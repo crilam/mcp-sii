@@ -68,6 +68,17 @@ export class Browser {
     this.run('agent-browser dialog dismiss');
   }
 
+  waitForAny(texts: string[], maxMs = 10_000): void {
+    const step = 2_000;
+    let elapsed = 0;
+    while (elapsed < maxMs) {
+      const s = this.snapshot();
+      if (texts.some(t => s.includes(t))) return;
+      execSync(`sleep ${step / 1000}`);
+      elapsed += step;
+    }
+  }
+
   // Espera a que aparezca un texto en el snapshot (polling, max 10s por defecto)
   waitFor(text: string, maxMs = 10_000): void {
     const step = 2_000;

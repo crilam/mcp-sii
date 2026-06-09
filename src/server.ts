@@ -2,8 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Browser } from './browser';
 import { SessionManager } from './session';
 import { MipymeScraper } from './scrapers/mipyme';
-import { registerEmpresasTools } from './tools/empresas';
-import { registerDocumentosTools } from './tools/documentos';
+import { registerMipymeTools } from './tools/mipyme';
+import { registerDteTools } from './tools/dte';
 import { getConfig } from './env';
 
 export function createServer(): McpServer {
@@ -17,8 +17,8 @@ export function createServer(): McpServer {
     version: '0.1.0',
   });
 
-  registerEmpresasTools(server, scraper);
-  registerDocumentosTools(server, scraper);
+  registerMipymeTools(server, scraper);
+  registerDteTools(server, scraper);
 
   return server;
 }

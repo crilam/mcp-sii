@@ -6,10 +6,10 @@ const TipoDteSchema = z.number().int().optional().describe('Tipo DTE: 33=factura
 const EmpresaRutSchema = z.string().optional().describe('RUT empresa a consultar. Usa SII_EMPRESA_RUT si se omite.');
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
 
-export function registerDocumentosTools(server: McpServer, scraper: MipymeScraper): void {
+export function registerDteTools(server: McpServer, scraper: MipymeScraper): void {
   server.tool(
-    'sii_list_documentos_emitidos',
-    'Lista DTEs emitidos por la empresa en el SII. Requiere certificado digital.',
+    'sii_dte_list_documentos_emitidos',
+    'Lista DTEs emitidos por la empresa en Consultas DTE del SII. Requiere certificado digital.',
     {
       empresa_rut: EmpresaRutSchema,
       tipo_dte: TipoDteSchema,
@@ -34,8 +34,8 @@ export function registerDocumentosTools(server: McpServer, scraper: MipymeScrape
   );
 
   server.tool(
-    'sii_get_documento_emitido',
-    'Detalle de un DTE emitido específico por tipo y folio. Si el documento no es del mes actual, indica fecha_doc en formato YYYY-MM-DD. Requiere certificado digital.',
+    'sii_dte_get_documento_emitido',
+    'Detalle de un DTE emitido específico por tipo y folio en Consultas DTE. Si el documento no es del mes actual, indica fecha_doc en formato YYYY-MM-DD. Requiere certificado digital.',
     {
       tipo_dte: z.number().int().describe('Tipo DTE: 33=factura, 34=factura exenta, 39=boleta, 61=nota de crédito'),
       folio: z.number().int().describe('Número de folio del documento'),
@@ -51,8 +51,8 @@ export function registerDocumentosTools(server: McpServer, scraper: MipymeScrape
   );
 
   server.tool(
-    'sii_list_documentos_recibidos',
-    'Lista DTEs recibidos por la empresa en el SII. Requiere certificado digital.',
+    'sii_dte_list_documentos_recibidos',
+    'Lista DTEs recibidos por la empresa en Consultas DTE del SII. Requiere certificado digital.',
     {
       empresa_rut: EmpresaRutSchema,
       tipo_dte: TipoDteSchema,
@@ -77,8 +77,8 @@ export function registerDocumentosTools(server: McpServer, scraper: MipymeScrape
   );
 
   server.tool(
-    'sii_get_documento_recibido',
-    'Detalle de un DTE recibido específico por folio. Si el documento no es del mes actual, indica fecha_doc en formato YYYY-MM-DD. Requiere certificado digital.',
+    'sii_dte_get_documento_recibido',
+    'Detalle de un DTE recibido específico por folio en Consultas DTE. Si el documento no es del mes actual, indica fecha_doc en formato YYYY-MM-DD. Requiere certificado digital.',
     {
       tipo_dte: z.number().int().describe('Tipo DTE del documento recibido'),
       folio: z.number().int().describe('Número de folio del documento'),
