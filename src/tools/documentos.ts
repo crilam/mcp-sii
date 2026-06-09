@@ -35,14 +35,15 @@ export function registerDocumentosTools(server: McpServer, scraper: MipymeScrape
 
   server.tool(
     'sii_get_documento_emitido',
-    'Detalle completo de un DTE emitido específico incluyendo líneas de detalle. Requiere certificado digital.',
+    'Detalle de un DTE emitido específico por tipo y folio. Si el documento no es del mes actual, indica fecha_doc en formato YYYY-MM-DD. Requiere certificado digital.',
     {
       tipo_dte: z.number().int().describe('Tipo DTE: 33=factura, 34=factura exenta, 39=boleta, 61=nota de crédito'),
       folio: z.number().int().describe('Número de folio del documento'),
       empresa_rut: EmpresaRutSchema,
+      fecha_doc: FechaSchema.describe('Fecha aproximada del documento (YYYY-MM-DD) para buscar en el mes correcto. Por defecto busca en el mes actual.'),
     },
-    async ({ tipo_dte, folio, empresa_rut }) => {
-      const doc = await scraper.getDocumentoEmitido(tipo_dte, folio, empresa_rut);
+    async ({ tipo_dte, folio, empresa_rut, fecha_doc }) => {
+      const doc = await scraper.getDocumentoEmitido(tipo_dte, folio, empresa_rut, fecha_doc);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(doc, null, 2) }],
       };
@@ -77,15 +78,16 @@ export function registerDocumentosTools(server: McpServer, scraper: MipymeScrape
 
   server.tool(
     'sii_get_documento_recibido',
-    'Detalle completo de un DTE recibido específico incluyendo líneas de detalle. Requiere certificado digital.',
+    'Detalle de un DTE recibido específico por folio. Si el documento no es del mes actual, indica fecha_doc en formato YYYY-MM-DD. Requiere certificado digital.',
     {
       tipo_dte: z.number().int().describe('Tipo DTE del documento recibido'),
       folio: z.number().int().describe('Número de folio del documento'),
       emisor_rut: z.string().describe('RUT del emisor del documento'),
       empresa_rut: EmpresaRutSchema,
+      fecha_doc: FechaSchema.describe('Fecha aproximada del documento (YYYY-MM-DD) para buscar en el mes correcto.'),
     },
-    async ({ tipo_dte, folio, emisor_rut, empresa_rut }) => {
-      const doc = await scraper.getDocumentoRecibido(tipo_dte, folio, emisor_rut, empresa_rut);
+    async ({ tipo_dte, folio, emisor_rut, empresa_rut, fecha_doc }) => {
+      const doc = await scraper.getDocumentoRecibido(tipo_dte, folio, emisor_rut, empresa_rut, fecha_doc);
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(doc, null, 2) }],
       };

@@ -104,15 +104,36 @@ export class MipymeScraper {
     });
   }
 
-  async getDocumentoEmitido(tipoDte: number, folio: number, empresaRut?: string): Promise<DocumentoEmitidoDetalle> {
+  async getDocumentoEmitido(tipoDte: number, folio: number, empresaRut?: string, fecha?: string): Promise<DocumentoEmitidoDetalle> {
     return this.withReauth(async () => {
       await this.ensureEmpresa(empresaRut);
-      const url = `${MIPYME_EMITIDOS_URL}?tipo=${tipoDte}&folio=${folio}`;
-      this.browser.open(url);
-      const snapshot = this.browser.snapshot();
-      const doc = this.parseDocumentosEmitidos(snapshot, 1)[0];
-      if (!doc) throw new Error(`No se encontró el documento tipo ${tipoDte} folio ${folio}`);
-      return { ...doc, lineas: this.parseLineasDetalle(snapshot) };
+      const session = await this.session.getSession();
+      const rutToUse = empresaRut ?? session.empresaRut;
+
+      this.browser.open(MIPYME_EMITIDOS_URL);
+      await this.applyFiltrosEmitidos({ empresaRut: rutToUse, fechaDesde: fecha });
+      this.browser.waitFor('DTE de ventas emitidos');
+      const summary = this.browser.snapshot();
+
+      const typeLinks = this.parseSummaryTypeLinks(summary);
+      const typeLink = typeLinks.find(l => l.tipoDte === tipoDte);
+      if (!typeLink) throw new Error(`No se encontraron documentos tipo ${tipoDte} en el período`);
+
+      this.browser.click(typeLink.ref);
+      this.browser.waitFor('Folio');
+      const listSnapshot = this.browser.snapshot();
+
+      const folioRef = this.findFolioLinkRef(listSnapshot, folio);
+      if (!folioRef) throw new Error(`Folio ${folio} no encontrado en tipo ${tipoDte}`);
+
+      this.browser.click(folioRef);
+      this.browser.waitFor('Total documentos');
+      const detailSnapshot = this.browser.snapshot();
+
+      const docs = this.parseDocumentosEmitidos(detailSnapshot, 1, tipoDte);
+      if (docs.length === 0) throw new Error(`No se encontró el documento tipo ${tipoDte} folio ${folio}`);
+
+      return { ...docs[0], lineas: [] };
     });
   }
 
@@ -126,15 +147,28 @@ export class MipymeScraper {
     });
   }
 
-  async getDocumentoRecibido(tipoDte: number, folio: number, emisorRut: string, empresaRut?: string): Promise<DocumentoRecibidoDetalle> {
+  async getDocumentoRecibido(tipoDte: number, folio: number, emisorRut: string, empresaRut?: string, fecha?: string): Promise<DocumentoRecibidoDetalle> {
     return this.withReauth(async () => {
       await this.ensureEmpresa(empresaRut);
-      const url = `${MIPYME_RECIBIDOS_URL}?tipo=${tipoDte}&folio=${folio}&emisor=${emisorRut}`;
-      this.browser.open(url);
-      const snapshot = this.browser.snapshot();
-      const doc = this.parseDocumentosRecibidos(snapshot, 1)[0];
-      if (!doc) throw new Error(`No se encontró el documento tipo ${tipoDte} folio ${folio} de ${emisorRut}`);
-      return { ...doc, lineas: this.parseLineasDetalle(snapshot) };
+      const session = await this.session.getSession();
+      const rutToUse = empresaRut ?? session.empresaRut;
+
+      this.browser.open(MIPYME_RECIBIDOS_URL);
+      await this.applyFiltrosRecibidos({ empresaRut: rutToUse, fechaDesde: fecha });
+      this.browser.waitFor('Folio');
+      const listSnapshot = this.browser.snapshot();
+
+      const folioRef = this.findFolioLinkRef(listSnapshot, folio);
+      if (!folioRef) throw new Error(`Folio ${folio} no encontrado de emisor ${emisorRut}`);
+
+      this.browser.click(folioRef);
+      this.browser.waitFor('Total documentos');
+      const detailSnapshot = this.browser.snapshot();
+
+      const docs = this.parseDocumentosRecibidos(detailSnapshot, 1);
+      if (docs.length === 0) throw new Error(`No se encontró el documento tipo ${tipoDte} folio ${folio} de ${emisorRut}`);
+
+      return { ...docs[0], lineas: [] };
     });
   }
 
@@ -361,7 +395,12 @@ export class MipymeScraper {
     return lineas;
   }
 
-  private findRef(snapshot: string, pattern: RegExp): string | null {
+  private findFolioLinkRef(snapshot: string, folio: number): string | null {
+    const m = snapshot.match(new RegExp(`link "${folio}" \\[ref=(e\\d+)\\]`));
+    return m ? m[1] : null;
+  }
+
+private findRef(snapshot: string, pattern: RegExp): string | null {
     for (const line of snapshot.split('\n')) {
       const refMatch = line.match(/ref=(e\d+)/);
       if (refMatch && pattern.test(line)) {
