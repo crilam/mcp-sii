@@ -44,6 +44,14 @@ export class Browser {
     this.run(`agent-browser press ${key}`);
   }
 
+  dialogAccept(): void {
+    this.run('agent-browser dialog accept');
+  }
+
+  dialogDismiss(): void {
+    this.run('agent-browser dialog dismiss');
+  }
+
   close(): void {
     this.run('agent-browser close');
   }

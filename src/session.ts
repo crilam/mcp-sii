@@ -25,6 +25,12 @@ export class SessionManager {
 
   async login(): Promise<SiiSession> {
     this.browser.open(this.config.strategy === AuthStrategy.Clave ? SII_LOGIN_URL : SII_CERT_URL);
+
+    if (this.config.strategy === AuthStrategy.Certificate) {
+      // El portal SII muestra un confirm dialog antes de abrir el selector de certificados
+      this.browser.dialogAccept();
+    }
+
     const loginSnapshot = this.browser.snapshot();
 
     if (this.config.strategy === AuthStrategy.Clave) {
