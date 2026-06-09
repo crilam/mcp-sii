@@ -74,41 +74,59 @@ export class MipymeScraper {
   }
 
   async listDocumentosEmitidos(filtros: FiltrosEmitidos): Promise<DocumentoEmitido[]> {
-    await this.ensureEmpresa(filtros.empresaRut);
-    this.browser.open(MIPYME_EMITIDOS_URL);
-    await this.applyFiltrosEmitidos(filtros);
-    const snapshot = this.browser.snapshot();
-    return this.parseDocumentosEmitidos(snapshot, filtros.limit ?? 50);
+    return this.withReauth(async () => {
+      await this.ensureEmpresa(filtros.empresaRut);
+      this.browser.open(MIPYME_EMITIDOS_URL);
+      await this.applyFiltrosEmitidos(filtros);
+      return this.parseDocumentosEmitidos(this.browser.snapshot(), filtros.limit ?? 50);
+    });
   }
 
   async getDocumentoEmitido(tipoDte: number, folio: number, empresaRut?: string): Promise<DocumentoEmitidoDetalle> {
-    await this.ensureEmpresa(empresaRut);
-    const url = `${MIPYME_EMITIDOS_URL}?tipo=${tipoDte}&folio=${folio}`;
-    this.browser.open(url);
-    const snapshot = this.browser.snapshot();
-    const doc = this.parseDocumentosEmitidos(snapshot, 1)[0];
-    if (!doc) throw new Error(`No se encontró el documento tipo ${tipoDte} folio ${folio}`);
-    const lineas = this.parseLineasDetalle(snapshot);
-    return { ...doc, lineas };
+    return this.withReauth(async () => {
+      await this.ensureEmpresa(empresaRut);
+      const url = `${MIPYME_EMITIDOS_URL}?tipo=${tipoDte}&folio=${folio}`;
+      this.browser.open(url);
+      const snapshot = this.browser.snapshot();
+      const doc = this.parseDocumentosEmitidos(snapshot, 1)[0];
+      if (!doc) throw new Error(`No se encontró el documento tipo ${tipoDte} folio ${folio}`);
+      return { ...doc, lineas: this.parseLineasDetalle(snapshot) };
+    });
   }
 
   async listDocumentosRecibidos(filtros: FiltrosRecibidos): Promise<DocumentoRecibido[]> {
-    await this.ensureEmpresa(filtros.empresaRut);
-    this.browser.open(MIPYME_RECIBIDOS_URL);
-    await this.applyFiltrosRecibidos(filtros);
-    const snapshot = this.browser.snapshot();
-    return this.parseDocumentosRecibidos(snapshot, filtros.limit ?? 50);
+    return this.withReauth(async () => {
+      await this.ensureEmpresa(filtros.empresaRut);
+      this.browser.open(MIPYME_RECIBIDOS_URL);
+      await this.applyFiltrosRecibidos(filtros);
+      return this.parseDocumentosRecibidos(this.browser.snapshot(), filtros.limit ?? 50);
+    });
   }
 
   async getDocumentoRecibido(tipoDte: number, folio: number, emisorRut: string, empresaRut?: string): Promise<DocumentoRecibidoDetalle> {
-    await this.ensureEmpresa(empresaRut);
-    const url = `${MIPYME_RECIBIDOS_URL}?tipo=${tipoDte}&folio=${folio}&emisor=${emisorRut}`;
-    this.browser.open(url);
-    const snapshot = this.browser.snapshot();
-    const doc = this.parseDocumentosRecibidos(snapshot, 1)[0];
-    if (!doc) throw new Error(`No se encontró el documento tipo ${tipoDte} folio ${folio} de ${emisorRut}`);
-    const lineas = this.parseLineasDetalle(snapshot);
-    return { ...doc, lineas };
+    return this.withReauth(async () => {
+      await this.ensureEmpresa(empresaRut);
+      const url = `${MIPYME_RECIBIDOS_URL}?tipo=${tipoDte}&folio=${folio}&emisor=${emisorRut}`;
+      this.browser.open(url);
+      const snapshot = this.browser.snapshot();
+      const doc = this.parseDocumentosRecibidos(snapshot, 1)[0];
+      if (!doc) throw new Error(`No se encontró el documento tipo ${tipoDte} folio ${folio} de ${emisorRut}`);
+      return { ...doc, lineas: this.parseLineasDetalle(snapshot) };
+    });
+  }
+
+  private async withReauth<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/sesion|session|autenticacion|unauthorized|401/i.test(msg)) {
+        this.session.invalidate();
+        await this.session.getSession();
+        return fn();
+      }
+      throw err;
+    }
   }
 
   private async ensureEmpresa(empresaRut?: string): Promise<void> {

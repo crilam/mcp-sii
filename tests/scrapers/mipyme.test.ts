@@ -47,3 +47,42 @@ describe('MipymeScraper.listDocumentosEmitidos', () => {
     });
   });
 });
+
+describe('MipymeScraper.withReauth', () => {
+  it('re-autentica y reintenta si falla con error de sesion', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111', empresaNombre: 'EMP A' });
+    (session.invalidate as jest.Mock).mockImplementation(() => {});
+
+    let callCount = 0;
+    (browser.snapshot as jest.Mock).mockReturnValue(
+      '[row] [cell "33"] [cell "1001"] [cell "2026-01-15"] [cell "CLIENTE SPA"] [cell "33333333-3"] [cell "100000"] [cell "19000"] [cell "119000"] [cell "DOK"] [/row]'
+    );
+    (browser.open as jest.Mock).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) throw new Error('session expirada');
+    });
+
+    const scraper = new MipymeScraper(browser, session);
+    const docs = await scraper.listDocumentosEmitidos({ fechaDesde: '2026-01-01' });
+
+    expect(session.invalidate).toHaveBeenCalledTimes(1);
+    // getSession is called: once by ensureEmpresa on first attempt, once by withReauth
+    // during re-auth, and once again by ensureEmpresa on the retry — total 3
+    expect(session.getSession).toHaveBeenCalledTimes(3);
+  });
+
+  it('propaga errores que no son de sesion', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111', empresaNombre: 'EMP A' });
+    (browser.open as jest.Mock).mockImplementation(() => {
+      throw new Error('Error de red inesperado');
+    });
+
+    const scraper = new MipymeScraper(browser, session);
+    await expect(scraper.listDocumentosEmitidos({})).rejects.toThrow('Error de red inesperado');
+    expect(session.invalidate).not.toHaveBeenCalled();
+  });
+});
