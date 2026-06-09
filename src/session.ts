@@ -15,7 +15,7 @@ export interface SiiSession {
   empresaNombre: string;
 }
 
-const SII_MIPYME_URL = 'https://www4.sii.cl/mipymesinternetui/pages/index.xhtml';
+const SII_MIPYME_URL = 'https://www4.sii.cl/consemitidosinternetui';
 const SII_LOGIN_URL = 'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html';
 const SII_CERT_CGI = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi';
 
@@ -153,7 +153,10 @@ export class SessionManager {
     const empresas = this.parseEmpresas(snapshot);
 
     if (empresas.length === 0) {
-      throw new Error('No se encontraron empresas disponibles para este usuario');
+      if (this.config.empresaRut) {
+        return { empresaRut: this.config.empresaRut, empresaNombre: this.config.empresaRut };
+      }
+      throw new Error('No se encontraron empresas disponibles. Configura SII_EMPRESA_RUT.');
     }
 
     if (empresas.length === 1) {
@@ -181,20 +184,22 @@ export class SessionManager {
   }
 
   private parseEmpresas(snapshot: string): Empresa[] {
-    const regex = /\[option "([^"]+)" value="([^"]+)"\]/g;
+    // Formato accessibility tree: option "RUT" [ref=eN] donde RUT es p.ej. 22222222-2
+    const regex = /option "(\d{5,}-[0-9Kk])" /g;
     const empresas: Empresa[] = [];
     let match;
     while ((match = regex.exec(snapshot)) !== null) {
-      empresas.push({ nombre: match[1], rut: match[2] });
+      empresas.push({ rut: match[1], nombre: match[1] });
     }
     return empresas;
   }
 
   private findRef(snapshot: string, pattern: RegExp): string | null {
-    const regex = /(@e\d+)[^\]]*"([^"]*)"/g;
-    let match;
-    while ((match = regex.exec(snapshot)) !== null) {
-      if (pattern.test(match[2])) return match[1];
+    for (const line of snapshot.split('\n')) {
+      const refMatch = line.match(/ref=(e\d+)/);
+      if (refMatch && pattern.test(line)) {
+        return refMatch[1];
+      }
     }
     return null;
   }

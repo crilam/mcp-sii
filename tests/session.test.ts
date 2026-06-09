@@ -1,4 +1,4 @@
-import { SessionManager, SiiSession } from '../src/session';
+import { SessionManager } from '../src/session';
 import { Browser } from '../src/browser';
 import { AuthStrategy, SiiConfig } from '../src/env';
 
@@ -11,20 +11,32 @@ const configClave: SiiConfig = {
   clave: 'mipass',
 };
 
-const configCert: SiiConfig = {
-  rut: '12345678',
-  strategy: AuthStrategy.Certificate,
-  certPath: '/ruta/cert.pfx',
-  certPassword: 'certpass',
-};
+// Snapshot de página de login (formato accessibility tree)
+const loginSnapshot = [
+  '- textbox "Ingrese su RUT" [ref=e1]',
+  '- textbox "Ingrese su Clave" [ref=e2]',
+  '- button "Ingresar" [ref=e3]',
+].join('\n');
+
+// Snapshot de página de empresa con una sola empresa
+const empresaUnicaSnapshot = [
+  '- combobox [expanded=false, ref=e10]: Empresa',
+  '- option "11111111-1" [ref=e11]',
+].join('\n');
+
+// Snapshot con dos empresas
+const dosEmpresasSnapshot = [
+  '- combobox [expanded=false, ref=e10]: Empresa',
+  '- option "11111111-1" [ref=e11]',
+  '- option "22222222-2" [ref=e12]',
+].join('\n');
 
 describe('SessionManager.login', () => {
   it('llama open, fill rut, fill clave y click en login', async () => {
     const browser = new MockBrowser();
     (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce('[input @e1 "RUT"] [input @e2 "Clave"] [button @e3 "Ingresar"]')
-      .mockReturnValueOnce('[select @e10 "Empresa"] [option "EMPRESA A" value="11111111"]');
-    (browser.getText as jest.Mock).mockReturnValue('EMPRESA A');
+      .mockReturnValueOnce(loginSnapshot)
+      .mockReturnValueOnce(empresaUnicaSnapshot);
 
     const mgr = new SessionManager(configClave, browser);
     await mgr.login();
@@ -36,23 +48,23 @@ describe('SessionManager.login', () => {
   });
 
   it('selecciona empresa por SII_EMPRESA_RUT si hay multiples', async () => {
-    const config = { ...configClave, empresaRut: '11111111' };
+    const config = { ...configClave, empresaRut: '11111111-1' };
     const browser = new MockBrowser();
     (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce('[input @e1 "RUT"] [input @e2 "Clave"] [button @e3 "Ingresar"]')
-      .mockReturnValueOnce('[select @e10 "Empresa"] [option "EMP A" value="11111111"] [option "EMP B" value="22222222"]');
+      .mockReturnValueOnce(loginSnapshot)
+      .mockReturnValueOnce(dosEmpresasSnapshot);
 
     const mgr = new SessionManager(config, browser);
     await mgr.login();
 
-    expect(browser.select).toHaveBeenCalledWith(expect.any(String), '11111111');
+    expect(browser.select).toHaveBeenCalledWith(expect.any(String), '11111111-1');
   });
 
   it('lanza error accionable si hay multiples empresas y no hay SII_EMPRESA_RUT', async () => {
     const browser = new MockBrowser();
     (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce('[input @e1 "RUT"] [input @e2 "Clave"] [button @e3 "Ingresar"]')
-      .mockReturnValueOnce('[select @e10 "Empresa"] [option "EMP A" value="11111111"] [option "EMP B" value="22222222"]');
+      .mockReturnValueOnce(loginSnapshot)
+      .mockReturnValueOnce(dosEmpresasSnapshot);
 
     const mgr = new SessionManager(configClave, browser);
     await expect(mgr.login()).rejects.toThrow('SII_EMPRESA_RUT');
@@ -62,7 +74,7 @@ describe('SessionManager.login', () => {
 describe('SessionManager.getSession', () => {
   it('reutiliza la sesion cacheada sin hacer login nuevamente', async () => {
     const browser = new MockBrowser();
-    (browser.snapshot as jest.Mock).mockReturnValue('[select @e10 "Empresa"] [option "EMP" value="11111111"]');
+    (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
 
     const mgr = new SessionManager(configClave, browser);
     await mgr.getSession();

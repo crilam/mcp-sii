@@ -58,8 +58,8 @@ export interface FiltrosRecibidos {
   empresaRut?: string;
 }
 
-const MIPYME_EMITIDOS_URL = 'https://www4.sii.cl/mipymesinternetui/pages/emitidos.xhtml';
-const MIPYME_RECIBIDOS_URL = 'https://www4.sii.cl/mipymesinternetui/pages/recibidos.xhtml';
+const MIPYME_EMITIDOS_URL = 'https://www4.sii.cl/consemitidosinternetui/#/defaultInternet';
+const MIPYME_RECIBIDOS_URL = 'https://www4.sii.cl/consemitidosinternetui/#/dterecibidosInternet';
 
 export class MipymeScraper {
   constructor(
@@ -68,9 +68,13 @@ export class MipymeScraper {
   ) {}
 
   async listEmpresas(): Promise<Empresa[]> {
-    await this.session.getSession();
+    const session = await this.session.getSession();
     const snapshot = this.browser.snapshot();
-    return this.parseEmpresas(snapshot);
+    const empresas = this.parseEmpresas(snapshot);
+    if (empresas.length === 0) {
+      return [{ rut: session.empresaRut, nombre: session.empresaNombre }];
+    }
+    return empresas;
   }
 
   async listDocumentosEmitidos(filtros: FiltrosEmitidos): Promise<DocumentoEmitido[]> {
@@ -78,7 +82,22 @@ export class MipymeScraper {
       await this.ensureEmpresa(filtros.empresaRut);
       this.browser.open(MIPYME_EMITIDOS_URL);
       await this.applyFiltrosEmitidos(filtros);
-      return this.parseDocumentosEmitidos(this.browser.snapshot(), filtros.limit ?? 50);
+      this.browser.waitFor('DTE de ventas emitidos');
+      const summary = this.browser.snapshot();
+
+      const typeLinks = this.parseSummaryTypeLinks(summary);
+      if (typeLinks.length === 0) return [];
+
+      const docs: DocumentoEmitido[] = [];
+      const limit = filtros.limit ?? 50;
+      for (const link of typeLinks) {
+        if (docs.length >= limit) break;
+        this.browser.click(link.ref);
+        this.browser.waitFor('Folio');
+        const docSnapshot = this.browser.snapshot();
+        docs.push(...this.parseDocumentosEmitidos(docSnapshot, limit - docs.length, link.tipoDte));
+      }
+      return docs;
     });
   }
 
@@ -140,78 +159,99 @@ export class MipymeScraper {
 
   private async applyFiltrosEmitidos(filtros: FiltrosEmitidos): Promise<void> {
     const snapshot = this.browser.snapshot();
-    if (filtros.fechaDesde) {
-      const ref = this.findRef(snapshot, /desde|inicio/i);
-      if (ref) this.browser.fill(ref, filtros.fechaDesde);
-    }
-    if (filtros.fechaHasta) {
-      const ref = this.findRef(snapshot, /hasta|fin/i);
-      if (ref) this.browser.fill(ref, filtros.fechaHasta);
-    }
-    if (filtros.tipoDte) {
-      const ref = this.findRef(snapshot, /tipo.*documento|tipo.*dte/i);
-      if (ref) this.browser.select(ref, String(filtros.tipoDte));
-    }
-    if (filtros.receptorRut) {
-      const ref = this.findRef(snapshot, /receptor|rut.*receptor/i);
-      if (ref) this.browser.fill(ref, filtros.receptorRut);
-    }
-    const btnRef = this.findRef(snapshot, /buscar|filtrar|consultar/i);
+    // El nuevo portal tiene comboboxes: [0]=empresa, [1]=mes, [2]=año + botón Consultar
+    const comboRefs = [...snapshot.matchAll(/combobox \[[^\]]*ref=(e\d+)\]/g)].map(m => m[1]);
+    const session = await this.session.getSession();
+    const empresaRut = filtros.empresaRut ?? session.empresaRut;
+    const fecha = filtros.fechaDesde ? new Date(filtros.fechaDesde + 'T00:00:00') : new Date();
+    const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    if (comboRefs[0]) this.browser.select(comboRefs[0], empresaRut);
+    if (comboRefs[1]) this.browser.select(comboRefs[1], MESES[fecha.getMonth()]);
+    if (comboRefs[2]) this.browser.select(comboRefs[2], String(fecha.getFullYear()));
+    const btnRef = this.findRef(snapshot, /consultar/i);
     if (btnRef) this.browser.click(btnRef);
   }
 
   private async applyFiltrosRecibidos(filtros: FiltrosRecibidos): Promise<void> {
     const snapshot = this.browser.snapshot();
-    if (filtros.fechaDesde) {
-      const ref = this.findRef(snapshot, /desde|inicio/i);
-      if (ref) this.browser.fill(ref, filtros.fechaDesde);
-    }
-    if (filtros.fechaHasta) {
-      const ref = this.findRef(snapshot, /hasta|fin/i);
-      if (ref) this.browser.fill(ref, filtros.fechaHasta);
-    }
-    if (filtros.tipoDte) {
-      const ref = this.findRef(snapshot, /tipo.*documento|tipo.*dte/i);
-      if (ref) this.browser.select(ref, String(filtros.tipoDte));
-    }
-    if (filtros.emisorRut) {
-      const ref = this.findRef(snapshot, /emisor|rut.*emisor/i);
-      if (ref) this.browser.fill(ref, filtros.emisorRut);
-    }
-    const btnRef = this.findRef(snapshot, /buscar|filtrar|consultar/i);
+    const comboRefs = [...snapshot.matchAll(/combobox \[[^\]]*ref=(e\d+)\]/g)].map(m => m[1]);
+    const session = await this.session.getSession();
+    const empresaRut = filtros.empresaRut ?? session.empresaRut;
+    const fecha = filtros.fechaDesde ? new Date(filtros.fechaDesde + 'T00:00:00') : new Date();
+    const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    if (comboRefs[0]) this.browser.select(comboRefs[0], empresaRut);
+    if (comboRefs[1]) this.browser.select(comboRefs[1], MESES[fecha.getMonth()]);
+    if (comboRefs[2]) this.browser.select(comboRefs[2], String(fecha.getFullYear()));
+    const btnRef = this.findRef(snapshot, /consultar/i);
     if (btnRef) this.browser.click(btnRef);
   }
 
   private parseEmpresas(snapshot: string): Empresa[] {
-    const regex = /\[option "([^"]+)" value="([^"]+)"\]/g;
+    const regex = /option "(\d{5,}-[0-9Kk])" /g;
     const empresas: Empresa[] = [];
     let match;
     while ((match = regex.exec(snapshot)) !== null) {
-      empresas.push({ nombre: match[1], rut: match[2] });
+      empresas.push({ rut: match[1], nombre: match[1] });
     }
     return empresas;
   }
 
-  private parseDocumentosEmitidos(snapshot: string, limit: number): DocumentoEmitido[] {
-    const rowRegex = /\[row\](.*?)\[\/row\]/gs;
+  private parseSummaryTypeLinks(snapshot: string): Array<{ ref: string; tipoDte: number }> {
+    const links: Array<{ ref: string; tipoDte: number }> = [];
+    const regex = /link "([^"]+\((\d+)\))" \[ref=(e\d+)\]/g;
+    let match;
+    while ((match = regex.exec(snapshot)) !== null) {
+      links.push({ ref: match[3], tipoDte: parseInt(match[2], 10) });
+    }
+    return links;
+  }
+
+  private parseDocumentosEmitidos(snapshot: string, limit: number, tipoDte = 0): DocumentoEmitido[] {
     const docs: DocumentoEmitido[] = [];
-    let rowMatch;
-    while ((rowMatch = rowRegex.exec(snapshot)) !== null && docs.length < limit) {
+    const lines = snapshot.split('\n');
+
+    let i = 0;
+    while (i < lines.length && docs.length < limit) {
+      const line = lines[i];
+      const rowMatch = line.match(/^(\s+)- row$/);
+      if (!rowMatch) { i++; continue; }
+
+      const rowIndent = rowMatch[1].length;
+      const cellIndent = rowIndent + 2;
+
+      // Recopilar celdas al nivel exacto del hijo directo del row
       const cells: string[] = [];
-      let cellMatch;
-      const cellRe = new RegExp(/\[cell "([^"]*)"\]/.source, 'g');
-      while ((cellMatch = cellRe.exec(rowMatch[1])) !== null) cells.push(cellMatch[1]);
-      if (cells.length >= 9) {
+      let j = i + 1;
+      while (j < lines.length) {
+        const cl = lines[j];
+        // Salir si estamos al nivel del row o más arriba
+        if (cl.length > 0 && !cl.startsWith(' '.repeat(rowIndent + 1))) break;
+        // Solo procesar celdas al nivel cellIndent
+        if (cl.startsWith(' '.repeat(cellIndent) + '- ')) {
+          const t = cl.trim();
+          if (t.startsWith('- cell "')) {
+            const m = t.match(/^- cell "([^"]*)"/);
+            if (m) cells.push(m[1]);
+          } else if (/^- cell\s*$/.test(t)) {
+            cells.push('');
+          }
+        }
+        j++;
+      }
+      i = j;
+
+      // Fila válida: ≥9 celdas, primera celda es número secuencial (no es fila de totales)
+      if (cells.length >= 9 && /^\d+$/.test(cells[0])) {
         docs.push({
-          tipoDte: parseInt(cells[0], 10),
-          folio: parseInt(cells[1], 10),
-          fecha: cells[2],
-          receptorNombre: cells[3],
-          receptorRut: cells[4],
-          montoNeto: parseInt(cells[5].replace(/\./g, ''), 10),
-          iva: parseInt(cells[6].replace(/\./g, ''), 10),
-          total: parseInt(cells[7].replace(/\./g, ''), 10),
-          estadoSii: cells[8],
+          tipoDte,
+          receptorRut: cells[1],
+          folio: parseInt(cells[2], 10),
+          fecha: cells[3],                              // dd/mm/yyyy
+          receptorNombre: cells[1],
+          montoNeto: parseInt(cells[5].replace(/\./g, ''), 10) || 0,
+          iva: parseInt(cells[7].replace(/\./g, ''), 10) || 0,
+          total: parseInt(cells[8].replace(/\./g, ''), 10) || 0,
+          estadoSii: cells[9] ?? '',
         });
       }
     }
@@ -266,10 +306,11 @@ export class MipymeScraper {
   }
 
   private findRef(snapshot: string, pattern: RegExp): string | null {
-    const regex = /(@e\d+)[^\]]*"([^"]*)"/g;
-    let match;
-    while ((match = regex.exec(snapshot)) !== null) {
-      if (pattern.test(match[2])) return match[1];
+    for (const line of snapshot.split('\n')) {
+      const refMatch = line.match(/ref=(e\d+)/);
+      if (refMatch && pattern.test(line)) {
+        return refMatch[1];
+      }
     }
     return null;
   }

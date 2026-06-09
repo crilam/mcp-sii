@@ -8,21 +8,64 @@ jest.mock('../../src/session');
 const MockBrowser = Browser as jest.MockedClass<typeof Browser>;
 const MockSession = SessionManager as jest.MockedClass<typeof SessionManager>;
 
+// Snapshots en formato accessibility tree (nuevo portal SII Angular)
+const formSnapshot = [
+  '- combobox [expanded=false, ref=e9]: Empresa',
+  '- combobox [expanded=false, ref=e10]: Enero',
+  '- combobox [expanded=false, ref=e11]: 2026',
+  '- button "Consultar" [ref=e12]',
+].join('\n');
+
+const summarySnapshot = [
+  'DTE de ventas emitidos',
+  '- link "Factura Electronica (33)" [ref=e34]',
+].join('\n');
+
+// Fila de documento individual con 12 celdas (formato accessibility tree)
+const docSnapshot = [
+  '      - row',
+  '        - cell "1" [ref=e1]',
+  '        - cell "33333333-3" [ref=e2]',
+  '        - cell "1001" [ref=e3]',
+  '        - cell "15/01/2026" [ref=e4]',
+  '        - cell "15/01/2026" [ref=e5]',
+  '        - cell "100.000" [ref=e6]',
+  '        - cell "0" [ref=e7]',
+  '        - cell "19.000" [ref=e8]',
+  '        - cell "119.000" [ref=e9]',
+  '        - cell',
+  '        - cell " Publicar" [ref=e11]',
+  '        - cell',
+].join('\n');
+
 describe('MipymeScraper.listEmpresas', () => {
-  it('retorna lista de empresas disponibles', async () => {
+  it('retorna lista de empresas disponibles desde snapshot', async () => {
     const browser = new MockBrowser();
     const session = new MockSession({} as any, browser);
-    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111', empresaNombre: 'EMPRESA A' });
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: '11111111-1' });
     (browser.snapshot as jest.Mock).mockReturnValue(
-      '[option "EMPRESA A" value="11111111"] [option "EMPRESA B" value="22222222"]'
+      '- option "11111111-1" [ref=e11]\n- option "22222222-2" [ref=e12]'
     );
 
     const scraper = new MipymeScraper(browser, session);
     const empresas = await scraper.listEmpresas();
 
     expect(empresas).toHaveLength(2);
-    expect(empresas[0]).toEqual({ rut: '11111111', nombre: 'EMPRESA A' });
-    expect(empresas[1]).toEqual({ rut: '22222222', nombre: 'EMPRESA B' });
+    expect(empresas[0]).toEqual({ rut: '11111111-1', nombre: '11111111-1' });
+    expect(empresas[1]).toEqual({ rut: '22222222-2', nombre: '22222222-2' });
+  });
+
+  it('retorna empresa de sesion si snapshot no tiene opciones', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: '11111111-1' });
+    (browser.snapshot as jest.Mock).mockReturnValue('sin opciones aqui');
+
+    const scraper = new MipymeScraper(browser, session);
+    const empresas = await scraper.listEmpresas();
+
+    expect(empresas).toHaveLength(1);
+    expect(empresas[0].rut).toBe('11111111-1');
   });
 });
 
@@ -30,20 +73,21 @@ describe('MipymeScraper.listDocumentosEmitidos', () => {
   it('retorna documentos emitidos con filtros', async () => {
     const browser = new MockBrowser();
     const session = new MockSession({} as any, browser);
-    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111', empresaNombre: 'EMP A' });
-    (browser.snapshot as jest.Mock).mockReturnValue(
-      '[row] [cell "33"] [cell "1001"] [cell "2026-01-15"] [cell "CLIENTE SPA"] [cell "33333333-3"] [cell "100000"] [cell "19000"] [cell "119000"] [cell "DOK"] [/row]'
-    );
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMP A' });
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(formSnapshot)   // applyFiltrosEmitidos
+      .mockReturnValueOnce(summarySnapshot) // summary tras waitFor
+      .mockReturnValueOnce(docSnapshot);    // detalle tras waitFor Folio
 
     const scraper = new MipymeScraper(browser, session);
-    const docs = await scraper.listDocumentosEmitidos({ fechaDesde: '2026-01-01', fechaHasta: '2026-01-31' });
+    const docs = await scraper.listDocumentosEmitidos({ fechaDesde: '2026-01-01' });
 
     expect(docs.length).toBeGreaterThan(0);
     expect(docs[0]).toMatchObject({
       folio: 1001,
       tipoDte: 33,
-      fecha: '2026-01-15',
-      receptorNombre: 'CLIENTE SPA',
+      fecha: '15/01/2026',
+      receptorRut: '33333333-3',
     });
   });
 });
@@ -52,31 +96,29 @@ describe('MipymeScraper.withReauth', () => {
   it('re-autentica y reintenta si falla con error de sesion', async () => {
     const browser = new MockBrowser();
     const session = new MockSession({} as any, browser);
-    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111', empresaNombre: 'EMP A' });
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMP A' });
     (session.invalidate as jest.Mock).mockImplementation(() => {});
+    // snapshot vacío hace que parseSummaryTypeLinks retorne [] y el método retorne []
+    (browser.snapshot as jest.Mock).mockReturnValue(formSnapshot);
 
     let callCount = 0;
-    (browser.snapshot as jest.Mock).mockReturnValue(
-      '[row] [cell "33"] [cell "1001"] [cell "2026-01-15"] [cell "CLIENTE SPA"] [cell "33333333-3"] [cell "100000"] [cell "19000"] [cell "119000"] [cell "DOK"] [/row]'
-    );
     (browser.open as jest.Mock).mockImplementation(() => {
       callCount++;
       if (callCount === 1) throw new Error('session expirada');
     });
 
     const scraper = new MipymeScraper(browser, session);
-    const docs = await scraper.listDocumentosEmitidos({ fechaDesde: '2026-01-01' });
+    await scraper.listDocumentosEmitidos({ fechaDesde: '2026-01-01' });
 
     expect(session.invalidate).toHaveBeenCalledTimes(1);
-    // getSession is called: once by ensureEmpresa on first attempt, once by withReauth
-    // during re-auth, and once again by ensureEmpresa on the retry — total 3
-    expect(session.getSession).toHaveBeenCalledTimes(3);
+    // ensureEmpresa(1) + withReauth re-auth(1) + ensureEmpresa retry(1) + applyFiltros(1) = 4
+    expect(session.getSession).toHaveBeenCalledTimes(4);
   });
 
   it('propaga errores que no son de sesion', async () => {
     const browser = new MockBrowser();
     const session = new MockSession({} as any, browser);
-    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111', empresaNombre: 'EMP A' });
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMP A' });
     (browser.open as jest.Mock).mockImplementation(() => {
       throw new Error('Error de red inesperado');
     });
