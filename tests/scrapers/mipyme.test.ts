@@ -39,20 +39,20 @@ const docSnapshot = [
 ].join('\n');
 
 describe('MipymeScraper.listEmpresas', () => {
-  it('retorna lista de empresas disponibles desde snapshot', async () => {
+  it('retorna lista de empresas con nombre y rut desde portal mipyme', async () => {
     const browser = new MockBrowser();
     const session = new MockSession({} as any, browser);
-    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: '11111111-1' });
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMPRESA UNO SPA' });
     (browser.snapshot as jest.Mock).mockReturnValue(
-      '- option "11111111-1" [ref=e11]\n- option "22222222-2" [ref=e12]'
+      '- option "EMPRESA UNO SPA 11111111-1" [ref=e11]\n- option "EMPRESA DOS LTDA 22222222-2" [ref=e12]'
     );
 
     const scraper = new MipymeScraper(browser, session);
     const empresas = await scraper.listEmpresas();
 
     expect(empresas).toHaveLength(2);
-    expect(empresas[0]).toEqual({ rut: '11111111-1', nombre: '11111111-1' });
-    expect(empresas[1]).toEqual({ rut: '22222222-2', nombre: '22222222-2' });
+    expect(empresas[0]).toEqual({ rut: '11111111-1', nombre: 'EMPRESA UNO SPA' });
+    expect(empresas[1]).toEqual({ rut: '22222222-2', nombre: 'EMPRESA DOS LTDA' });
   });
 
   it('retorna empresa de sesion si snapshot no tiene opciones', async () => {

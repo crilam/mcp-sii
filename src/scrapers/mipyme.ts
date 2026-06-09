@@ -58,6 +58,7 @@ export interface FiltrosRecibidos {
   empresaRut?: string;
 }
 
+const MIPYME_PORTAL_URL = 'https://mipyme.sii.cl/';
 const MIPYME_EMITIDOS_URL = 'https://www4.sii.cl/consemitidosinternetui/#/defaultInternet';
 const MIPYME_RECIBIDOS_URL = 'https://www4.sii.cl/consemitidosinternetui/#/dterecibidosInternet';
 
@@ -68,10 +69,12 @@ export class MipymeScraper {
   ) {}
 
   async listEmpresas(): Promise<Empresa[]> {
-    const session = await this.session.getSession();
+    await this.session.getSession();
+    this.browser.open(MIPYME_PORTAL_URL);
     const snapshot = this.browser.snapshot();
     const empresas = this.parseEmpresas(snapshot);
     if (empresas.length === 0) {
+      const session = await this.session.getSession();
       return [{ rut: session.empresaRut, nombre: session.empresaNombre }];
     }
     return empresas;
@@ -188,11 +191,18 @@ export class MipymeScraper {
   }
 
   private parseEmpresas(snapshot: string): Empresa[] {
-    const regex = /option "(\d{5,}-[0-9Kk])" /g;
+    // Formato portal mipyme: option "NOMBRE EMPRESA RUT-DV" [ref=eN]
+    const regex = /option "([^"]+)" /g;
     const empresas: Empresa[] = [];
     let match;
     while ((match = regex.exec(snapshot)) !== null) {
-      empresas.push({ rut: match[1], nombre: match[1] });
+      const text = match[1];
+      const withName = text.match(/^(.+?)\s+(\d{5,}-[0-9Kk])$/);
+      if (withName) {
+        empresas.push({ rut: withName[2], nombre: withName[1].trim() });
+      } else if (/^\d{5,}-[0-9Kk]$/.test(text)) {
+        empresas.push({ rut: text, nombre: text });
+      }
     }
     return empresas;
   }

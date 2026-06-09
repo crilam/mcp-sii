@@ -15,7 +15,7 @@ export interface SiiSession {
   empresaNombre: string;
 }
 
-const SII_MIPYME_URL = 'https://www4.sii.cl/consemitidosinternetui';
+const SII_MIPYME_URL = 'https://mipyme.sii.cl/';
 const SII_LOGIN_URL = 'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html';
 const SII_CERT_CGI = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi';
 
@@ -180,16 +180,24 @@ export class SessionManager {
 
     const selectRef = this.findRef(snapshot, /empresa/i) ?? '@e10';
     this.browser.select(selectRef, empresa.rut);
+    const submitRef = this.findRef(snapshot, /enviar|aceptar|confirmar/i);
+    if (submitRef) this.browser.click(submitRef);
     return { empresaRut: empresa.rut, empresaNombre: empresa.nombre };
   }
 
   private parseEmpresas(snapshot: string): Empresa[] {
-    // Formato accessibility tree: option "RUT" [ref=eN] donde RUT es p.ej. 22222222-2
-    const regex = /option "(\d{5,}-[0-9Kk])" /g;
+    // Formato portal mipyme: option "NOMBRE EMPRESA RUT-DV" [ref=eN]
+    const regex = /option "([^"]+)" /g;
     const empresas: Empresa[] = [];
     let match;
     while ((match = regex.exec(snapshot)) !== null) {
-      empresas.push({ rut: match[1], nombre: match[1] });
+      const text = match[1];
+      const withName = text.match(/^(.+?)\s+(\d{5,}-[0-9Kk])$/);
+      if (withName) {
+        empresas.push({ rut: withName[2], nombre: withName[1].trim() });
+      } else if (/^\d{5,}-[0-9Kk]$/.test(text)) {
+        empresas.push({ rut: text, nombre: text });
+      }
     }
     return empresas;
   }

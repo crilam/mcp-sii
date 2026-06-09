@@ -18,17 +18,17 @@ const loginSnapshot = [
   '- button "Ingresar" [ref=e3]',
 ].join('\n');
 
-// Snapshot de página de empresa con una sola empresa
+// Snapshot del portal mipyme con una sola empresa (formato "NOMBRE RUT-DV")
 const empresaUnicaSnapshot = [
   '- combobox [expanded=false, ref=e10]: Empresa',
-  '- option "11111111-1" [ref=e11]',
+  '- option "EMPRESA UNO SPA 11111111-1" [ref=e11]',
 ].join('\n');
 
 // Snapshot con dos empresas
 const dosEmpresasSnapshot = [
   '- combobox [expanded=false, ref=e10]: Empresa',
-  '- option "11111111-1" [ref=e11]',
-  '- option "22222222-2" [ref=e12]',
+  '- option "EMPRESA UNO SPA 11111111-1" [ref=e11]',
+  '- option "EMPRESA DOS LTDA 22222222-2" [ref=e12]',
 ].join('\n');
 
 describe('SessionManager.login', () => {
