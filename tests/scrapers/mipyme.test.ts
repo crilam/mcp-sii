@@ -243,3 +243,54 @@ describe('MipymeScraper.listMipymeDteEmitidos', () => {
     expect(docs).toEqual([]);
   });
 });
+
+// Snapshots para flujo de emisión DTE
+const emisionFormSnapshot = [
+  '- textbox "RUT Receptor" [ref=e10]',
+  '- textbox "DV" [ref=e11]',
+  '- textbox "Descripción" [ref=e20]',
+  '- spinbutton "Cantidad" [ref=e21]',
+  '- spinbutton "Precio Unitario" [ref=e22]',
+  '- button "Agrega linea de Detalle" [ref=e23]',
+  '- button "Validar y visualizar" [ref=e30]',
+].join('\n');
+
+const emisionConfirmSnapshot = [
+  'Folio: 1234',
+  'Total: 119.000',
+  '- button "Emitir" [ref=e40]',
+].join('\n');
+
+const emisionSuccessSnapshot = [
+  'Folio 1234',
+  'Receptor: 33333333-3',
+  'Total: 119.000',
+].join('\n');
+
+describe('MipymeScraper.emitirDte', () => {
+  it('navega el portal, llena el formulario y retorna folio emitido', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMPRESA A' });
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(mipymePortalSnapshot)    // ensureMipymePortalEmpresa
+      .mockReturnValueOnce(emisionFormSnapshot)     // fill receptor
+      .mockReturnValueOnce(emisionFormSnapshot)     // fill linea
+      .mockReturnValueOnce(emisionFormSnapshot)     // snapshot para validar
+      .mockReturnValueOnce(emisionConfirmSnapshot)  // tras waitFor('Emitir')
+      .mockReturnValueOnce(emisionSuccessSnapshot); // tras waitFor('Folio')
+
+    const scraper = new MipymeScraper(browser, session);
+    const result = await scraper.emitirDte({
+      tipoDte: 33,
+      receptorRut: '33333333-3',
+      receptorDv: '1',
+      lineas: [{ descripcion: 'Servicio', cantidad: 1, precioUnitario: 100000 }],
+    });
+
+    expect(result.folio).toBe(1234);
+    expect(result.tipoDte).toBe(33);
+    expect(browser.fill).toHaveBeenCalledWith(expect.any(String), '33333333-3');
+    expect(browser.fill).toHaveBeenCalledWith(expect.any(String), '1');
+  });
+});
