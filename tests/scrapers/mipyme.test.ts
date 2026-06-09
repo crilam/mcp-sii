@@ -92,6 +92,45 @@ describe('MipymeScraper.listDocumentosEmitidos', () => {
   });
 });
 
+// Fila de documento recibido con 12 celdas (formato accessibility tree)
+const docRecibidoSnapshot = [
+  '      - row',
+  '        - cell "1" [ref=e1]',
+  '        - cell "33333333-3" [ref=e2]',
+  '        - cell "2001" [ref=e3]',
+  '        - cell "10/01/2026" [ref=e4]',
+  '        - cell "10/01/2026" [ref=e5]',
+  '        - cell "200.000" [ref=e6]',
+  '        - cell "0" [ref=e7]',
+  '        - cell "38.000" [ref=e8]',
+  '        - cell "238.000" [ref=e9]',
+  '        - cell "Recibido" [ref=e10]',
+  '        - cell',
+  '        - cell',
+].join('\n');
+
+describe('MipymeScraper.listDocumentosRecibidos', () => {
+  it('retorna documentos recibidos con filtros', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMP A' });
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(formSnapshot)        // applyFiltrosRecibidos
+      .mockReturnValueOnce(docRecibidoSnapshot); // snapshot tras waitFor Folio
+
+    const scraper = new MipymeScraper(browser, session);
+    const docs = await scraper.listDocumentosRecibidos({ fechaDesde: '2026-01-01' });
+
+    expect(docs.length).toBeGreaterThan(0);
+    expect(docs[0]).toMatchObject({
+      folio: 2001,
+      emisorRut: '33333333-3',
+      fecha: '10/01/2026',
+      total: 238000,
+    });
+  });
+});
+
 describe('MipymeScraper.withReauth', () => {
   it('re-autentica y reintenta si falla con error de sesion', async () => {
     const browser = new MockBrowser();

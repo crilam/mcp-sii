@@ -118,6 +118,7 @@ export class MipymeScraper {
       await this.ensureEmpresa(filtros.empresaRut);
       this.browser.open(MIPYME_RECIBIDOS_URL);
       await this.applyFiltrosRecibidos(filtros);
+      this.browser.waitFor('Folio');
       return this.parseDocumentosRecibidos(this.browser.snapshot(), filtros.limit ?? 50);
     });
   }
@@ -259,25 +260,48 @@ export class MipymeScraper {
   }
 
   private parseDocumentosRecibidos(snapshot: string, limit: number): DocumentoRecibido[] {
-    const rowRegex = /\[row\](.*?)\[\/row\]/gs;
     const docs: DocumentoRecibido[] = [];
-    let rowMatch;
-    while ((rowMatch = rowRegex.exec(snapshot)) !== null && docs.length < limit) {
+    const lines = snapshot.split('\n');
+
+    let i = 0;
+    while (i < lines.length && docs.length < limit) {
+      const line = lines[i];
+      const rowMatch = line.match(/^(\s+)- row$/);
+      if (!rowMatch) { i++; continue; }
+
+      const rowIndent = rowMatch[1].length;
+      const cellIndent = rowIndent + 2;
+
       const cells: string[] = [];
-      let cellMatch;
-      const cellRe = /\[cell "([^"]*)"\]/g;
-      while ((cellMatch = cellRe.exec(rowMatch[1])) !== null) cells.push(cellMatch[1]);
-      if (cells.length >= 9) {
+      let j = i + 1;
+      while (j < lines.length) {
+        const cl = lines[j];
+        if (cl.length > 0 && !cl.startsWith(' '.repeat(rowIndent + 1))) break;
+        if (cl.startsWith(' '.repeat(cellIndent) + '- ')) {
+          const t = cl.trim();
+          if (t.startsWith('- cell "')) {
+            const m = t.match(/^- cell "([^"]*)"/);
+            if (m) cells.push(m[1]);
+          } else if (/^- cell\s*$/.test(t)) {
+            cells.push('');
+          }
+        }
+        j++;
+      }
+      i = j;
+
+      // Fila válida: ≥9 celdas, primera celda es número secuencial
+      if (cells.length >= 9 && /^\d+$/.test(cells[0])) {
         docs.push({
-          tipoDte: parseInt(cells[0], 10),
-          folio: parseInt(cells[1], 10),
-          fecha: cells[2],
-          emisorNombre: cells[3],
-          emisorRut: cells[4],
-          montoNeto: parseInt(cells[5].replace(/\./g, ''), 10),
-          iva: parseInt(cells[6].replace(/\./g, ''), 10),
-          total: parseInt(cells[7].replace(/\./g, ''), 10),
-          estadoRecepcion: cells[8],
+          tipoDte: 0,
+          emisorRut: cells[1],
+          folio: parseInt(cells[2], 10),
+          fecha: cells[3],
+          emisorNombre: cells[1],
+          montoNeto: parseInt(cells[5].replace(/\./g, ''), 10) || 0,
+          iva: parseInt(cells[7].replace(/\./g, ''), 10) || 0,
+          total: parseInt(cells[8].replace(/\./g, ''), 10) || 0,
+          estadoRecepcion: cells[9] ?? '',
         });
       }
     }
@@ -285,20 +309,42 @@ export class MipymeScraper {
   }
 
   private parseLineasDetalle(snapshot: string): LineaDetalle[] {
-    const rowRegex = /\[detalle-row\](.*?)\[\/detalle-row\]/gs;
     const lineas: LineaDetalle[] = [];
-    let match;
-    while ((match = rowRegex.exec(snapshot)) !== null) {
+    const lines = snapshot.split('\n');
+
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const rowMatch = line.match(/^(\s+)- row$/);
+      if (!rowMatch) { i++; continue; }
+
+      const rowIndent = rowMatch[1].length;
+      const cellIndent = rowIndent + 2;
+
       const cells: string[] = [];
-      let cellMatch;
-      const cellRe = /\[cell "([^"]*)"\]/g;
-      while ((cellMatch = cellRe.exec(match[1])) !== null) cells.push(cellMatch[1]);
-      if (cells.length >= 4) {
+      let j = i + 1;
+      while (j < lines.length) {
+        const cl = lines[j];
+        if (cl.length > 0 && !cl.startsWith(' '.repeat(rowIndent + 1))) break;
+        if (cl.startsWith(' '.repeat(cellIndent) + '- ')) {
+          const t = cl.trim();
+          if (t.startsWith('- cell "')) {
+            const m = t.match(/^- cell "([^"]*)"/);
+            if (m) cells.push(m[1]);
+          } else if (/^- cell\s*$/.test(t)) {
+            cells.push('');
+          }
+        }
+        j++;
+      }
+      i = j;
+
+      if (cells.length >= 4 && isNaN(parseInt(cells[0], 10)) && cells[0] !== '') {
         lineas.push({
           descripcion: cells[0],
-          cantidad: parseFloat(cells[1]),
-          precioUnitario: parseInt(cells[2].replace(/\./g, ''), 10),
-          descuento: parseFloat(cells[3]),
+          cantidad: parseFloat(cells[1]) || 0,
+          precioUnitario: parseInt(cells[2].replace(/\./g, ''), 10) || 0,
+          descuento: parseFloat(cells[3]) || 0,
         });
       }
     }
