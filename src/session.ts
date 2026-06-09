@@ -1,4 +1,7 @@
 import { execSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { Browser } from './browser';
 import { AuthStrategy, SiiConfig } from './env';
 
@@ -14,7 +17,24 @@ export interface SiiSession {
 
 const SII_MIPYME_URL = 'https://www4.sii.cl/mipymesinternetui/pages/index.xhtml';
 const SII_LOGIN_URL = 'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html';
-const SII_CERT_URL = 'https://zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html';
+const SII_CERT_CGI = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi';
+
+// Nombres de cookies de sesión que el SII establece tras autenticación.
+const SII_SESSION_COOKIES = [
+  'NETSCAPE_LIVEWIRE.rut',
+  'NETSCAPE_LIVEWIRE.rutm',
+  'NETSCAPE_LIVEWIRE.dv',
+  'NETSCAPE_LIVEWIRE.dvm',
+  'NETSCAPE_LIVEWIRE.clave',
+  'NETSCAPE_LIVEWIRE.mac',
+  'NETSCAPE_LIVEWIRE.exp',
+  'NETSCAPE_LIVEWIRE.sec',
+  'NETSCAPE_LIVEWIRE.lms',
+  'TOKEN',
+  'CSESSIONID',
+  'DV_NS',
+  'RUT_NS',
+];
 
 export class SessionManager {
   private session: SiiSession | null = null;
@@ -26,17 +46,10 @@ export class SessionManager {
 
   async login(): Promise<SiiSession> {
     if (this.config.strategy === AuthStrategy.Certificate) {
-      this.importCertIfNeeded();
-      // La página muestra un confirm dialog durante la carga; capturamos el timeout y lo aceptamos.
-      this.browser.openWithPendingDialog(SII_CERT_URL);
-      this.browser.dialogAccept();
+      await this.loginWithCert();
     } else {
       this.browser.open(SII_LOGIN_URL);
-    }
-
-    const loginSnapshot = this.browser.snapshot();
-
-    if (this.config.strategy === AuthStrategy.Clave) {
+      const loginSnapshot = this.browser.snapshot();
       await this.fillClaveForm(loginSnapshot);
     }
 
@@ -56,17 +69,71 @@ export class SessionManager {
     this.session = null;
   }
 
-  private importCertIfNeeded(): void {
-    if (!this.config.certPath || !this.config.certPassword) return;
-    try {
-      // Importa el .pfx al Keychain de macOS si no está ya. Chrome lo usará automáticamente.
-      execSync(
-        `security import "${this.config.certPath}" -P "${this.config.certPassword}" -A -k ~/Library/Keychains/login.keychain-db 2>/dev/null || true`,
-        { encoding: 'utf-8', timeout: 15_000 }
-      );
-    } catch {
-      // Si ya está importado o falla silenciosamente, continuar igual.
+  // Autentica con certificado digital vía curl (TLS mutual auth), luego inyecta
+  // las cookies de sesión en agent-browser navegando a un dominio .sii.cl.
+  private async loginWithCert(): Promise<void> {
+    const { certPath, certPassword } = this.config;
+    if (!certPath || !certPassword) {
+      throw new Error('loginWithCert requiere SII_CERT_PATH y SII_CERT_PASSWORD');
     }
+
+    const tmpDir = os.tmpdir();
+    const certPem = path.join(tmpDir, 'sii_cert.pem');
+    const keyPem = path.join(tmpDir, 'sii_key.pem');
+    const cookiesFile = path.join(tmpDir, 'sii_cookies.txt');
+
+    // Extraer cert y clave privada del .pfx a PEM temporales (cifrado legacy RC2).
+    execSync(
+      `openssl pkcs12 -in "${certPath}" -out "${certPem}" -nokeys -legacy -passin pass:"${certPassword}" 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 10_000 }
+    );
+    execSync(
+      `openssl pkcs12 -in "${certPath}" -out "${keyPem}" -nocerts -nodes -legacy -passin pass:"${certPassword}" 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 10_000 }
+    );
+
+    // TLS mutual auth → obtener cookies de sesión SII.
+    execSync(
+      `curl -sk --cert "${certPem}" --key "${keyPem}" ` +
+      `-c "${cookiesFile}" -b "${cookiesFile}" ` +
+      `-L --max-redirs 5 ` +
+      `-d "referencia=${SII_MIPYME_URL}" ` +
+      `"${SII_CERT_CGI}?${SII_MIPYME_URL}" -o /dev/null`,
+      { encoding: 'utf-8', timeout: 30_000 }
+    );
+
+    // Parsear cookies del archivo Netscape.
+    const cookieMap = this.parseCookieFile(cookiesFile);
+
+    // Limpiar temporales.
+    try { fs.unlinkSync(certPem); fs.unlinkSync(keyPem); } catch { /* ignore */ }
+
+    // Inyectar cookies en Chrome: abrir www.sii.cl y setear via document.cookie.
+    this.browser.open('https://www.sii.cl');
+    for (const name of SII_SESSION_COOKIES) {
+      const value = cookieMap[name];
+      if (value) {
+        this.browser.eval(
+          `document.cookie="${name}=${encodeURIComponent(value)};path=/;domain=.sii.cl;secure"`
+        );
+      }
+    }
+  }
+
+  // Parsea archivo de cookies en formato Netscape (generado por curl -c).
+  private parseCookieFile(filePath: string): Record<string, string> {
+    const map: Record<string, string> = {};
+    try {
+      const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
+      for (const line of lines) {
+        if (line.startsWith('#') || !line.trim()) continue;
+        const parts = line.split('\t');
+        if (parts.length >= 7) {
+          map[parts[5]] = parts[6].trim();
+        }
+      }
+    } catch { /* archivo no existe */ }
+    return map;
   }
 
   private async fillClaveForm(snapshot: string): Promise<void> {
