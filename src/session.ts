@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import { Browser } from './browser';
 import { AuthStrategy, SiiConfig } from './env';
 
@@ -24,11 +25,13 @@ export class SessionManager {
   ) {}
 
   async login(): Promise<SiiSession> {
-    this.browser.open(this.config.strategy === AuthStrategy.Clave ? SII_LOGIN_URL : SII_CERT_URL);
-
     if (this.config.strategy === AuthStrategy.Certificate) {
-      // El portal SII muestra un confirm dialog antes de abrir el selector de certificados
+      this.importCertIfNeeded();
+      // La página muestra un confirm dialog durante la carga; capturamos el timeout y lo aceptamos.
+      this.browser.openWithPendingDialog(SII_CERT_URL);
       this.browser.dialogAccept();
+    } else {
+      this.browser.open(SII_LOGIN_URL);
     }
 
     const loginSnapshot = this.browser.snapshot();
@@ -51,6 +54,19 @@ export class SessionManager {
 
   invalidate(): void {
     this.session = null;
+  }
+
+  private importCertIfNeeded(): void {
+    if (!this.config.certPath || !this.config.certPassword) return;
+    try {
+      // Importa el .pfx al Keychain de macOS si no está ya. Chrome lo usará automáticamente.
+      execSync(
+        `security import "${this.config.certPath}" -P "${this.config.certPassword}" -A -k ~/Library/Keychains/login.keychain-db 2>/dev/null || true`,
+        { encoding: 'utf-8', timeout: 15_000 }
+      );
+    } catch {
+      // Si ya está importado o falla silenciosamente, continuar igual.
+    }
   }
 
   private async fillClaveForm(snapshot: string): Promise<void> {
