@@ -58,9 +58,63 @@ export interface FiltrosRecibidos {
   empresaRut?: string;
 }
 
+export interface MipymeDteEmitido {
+  tipoDte: number;
+  tipoDteNombre: string;
+  folio: number;
+  fecha: string;
+  receptorRut: string;
+  receptorNombre: string;
+  monto: number;
+  estado: string;
+}
+
+export interface FiltrosMipymeDteEmitidos {
+  empresaRut?: string;
+  tipoDte?: number;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  receptorRut?: string;
+  folio?: number;
+  limit?: number;
+}
+
+export interface LineaDte {
+  descripcion: string;
+  cantidad: number;
+  precioUnitario: number;
+}
+
+export interface EmitirDteParams {
+  empresaRut?: string;
+  tipoDte: number;
+  receptorRut: string;
+  receptorDv: string;
+  lineas: LineaDte[];
+}
+
+export interface DteEmitidoResult {
+  folio: number;
+  tipoDte: number;
+  receptorRut: string;
+  total: number;
+}
+
 const MIPYME_PORTAL_URL = 'https://mipyme.sii.cl/';
 const MIPYME_EMITIDOS_URL = 'https://www4.sii.cl/consemitidosinternetui/#/defaultInternet';
 const MIPYME_RECIBIDOS_URL = 'https://www4.sii.cl/consemitidosinternetui/#/dterecibidosInternet';
+const MIPYME_CGI_BASE = 'https://www1.sii.cl/cgi-bin/Portal001';
+const MIPYME_HISTORIAL_URL = `${MIPYME_CGI_BASE}/mipeAdminDocsEmi.cgi`;
+const MIPYME_EMISION_URL = `${MIPYME_CGI_BASE}/mipeDocAlta.cgi`;
+
+const TIPO_DTE_NOMBRES: Record<string, number> = {
+  'Factura Electronica': 33,
+  'Factura No afecta o exenta': 34,
+  'Nota de Credito': 61,
+  'Nota de Debito': 56,
+  'Guia de Despacho': 52,
+  'Factura de Compra': 46,
+};
 
 export class MipymeScraper {
   constructor(
@@ -141,9 +195,25 @@ export class MipymeScraper {
     return this.withReauth(async () => {
       await this.ensureEmpresa(filtros.empresaRut);
       this.browser.open(MIPYME_RECIBIDOS_URL);
+      await this.navegarATabRecibidos();
       await this.applyFiltrosRecibidos(filtros);
-      this.browser.waitFor('Folio');
-      return this.parseDocumentosRecibidos(this.browser.snapshot(), filtros.limit ?? 50);
+      this.browser.waitForAny(['No hay documentos', 'Tipo Documento']);
+      const summary = this.browser.snapshot();
+      if (summary.includes('No hay documentos')) return [];
+
+      const typeLinks = this.parseSummaryTypeLinks(summary);
+      if (typeLinks.length === 0) return [];
+
+      const docs: DocumentoRecibido[] = [];
+      const limit = filtros.limit ?? 50;
+      for (const link of typeLinks) {
+        if (docs.length >= limit) break;
+        this.browser.click(link.ref);
+        this.browser.waitFor('Folio');
+        const docSnapshot = this.browser.snapshot();
+        docs.push(...this.parseDocumentosRecibidos(docSnapshot, limit - docs.length, link.tipoDte));
+      }
+      return docs;
     });
   }
 
@@ -154,7 +224,17 @@ export class MipymeScraper {
       const rutToUse = empresaRut ?? session.empresaRut;
 
       this.browser.open(MIPYME_RECIBIDOS_URL);
+      await this.navegarATabRecibidos();
       await this.applyFiltrosRecibidos({ empresaRut: rutToUse, fechaDesde: fecha });
+      this.browser.waitForAny(['No hay documentos', 'Tipo Documento']);
+      const summary = this.browser.snapshot();
+      if (summary.includes('No hay documentos')) throw new Error(`No hay documentos recibidos en el período para folio ${folio}`);
+
+      const typeLinks = this.parseSummaryTypeLinks(summary);
+      const typeLink = typeLinks.find(l => l.tipoDte === tipoDte);
+      if (!typeLink) throw new Error(`No se encontraron documentos tipo ${tipoDte} en el período`);
+
+      this.browser.click(typeLink.ref);
       this.browser.waitFor('Folio');
       const listSnapshot = this.browser.snapshot();
 
@@ -165,10 +245,67 @@ export class MipymeScraper {
       this.browser.waitFor('Total documentos');
       const detailSnapshot = this.browser.snapshot();
 
-      const docs = this.parseDocumentosRecibidos(detailSnapshot, 1);
+      const docs = this.parseDocumentosRecibidos(detailSnapshot, 1, tipoDte);
       if (docs.length === 0) throw new Error(`No se encontró el documento tipo ${tipoDte} folio ${folio} de ${emisorRut}`);
 
       return { ...docs[0], lineas: [] };
+    });
+  }
+
+  async listMipymeDteEmitidos(filtros: FiltrosMipymeDteEmitidos): Promise<MipymeDteEmitido[]> {
+    return this.withReauth(async () => {
+      await this.ensureMipymePortalEmpresa(filtros.empresaRut);
+      const url = this.buildHistorialUrl(filtros);
+      this.browser.open(url);
+      this.browser.waitForAny(['No existen documentos', 'Receptor RUT']);
+      const snapshot = this.browser.snapshot();
+      if (snapshot.includes('No existen documentos')) return [];
+      return this.parseMipymeDteEmitidos(snapshot, filtros.limit ?? 50);
+    });
+  }
+
+  async emitirDte(params: EmitirDteParams): Promise<DteEmitidoResult> {
+    return this.withReauth(async () => {
+      await this.ensureMipymePortalEmpresa(params.empresaRut);
+      this.browser.open(`${MIPYME_EMISION_URL}?TPO_DOC=${params.tipoDte}`);
+      this.browser.waitFor('Receptor');
+
+      let snapshot = this.browser.snapshot();
+      const rutRef = this.findRef(snapshot, /RUT.*Receptor|Rut Receptor/i);
+      const dvRef = this.findRef(snapshot, /\bDV\b/);
+      if (rutRef) this.browser.fill(rutRef, params.receptorRut);
+      if (dvRef) this.browser.fill(dvRef, params.receptorDv);
+
+      for (let idx = 0; idx < params.lineas.length; idx++) {
+        const linea = params.lineas[idx];
+        snapshot = this.browser.snapshot();
+        const descRef = this.findRef(snapshot, /Descripci/i);
+        const cantRef = this.findRef(snapshot, /Cantidad/i);
+        const precioRef = this.findRef(snapshot, /Precio/i);
+        if (descRef) this.browser.fill(descRef, linea.descripcion);
+        if (cantRef) this.browser.fill(cantRef, String(linea.cantidad));
+        if (precioRef) this.browser.fill(precioRef, String(linea.precioUnitario));
+        if (idx < params.lineas.length - 1) {
+          const addRef = this.findRef(snapshot, /Agrega.*linea/i);
+          if (addRef) this.browser.click(addRef);
+          this.browser.waitFor('Descripci');
+        }
+      }
+
+      snapshot = this.browser.snapshot();
+      const validarRef = this.findRef(snapshot, /Validar/i);
+      if (!validarRef) throw new Error('No se encontró el botón "Validar y visualizar"');
+      this.browser.click(validarRef);
+      this.browser.waitFor('Emitir');
+
+      snapshot = this.browser.snapshot();
+      const emitirRef = this.findRef(snapshot, /\bEmitir\b/);
+      if (!emitirRef) throw new Error('No se encontró el botón "Emitir"');
+      this.browser.click(emitirRef);
+      this.browser.waitFor('Folio');
+
+      snapshot = this.browser.snapshot();
+      return this.parseDteEmitidoResult(snapshot, params.tipoDte);
     });
   }
 
@@ -208,6 +345,13 @@ export class MipymeScraper {
     if (comboRefs[2]) this.browser.select(comboRefs[2], String(fecha.getFullYear()));
     const btnRef = this.findRef(snapshot, /consultar/i);
     if (btnRef) this.browser.click(btnRef);
+  }
+
+  private async navegarATabRecibidos(): Promise<void> {
+    this.browser.waitFor('DTE Recibidos');
+    const tabRef = this.findRef(this.browser.snapshot(), /DTE Recibidos/);
+    if (tabRef) this.browser.click(tabRef);
+    this.browser.waitFor('CONSULTA DTE RECIBIDOS');
   }
 
   private async applyFiltrosRecibidos(filtros: FiltrosRecibidos): Promise<void> {
@@ -303,7 +447,7 @@ export class MipymeScraper {
     return docs;
   }
 
-  private parseDocumentosRecibidos(snapshot: string, limit: number): DocumentoRecibido[] {
+  private parseDocumentosRecibidos(snapshot: string, limit: number, tipoDte = 0): DocumentoRecibido[] {
     const docs: DocumentoRecibido[] = [];
     const lines = snapshot.split('\n');
 
@@ -337,7 +481,7 @@ export class MipymeScraper {
       // Fila válida: ≥9 celdas, primera celda es número secuencial
       if (cells.length >= 9 && /^\d+$/.test(cells[0])) {
         docs.push({
-          tipoDte: 0,
+          tipoDte,
           emisorRut: cells[1],
           folio: parseInt(cells[2], 10),
           fecha: cells[3],
@@ -400,7 +544,100 @@ export class MipymeScraper {
     return m ? m[1] : null;
   }
 
-private findRef(snapshot: string, pattern: RegExp): string | null {
+private async ensureMipymePortalEmpresa(empresaRut?: string): Promise<void> {
+    const session = await this.session.getSession();
+    const rutToUse = empresaRut ?? session.empresaRut;
+    this.browser.open(MIPYME_PORTAL_URL);
+    this.browser.waitFor(rutToUse);
+    const snapshot = this.browser.snapshot();
+    const comboRef = this.findRef(snapshot, /combobox/);
+    if (comboRef) this.browser.select(comboRef, rutToUse);
+    const btnRef = this.findRef(snapshot, /ingresar|acceder/i);
+    if (btnRef) this.browser.click(btnRef);
+  }
+
+  private buildHistorialUrl(filtros: FiltrosMipymeDteEmitidos): string {
+    const params = new URLSearchParams({
+      RUT_RECP: filtros.receptorRut ?? '',
+      FOLIO: filtros.folio ? String(filtros.folio) : '',
+      RZN_SOC: '',
+      FEC_DESDE: filtros.fechaDesde ? this.toSiiDate(filtros.fechaDesde) : '',
+      FEC_HASTA: filtros.fechaHasta ? this.toSiiDate(filtros.fechaHasta) : '',
+      TPO_DOC: filtros.tipoDte ? String(filtros.tipoDte) : '',
+      ESTADO: '',
+      ORDEN: '',
+      NUM_PAG: '1',
+    });
+    return `${MIPYME_HISTORIAL_URL}?${params}`;
+  }
+
+  private toSiiDate(iso: string): string {
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+  }
+
+  private parseMipymeDteEmitidos(snapshot: string, limit: number): MipymeDteEmitido[] {
+    const docs: MipymeDteEmitido[] = [];
+    const lines = snapshot.split('\n');
+
+    let i = 0;
+    while (i < lines.length && docs.length < limit) {
+      const line = lines[i];
+      const rowMatch = line.match(/^(\s+)- row$/);
+      if (!rowMatch) { i++; continue; }
+
+      const rowIndent = rowMatch[1].length;
+      const cellIndent = rowIndent + 2;
+
+      const cells: string[] = [];
+      let j = i + 1;
+      while (j < lines.length) {
+        const cl = lines[j];
+        if (cl.length > 0 && !cl.startsWith(' '.repeat(rowIndent + 1))) break;
+        if (cl.startsWith(' '.repeat(cellIndent) + '- ')) {
+          const t = cl.trim();
+          if (t.startsWith('- cell "')) {
+            const m = t.match(/^- cell "([^"]*)"/);
+            if (m) cells.push(m[1]);
+          } else if (/^- cell\s*$/.test(t)) {
+            cells.push('');
+          }
+          // - cell [ref=eN] (sin texto) → ignorado intencionalmente (columna "Ver")
+        }
+        j++;
+      }
+      i = j;
+
+      // cells: [0]=receptorRut [1]=receptorNombre [2]=tipoDteNombre [3]=folio [4]=fecha [5]=monto [6]=estado
+      if (cells.length >= 7 && /^\d+$/.test(cells[3])) {
+        docs.push({
+          tipoDte: TIPO_DTE_NOMBRES[cells[2]] ?? 0,
+          tipoDteNombre: cells[2],
+          folio: parseInt(cells[3], 10),
+          fecha: cells[4],
+          receptorRut: cells[0],
+          receptorNombre: cells[1],
+          monto: parseInt(cells[5].replace(/\./g, ''), 10) || 0,
+          estado: cells[6],
+        });
+      }
+    }
+    return docs;
+  }
+
+  private parseDteEmitidoResult(snapshot: string, tipoDte: number): DteEmitidoResult {
+    const folioMatch = snapshot.match(/Folio[:\s]+(\d+)/i);
+    const totalMatch = snapshot.match(/Total[:\s]+([\d.]+)/i);
+    const receptorMatch = snapshot.match(/Receptor[:\s]+([\d]+-[0-9Kk])/i);
+    return {
+      folio: folioMatch ? parseInt(folioMatch[1], 10) : 0,
+      tipoDte,
+      receptorRut: receptorMatch ? receptorMatch[1] : '',
+      total: totalMatch ? parseInt(totalMatch[1].replace(/\./g, ''), 10) : 0,
+    };
+  }
+
+  private findRef(snapshot: string, pattern: RegExp): string | null {
     for (const line of snapshot.split('\n')) {
       const refMatch = line.match(/ref=(e\d+)/);
       if (refMatch && pattern.test(line)) {

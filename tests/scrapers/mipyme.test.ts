@@ -109,14 +109,29 @@ const docRecibidoSnapshot = [
   '        - cell',
 ].join('\n');
 
+const tabRecibidosSnapshot = [
+  '- link " DTE Emitidos" [ref=e7]',
+  '- link " DTE Recibidos" [ref=e8]',
+  '- link " Descargas Diferidas" [ref=e9]',
+  '- heading "CONSULTA DTE RECIBIDOS"',
+].join('\n');
+
+const summaryRecibidosSnapshot = [
+  'CONSULTA DTE RECIBIDOS',
+  'Tipo Documento',
+  '- link "Factura Electronica (33)" [ref=e20]',
+].join('\n');
+
 describe('MipymeScraper.listDocumentosRecibidos', () => {
   it('retorna documentos recibidos con filtros', async () => {
     const browser = new MockBrowser();
     const session = new MockSession({} as any, browser);
     (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMP A' });
     (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce(formSnapshot)        // applyFiltrosRecibidos
-      .mockReturnValueOnce(docRecibidoSnapshot); // snapshot tras waitFor Folio
+      .mockReturnValueOnce(tabRecibidosSnapshot) // navegarATabRecibidos: findRef tab
+      .mockReturnValueOnce(formSnapshot)          // applyFiltrosRecibidos
+      .mockReturnValueOnce(summaryRecibidosSnapshot) // summary tras waitForAny
+      .mockReturnValueOnce(docRecibidoSnapshot);  // detalle tras waitFor Folio
 
     const scraper = new MipymeScraper(browser, session);
     const docs = await scraper.listDocumentosRecibidos({ fechaDesde: '2026-01-01' });
@@ -124,6 +139,7 @@ describe('MipymeScraper.listDocumentosRecibidos', () => {
     expect(docs.length).toBeGreaterThan(0);
     expect(docs[0]).toMatchObject({
       folio: 2001,
+      tipoDte: 33,
       emisorRut: '33333333-3',
       fecha: '10/01/2026',
       total: 238000,
@@ -165,5 +181,65 @@ describe('MipymeScraper.withReauth', () => {
     const scraper = new MipymeScraper(browser, session);
     await expect(scraper.listDocumentosEmitidos({})).rejects.toThrow('Error de red inesperado');
     expect(session.invalidate).not.toHaveBeenCalled();
+  });
+});
+
+// ---- Snapshots para portal mipyme CGI ----
+const mipymePortalSnapshot = [
+  '- combobox [ref=e5]: 11111111-1',
+  '  - option "EMPRESA A 11111111-1" [ref=e11]',
+  '- button "Ingresar" [ref=e6]',
+].join('\n');
+
+// Cada fila del historial tiene columna "Ver" (- cell [ref=eN]) que el parser ignora
+// porque no tiene comillas, seguida de 7 columnas con texto
+const mipymeHistorialSnapshot = [
+  'Receptor RUT',
+  '      - row',
+  '        - cell [ref=e1]',
+  '        - cell "33333333-3" [ref=e2]',
+  '        - cell "EMPRESA A" [ref=e3]',
+  '        - cell "Factura Electronica" [ref=e4]',
+  '        - cell "1001" [ref=e5]',
+  '        - cell "15/01/2026" [ref=e6]',
+  '        - cell "119.000" [ref=e7]',
+  '        - cell "Vigente" [ref=e8]',
+].join('\n');
+
+describe('MipymeScraper.listMipymeDteEmitidos', () => {
+  it('retorna documentos del historial mipyme CGI con filtros', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMPRESA A' });
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(mipymePortalSnapshot)    // ensureMipymePortalEmpresa
+      .mockReturnValueOnce(mipymeHistorialSnapshot); // listMipymeDteEmitidos tras waitForAny
+
+    const scraper = new MipymeScraper(browser, session);
+    const docs = await scraper.listMipymeDteEmitidos({ fechaDesde: '2026-01-01' });
+
+    expect(docs.length).toBeGreaterThan(0);
+    expect(docs[0]).toMatchObject({
+      folio: 1001,
+      tipoDte: 33,
+      tipoDteNombre: 'Factura Electronica',
+      receptorRut: '33333333-3',
+      receptorNombre: 'EMPRESA A',
+      monto: 119000,
+      estado: 'Vigente',
+    });
+  });
+
+  it('retorna [] si el portal indica "No existen documentos"', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMPRESA A' });
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(mipymePortalSnapshot)
+      .mockReturnValueOnce('No existen documentos');
+
+    const scraper = new MipymeScraper(browser, session);
+    const docs = await scraper.listMipymeDteEmitidos({});
+    expect(docs).toEqual([]);
   });
 });
