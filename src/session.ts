@@ -80,6 +80,7 @@ export class SessionManager {
   }
 
   private async selectEmpresa(): Promise<SiiSession> {
+    this.browser.open(SII_MIPYME_URL);
     const snapshot = this.browser.snapshot();
 
     const empresas = this.parseEmpresas(snapshot);

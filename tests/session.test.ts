@@ -68,6 +68,8 @@ describe('SessionManager.getSession', () => {
     await mgr.getSession();
     await mgr.getSession();
 
-    expect(browser.open).toHaveBeenCalledTimes(1);
+    // login abre SII_LOGIN_URL + selectEmpresa abre SII_MIPYME_URL = 2 calls en total.
+    // El segundo getSession() usa la caché y no llama open.
+    expect(browser.open).toHaveBeenCalledTimes(2);
   });
 });

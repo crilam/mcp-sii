@@ -12,14 +12,18 @@ export class Browser {
   }
 
   // Navega a una URL que puede mostrar un JS confirm dialog durante la carga.
-  // Captura el timeout provocado por el dialog y lo deja pendiente para que
-  // el llamador resuelva con dialogAccept() o dialogDismiss().
+  // Captura el error provocado por el dialog (execSync pone el output en err.stderr/stdout,
+  // no en err.message) y lo deja pendiente para que el llamador resuelva con dialogAccept().
   openWithPendingDialog(url: string): void {
     try {
       this.run(`agent-browser open ${url}`);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!/timed out|dialog/i.test(msg)) throw err;
+      const allText = [
+        err instanceof Error ? err.message : String(err),
+        (err as any)?.stderr?.toString() ?? '',
+        (err as any)?.stdout?.toString() ?? '',
+      ].join(' ');
+      if (!/timed.?out|ETIMEDOUT|dialog/i.test(allText)) throw err;
     }
   }
 
