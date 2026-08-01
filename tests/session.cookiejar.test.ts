@@ -67,6 +67,34 @@ describe('SessionManager.rutaCookieJar', () => {
     expect(mgr.identidad()).toEqual({ rut: '12345678', dv: 'K' });
   });
 
+  // Sólo loginWithCert escribe el cookie jar. Con clave tributaria el archivo
+  // nunca existe, y devolver la ruta igual hacía que las tools por HTTP
+  // fallaran siempre con "la sesión pudo expirar" — o, si en esa máquina hubo
+  // antes una corrida con certificado, que curl mandara cookies rancias y
+  // disparara el bloqueo del SII por exceso de sesiones.
+  it('falla con un mensaje accionable si la estrategia es clave', async () => {
+    const mgr = new SessionManager(
+      { rut: '11111111-1', strategy: AuthStrategy.Clave, clave: 'secreta' },
+      new MockBrowser()
+    );
+
+    await expect(mgr.rutaCookieJar()).rejects.toThrow(/certificado digital/);
+    await expect(mgr.rutaCookieJar()).rejects.toThrow(/SII_CERT_PATH/);
+  });
+
+  it('no autentica ni abre el navegador cuando la estrategia es clave', async () => {
+    const browser = new MockBrowser();
+    const mgr = new SessionManager(
+      { rut: '11111111-1', strategy: AuthStrategy.Clave, clave: 'secreta' },
+      browser
+    );
+
+    await expect(mgr.rutaCookieJar()).rejects.toThrow();
+
+    expect(browser.open).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+
   it('autentica si todavía no hay sesión', async () => {
     const mgr = new SessionManager(configCert, new MockBrowser());
 

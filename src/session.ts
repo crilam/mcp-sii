@@ -189,6 +189,22 @@ export class SessionManager {
   // cuenta: dos sesiones simultáneas contra el mismo RUT disparan el bloqueo
   // del SII. La sesión la administra sólo esta clase.
   async rutaCookieJar(): Promise<string> {
+    // Sólo `loginWithCert` escribe el cookie jar (curl -c). Con estrategia de
+    // clave la autenticación pasa por el navegador y el archivo nunca existe,
+    // así que devolver la ruta igual haría que curl salga sin cookies y el
+    // fallo se reporte como "la sesión pudo expirar", que apunta al lugar
+    // equivocado. Peor: si en esta máquina hubo antes una corrida con
+    // certificado, el archivo quedó en $TMPDIR y curl -b mandaría cookies de
+    // una sesión anterior, que es justo lo que dispara el bloqueo del SII
+    // 01.01.190.500.720.27. Se falla antes de tocar la red.
+    if (this.config.strategy !== AuthStrategy.Certificate) {
+      throw new Error(
+        'Las consultas por HTTP (boletas de honorarios) requieren autenticación con ' +
+        'certificado digital: la autenticación con clave tributaria corre en el navegador ' +
+        'y no produce el archivo de cookies que necesita curl. ' +
+        'Configurá SII_CERT_PATH y SII_CERT_PASSWORD.'
+      );
+    }
     await this.authenticate();
     return COOKIE_JAR;
   }
