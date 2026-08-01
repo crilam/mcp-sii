@@ -21,13 +21,21 @@ export interface InformeAnualBhe {
   folioFinal: number | null;
 }
 
+// La contraparte de una boleta emitida es el receptor; la de una recibida, el
+// emisor. Nombrar los dos casos "receptor" mentía sobre qué representa el dato
+// en las recibidas, así que el campo dice de quién se trata en cada caso.
+export type RolContraparte = 'receptor' | 'emisor';
+
 export interface BoletaBhe {
   folio: number;
   fecha: string;
-  receptorRut: string;
-  receptorNombre: string;
+  contraparteRol: RolContraparte;
+  contraparteRut: string;
+  contraparteNombre: string;
   honorarioBruto: number;
-  retencionEmisor: number;
+  // El informe de recibidas no trae la retención del emisor (el receptor no la
+  // ve). null es "el SII no lo informa", distinto de un cero que sí informó.
+  retencionEmisor: number | null;
   retencionReceptor: number;
   totalLiquido: number;
   anulada: boolean;
@@ -45,13 +53,88 @@ const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
 // que el navegador renderiza con document.write. El parser va sobre el fuente.
 const XML_VALUE = /xml_values\['(\w+)'\]\s*=\s*"([^"]*)"/g;
 
+// El CGI pagina de a 100 filas: `MAXFILAS=100` y `tot_pag = Math.ceil(max/100)`
+// en la propia respuesta. Ver ESQUEMAS/comentario en parseBoletas.
+const MAX_FILAS_POR_PAGINA = 100;
+
+// Emitidas y recibidas NO comparten esquema: el CGI de recibidas usa otros
+// nombres de campo (verificado contra el portal). Parsear las recibidas con los
+// nombres de emitidas devolvía cada boleta con RUT "-" y nombre vacío, sin
+// lanzar nada. Cada informe declara sus claves acá.
+interface EsquemaBoletas {
+  rol: RolContraparte;
+  rut: string;
+  dv: string;
+  nombre: string;
+  // El CGI de recibidas no emite fechaemision_N; la fecha de la boleta viene
+  // en fecha_boleta_N, que emitidas también trae.
+  fecha: string;
+  // Ausente en recibidas: el receptor no ve la retención que declaró el emisor.
+  retencionEmisor: string | null;
+}
+
+const ESQUEMA_EMITIDAS: EsquemaBoletas = {
+  rol: 'receptor',
+  rut: 'rutreceptor',
+  dv: 'dvreceptor',
+  nombre: 'nombrereceptor',
+  fecha: 'fechaemision',
+  retencionEmisor: 'retencion_emisor',
+};
+
+const ESQUEMA_RECIBIDAS: EsquemaBoletas = {
+  rol: 'emisor',
+  rut: 'rutemisor',
+  dv: 'dvemisor',
+  // Con guión bajo, a diferencia de `nombrereceptor` en emitidas.
+  nombre: 'nombre_emisor',
+  fecha: 'fecha_boleta',
+  retencionEmisor: null,
+};
+
+// Entidades HTML que el SII emite en razones sociales (respuesta ISO-8859-1).
+// Se resuelven a mano para no agregar dependencias; las numéricas van aparte.
+const ENTIDADES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  aacute: 'á', eacute: 'é', iacute: 'í', oacute: 'ó', uacute: 'ú',
+  Aacute: 'Á', Eacute: 'É', Iacute: 'Í', Oacute: 'Ó', Uacute: 'Ú',
+  ntilde: 'ñ', Ntilde: 'Ñ', uuml: 'ü', Uuml: 'Ü',
+  ordm: 'º', ordf: 'ª', deg: '°',
+};
+
+// Fallo que no depende de la sesión, sino de algo que el scraper todavía no
+// sabe hacer. Se distingue para no reintentarlo (ver conSesionFresca).
+export class LimitacionConocida extends Error {}
+
 export class BheScraper {
   constructor(
     private http: SiiHttpClient,
     private session: SessionManager
   ) {}
 
+  // La causa más común de una respuesta que no parece un informe es una sesión
+  // del SII ya caducada. Sin invalidarla, `autenticadoHasta` la sigue dando por
+  // buena durante dos horas y cada reintento repite el mismo fallo hasta
+  // reiniciar el proceso — así que el consejo "reintentá" era el único que no
+  // podía funcionar. Mismo patrón que BienesRaicesScraper. Vive acá, envolviendo
+  // a los dos informes, para no duplicar el reintento en cada método.
+  private async conSesionFresca<T>(intento: () => Promise<T>): Promise<T> {
+    try {
+      return await intento();
+    } catch (e) {
+      // Un límite que ya conocemos no se arregla reautenticando: reintentarlo
+      // sólo gastaría otra consulta para volver a fallar igual.
+      if (e instanceof LimitacionConocida) throw e;
+      this.session.invalidate();
+      return intento();
+    }
+  }
+
   async informeAnual(anio: number): Promise<InformeAnualBhe> {
+    return this.conSesionFresca(() => this.intentarInformeAnual(anio));
+  }
+
+  private async intentarInformeAnual(anio: number): Promise<InformeAnualBhe> {
     // No requiere seleccionar empresa: la BHE es de la persona natural.
     await this.session.authenticateOnly();
     const { rut, dv } = this.session.identidad();
@@ -93,6 +176,14 @@ export class BheScraper {
     mes: number,
     recibidas = false
   ): Promise<BoletaBhe[]> {
+    return this.conSesionFresca(() => this.intentarInformeMensual(anio, mes, recibidas));
+  }
+
+  private async intentarInformeMensual(
+    anio: number,
+    mes: number,
+    recibidas: boolean
+  ): Promise<BoletaBhe[]> {
     // No requiere seleccionar empresa: la BHE es de la persona natural.
     await this.session.authenticateOnly();
     const { rut, dv } = this.session.identidad();
@@ -116,7 +207,35 @@ export class BheScraper {
       );
     }
 
-    return this.parseBoletas(html, this.toInt(values['total_boletas']) ?? 0);
+    const total = this.toInt(values['total_boletas']) ?? 0;
+
+    // `total_boletas` es el total del MES, no el de la página, y el CGI sólo
+    // manda 100 filas por página. Iterando hasta el total, los índices 101+ no
+    // existen, quedan con folio null y el `continue` los descartaba: el usuario
+    // recibía 100 boletas presentadas como el mes completo.
+    //
+    // Decisión: error explícito en vez de paginar. Las dos respuestas capturadas
+    // numeran las páginas distinto —emitidas devuelve pagina_solicitada "0",
+    // recibidas devuelve "1" y además pagina_actual— y no hay ninguna captura
+    // real de un mes con más de una página contra la cual verificar qué valor
+    // pide la página 2 en cada CGI. Adivinarlo tiene un modo de falla peor que
+    // el actual: si el CGI ignora el parámetro devuelve otra vez la página 1 y
+    // el resultado serían 200 boletas con folios duplicados, igual de silencioso.
+    // Preferimos fallar fuerte y dejar la paginación para cuando haya fixture.
+    if (total > MAX_FILAS_POR_PAGINA) {
+      throw new LimitacionConocida(
+        `El SII informa ${total} boletas para ${String(mes).padStart(2, '0')}/${anio}, ` +
+        `pero entrega como máximo ${MAX_FILAS_POR_PAGINA} por página y la paginación ` +
+        'todavía no está implementada. Consultá el mes desde el portal para no ' +
+        'trabajar con un listado incompleto.'
+      );
+    }
+
+    return this.parseBoletas(
+      html,
+      total,
+      recibidas ? ESQUEMA_RECIBIDAS : ESQUEMA_EMITIDAS
+    );
   }
 
   private parseXmlValues(html: string): Record<string, string> {
@@ -168,7 +287,13 @@ export class BheScraper {
   // asi que el indice es el ultimo segmento, no el segundo.
   private parseArrInforme(html: string): Record<string, string> {
     const values: Record<string, string> = {};
-    const re = /arr_informe_mensual\['([^']+)'\]\s*=\s*([^;]+);/g;
+    // El valor se toma hasta el fin de línea, no hasta el primer ";": una razón
+    // social con entidades HTML ("SOC. GARC&Iacute;A &amp; CIA") lleva puntos y
+    // coma adentro del literal, y cortar ahí devolvía una cadena sin comilla de
+    // cierre que `desenvolver` no reconocía — el nombre desaparecía sin error.
+    // Cada asignación del CGI ocupa una línea propia, así que la frontera segura
+    // es el salto de línea y quien delimita el valor son las comillas.
+    const re = /arr_informe_mensual\['([^']+)'\]\s*=\s*([^\n\r]*)/g;
     for (const m of html.matchAll(re)) {
       values[m[1]] = this.desenvolver(m[2]);
     }
@@ -180,10 +305,33 @@ export class BheScraper {
     const conFormato = expr.match(/formatMiles\(\s*"([^"]*)"/);
     if (conFormato) return conFormato[1];
     const literal = expr.match(/"([^"]*)"/);
-    return literal ? literal[1] : '';
+    return literal ? this.decodificarEntidades(literal[1]) : '';
   }
 
-  private parseBoletas(html: string, total: number): BoletaBhe[] {
+  // El SII escapa las razones sociales como entidades HTML porque el valor
+  // termina en un document.write. Devolverlas crudas expone "GARC&Iacute;A" al
+  // usuario, así que se resuelven acá (sin dependencias: tabla propia para las
+  // nombradas que emite el portal, y cálculo directo para las numéricas).
+  private decodificarEntidades(texto: string): string {
+    if (!texto.includes('&')) return texto;
+    return texto.replace(/&(#\d+|#[xX][0-9a-fA-F]+|\w+);/g, (entidad, cuerpo: string) => {
+      if (cuerpo.startsWith('#')) {
+        const codigo = cuerpo[1] === 'x' || cuerpo[1] === 'X'
+          ? parseInt(cuerpo.slice(2), 16)
+          : parseInt(cuerpo.slice(1), 10);
+        return Number.isFinite(codigo) ? String.fromCodePoint(codigo) : entidad;
+      }
+      // Una entidad desconocida se deja tal cual: inventar un reemplazo
+      // corrompería el nombre en silencio, que es el fallo que estamos cerrando.
+      return ENTIDADES[cuerpo] ?? entidad;
+    });
+  }
+
+  private parseBoletas(
+    html: string,
+    total: number,
+    esquema: EsquemaBoletas
+  ): BoletaBhe[] {
     const arr = this.parseArrInforme(html);
     const boletas: BoletaBhe[] = [];
 
@@ -198,11 +346,14 @@ export class BheScraper {
 
       boletas.push({
         folio,
-        fecha: (arr[`fechaemision_${i}`] ?? '').trim(),
-        receptorRut: `${arr[`rutreceptor_${i}`] ?? ''}-${arr[`dvreceptor_${i}`] ?? ''}`,
-        receptorNombre: (arr[`nombrereceptor_${i}`] ?? '').trim(),
+        fecha: (arr[`${esquema.fecha}_${i}`] ?? '').trim(),
+        contraparteRol: esquema.rol,
+        contraparteRut: `${arr[`${esquema.rut}_${i}`] ?? ''}-${arr[`${esquema.dv}_${i}`] ?? ''}`,
+        contraparteNombre: (arr[`${esquema.nombre}_${i}`] ?? '').trim(),
         honorarioBruto: this.toInt(arr[`totalhonorarios_${i}`]) ?? 0,
-        retencionEmisor: this.toInt(arr[`retencion_emisor_${i}`]) ?? 0,
+        retencionEmisor: esquema.retencionEmisor === null
+          ? null
+          : this.toInt(arr[`${esquema.retencionEmisor}_${i}`]) ?? 0,
         retencionReceptor: this.toInt(arr[`retencion_receptor_${i}`]) ?? 0,
         totalLiquido: this.toInt(arr[`honorariosliquidos_${i}`]) ?? 0,
         // Solo el caso vigente esta verificado contra el portal: las boletas

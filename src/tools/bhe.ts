@@ -22,7 +22,7 @@ export function registerBheTools(server: McpServer, scraper: BheScraper): void {
 
   server.tool(
     'sii_bhe_list_emitidas',
-    'Lista boleta por boleta las boletas de honorarios electrónicas emitidas por el RUT persona autenticado en un mes: folio, fecha, receptor, honorario bruto, retención del emisor y del receptor, total líquido y si está anulada. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
+    'Lista boleta por boleta las boletas de honorarios electrónicas emitidas por el RUT persona autenticado en un mes: folio, fecha, receptor de la boleta (en contraparteRut/contraparteNombre, con contraparteRol="receptor"), honorario bruto, retención del emisor y del receptor, total líquido y si está anulada. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
     paramsMes,
     async ({ anio, mes }: { anio: number; mes: number }) => ({
       content: [{
@@ -34,7 +34,7 @@ export function registerBheTools(server: McpServer, scraper: BheScraper): void {
 
   server.tool(
     'sii_bhe_list_recibidas',
-    'Lista las boletas de honorarios electrónicas recibidas por el RUT persona autenticado en un mes, con el mismo detalle que las emitidas. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
+    'Lista las boletas de honorarios electrónicas recibidas por el RUT persona autenticado en un mes: folio, fecha, emisor de la boleta (en contraparteRut/contraparteNombre, con contraparteRol="emisor"), honorario bruto, retención del receptor, total líquido y si está anulada. El SII no informa la retención del emisor en las recibidas, así que retencionEmisor viene en null. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
     paramsMes,
     async ({ anio, mes }: { anio: number; mes: number }) => ({
       content: [{
