@@ -24,6 +24,11 @@ const SII_LOGIN_URL = 'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/Ingreso
 const SII_CERT_CGI = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi';
 const SII_LOGOUT_URL = 'https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi';
 
+// Cookie de expiración que el CGI del SII escribe por JavaScript, con 2 horas
+// de vigencia (el mismo valor que usa su propio script de autenticación).
+const SII_LOCEXP_COOKIE = 'NETSCAPE_LIVEWIRE.locexp';
+const LOCEXP_TTL_MS = 7_200_000;
+
 // Nombres de cookies de sesión que el SII establece tras autenticación.
 const SII_SESSION_COOKIES = [
   'NETSCAPE_LIVEWIRE.rut',
@@ -181,15 +186,23 @@ export class SessionManager {
       { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'ignore', 'pipe'] }
     );
 
+    // El archivo de cookies persiste entre corridas. Mandar las de la sesión
+    // anterior con -b hace que el SII las cuente como sesiones acumuladas y
+    // responda "Usted ha superado el máximo de sesiones autenticadas"
+    // (01.01.190.500.720.27), bloqueando el acceso. Se autentica en limpio.
+    try { fs.unlinkSync(cookiesFile); } catch { /* no existía */ }
+
     // TLS mutual auth → obtener cookies de sesión SII.
-    execSync(
+    const salida = execSync(
       `curl -sk --cert "${certPem}" --key "${keyPem}" ` +
-      `-c "${cookiesFile}" -b "${cookiesFile}" ` +
+      `-c "${cookiesFile}" ` +
       `-L --max-redirs 5 ` +
       `-d "referencia=${SII_MIPYME_URL}" ` +
-      `"${SII_CERT_CGI}?${SII_MIPYME_URL}" -o /dev/null`,
+      `"${SII_CERT_CGI}?${SII_MIPYME_URL}"`,
       { encoding: 'utf-8', timeout: 30_000 }
     );
+
+    this.assertAutenticacionExitosa(salida);
 
     // Parsear cookies del archivo Netscape.
     const cookieMap = this.parseCookieFile(cookiesFile);
@@ -207,6 +220,35 @@ export class SessionManager {
         );
       }
     }
+
+    this.setLocExpCookie();
+  }
+
+  // El CGI responde 200 incluso cuando rechaza la autenticación: el error viene
+  // dentro de un alert() de JavaScript. Sin esta comprobación el fallo pasa
+  // inadvertido y recién se manifiesta como consultas vacías, muy lejos de la
+  // causa. En el éxito la respuesta trae el location.replace al portal.
+  private assertAutenticacionExitosa(html: string): void {
+    const alerta = html.match(/alert\('([^']+)'/);
+    if (alerta) {
+      throw new Error(`El SII rechazó la autenticación: ${alerta[1].trim()}`);
+    }
+    if (!html.includes('location.replace')) {
+      throw new Error(
+        'El SII no completó la autenticación con certificado (no redirigió al portal).'
+      );
+    }
+  }
+
+  // El CGI de autenticación no manda `locexp` en un Set-Cookie: la escribe por
+  // JavaScript en la respuesta, así que curl nunca la ve y hay que replicarla.
+  // Sin ella el portal rechaza la sesión aunque el resto de las cookies sea
+  // válido, y la autenticación aparenta fallar sin ningún mensaje de error.
+  private setLocExpCookie(): void {
+    const expira = new Date(Date.now() + LOCEXP_TTL_MS).toUTCString();
+    this.browser.eval(
+      `document.cookie="${SII_LOCEXP_COOKIE}=${expira};path=/;domain=.sii.cl;secure"`
+    );
   }
 
   // Parsea archivo de cookies en formato Netscape (generado por curl -c).

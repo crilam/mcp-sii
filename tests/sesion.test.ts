@@ -52,6 +52,63 @@ describe('SessionManager: reuso de sesión', () => {
   });
 });
 
+// El CGI de autenticación escribe `locexp` por JavaScript en vez de mandarla en
+// un Set-Cookie, así que curl no la captura. Sin ella el portal rechaza la
+// sesión aunque el resto de las cookies sea válido, y sin mensaje de error.
+describe('SessionManager: cookie locexp', () => {
+  const certConfig = {
+    strategy: AuthStrategy.Certificate,
+    rut: '11111111-1',
+    certPath: '/tmp/cert.pfx',
+    certPassword: 'x',
+  } as SiiConfig;
+
+  it('inyecta NETSCAPE_LIVEWIRE.locexp al autenticar con certificado', async () => {
+    const browser = new MockBrowser();
+    const session = new SessionManager(certConfig, browser);
+    // Evitar openssl/curl reales: solo interesa la inyección de cookies.
+    (session as any).loginWithCert = async () => {
+      (session as any).setLocExpCookie();
+    };
+
+    await session.authenticateOnly();
+
+    const evals = (browser.eval as jest.Mock).mock.calls.map(([js]) => js);
+    expect(evals.some(js => js.includes('NETSCAPE_LIVEWIRE.locexp'))).toBe(true);
+  });
+
+  it('le da a locexp una expiración futura', async () => {
+    const browser = new MockBrowser();
+    const session = new SessionManager(certConfig, browser);
+
+    (session as any).setLocExpCookie();
+
+    const [js] = (browser.eval as jest.Mock).mock.calls[0];
+    const fecha = js.match(/locexp=([^;]+);/)![1];
+    expect(new Date(fecha).getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+// El CGI responde 200 aunque rechace: el error viaja dentro de un alert() de JS.
+describe('SessionManager: detección de rechazo del CGI', () => {
+  const session = new SessionManager({} as any, new MockBrowser());
+  const assert = (html: string) => (session as any).assertAutenticacionExitosa(html);
+
+  it('reporta el mensaje del SII cuando supera el máximo de sesiones', () => {
+    const html = `<script>alert('Usted ha superado el máximo de sesiones autenticadas');</script>`;
+    expect(() => assert(html)).toThrow(/máximo de sesiones autenticadas/);
+  });
+
+  it('falla si no hubo redirección al portal', () => {
+    expect(() => assert('<html><body>algo inesperado</body></html>')).toThrow(/no completó la autenticación/);
+  });
+
+  it('acepta la respuesta de éxito', () => {
+    const html = `<script>location.replace('https://mipyme.sii.cl/');</script>`;
+    expect(() => assert(html)).not.toThrow();
+  });
+});
+
 describe('SessionManager.logout', () => {
   it('navega a la URL de término de sesión del SII', async () => {
     const { browser, session } = makeSession();
