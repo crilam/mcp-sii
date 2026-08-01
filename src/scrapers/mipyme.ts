@@ -100,10 +100,10 @@ export interface DteEmitidoResult {
   total: number;
 }
 
-const MIPYME_PORTAL_URL = 'https://mipyme.sii.cl/';
 const MIPYME_EMITIDOS_URL = 'https://www4.sii.cl/consemitidosinternetui/#/defaultInternet';
 const MIPYME_RECIBIDOS_URL = 'https://www4.sii.cl/consemitidosinternetui/#/dterecibidosInternet';
 const MIPYME_CGI_BASE = 'https://www1.sii.cl/cgi-bin/Portal001';
+const MIPYME_PORTAL_URL = `${MIPYME_CGI_BASE}/mipeSelEmpresa.cgi`;
 const MIPYME_HISTORIAL_URL = `${MIPYME_CGI_BASE}/mipeAdminDocsEmi.cgi`;
 const MIPYME_EMISION_URL = `${MIPYME_CGI_BASE}/mipeDocAlta.cgi`;
 
@@ -123,10 +123,7 @@ export class MipymeScraper {
   ) {}
 
   async listEmpresas(): Promise<Empresa[]> {
-    await this.session.getSession();
-    this.browser.open(MIPYME_PORTAL_URL);
-    const snapshot = this.browser.snapshot();
-    const empresas = this.parseEmpresas(snapshot);
+    const empresas = await this.session.listEmpresasDisponibles();
     if (empresas.length === 0) {
       const session = await this.session.getSession();
       return [{ rut: session.empresaRut, nombre: session.empresaNombre }];

@@ -16,8 +16,19 @@ export interface SiiSession {
 }
 
 const SII_MIPYME_URL = 'https://mipyme.sii.cl/';
+// mipyme.sii.cl solo sirve como `referencia` del CGI de autenticación: navegar a
+// esa raíz devuelve 404 (y sus subrutas, un rechazo del WAF). La selección de
+// empresa vive en el CGI del portal.
+const SII_SEL_EMPRESA_URL = 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi';
 const SII_LOGIN_URL = 'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html';
 const SII_CERT_CGI = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi';
+const SII_LOGOUT_URL = 'https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi';
+const SEL_EMPRESA_MARKERS = ['SELECCIÓN DE EMPRESA', '- option "'];
+
+// Cookie de expiración que el CGI del SII escribe por JavaScript, con 2 horas
+// de vigencia (el mismo valor que usa su propio script de autenticación).
+const SII_LOCEXP_COOKIE = 'NETSCAPE_LIVEWIRE.locexp';
+const LOCEXP_TTL_MS = 7_200_000;
 
 // Nombres de cookies de sesión que el SII establece tras autenticación.
 const SII_SESSION_COOKIES = [
@@ -36,8 +47,54 @@ const SII_SESSION_COOKIES = [
   'RUT_NS',
 ];
 
+// Los .pfx del SII usan cifrado legacy (RC2), que solo OpenSSL 3.x descifra con
+// -legacy. El `openssl` del PATH en macOS es LibreSSL, que ni siquiera acepta
+// ese flag, así que hay que buscar un binario OpenSSL 3.x real.
+const OPENSSL_CANDIDATES = [
+  '/opt/homebrew/opt/openssl@3/bin/openssl',
+  '/usr/local/opt/openssl@3/bin/openssl',
+  'openssl',
+];
+
+let opensslBin: string | null = null;
+
+function resolveOpensslBin(): string {
+  if (opensslBin) return opensslBin;
+
+  const candidates = process.env.SII_OPENSSL_BIN
+    ? [process.env.SII_OPENSSL_BIN]
+    : OPENSSL_CANDIDATES;
+
+  for (const bin of candidates) {
+    try {
+      const version = execSync(`"${bin}" version`, {
+        encoding: 'utf-8',
+        timeout: 5_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (/^OpenSSL 3/.test(version.trim())) {
+        opensslBin = bin;
+        return bin;
+      }
+    } catch {
+      // Candidato inexistente o no ejecutable: seguir con el siguiente.
+    }
+  }
+
+  throw new Error(
+    'No se encontró OpenSSL 3.x, necesario para leer el certificado .pfx del SII ' +
+    '(el `openssl` de macOS es LibreSSL y no soporta -legacy). ' +
+    'Instalalo con `brew install openssl@3` o apuntá SII_OPENSSL_BIN al binario correcto.'
+  );
+}
+
 export class SessionManager {
   private session: SiiSession | null = null;
+  // Instante en que caduca la autenticación, o null si no hay ninguna vigente.
+  // Guardar un booleano no alcanza: el servidor MCP vive mucho más que la
+  // sesión del SII, y una marca que no caduca hace que las consultas salten el
+  // login, vayan a una página protegida y fallen igual en cada reintento.
+  private autenticadoHasta: number | null = null;
 
   constructor(
     private config: SiiConfig,
@@ -45,6 +102,46 @@ export class SessionManager {
   ) {}
 
   async login(): Promise<SiiSession> {
+    await this.authenticate();
+    const session = await this.selectEmpresa();
+    this.session = session;
+    return session;
+  }
+
+  // Lista las empresas que la persona puede operar sin exigir que una esté
+  // seleccionada: es el paso previo a configurar SII_EMPRESA_RUT, así que no
+  // puede depender de getSession() (que falla justamente cuando hay varias).
+  async listEmpresasDisponibles(): Promise<Empresa[]> {
+    await this.authenticate();
+    this.browser.open(SII_SEL_EMPRESA_URL);
+    // Justo después de inyectar las cookies la página puede no haber rendido
+    // todavía y el snapshot vuelve sin el combo, devolviendo cero empresas.
+    this.browser.waitForAny(SEL_EMPRESA_MARKERS, 20_000);
+    const snapshot = this.browser.snapshot();
+
+    // Igual que arriba: si la página no rindió, un listado vacío se confunde
+    // con "esta persona no opera ninguna empresa".
+    if (!SEL_EMPRESA_MARKERS.some(m => snapshot.includes(m))) {
+      throw new Error(
+        'La página de selección de empresa no terminó de cargar. Reintentá en unos minutos.'
+      );
+    }
+
+    return this.parseEmpresas(snapshot);
+  }
+
+  // Autentica el RUT persona sin seleccionar empresa. Lo necesitan los portales
+  // que cuelgan de la persona y no del contribuyente (p. ej. bienes raíces).
+  async authenticateOnly(): Promise<void> {
+    return this.authenticate();
+  }
+
+  // Cada autenticación abre una sesión nueva en el SII y el servicio limita
+  // cuántas puede tener abiertas un RUT a la vez (error 01.01.190.500.720.27).
+  // Reautenticar en cada consulta las agota, así que se reusa mientras viva.
+  private async authenticate(): Promise<void> {
+    if (this.autenticadoHasta !== null && Date.now() < this.autenticadoHasta) return;
+
     if (this.config.strategy === AuthStrategy.Certificate) {
       await this.loginWithCert();
     } else {
@@ -53,9 +150,21 @@ export class SessionManager {
       await this.fillClaveForm(loginSnapshot);
     }
 
-    const session = await this.selectEmpresa();
-    this.session = session;
-    return session;
+    // La sesión dura lo mismo que la cookie `locexp` que el propio SII emite.
+    this.autenticadoHasta = Date.now() + LOCEXP_TTL_MS;
+  }
+
+  // Cierra la sesión en el SII. Sin esto las sesiones quedan abiertas del lado
+  // del servicio hasta que expiran, y se acumulan hasta bloquear el acceso.
+  async logout(): Promise<void> {
+    if (this.autenticadoHasta === null) return;
+
+    try {
+      this.browser.open(SII_LOGOUT_URL);
+    } finally {
+      this.autenticadoHasta = null;
+      this.session = null;
+    }
   }
 
   async getSession(): Promise<SiiSession> {
@@ -65,8 +174,11 @@ export class SessionManager {
     return this.session;
   }
 
+  // La sesión del SII expiró o fue rechazada: hay que reautenticar, así que el
+  // flag de autenticación también se limpia.
   invalidate(): void {
     this.session = null;
+    this.autenticadoHasta = null;
   }
 
   // Autentica con certificado digital vía curl (TLS mutual auth), luego inyecta
@@ -82,31 +194,47 @@ export class SessionManager {
     const keyPem = path.join(tmpDir, 'sii_key.pem');
     const cookiesFile = path.join(tmpDir, 'sii_cookies.txt');
 
-    // Extraer cert y clave privada del .pfx a PEM temporales (cifrado legacy RC2).
-    execSync(
-      `openssl pkcs12 -in "${certPath}" -out "${certPem}" -nokeys -legacy -passin pass:"${certPassword}" 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 10_000 }
-    );
-    execSync(
-      `openssl pkcs12 -in "${certPath}" -out "${keyPem}" -nocerts -nodes -legacy -passin pass:"${certPassword}" 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 10_000 }
-    );
+    // La clave privada se extrae con -nodes, o sea sin cifrar, a un directorio
+    // compartido. El `finally` no es decorativo: sin él, cualquier salida por
+    // excepción —certificado vencido, caída de red— deja material de clave
+    // reutilizable en disco, y justo en el camino de fallo.
+    let cookieMap: Record<string, string>;
+    try {
+      // Extraer cert y clave privada del .pfx a PEM temporales (cifrado legacy RC2).
+      const openssl = resolveOpensslBin();
+      execSync(
+        `"${openssl}" pkcs12 -in "${certPath}" -out "${certPem}" -nokeys -legacy -passin pass:"${certPassword}"`,
+        { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'ignore', 'pipe'] }
+      );
+      execSync(
+        `"${openssl}" pkcs12 -in "${certPath}" -out "${keyPem}" -nocerts -nodes -legacy -passin pass:"${certPassword}"`,
+        { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'ignore', 'pipe'] }
+      );
 
-    // TLS mutual auth → obtener cookies de sesión SII.
-    execSync(
-      `curl -sk --cert "${certPem}" --key "${keyPem}" ` +
-      `-c "${cookiesFile}" -b "${cookiesFile}" ` +
-      `-L --max-redirs 5 ` +
-      `-d "referencia=${SII_MIPYME_URL}" ` +
-      `"${SII_CERT_CGI}?${SII_MIPYME_URL}" -o /dev/null`,
-      { encoding: 'utf-8', timeout: 30_000 }
-    );
+      // El archivo de cookies persiste entre corridas. Mandar las de la sesión
+      // anterior con -b hace que el SII las cuente como sesiones acumuladas y
+      // responda "Usted ha superado el máximo de sesiones autenticadas"
+      // (01.01.190.500.720.27), bloqueando el acceso. Se autentica en limpio.
+      try { fs.unlinkSync(cookiesFile); } catch { /* no existía */ }
 
-    // Parsear cookies del archivo Netscape.
-    const cookieMap = this.parseCookieFile(cookiesFile);
+      // TLS mutual auth → obtener cookies de sesión SII.
+      const salida = execSync(
+        `curl -sk --cert "${certPem}" --key "${keyPem}" ` +
+        `-c "${cookiesFile}" ` +
+        `-L --max-redirs 5 ` +
+        `-d "referencia=${SII_MIPYME_URL}" ` +
+        `"${SII_CERT_CGI}?${SII_MIPYME_URL}"`,
+        { encoding: 'utf-8', timeout: 30_000 }
+      );
 
-    // Limpiar temporales.
-    try { fs.unlinkSync(certPem); fs.unlinkSync(keyPem); } catch { /* ignore */ }
+      this.assertAutenticacionExitosa(salida);
+
+      // Parsear cookies del archivo Netscape.
+      cookieMap = this.parseCookieFile(cookiesFile);
+    } finally {
+      try { fs.unlinkSync(certPem); } catch { /* no se alcanzó a crear */ }
+      try { fs.unlinkSync(keyPem); } catch { /* no se alcanzó a crear */ }
+    }
 
     // Inyectar cookies en Chrome: abrir www.sii.cl y setear via document.cookie.
     this.browser.open('https://www.sii.cl');
@@ -118,6 +246,35 @@ export class SessionManager {
         );
       }
     }
+
+    this.setLocExpCookie();
+  }
+
+  // El CGI responde 200 incluso cuando rechaza la autenticación: el error viene
+  // dentro de un alert() de JavaScript. Sin esta comprobación el fallo pasa
+  // inadvertido y recién se manifiesta como consultas vacías, muy lejos de la
+  // causa. En el éxito la respuesta trae el location.replace al portal.
+  private assertAutenticacionExitosa(html: string): void {
+    const alerta = html.match(/alert\('([^']+)'/);
+    if (alerta) {
+      throw new Error(`El SII rechazó la autenticación: ${alerta[1].trim()}`);
+    }
+    if (!html.includes('location.replace')) {
+      throw new Error(
+        'El SII no completó la autenticación con certificado (no redirigió al portal).'
+      );
+    }
+  }
+
+  // El CGI de autenticación no manda `locexp` en un Set-Cookie: la escribe por
+  // JavaScript en la respuesta, así que curl nunca la ve y hay que replicarla.
+  // Sin ella el portal rechaza la sesión aunque el resto de las cookies sea
+  // válido, y la autenticación aparenta fallar sin ningún mensaje de error.
+  private setLocExpCookie(): void {
+    const expira = new Date(Date.now() + LOCEXP_TTL_MS).toUTCString();
+    this.browser.eval(
+      `document.cookie="${SII_LOCEXP_COOKIE}=${expira};path=/;domain=.sii.cl;secure"`
+    );
   }
 
   // Parsea archivo de cookies en formato Netscape (generado por curl -c).
@@ -147,7 +304,7 @@ export class SessionManager {
   }
 
   private async selectEmpresa(): Promise<SiiSession> {
-    this.browser.open(SII_MIPYME_URL);
+    this.browser.open(SII_SEL_EMPRESA_URL);
     const snapshot = this.browser.snapshot();
 
     const empresas = this.parseEmpresas(snapshot);

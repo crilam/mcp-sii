@@ -1,0 +1,646 @@
+- (1026) OCULTO (info)
+  - (3261) APP´s (info)
+    - (3263) e-Renta (info)
+    - (3262) e-RUT (info)
+  - (3603) Pago en Línea - PEEL (SAG y BBRR)
+  - (3758) Sistema expediente electrónico (SEE) [https://www4.sii.cl/seeui/see/internet/#/see]
+- (1943) Clave tributaria, mandatario digital y representantes electrónicos (info)
+  - (1945) Clave tributaria
+    - (1947) Obtener clave tributaria [https://www2.sii.cl/admin-cntr/noauthz/obtener-clave-tributaria]
+    - (1948) Recuperar o cambiar Clave Tributaria [https://www2.sii.cl/admin-cntr/noauthz/recuperar-clave-tributaria]
+    - (1950) Ayudas
+  - (4661) Mandatario Digital
+    - (4663) Administración y gestión de mandatos [https://mandatario.w.sii.cl/mandatarios-digitales/home]
+    - (4662) Ingresar a representar [https://www2.sii.cl/admin-representantes/representantes-aplicaciones]
+  - (1946) Representantes electrónicos
+    - (2355) Representar a contribuyentes [https://zeusr.sii.cl/cgi_AUT2000/admRPDOBuild.cgi]
+    - (2356) Administrar representantes electrónicos [https://zeusr.sii.cl/cgi_AUT2000/admRPTEBuild.cgi]
+- (1031)  RUT, Inicio de Actividades e Inscripción en Registros  (info)
+  - (1032) Inscripción y obtención de N° de RUT
+    - (3831) Persona Jurídica Comercial
+      - (3835) Nueva sociedad publicada en Diario Oficial [https://www4.sii.cl/solRutIAIInternet/#inicio]
+      - (3836) Sociedad creada por reorganización empresarial [https://www4.sii.cl/obtencionrutinternetui/#!/home]
+      - (3837) Otras empresas/sociedades formalizadas [https://www4.sii.cl/obtencionrutinternetui/#!/home]
+    - (3832) Organización sin fines de lucro [https://www4.sii.cl/obtencionrutinternetui/#!/home]
+    - (3833) Entidad sin Personalidad Jurídica [https://www4.sii.cl/obtencionrutinternetui/#!/home]
+    - (3834) Inversionista extranjero persona natural [https://www4.sii.cl/obtencionrutinternetui/#!/home]
+    - (3858) Sociedades Extranjeras [https://www4.sii.cl/obtencionrutinternetui/#!/home]
+  - (1033) Cédula RUT electrónica (e-RUT)
+    - (1076) Solicitar e-RUT [https://www4.sii.cl/crepInternet/SolicitudDuplicadoInternet.html]
+    - (1077) Consultar e Invalidar e-RUT [https://www4.sii.cl/crepInternet/ConsultaCedulas.html]
+    - (1078) Verificar e-RUT [https://www4.sii.cl/crepInternet/VerificacionCedula.html]
+  - (1034) Inicio de actividades
+    - (1059) Iniciar Actividades [https://www2.sii.cl/inicio-de-actividades/]
+    - (4645) Nuevo Inicio de Actividades (versión beta) [https://www2.sii.cl/inicio-de-actividades/]
+    - (4364) Declarar activos (empresario individual) [https://www4.sii.cl/modificacioncntrui/#/modificacionactivorelevante]
+    - (1081) Certificados de inicio de actividades y otros
+      - (1084) Consultar certificados [https://www4.sii.cl/copiaCertificadosBlobstoreInternet/]
+      - (1085) Consultar certificados emitidos antes del 01-07-2016 [https://www4.sii.cl/consultaIAIInternet/#consulta]
+      - (1086) Consultar certificados emitidos en “Tu Empresa en un Día”, antes del 01-07-2016 [https://www3.sii.cl:443/inicioactividades/index.html]
+    - (3838) Inicio en 1ra categoría para persona natural extranjera [https://www3.sii.cl:443/sispadinternet/index.html]
+  - (4686) Inscripción en registros
+    - (4688) Inscripción en el registro de asociaciones culturales
+      - (4692) Consultar certificado [https://www4.sii.cl/copiaCertificadosBlobstoreInternet/]
+      - (4691) Inscríbase en el registro de asociaciones culturales [https://www4.sii.cl/actatributointernetui/#!/asociacionesCulturales]
+    - (4687) Inscripción en el registro de feriantes (Ley 21.745)
+      - (4690) Consultar certificado [https://www4.sii.cl/copiaCertificadosBlobstoreInternet/]
+      - (4689) Inscríbase en el registro de contribuyentes de ferias libres [https://www2.sii.cl/ferias-libres/]
+    - (4693) Inscripción en el registro de pequeños contribuyentes que desarrollen actividades de subsistencia
+      - (4695) Consultar certificado [https://www4.sii.cl/copiaCertificadosBlobstoreInternet/]
+      - (4694) Inscríbase en el registro de pequeños contribuyentes que desarrollen actividades de subsistencia [https://www2.sii.cl/subsistencia/]
+- (1125) Actualización de información (info)
+  - (3738) Actualizar datos de identificación [https://www4.sii.cl/modificacionesiainternetui/]
+  - (4365) Declarar activos (empresario individual) [https://www4.sii.cl/modificacioncntrui/#/modificacionactivorelevante]
+  - (1126) Actualizar domicilio [https://www4.sii.cl/modificacioncntrinternetui/#!/vista-general]
+  - (1129) Cambiar/ampliar giro o actividad económica [https://www4.sii.cl/modificacioncntrinternetui/#!/vista-general]
+  - (1130) Agregar/eliminar sucursales [https://www4.sii.cl/modificacioncntrinternetui/#!/vista-general]
+  - (1128) Cambiar email y/o teléfono móvil [https://www4.sii.cl/modificacioncntrui/#/modificacionmail]
+  - (3739) Informar reorganizaciones empresariales [https://www4.sii.cl/modificacionesiainternetui/#!/entidad/reorganizacion/seleccionar]
+  - (4560) Registro de Asociaciones Culturales [https://www4.sii.cl/actatributointernetui/#!/asociacionesCulturales]
+  - (4370) Certificados de inicio de actividades y otros
+    - (4372) Consultar certificados [https://www4.sii.cl/copiaCertificadosBlobstoreInternet/]
+    - (4374) Consultar certificados emitidos antes del 01-07-2016 [https://www4.sii.cl/consultaIAIInternet/#consulta]
+    - (4376) Consultar certificados emitidos en “Tu Empresa en un Día”, antes del 01-07-2016 [https://www3.sii.cl:443/inicioactividades/index.html]
+  - (4419) Registrar datos de contacto asesores de alto patrimonio
+    - (4420) Registrar datos de contacto [https://www4.sii.cl/actatributointernetui/#!/altosPatrimonios]
+- (1037) Peticiones administrativas y otras solicitudes (info)
+  - (1140) Peticiones administrativas y otras solicitudes
+    - (1141) Ingresar petición administrativa y otras solicitudes [https://www3.sii.cl:443/sispadinternet/index.html]
+      - (4530) Consultas y Reclamos [https://www4.sii.cl/reclamossugerenciasinternetui/#!/menuContacto]
+      - (4529) Peticiones Administrativas [https://www3.sii.cl:443/sispadinternet/index.html]
+      - (4531) Solicitudes de Bienes Raíces [https://www4.sii.cl/solicitudesbienesraicesui/#!/solicitud/contribuyente/]
+    - (1142) Consultar estado de peticiones administrativas [https://www3.sii.cl:443/sispadinternet/index.html?item=itemTareas]
+    - (1143) Ayudas
+  - (3729) Consultas sobre interpretación y aplicación de disposiciones tributarias
+    - (3731) Formulario de ingreso de consultas [https://www2.sii.cl/archivogabe22-inter/formularioCIT]
+    - (3732) Seguimiento del estado de consultas [https://www2.sii.cl/archivogabe22-inter/seguimientoConsultas]
+    - (4480) Ingresar al registro de consultas [https://www2.sii.cl/archivogabe22-inter/registroPubConsultasCIT]
+  - (3604) Presentación reposición administrativa voluntaria (RAV) y Recurso Jerárquico
+    - (3606) Consulta y seguimiento de casos [https://www4.sii.cl/siaginternetui/#!/consulta/]
+    - (3605) Presentación RAV [https://www4.sii.cl/siaginternetui/#!/solicitud-rav/]
+    - (3637) Presentación Recurso Jerárquico [https://www4.sii.cl/siaginternetui/#!/recurso/]
+  - (1091) Regímenes tributarios
+    - (1092) Inscripción regímenes tributarios [https://www4.sii.cl/regimenesTributariosInternet/]
+    - (3639) Consultar certificados [https://www4.sii.cl/copiaCertificadosBlobstoreInternet/]
+    - (1093) Ayuda
+  - (3582) Aviso de venta de vehículos
+    - (3583) Consultar aviso de venta de vehículos [https://www4.sii.cl/avvInternet/?AVV_MENU=1#Inicio]
+  - (3839) Aviso de liquidación concursal [https://www3.sii.cl:443/sispadinternet/index.html]
+  - (3840) Aviso de extinción de representación o mandato [https://www3.sii.cl:443/sispadinternet/index.html]
+  - (3730) Consultas sobre 26 bis del Código Tributario [https://www2.sii.cl/archivogabe22-inter/formularioElusion]
+  - (1111) Solicitud de contabilidad computacional
+    - (1112) Solicitud de Contabilidad Computacional [https://www.sii.cl/cvc_cgi/scc/solicitud_cc]
+    - (1113) Información sobre su Solicitud [https://www.sii.cl/cvc_cgi/scc/consulta_scc]
+    - (1114) Ayudas
+  - (1132) Dar aviso de pérdida y/o recuperación de cédula de identidad
+    - (1133) Cédula nacional de identidad [https://www2.sii.cl/pcr/aviso-perdida-cedula-nacional]
+    - (1135) Cédula de identidad extranjeros [https://www2.sii.cl/pcr/aviso-perdida-cedula-extranjera]
+    - (1136) Dar aviso de recuperación de cédula de identidad [https://www2.sii.cl/pcr/aviso-recuperacion-cedula]
+  - (1145) Certificados a presentar ante Administraciones Tributarias Extranjeras
+    - (1146) Solicitud de certificados [https://www4.sii.cl/certificadosinternacionalesinternetui/#/menu]
+    - (1150) Verificar certificados emitidos [https://www4.sii.cl/certificadosinternacionalesbaseinternetui/#/menu?idioma=CL]
+  - (4683) Presentación de revisión de actuación fiscalizadora (RAF) [https://www4.sii.cl/siaginternetui/#!/solicitud-raf/]
+- (3598) Autorización de documentos tributarios (info)
+  - (3599) Solicitar Autorización de Documentos Tributarios [https://www4.sii.cl/tibvsui/internet/]
+  - (3600) Consultar Certificados Emitidos [https://www4.sii.cl/copiaCertificadosBlobstoreInternet/#consulta]
+- (1039) Factura electrónica (info)
+  - (1182) Conozca sobre Factura Electrónica
+    - (1188) Conozca de factura electrónica y de los sistemas disponibles [1039-como_fact_elect-1182.html]
+    - (1189) Infórmese sobre la Ley [1039-ley_fe_20727-1182.html]
+    - (1190) Certificado digital
+      - (3219) Información acerca del Certificado Digital (info)
+      - (3220) Centralizar certificado digital  [https://www4.sii.cl/uploadCertDigitalInternet/]
+    - (3149) Estadísticas [1039-estadistic-1182.html]
+  - (1183) Sistema de facturación gratuito del SII
+    - (1191) Inscríbase aquí [https://www2.sii.cl/inscripcion-factura-sii/]
+    - (1192) Emisión de documentos tributarios electrónicos (DTE) (*)
+      - (3524) Factura Electrónica para Turistas Extranjeros [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=33&TIPO=4&esFACT_TUR=TRUE]
+      - (1195) Factura electrónica [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=33&TIPO=4]
+      - (1196) Factura No afecta o exenta electrónica [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=34&TIPO=4]
+      - (1197) Nota de crédito electrónica [https://www1.sii.cl/Portal001/EmiNotaCredito.html]
+      - (1198) Nota de débito electrónica [https://www1.sii.cl/Portal001/EmiNotaDebito.html]
+      - (1199) Guía de despacho electrónica [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=52&TIPO=4]
+      - (1200) Factura de compra electrónica [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=46&TIPO=4]
+      - (2798) Liquidación factura electrónica [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=43&TIPO=4]
+      - (3156) Factura electrónica con crédito de empresas constructoras [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=33&TIPO=4&esCRED_EC=TRUE]
+      - (3195) Factura de Exportación Electrónica [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=110&TIPO=4]
+      - (3196) Nota de Crédito de Exportación Electrónica [https://www1.sii.cl/Portal001/EmiNotaCreditoExpo.html]
+      - (3197) Nota de Débito de Exportación Electrónica [https://www1.sii.cl/Portal001/EmiNotaDebitoExpo.html]
+      - (3157) Emitir DTE a partir de borradores [https://www4.sii.cl/mipymeinternetui/#!/borradores]
+    - (3154) Historial de DTE y respuesta a documentos recibidos (*)
+      - (3224) Ingrese al Registro de Aceptación o Reclamo de un DTE [https://www4.sii.cl/registrorechazodteInternet/]
+      - (1201) Ver documentos emitidos [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=2&TIPO=4]
+      - (1202) Ver documentos recibidos - Generar respuesta al emisor [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=1&TIPO=4]
+    - (1203) Administración de libros de compras y ventas (*)
+      - (1204) Creación, edición y envío de libros [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=12&TIPO=4]
+      - (1205) Asignación de DTE recibidos a libros de compras [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=11&TIPO=4]
+      - (1206) Propuesta parcial del F29 (a partir de IECV enviado) [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=103&TIPO=4]
+      - (1207) Casos prácticos de llenado de libros [https://www.sii.cl/factura_electronica/factura_sii/guias_ayuda/casos_iecv.pdf]
+    - (3158) Seleccione la empresa con la que desea operar (*) [https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi]
+    - (1208) Consultas de recepción de DTE y libros en el SII
+      - (3223) Ingrese al Registro de Aceptación o Reclamo de un DTE [https://www4.sii.cl/registrorechazodteInternet/]
+      - (1210) Consultar validez de un documento [https://palena.sii.cl/cgi_dte/UPL/DTEauth?2]
+      - (1211) Verificar contenido de un documento [https://palena.sii.cl/cgi_dte/UPL/DTEauth?6]
+      - (1212) Mis DTE recibidos [https://palena.sii.cl/cgi_dte/consultaDTE/wsDTEConsRecContHtml.cgi]
+      - (3246) Mis DTE en el SII [https://www4.sii.cl/consemitidosinternetui/#/defaultInternet]
+      - (1213) Consultar mis libros electrónicos aceptados [https://palena.sii.cl/cgi_dte/UPL/DTEauth?7]
+      - (1214) Consultar emisores electrónicos autorizados [https://palena.sii.cl/cvc/dte/ee_empresas_dte.html]
+    - (1215) Actualización de datos empresa autorizada (*)
+      - (4559) Gestiona tu logo [https://www2.sii.cl/logo-dte/]
+      - (1220) Actualizar datos del contribuyente [https://palena.sii.cl/cvc_cgi/dte/ad_empresa1]
+      - (1221) Mantención de usuarios [https://palena.sii.cl/cvc_cgi/dte/eu_enrola_usuarios]
+    - (1222) Cesión de factura electrónica
+      - (1223) Seleccionar documentos para cesión (*) [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=2&TIPO=4]
+      - (3638) Seleccionar facturas de compras recibidas para cesión [https://www1.sii.cl/cgi-bin/Portal001/mipeLaunchPage.cgi?OPCION=3&TIPO=4]
+      - (1224) Registro electrónico de cesión de créditos [https://palena.sii.cl/rtc/RTC/RTCMenu.html]
+      - (3182) Registro de aceptación o reclamos de un DTE [https://www4.sii.cl/registrorechazodtej6ui]
+      - (3198) Guía de uso del Registro de Aceptación o Reclamo de un DTE [https://www.sii.cl/factura_electronica/GUIA_aceptacion_reclamo_dte.pdf]
+      - (3183) Mis DTE en el SII [https://www4.sii.cl/consemitidosinternetui/#/defaultInternet]
+    - (1225) Respaldo de DTE y/o IECV
+      - (1226) Descargar información electrónica (DTE y/o IECV) [https://www1.sii.cl/Portal001/auth.html]
+    - (1228)  Sistema de tributación simplificada
+      - (1229) ¿Qué es el sistema de tributación simplificada? [1039-que_es_trib_simplificada-1183.html]
+      - (1230) Verifique factibilidad e inscríbase [1039-inscp_tributacion_simplificada-1183.html]
+      - (1231) Sistema de tributación simplificada (14 Ter) [1039-menu_trib_simplificada-1183.html]
+    - (1232) Sistema de contabilidad completa
+      - (1233) ¿Qué es el sistema de contabilidad completa? [1039-que_es_contabilidad_cmp-1183.html]
+      - (1234) Verifique factibilidad e inscríbase [1039-inscp_contabilidad_completa-1183.html]
+      - (1235) Sistema de contabilidad completa [https://www4.sii.cl/cCMInternet/]
+    - (1236) Ayudas
+  - (1184) Sistema de facturación de mercado
+    - (1242) Inscríbase aquí
+      - (3150) ¿Cómo elegir un software de mercado? [1039-elegir_sistema_fe-1184.html]
+      - (3151) Procedimiento de postulación, certificación y autorización [1039-proc_postulacion-1184.html]
+      - (3152) Postule Aquí [1039-postulacion-1184.html]
+    - (1243) Consulta de documentos tributarios electrónicos
+      - (1244) Consultar emisores electrónicos autorizados [https://palena.sii.cl/cvc/dte/ee_empresas_dte.html]
+      - (1245) Verificar contenido de un documento [https://palena.sii.cl/cgi_dte/UPL/DTEauth?6]
+      - (1246) Consultar validez de un documento [https://palena.sii.cl/cgi_dte/UPL/DTEauth?2]
+      - (1247) Verificar contenido de un documento de exportación electrónico [https://palena.sii.cl/cgi_dte/UPL/QFactExp.cgi]
+      - (3184) Registro de aceptación o reclamos de un DTE [https://www4.sii.cl/registrorechazodtej6ui]
+      - (3199) Guía de uso del Registro de Aceptación o Reclamo de un DTE [https://www.sii.cl/factura_electronica/GUIA_aceptacion_reclamo_dte.pdf]
+      - (1248) Mis DTE recibidos en el SII [https://palena.sii.cl/cgi_dte/consultaDTE/wsDTEConsRecContHtml.cgi]
+      - (3247) Mis DTE en el SII [https://www4.sii.cl/consemitidosinternetui/#/defaultInternet]
+      - (1249) Consultar entre empresas autorizadas [https://palena.sii.cl/cvc_cgi/dte/ce_consulta_rut]
+      - (1250) Consultar estado de resumen de ventas diarias de boletas Electrónicas (**) [https://palena.sii.cl/cgi_dte/UPL/DTEauth?12]
+      - (3153) Consulta deuda de resumen de ventas diarias de boletas electrónicas [https://www4.sii.cl/nodeclarantescofInternet/]
+    - (1251) Envío de DTE y libros de compras y ventas (*)
+      - (1252) Enviar DTE y libros electrónicos [https://palena.sii.cl/cgi_dte/UPL/DTEauth?1]
+      - (1253) Consultar estado de un envío [https://palena.sii.cl/cgi_dte/UPL/DTEauth?3]
+      - (1254) Consultar mis libros electrónicos aceptados [https://palena.sii.cl/cgi_dte/UPL/DTEauth?7]
+      - (1255) Historia de envíos [https://palena.sii.cl/cgi_dte/UPL/DTEauth?4]
+      - (1256) Descargar "Código de autorización reemplazo de libro electrónico" [https://palena.sii.cl/cgi_dte/UPL/DTEauth?11]
+    - (1257) Timbraje electrónico (*)
+      - (1258) Solicitar timbraje electrónico [https://palena.sii.cl/cvc_cgi/dte/of_solicita_folios]
+      - (1259) Anular folios [https://palena.sii.cl/cvc_cgi/dte/af_anular1]
+      - (1260) Anulación masiva de folios [https://www2.sii.cl/anulacion-masiva-folios]
+      - (1261) Reobtención de folios [https://palena.sii.cl/cvc_cgi/dte/rf_reobtencion1_folios]
+      - (1262) Información de timbrajes históricos [https://palena.sii.cl/cvc_cgi/dte/of_consulta_folios]
+      - (1263) Consultar folios anulados [https://palena.sii.cl/cvc_cgi/dte/af_anular4]
+    - (1264) Actualización de datos empresa autorizada (*)
+      - (4685) Actualizar datos del contribuyente [https://palena.sii.cl/cvc_cgi/dte/ad_empresa1]
+      - (1266) Mantención de usuarios [https://palena.sii.cl/cvc_cgi/dte/eu_enrola_usuarios]
+    - (1267) Registro electrónico de cesión de créditos
+      - (1268) Ingrese al menú registro electrónico de cesión de créditos [https://palena.sii.cl/rtc/RTC/RTCMenu.html]
+    - (1269) Menú postulantes
+      - (1270) Ambiente de certificación y prueba [1039-menu_certificacion-1184.html]
+    - (1271) Ayudas
+  - (3256) Registro de Compras y Ventas
+    - (3257) Ingresar al Registro de Compras y Ventas [https://www4.sii.cl/consdcvinternetui]
+  - (1185) Consultas DTE
+    - (3185) Registro de aceptación o reclamos de un DTE [https://www4.sii.cl/registrorechazodtej6ui/#/buscadorinternet]
+    - (3515) Verificar contenido de un documento de exportación electrónico [https://palena.sii.cl/cgi_dte/UPL/QFactExp.cgi]
+    - (3200) Guía de uso del Registro de Aceptación o Reclamo de un DTE [https://www.sii.cl/factura_electronica/GUIA_aceptacion_reclamo_dte.pdf]
+    - (3249) Mis DTE en el SII [https://www4.sii.cl/consemitidosinternetui/#/defaultInternet]
+    - (3230) WebService de Aceptación o Reclamo de un DTE [https://www.sii.cl/factura_electronica/Webservice_Registro_Reclamo_DTE_V1.1.pdf]
+    - (3227) Consulta de factibilidad de cesión de un DTE [https://www4.sii.cl/registrorechazodtej6ui/#/consultadtecedible]
+    - (1283) Consultar validez de un documento [https://palena.sii.cl/cgi_dte/UPL/DTEauth?2]
+    - (1284) Verificar contenido de un documento [https://palena.sii.cl/cgi_dte/UPL/DTEauth?6]
+  - (4671) Verificación de actividad para emitir facturas
+    - (4673) Solicitar verificación de actividad para emitir facturas [https://www4.sii.cl/verificacionactividadesinternetui/?opcion=1#/ingreso]
+    - (4672) Consulta estado de verificación y acreditación [https://www4.sii.cl/verificacionactividadesinternetui/?opcion=2#/consulta]
+  - (3201) Registro de Aceptación o Reclamo de un DTE
+    - (3202) Ingrese al Registro de Aceptación o Reclamo de un DTE [https://www4.sii.cl/registrorechazodtej6ui]
+    - (3203) Guía de Uso del Registro de Aceptación o Reclamo de un DTE [guia_aceptacion_reclamo_dte_2.pdf]
+    - (3248) Mis DTE emitidos en el SII [https://www4.sii.cl/consemitidosinternetui/#/defaultInternet]
+    - (3226) Consulta de factibilidad de cesión de un DTE [https://www4.sii.cl/registrorechazodtej6ui/#/consultadtecedible]
+    - (3229) WebService de Aceptación o Reclamo de un DTE [https://www.sii.cl/factura_electronica/Webservice_Registro_Reclamo_DTE_V1.2.pdf]
+  - (1186) Consulta de contribuyentes
+    - (1285) Consulta de empresas autorizadas [https://palena.sii.cl/cvc/dte/ee_empresas_dte.html]
+    - (1286) Consultar contribuyentes obligados a facturar electrónicamente [https://zeus.sii.cl/cvc/stc/stc.html]
+  - (3307)  Publicación de Facturas [https://www.sii.cl/destacados/factura_electronica/cesion_facturas.html]
+  - (3830) Solicitud de folios electrónicos y timbraje de documentos [https://www3.sii.cl:443/sispadinternet/index.html]
+- (3532) Boleta de ventas y servicios electrónica (info)
+  - (3810) Sistema de emisión de Boletas Electrónicas SII
+    - (3808) Inscríbase aquí [https://www1.sii.cl/cvc_cgi/dte/pf2_inscripcionBoleta]
+    - (3809) Emitir boletas electrónicas SII [https://eboleta.sii.cl/]
+    - (3821) Modificar usuarios autorizados [3532-3571.html]
+  - (3811) Boleta electrónica de mercado
+    - (3533) Inscríbase aquí [3532-3533.html]
+      - (3534) Procedimiento de postulación, certificación y autorización (info)
+      - (4310) Proveedor Autorizado de Boleta Electrónica [https://www4.sii.cl/certBolElectDteInternet/?SET=3]
+    - (3535) Envío de resumen de ventas diarias (ex reporte de consumo de folios) [3532-3535.html]
+      - (3540) Consulta de deuda de resumen de ventas diarias de boleta electrónica [https://www4.sii.cl/nodeclarantescofInternet/]
+      - (3537) Consulta estado de un envío [https://palena.sii.cl/cgi_dte/UPL/DTEauth?3]
+      - (3539) Consultar estado de resumen de ventas diarias de boleta electrónica (**) [https://palena.sii.cl/cgi_dte/UPL/DTEauth?12]
+      - (3536) Enviar resumen de ventas diarias [https://palena.sii.cl/cgi_dte/UPL/DTEauth?1]
+      - (3538) Historia de envíos [https://palena.sii.cl/cgi_dte/UPL/DTEauth?4]
+    - (3773) Timbraje electrónico (*) [3532-3773.html]
+      - (3776) Anulación masiva de folios [https://www4.sii.cl/anulacionMsvDteInternet/]
+      - (3775) Anular folios [https://palena.sii.cl/cvc_cgi/dte/af_anular1]
+      - (3779) Consultar folios anulados [https://palena.sii.cl/cvc_cgi/dte/af_anular4]
+      - (3778) Información de timbrajes históricos [https://palena.sii.cl/cvc_cgi/dte/of_consulta_folios]
+      - (3777) Reobtención de folios [https://palena.sii.cl/cvc_cgi/dte/rf_reobtencion1_folios]
+      - (3774) Solicitar timbraje electrónico [https://palena.sii.cl/cvc_cgi/dte/of_solicita_folios]
+    - (3571) Actualización de datos empresa autorizada [3532-3571.html]
+      - (3572) Actualizar datos empresa [ https://palena.sii.cl/cvc_cgi/dte/ad_empresa1]
+      - (3573) Mantención de usuarios [https://palena.sii.cl/cvc_cgi/dte/eu_enrola_usuarios]
+    - (3542) Menú postulantes [3532-3542.html]
+      - (3543) Ambiente de certificación y prueba (info)
+    - (3841) Instructivo técnico Boleta Electrónica [3532-instructivo_tecnico_be-3811.html]
+      - (3848) Automatización de procesos para envío de resumen de ventas diarias (ex RCOF)
+        - (3856) Ejemplo de upload automático [https://www.sii.cl/factura_electronica/factura_mercado/ejem_upload.txt]
+        - (3853) Envío Automático de Documentos Tributarios Electrónicos  [https://www.sii.cl/factura_electronica/factura_mercado/envio.pdf]
+        - (3852) Web Service Autenticación Automática con Certificado Digital [https://www.sii.cl/factura_electronica/factura_mercado/autenticacion.pdf]
+        - (3851) Web Service Consulta Avanzada Estado de DTE [https://www.sii.cl/factura_electronica/factura_mercado/OIFE2006_QueryEstDteAv_MDE.pdf]
+        - (3855) Web Service Consulta Estado de DTE [https://www.sii.cl/factura_electronica/factura_mercado/estado_dte.pdf]
+        - (3854) Web Service Consulta Estado de Envío [https://www.sii.cl/factura_electronica/factura_mercado/estado_envio.pdf]
+        - (3850) Web Service Solicitud Reenvío Correo de Validación DTE [https://www.sii.cl/factura_electronica/factura_mercado/OIFE2005_wsDTECorreo_MDE.pdf]
+      - (3846) Descripción Formato de Documentos Electrónicos [3532-descripcion_formato-3811.html]
+      - (3849) Firma Electrónica [3532-mn_firma_elect-3811.html]
+      - (3847) Formato XML de documentos electrónicos [3532-formato_xml-3811.html]
+      - (3842) Instrucciones para envío de Boleta Electrónica
+        - (3870) Diagrama de estado de envíos [diagrama_estados_be.pdf]
+        - (3844) Documentación Técnica API [https://www4c.sii.cl/bolcoreinternetui/api/]
+        - (3843) Instructivo para la emisión de Boletas Electrónicas [https://www.sii.cl/factura_electronica/factura_mercado/Instructivo_Emision_Boleta_Elect.pdf]
+    - (3780) Ayudas
+      - (3781) 01-Boleta de Ventas y Servicios Electrónica (info)
+      - (3782) 03-Boleta de Ventas y Servicios Electrónica (info)
+  - (3872) Consultar validez Boleta Electrónica [https://www4.sii.cl/bolcoreinternetui/#!/home]
+  - (4670) Consultar Contenido Boleta Electrónica [https://www2.sii.cl/bolcore/]
+  - (3933) Declaración de modelo de emisión [https://www4.sii.cl/actatributointernetui/#!/inicio]
+  - (4389) Emitir nota de crédito electrónica [https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresaBol.cgi]
+- (1040) Boletas de honorarios electrónicas (info)
+  - (1287) Emisor de boleta de honorarios
+    - (1288) Emitir boleta de honorarios electrónica
+      - (1289) Por contribuyente [https://loa.sii.cl/cgi_IMT/TMBECN_ValidaTimbrajeContrib.cgi?modo=1&dummy=1461943054813]
+      - (1290) Por contribuyente con datos usados anteriormente [https://loa.sii.cl/cgi_IMT/TMBECN_ValidaTimbrajeContrib.cgi?modo=2&dummy=1461943128819]
+      - (1291) Por usuario autorizado [https://loa.sii.cl/cgi_IMT/TMBEUS_ValidaAutoriz.cgi?modo=1&dummy=1461943139925]
+      - (1292) Por usuario autorizado con datos usados anteriormente [https://loa.sii.cl/cgi_IMT/TMBEUS_ValidaAutoriz.cgi?modo=2&dummy=1461943151412]
+      - (3871) Emisión para Directores S.A. [https://www4.sii.cl/bhedirectoresinternetui/#!/inicio]
+    - (1293) Consultas sobre boletas de honorarios electrónicas
+      - (1294) Consultar boletas emitidas [https://loa.sii.cl/cgi_IMT/TMBCOC_MenuConsultasContrib.cgi?dummy=1461943167534]
+      - (1295) Consultar boletas recibidas [https://loa.sii.cl/cgi_IMT/TMBCOC_MenuConsultasContribRec.cgi?dummy=1461943244650]
+      - (1296) Consulta de boletas por terceros [https://loa.sii.cl/cgi_IMT/TMBCOT_MenuConsultasTerceros.cgi?dummy=1461943255264]
+      - (1297) Consulta de boletas observadas por el receptor [https://loa.sii.cl/cgi_IMT/TMBCOC_InformeRechazosReceptor.cgi?]
+    - (1298) Anulación y observación de boletas emitidas
+      - (1299) Anular boletas emitidas [https://loa.sii.cl/cgi_IMT/TMBANU_PrevalidaAnulacion.cgi?dummy=1461943341054]
+      - (1300) Confirmar o rechazar anulación por receptor [https://loa.sii.cl/cgi_IMT/TMBANU_ListarBheConfirmarReceptor.cgi?dummy=1461943406606]
+      - (1301) Observar boletas recibidas [https://loa.sii.cl/cgi_IMT/TMBANU_ListarBheRechazarReceptor.cgi?dummy=1260891542046]
+    - (1302) Delegar emisión a un usuario autorizado
+      - (1303) Autorizar o revocar a un usuario autorizado [https://loa.sii.cl/cgi_IMT/TMBADU_Menu.cgi?dummy=1461944396071]
+    - (1304) Ayudas
+  - (1309) Boleta de prestación de servicios de terceros electrónica
+    - (1310) Emitir BTE por contribuyente [https://zeus.sii.cl/cvc_cgi/bte/bte_indiv_ing]
+    - (1311) Consulta de BTE´s recibidas [https://zeus.sii.cl/cvc_cgi/bte/bte_indiv_cons?2]
+    - (1312) Consulta de BTE´s emitidas [https://zeus.sii.cl/cvc_cgi/bte/bte_indiv_cons?1]
+    - (1313) Anulación de BTE´s [https://zeus.sii.cl/cvc_cgi/bte/bte_indiv_anula]
+    - (1314) Ayudas
+  - (3696) Cotizaciones previsionales [https://www4.sii.cl/consultaestadof22ui/#!/validarCertificado]
+    - (4665) Consultar comprobante cotizaciones [#]
+    - (4664) Generar certificado de boleta de honorarios [#]
+  - (3873) Mantenedor de Directores S.A. [https://www4.sii.cl/relacionesriacinternetui/#!/inicio]
+- (1041) Libros contables electrónicos (info)
+  - (1324) Inscripción Libros Contables Electrónicos
+    - (1325) Inscripción Libros Contables Electrónicos [https://www.sii.cl/e_contabilidad/postulacion.htm]
+    - (1326) Menú de Certificación [https://www.sii.cl/e_contabilidad/menuLCECertif.html]
+    - (1332) Empresas de software autorizadas [https://www.sii.cl/e_contabilidad/empresas_autorizadas.html]
+    - (1333) Solicitud para acogerse al modo de operación de LCE [https://www.sii.cl/e_contabilidad/Solicitud_LCE.htm]
+  - (1334) Envío de Documentos
+    - (1335) Envío LCE [https://palena.sii.cl/cgi_dte/UPL/DTEauth?10]
+    - (1336) Consulta Estado de un Envío [https://palena.sii.cl/cgi_dte/UPL/DTEauth?3]
+    - (1338) Consulta Estado Libros Electrónicos [https://palena.sii.cl/cgi_dte/UPL/DTEauth?7]
+- (1042) Impuestos mensuales (info)
+  - (3264) Declaración mensual (F29)
+    - (3270) Declarar IVA (F29) [https://www4.sii.cl/propuestaf29ui/internet/]
+    - (3271) Corregir o rectificar declaración [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=29]
+    - (3934) Ayudas (info)
+  - (3265) Declaración mensual (F50)
+    - (3268) Declarar y pagar (F50) [https://www4.sii.cl/rfiInternet/declarar/index.html]
+    - (3269) Corregir o rectificar declaración [https://www4.sii.cl/rfiInternet/rectificarF50/index.html#rfiBusquedaDeclaracionForm]
+  - (3253) Registro de compras y ventas
+    - (3258) Ingresar al Registro de Compras y Ventas [https://www4.sii.cl/consdcvinternetui]
+  - (3267) Asistente para cálculos
+    - (3039) Calculadora SST (Sistemas Solares Térmicos) [https://www2.sii.cl/calculadora-sst/noauthz/calculadoraSst/]
+    - (3308) Calculadora Tasaciones Esporádicas (TAE) [https://www2.sii.cl/calculadora-sst/calculadoraTae]
+    - (3040) Cálculo de IVA por Arriendo de Inmuebles Amoblados [https://www2.sii.cl/calculadora-sst/calculadoraArriendo]
+  - (3266) Consulta y seguimiento (F29 y F50)
+    - (1364) Consultar estado de declaración [https://www4.sii.cl/rfiInternet/consulta/index.html]
+    - (1365) Verificar declaración por terceros [https://www4.sii.cl/rfiInternet/consultaTerceros/index.html]
+    - (1368) Consulta Integral F29 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=29]
+  - (3699) Consultar y pagar giros [https://www4.sii.cl/rfiInternet/?opcionPagina=ConsultaGiros]
+  - (3640) Solicitud de devoluciones
+    - (3733) Solicitud de Devolución por Art. 27 bis (F3280)
+      - (3735) Consultar estado F3280 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=3280]
+      - (3737) Corregir o rectificar F3280 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=3280]
+      - (3734) Solicitar devolución F3280 [https://www4.sii.cl/sifmconsultaarsiiui/internet.html#!/f3280]
+    - (1398) Solicitud Devolución IVA Exportador (F3600)
+      - (1399) Enviar Declaraciones Juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=inddjj&form=3600]
+      - (1400) Solicitar Devolución F3600 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=infxx&form=3600]
+      - (1401) Consultar Estado de las Declaraciones Juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3600]
+      - (1402) Consultar Estado F3600 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=3600]
+      - (1403) Corregir o Rectificar Declaraciones Juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3600]
+      - (1404) Corregir o Rectificar F3600 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=3600]
+      - (1405) Ayudas
+    - (1421) Solicitud Devolución Cambio de Sujeto (F3560)
+      - (1422) Enviar declaraciones juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=inddjj&form=3560]
+      - (1423) Solicitar devolución F3560 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=infxx&form=3560]
+      - (1424) Consultar estado de las declaraciones juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3560]
+      - (1425) Consultar estado F3560 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=3560]
+      - (1426) Corregir o rectificar declaraciones juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3560]
+      - (1427) Corregir o rectificar F3560 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=3560]
+      - (1428) Ayudas
+    - (3641) Solicitud de Devolución por Art. 27 ter (F3281) (info)
+      - (3643) Solicitar devolución F3281 [https://www4.sii.cl/sifmconsultaarsiiui/internet.html#!/f3281]
+      - (3644) Consultar estado F3281 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=3281]
+      - (3645) Corregir o rectificar F3281 [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=cifxx&form=3281]
+  - (3744) Impuesto de timbres y estampillas (F24 y F24.1)
+    - (4540) Declarar Formulario 24 [https://www2.sii.cl/formulario-24/0]
+    - (4541) Declarar Formulario 24.1 [https://www2.sii.cl/formulario-24/1]
+    - (4461) Mis declaraciones [https://www2.sii.cl/formulario-24/declaraciones]
+    - (4537) Mandatario Digital (info)
+  - (1435) Otras aplicaciones y nóminas
+    - (3493) Nóminas de Contribuyentes Sujetos a Retención para el Cumplimiento del IVA y de Difícil Fiscalización
+      - (4555) Nómina de Contribuyentes de Difícil Fiscalización [https://www2.sii.cl/ndf]
+      - (4556) Nómina de Contribuyentes Sujetos a Retención para el Cumplimiento del IVA [https://www2.sii.cl/ndf/descarga-nsr]
+    - (1436) Declaración cambio sujeto Contratistas de la Construcción (F3222)
+      - (1437) Formato de Registro y Características de Grabación [https://www.sii.cl/IVA2000/DJIVA/FormatoRegistro.htm]
+      - (1438) Obtener e Instalar el Software Validador de la Declaración [https://www.sii.cl/IVA2000/DJIVA/InstalacionValidador.htm]
+      - (1439) Instrucciones de llenado de Etiquetas y generación de Números de Folios para Medios Magnéticos [https://www.sii.cl/IVA2000/DJIVA/EtiquetasyFolio.htm]
+      - (1440) Manual del Software de Validación de la Declaración [https://www.sii.cl/IVA2000/DJIVA/Manual.htm]
+    - (1441) Software de validación de libros de compras y ventas para grandes contribuyentes [https://www.sii.cl/IVA2000/PGMAdeVALIDACION2.htm]
+    - (1442) Nómina de Agentes Retenedores [https://www2.sii.cl/nar]
+    - (1448) Porcentaje de Reajuste a aplicar a Devoluciones de IVA de Pequeños Productores Agrícolas [https://www.sii.cl/valores_y_fechas/porcentaje_de_reajuste.html]
+    - (1449) Emisión Certificado Recargos Impto. Timbres y Estampillas (ITE)  [https://zeus.sii.cl/cvc/ite/index.html]
+  - (3814) Beneficio reembolso remanente crédito fiscal IVA [https://www4.sii.cl/devolucion-anticipada/informacion-beneficios-iva]
+- (1043) Declaraciones juradas (info)
+  - (1451) Declaraciones juradas de IVA
+    - (1452) Declaración jurada informe mensual retenedores cambio de sujeto y anticipo de IVA F3500
+      - (1453) Enviar declaraciones Juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=inddjj&form=3500]
+      - (1454) Consultar estado de la declaración [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3500]
+      - (1455) Corregir o rectificar declaración [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3500]
+      - (1456) Ayudas
+    - (1461) Declaración jurada de IVA exportador
+      - (1462) Enviar declaraciones juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=inddjj&form=3600]
+      - (1463) Consultar estado de declaración [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3600]
+      - (1464) Corregir o rectificar declaraciones [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3600]
+      - (1465) Ayudas
+    - (1473) Declaraciones juradas de IVA cambio de sujeto
+      - (1474) Enviar declaraciones juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=inddjj&form=3560]
+      - (1475) Consultar estado de declaración [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3560]
+      - (1476) Corregir o rectificar declaraciones [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3560]
+      - (1477) Ayudas
+    - (1483) Declaración jurada de IVA F3327 y F3328
+      - (1487) Consultar estado de los libros (visualizador de libros) [https://www4.sii.cl/ilcvInternet/index.html]
+      - (1488) Consultar certificado solemne [https://www4.sii.cl/iecvDjInternet/]
+      - (1489) Ayudas
+    - (1506) Declaración jurada F3325 sobre participación anual en comunidades y/o sociedades
+      - (2630) Ayudas
+      - (2628) Consultar estado de las declaraciones juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3325]
+      - (2629) Corregir o rectificar declaraciones juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3325]
+      - (2627) Enviar declaraciones juradas [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=inddjj&form=3325]
+  - (1518) Declaraciones juradas de Renta
+    - (2638) Declaraciones juradas
+      - (2643) Anular declaración [https://alerce.sii.cl/dior/dej/html/anulacion/menu_anulacion.html]
+      - (3306) Asistente 14Ter [https://www.sii.cl/destacados/renta/asistente_14ter.html]
+      - (3304) Asistente Renta Atribuida [https://www.sii.cl/destacados/renta/renta_atribuida.html]
+      - (2644) Consulta estado y giros emitidos [https://www4.sii.cl/djconsultarentaui/internet/]
+      - (3214) Consulta Estado de terceros [https://www4.sii.cl/djconsultarentaui/internet/index_consulta.html]
+      - (2645) Consultar información de sus agentes retenedores y otros [https://www4.sii.cl/djconsultarentaui/internet/#/agenteretenedor/]
+      - (2646) Descargar software de declaraciones juradas
+        - (2648) Bajar software generador de archivo gratis para Declaraciones Juradas [https://alerce.sii.cl/dior/dej/html/bajar_sw/menu_bajar_sw_generador.html]
+        - (2647) Bajar software gratis para Declaraciones Juradas [https://alerce.sii.cl/dior/dej/html/bajar_sw/menu_bajar_sw_gratis.html]
+      - (2642) Enviar o corregir F1862 por software generador (AT2006-2009) [https://alerce.sii.cl/dior/dej/html/upload/menu_upload_1862.html]
+      - (2639) Enviar o corregir por formulario electrónico [https://www4.sii.cl/ingresoRentaDDJJInternet/]
+      - (2640) Enviar o corregir por importador de datos [https://alerce.sii.cl/dior/dej/html/imp_dj/menu_ingreso_imp_dj.html]
+      - (2641) Enviar o corregir por software [https://alerce.sii.cl/dior/dej/html/upload/menu_upload.html]
+    - (3544) Mis declaraciones Juradas [https://www4.sii.cl/perfilamientodjui/#/declaracionJuradaRenta]
+    - (4352) Consultar libro de remuneraciones de la Dirección del Trabajo [https://www2.sii.cl/consulta-empleadores]
+    - (2649) Declaraciones juradas simples
+      - (2652) Designar beneficiario de rebaja de impuestos por créditos hipotecarios [1043-designar_comunero-1518.html]
+    - (3546) Consulta de Declaraciones Juradas
+      - (3549) Consulta Estado de terceros [https://www4.sii.cl/djconsultarentaui/internet/#/consulta/]
+      - (3548) Consulta estado y giros emitidos [https://www2.sii.cl/djconsulta/consultaddjjs]
+      - (3550) Consulta información para declarar [https://www4.sii.cl/djconsultarentaui/internet/#/agenteretenedor/]
+    - (3547) Otras Declaraciones Juradas 
+      - (3556) Consulta Estado de terceros [https://www4.sii.cl/djconsultarentaui/internet/#/consulta/]
+      - (3555) Consulta estado y giros emitidos [https://www2.sii.cl/djconsulta/consultaddjjs]
+      - (3554) Enviar o corregir mediante archivo [https://www2.sii.cl/api-ddjj/]
+      - (3552) Enviar o corregir por formulario electrónico [https://www4.sii.cl/ingresoRentaDDJJInternet/#ddjjPresentacionForm]
+      - (3553) Enviar o corregir por importador de datos [https://alerce.sii.cl/dior/dej/html/imp_dj/menu_ingreso_imp_dj.html]
+      - (3557) Información para declarar  [https://www4.sii.cl/djconsultarentaui/internet/#/agenteretenedor/]
+    - (3558) Declaraciones Mensuales
+      - (3563) Consulta Estado de terceros [https://www4.sii.cl/djconsultarentaui/internet/#/consulta/]
+      - (3562) Consulta estado y giros emitidos [https://www2.sii.cl/djconsulta/consultaddjjs]
+      - (3564) Consulta información para declarar [https://www4.sii.cl/djconsultarentaui/internet/#/agenteretenedor/]
+      - (3561) Enviar o corregir mediante archivo [https://www2.sii.cl/api-ddjj/]
+      - (3559) Enviar o corregir por formulario electrónico [https://www4.sii.cl/ingresoRentaDDJJInternet/#ddjjPresentacionForm]
+      - (3560) Enviar o corregir por importador de datos [https://alerce.sii.cl/dior/dej/html/imp_dj/menu_ingreso_imp_dj.html]
+    - (4521) Escritorio contable
+      - (4522) Ingresar a escritorio contable [https://www2.sii.cl/intermediario/]
+      - (4523) Mandatario digital (info)
+    - (2653) Nóminas
+      - (4650) Consultar y enviar sus nóminas [https://www2.sii.cl/api-ddjj/upload/nominas]
+  - (1562) Declaración jurada de impuesto de timbres y estampilla
+    - (2682) Ayudas
+    - (2689) Consultar estado de declaración enviada por formulario electrónico, importador o vía upload [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=ciddjj&form=3324]
+    - (2688) Enviar o corregir declaraciones por formulario electrónico, importador o vía upload [https://www4.sii.cl/sifmConsultaInternet/index.html?dest=inddjj&form=3324]
+  - (1576) Declaraciones juradas de bienes raíces
+    - (3298) Declaración jurada de cálculo de avalúo fiscal de bienes raíces acogidos a la Ley de Copropiedad
+      - (3299) Declarar [https://www4.sii.cl/inclusionesbbrrui/]
+      - (3300) Verificar Declaración [https://www4.sii.cl/inclusionesbbrrui/#!/validardj/index.html]
+      - (3301) Guía para el uso de la aplicación [guiaUsoAplicacion.pdf]
+      - (3302) Guía para autorizar a un tercero que declare [guiaAutorizarTercerizacion.pdf]
+    - (3517) Declaración jurada de transferencias e inscripciones de bienes raíces
+      - (3518) Bajar software generador gratis, para enviar “Inscripciones en el Registro de Propiedad” [https://alerce.sii.cl/dior/dej/html/bajar_sw/menu_bajar_sw_generador.html]
+      - (3519) Consultar estado y giros emitidos [https://www4.sii.cl/djconsultarentaui/internet/]
+      - (3520) Enviar y corregir [https://www2.sii.cl/api-ddjj/]
+      - (3521) Manual Operación F2964 [docs/manual_software_generador_dj_cbr.docx]
+    - (1577) Predios Forestales
+      - (1578) Declarar [https://zeus.sii.cl/avalu_cgi/br/brct06.sh?2]
+      - (1579) Consultar Declaración [https://zeus.sii.cl/avalu_cgi/br/brct06.sh?3]
+      - (1580) Buscar roles a declarar [https://zeus.sii.cl/avalu_cgi/br/brct06.sh?1]
+      - (1581) Ayudas [https://www.sii.cl/pagina/br/DJForestales.htm]
+    - (1582) Declaración jurada de mejoras de bienes raíces
+      - (1583) Ingresar declaración [https://www4.sii.cl/djmejorasRTInternet/index.html]
+    - (3232) Tasaciones comerciales (F2807) y archivos SARA
+      - (3233) Bajar software generador gratis, para enviar “extracto informe de tasación” [https://alerce.sii.cl/dior/dej/html/bajar_sw/menu_bajar_sw_generador.html]
+      - (3235) Consultar estado y giros emitidos [https://www4.sii.cl/djconsultarentaui/internet/]
+      - (3234) Enviar o corregir por software [https://www2.sii.cl/api-ddjj/]
+      - (3236) Manual de operación (F2807) [https://www.sii.cl/declaraciones_juradas/ManualOperacionF2807.pdf]
+      - (4475) Envío de nóminas y convenios (SARA) [https://www4.sii.cl/eoiui/internet/#/content/upload]
+  - (1584) Registro de inversiones en el extranjero
+    - (2691) Ayudas
+    - (2690) Ingresar Inversión [https://zeus.sii.cl/dior/rie/html/index.html]
+  - (4598) Declaración jurada extraordinaria de bienes y rentas
+    - (4599) Enviar declaración jurada [https://www4.sii.cl/sisregcapInternet/]
+    - (4600) Instrucciones [instructivo_f1920.pdf]
+- (1044) Declaración de renta (info)
+  - (2694) Declarar Renta (F22) [https://www2.sii.cl/navegacionf22/]
+  - (4657) Pago diferido [https://www4.sii.cl/pagodiferidoui/internet/]
+  - (2695) Corregir o rectificar declaración [https://alerce.sii.cl/dior_cgi/ren_mp/REN_MenusRenta.cgi?opcion=1]
+  - (2696) Consulta y seguimiento
+    - (2697) Consultar estado de declaración [https://www4.sii.cl/consultaestadof22ui/]
+    - (2698) Información de sus ingresos, agentes retenedores y otros [https://www4.sii.cl/djconsultarentaui/internet/#/agenteretenedor/]
+    - (2699) Verificar declaración por terceros [https://alerce.sii.cl/dior_cgi/ren_mp/REN_MenusRenta.cgi?opcion=6]
+    - (2700) Consulta de planes especiales [https://alerce.sii.cl/dior_cgi/ren_mp/REN_MenusRenta.cgi?opcion=7]
+  - (4652) Información para Empresas [https://www2.sii.cl/informacion-f22]
+  - (2701) Asistentes para cálculos
+    - (4660) Asistente de cálculo de enajenación de bienes raíces [https://www2.sii.cl/asistente-bbrr/cn/inicio]
+    - (4656) Asistente de Renta Presunta [https://www2.sii.cl/renta-presunta/cn/inicio]
+    - (4719) Asistente ProPyme General y Transparente [https://www2.sii.cl/asistente-propyme/]
+    - (2709) Asistente de cálculo de Enajenación de Acciones y/o Cuotas de Fondos de Inversión y/o Cuotas de Fondos Mutuos [https://www2.sii.cl/asistenteacciones/]
+    - (3578) Asistente de cálculo de Capital Propio Tributario [https://www4.sii.cl/asistentesrentaui/internet/#/calculadora_cpt]
+    - (4526) Asistente de cálculo de arriendos de bienes raíces [https://www2.sii.cl/asistentearriendo/cn/Inicio]
+  - (4520) Escritorio contable
+    - (4524) Ingresar a escritorio contable [https://www2.sii.cl/intermediario/]
+    - (4525) Mandatario digital (info)
+  - (2712) Declaración jurada simple de cesión de beneficio de crédito por gastos en educación, art.55ter.
+    - (2714) Consultar estado declaración [https://www4.sii.cl/cesbeneducInternet/]
+    - (2713) Enviar o reemplazar declaración [https://www2.sii.cl/cesionbeneficio/]
+    - (2715) Requisitos asociados al crédito [https://www.sii.cl/portales/renta/2016/beneficio_educacion016.htm]
+  - (2718) Bonificación ahorro previsional voluntario
+    - (2719) Consulta estado bonificación APV [https://www4.sii.cl/consultaapvInternet/]
+  - (4430) Acuerdos Anticipados de Precios de Transferencia (APA)
+    - (4431) Solicitar consulta previa [1044-solicitar_consulta_previa-4430.html]
+    - (4432) Enviar solicitud y documentos  [1044-enviar_solicitud_doctos-4430.html]
+    - (4433) Consultar estado de documentos enviados  [https://www4.sii.cl/eoiui/internet/#/content/status]
+  - (2716) Anticipo devolución impuesto a la renta año tributario 2020 [https://www4.sii.cl/devolucion-anticipada/informacion]
+- (1045) Infracciones, pago de giros y condonaciones (info)
+  - (3212) Infracciones
+    - (1676) Consultar estado Denuncia [https://www4.sii.cl/pascnetinternetui/#!/home]
+    - (1677) Cartola de Denuncias y Giros Asociado [https://zeus.sii.cl/CGI_GPS/GPS_DenunciosAsociadosARut.cgi]
+  - (3213) Pago de Giros [https://www2.sii.cl/pagogiro-ui/]
+- (1046) Término de giro (info)
+  - (2778) Declarar término de giro  [https://www4.sii.cl/sistgiInternet/?opc=dec]
+  - (2779) Consultar declaración de término de giro  [https://www4.sii.cl/sistgiInternet/?opc=con]
+  - (2781) Certificado de término de giro emitidos antes del 08/08/2016 [https://www4.sii.cl/consultaTGIInternet/]
+  - (4722) Comunicar cese/continuidad de actividad [https://www2.sii.cl/tgp/]
+- (1047) Situación tributaria (info)
+  - (4322) Consulta para empleadores: Verificar trabajadores que solicitaron préstamo solidario tasa cero [https://www2.sii.cl/consulta-empleadores/consultar]
+  - (3041) Consultar timbraje de documentos [https://zeus.sii.cl/cvc/vdc/index.html]
+  - (1690) Consultar y revisar situación tributaria
+    - (1691) Consultar situación tributaria de terceros [https://www2.sii.cl/stc/noauthz]
+    - (1692) Consultar situación de proveedores
+      - (1693) Envío de datos para consulta masiva situación de proveedores [https://www2.sii.cl/cmsp/upload]
+      - (1694) Estado de consulta masiva de situación de proveedores [https://www2.sii.cl/cmsp/download]
+    - (1698) Consultar proveedores de campañas políticas
+      - (1699) Efectuar consulta [https://zeus.sii.cl/cvc_cgi/stc/servel]
+      - (1700) Ayudas
+  - (1702) Carpeta tributaria electrónica
+    - (3859) Carpeta Tributaria Regular (nueva versión)
+      - (4675) Generar Carpeta Tributaria Regular
+        - (4677) Generar Carpeta Tributaria Regular para Créditos [https://www2.sii.cl/carpetatributaria/generarcteregular]
+        - (4678) Generar Carpeta Tributaria Regular Personalizada [https://www2.sii.cl/carpetatributaria/generarctepersonalizada]
+      - (4676) Revisar Carpeta Tributaria Regular
+        - (4680) Revisar Carpeta Tributaria Regular Recibida [https://www2.sii.cl/carpetatributaria/cterevisar]
+        - (4679) Revisar Historial de Carpetas Tributarias Regulares Emitidas [https://www2.sii.cl/carpetatributaria/cteregular]
+    - (4674) Consulta Carpetas Tributarias Electrónicas (versión anterior a octubre 2025)
+      - (4682) Revisar Carpeta Tributaria Recibida [https://zeus.sii.cl/dii_cgi/carpeta_tributaria/cte_consulta_tercero_00.cgi]
+      - (4681) Revisar Carpeta Tributaria Regular [https://zeus.sii.cl/dii_cgi/carpeta_tributaria/cte_bsq_carpetas_01.cgi]
+    - (3860) Carpeta por Mandato a Instituciones
+      - (3867) Generar Carpeta por Mandato a Instituciones [https://www4.sii.cl/cteInternet/]
+      - (3868) Revisar Historial de Mandatos Emitidos [https://www4.sii.cl/cteInternet/#MANDATO]
+      - (3869) Descargar Carpeta Tributaria por Instituciones [https://www4.sii.cl/sismunInternet/?caller=ABIF]
+  - (1714) Nóminas
+    - (4557) Nómina de Registro Voluntario de Instituciones Financieras Extranjeras e Internacionales (info)
+    - (1716) Nómina registro de instituciones sin fines de lucro distribuidoras y/o receptoras de productos cuya comercialización sea inviable [1047-nomina_sin_fines_lucro-1714.html]
+    - (1717) Nómina de empresas hoteleras registradas en el SII [http://www3.sii.cl/nomemphote/]
+    - (3190) Nómina registro de los profesionales tasadores del art. 5 transitorio de la ley N° 18.895, de 1990 [1047-nomina_profesionales-1714.html]
+    - (3522) Nómina de medios electrónicos autorizados por el SII [1047-nomina_medios_electronicos-1714.html]
+    - (3728) Nómina de Contribuyentes acogidos al beneficio de término de sus procesos judiciales [1047-nomina_cabtpj-1714.html]
+    - (4497) Nómina de contribuyentes con avenimientos totales en procesos judiciales [1047-nomina_avenimientos-1714.html]
+- (3140) Herencias y Donaciones (info)
+  - (4383) Impuestos a las herencias y donaciones
+    - (4385) Declarar, consultar y rectificar herencias y donaciones (F4412) [https://www4.sii.cl/sifmherenciasdonacionesui/internet.html]
+    - (4386) Consulta estado para declarante herencias y donaciones (F4412) [https://www4.sii.cl/sifmConsultaInternet/index.html?form=4412&dest=cifxx]
+    - (4387) Consultar certificado de herencia intestada (F4423) [https://www4.sii.cl/consdphiInternet/]
+  - (4384) Compañías de seguros
+    - (4388) Calcular impuesto [calcular_impuesto_herencias.xlsx]
+    - (4417) Declaración jurada mensual de impuesto Formulario 1954 [https://www4.sii.cl/eoiui/internet/#/content/upload]
+    - (4418) Consulta estado de la Declaración [https://www4.sii.cl/eoiui/internet/#/content/status]
+- (1048) Avalúos y contribuciones de bienes raíces (info)
+  - (4544) Mis bienes raíces (información integrada)
+    - (4548) Consultar antecedentes de bienes raíces [https://www2.sii.cl/vica/Menu/AntecedentesBienRaiz]
+    - (4547) Consultar certificado de avalúo fiscal [https://www2.sii.cl/vica/Menu/CertificadosAvaluoCC]
+    - (4546) Consultar mis bienes raíces [https://www2.sii.cl/vica/Menu/BienesRaices]
+    - (4648) Mandatario Digital
+      - (4647) Administración y gestión de mandatos [https://mandatario.w.sii.cl/mandatarios-digitales/home]
+      - (4649) Ingresar a representar [https://www2.sii.cl/admin-representantes/representantes-aplicaciones]
+  - (4723) Presentación reposición administrativa voluntaria (RAV) de actos de avaluaciones
+    - (4725) Consulta y seguimiento de casos [https://www4.sii.cl/solicitudesbienesraicesui/#!/consulta/solicitudes/]
+    - (4724) Presentación reposición administrativa voluntaria (RAV) [https://www4.sii.cl/solicitudesbienesraicesui/#!/solicitud/juridico/]
+  - (4504) Ingresar solicitud de bienes raíces
+    - (4506) Consultar solicitudes [https://www4.sii.cl/solicitudesbienesraicesui/#!/consulta/solicitudes/]
+    - (4507) Documentos requeridos [1048-doctos_requeridos-2573.html]
+    - (4509) Ingresar solicitud [https://www4.sii.cl/solicitudesbienesraicesui/#!/solicitud/contribuyente/]
+    - (4508) Verificación documentos [https://www4.sii.cl/solicitudesbienesraicesui/#!/verificaciondoc]
+  - (2569) Consultar Reavalúos y ROL semestral de contribuciones
+    - (4550) Consultar Rol semestral de contribuciones
+      - (4551) Consulta de Rol semestral de contribuciones [https://www4.sii.cl/rolreavaluointernetui/#!/rolcobro]
+      - (4552) Consulta de Rol semestral de Reemplazo de contribuciones [https://www4.sii.cl/rolreavaluointernetui/#!/rolree]
+      - (4553) Consulta de Rol semestral de Suplementarios de contribuciones [https://www4.sii.cl/rolreavaluointernetui/#!/rolsup]
+      - (4554) Descarga de Información de Catastro y Roles Semestrales de Contribuciones [https://www4.sii.cl/sismunInternet6/?caller=DETALLE_CAT_Y_ROL_COBRO]
+    - (4721) Mi reavalúo [https://www2.sii.cl/mi-reavaluo-ui/]
+  - (3661) Consultar beneficio del adulto mayor
+    - (3662) Consultar beneficio del adulto mayor [https://www4.sii.cl/beneficioadultomayorui/internet/#/consulta/index.html]
+    - (3663) Información sobre rebaja del impuesto territorial adultos mayores [https://www.sii.cl/destacados/avaluaciones/bam/]
+  - (3657) Consultar sobretasa de bienes raíces
+    - (3659) Giro sobretasa bienes inmuebles [https://www4.sii.cl/sobretasamt]
+    - (3660) Pagar la sobretasa bienes inmuebles [https://www2.sii.cl/pagogiro-ui]
+    - (3658) Propiedades consideradas en Giro [https://www4.sii.cl/consultapropiedadesmt/#!/propiedadesrut]
+  - (2623) Pagar Contribuciones y obtener certificados de avalúo y antecedentes para terceros
+    - (2624) Pagar contribuciones [https://www4.sii.cl/cuotaanualbienesraicespubinternetui/#!/buscaRolPagos]
+    - (2626) Obtener detalle de pagos y certificados realizadas vía internet [https://www4.sii.cl/cuotaanualbienesraicespubinternetui/#!/HistorialRolPago]
+    - (2625) Obtener certificado de avalúo o antecedentes utilizando ROL o dirección del bien raíz [https://www2.sii.cl/vicana/Menu/ConsultarAntecedentesSC]
+    - (4651) Consultar antecedentes de un bien raíz [https://zeus.sii.cl/avalu_cgi/br/brc801.sh]
+  - (3665) Consultar transferencia de bienes raíces [https://www4.sii.cl/enajenacionesui/]
+    - (3666) Transferencias de bienes raíces [https://www4.sii.cl/enajenacionesui/]
+  - (2573) Ingresar declaraciones de bienes raíces
+    - (2589) Comunicación de Tasación a Valor de Mercado  de Bienes Raíces, Ley N° 20.780, de 2014
+      - (2601) Consultar comunicación [https://www4.sii.cl/tascomInternetConsulta/index.html]
+      - (2600) Ingresar comunicación [https://www4.sii.cl/tascomInternet/index.html]
+    - (3679) Declaración de tasaciones comerciales (F2807) y archivos SARA
+      - (3680) Bajar software generador gratis, para enviar “extracto informe de tasación” [https://alerce.sii.cl/dior/dej/html/bajar_sw/menu_bajar_sw_generador.html]
+      - (3681) Consultar estado y giros emitidos [https://www4.sii.cl/djconsultarentaui/internet/]
+      - (3682) Enviar y corregir [https://www2.sii.cl/api-ddjj/]
+      - (3684) Manual de operación (F2807) [https://www.sii.cl/declaraciones_juradas/ManualOperacionF2807.pdf]
+      - (4476) Envío de nóminas y convenios (SARA) [https://www2.sii.cl/sara/carga/manual]
+    - (3677) Declaración jurada de mejoras de bienes raíces, Ley N° 20.780, de 2014
+      - (3678) Ingresar declaración [https://www4.sii.cl/djmejorasRTInternet/index.html]
+    - (3672) Declaración Ley de Copropiedad (F2803)
+      - (3673) Declarar [https://www4.sii.cl/inclusionesbbrrui/]
+      - (3674) Verificar Declaración [https://www4.sii.cl/inclusionesbbrrui/#!/validardj/index.html]
+  - (2572) Aplicaciones para entidades externas [https://www.sii.cl/sitios_de_interes/aplicaciones_para_entidades_externas.html]
+- (1049) Tasación fiscal de vehículos (info)
+  - (3526) Consulta tasación de vehículos [acordeon]
+    - (3685) Consulta tasación de vehículos [https://www4.sii.cl/vehiculospubui/#/searchtasacion]
+    - (3687) Consultar nuevo código (info)
+  - (2612) Tasación de vehículos (bajada de datos)
+    - (2613) Consultar tasación histórica [https://www.sii.cl/pagina/actualizada/noticias/tv_historica.htm]
+  - (2618) Impuesto a emisiones contaminantes vehículos nuevos
+    - (2619) Asistente de cálculo de impuesto a emisiones contaminantes [https://www4.sii.cl/calcImpVehiculoNuevoInternet/internet.html]
+    - (2621) Ayudas
+    - (2620) Consultar rendimiento urbano y emisiones contaminantes [https://www4.sii.cl/calcImpVehiculoNuevoInternet/internet.html?modulo=listado]
+  - (3137) Declaración de Vehículos Motorizados
+    - (3509) Administrar Marcas Comercializadas [https://www4.sii.cl/vehiculosui/#/comercializemarkrdm]
+    - (3568) Consulta Declaración [https://www4.sii.cl/vehiculosui/#/searchdeclaration]
+    - (3508) Declarar Modelos de Vehículos [https://www4.sii.cl/vehiculosui/#/declaration]
+    - (3529) Mensajería  [https://www4.sii.cl/vehiculosui/#/messagesrdm ]
+    - (3510) Registrar Datos de Contacto [https://www4.sii.cl/vehiculosui/#/managerrdm]
+    - (3569) Reporte de Avance [https://www4.sii.cl/vehiculosui/#/advancereport]
+- (4485) Impuesto a aviones, helicópteros, yates y vehículos de alto valor (info)
+  - (4486) Consulta, solicitudes y pago (info)
+    - (4487) Consultar bienes y solicitar modificación [https://www2.sii.cl/impuesto-lujo/]
+    - (4489) Pagar impuesto de aviones, helicópteros, yates y vehículos de alto valor [https://www2.sii.cl/pagogiro-ui/]
+    - (4490) Consultar estado de solicitudes ingresadas [https://www2.sii.cl/impuesto-lujo/consultar-solicitudes]
