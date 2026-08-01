@@ -36,6 +36,47 @@ const SII_SESSION_COOKIES = [
   'RUT_NS',
 ];
 
+// Los .pfx del SII usan cifrado legacy (RC2), que solo OpenSSL 3.x descifra con
+// -legacy. El `openssl` del PATH en macOS es LibreSSL, que ni siquiera acepta
+// ese flag, así que hay que buscar un binario OpenSSL 3.x real.
+const OPENSSL_CANDIDATES = [
+  '/opt/homebrew/opt/openssl@3/bin/openssl',
+  '/usr/local/opt/openssl@3/bin/openssl',
+  'openssl',
+];
+
+let opensslBin: string | null = null;
+
+function resolveOpensslBin(): string {
+  if (opensslBin) return opensslBin;
+
+  const candidates = process.env.SII_OPENSSL_BIN
+    ? [process.env.SII_OPENSSL_BIN]
+    : OPENSSL_CANDIDATES;
+
+  for (const bin of candidates) {
+    try {
+      const version = execSync(`"${bin}" version`, {
+        encoding: 'utf-8',
+        timeout: 5_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (/^OpenSSL 3/.test(version.trim())) {
+        opensslBin = bin;
+        return bin;
+      }
+    } catch {
+      // Candidato inexistente o no ejecutable: seguir con el siguiente.
+    }
+  }
+
+  throw new Error(
+    'No se encontró OpenSSL 3.x, necesario para leer el certificado .pfx del SII ' +
+    '(el `openssl` de macOS es LibreSSL y no soporta -legacy). ' +
+    'Instalalo con `brew install openssl@3` o apuntá SII_OPENSSL_BIN al binario correcto.'
+  );
+}
+
 export class SessionManager {
   private session: SiiSession | null = null;
 
@@ -83,13 +124,14 @@ export class SessionManager {
     const cookiesFile = path.join(tmpDir, 'sii_cookies.txt');
 
     // Extraer cert y clave privada del .pfx a PEM temporales (cifrado legacy RC2).
+    const openssl = resolveOpensslBin();
     execSync(
-      `openssl pkcs12 -in "${certPath}" -out "${certPem}" -nokeys -legacy -passin pass:"${certPassword}" 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 10_000 }
+      `"${openssl}" pkcs12 -in "${certPath}" -out "${certPem}" -nokeys -legacy -passin pass:"${certPassword}"`,
+      { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'ignore', 'pipe'] }
     );
     execSync(
-      `openssl pkcs12 -in "${certPath}" -out "${keyPem}" -nocerts -nodes -legacy -passin pass:"${certPassword}" 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 10_000 }
+      `"${openssl}" pkcs12 -in "${certPath}" -out "${keyPem}" -nocerts -nodes -legacy -passin pass:"${certPassword}"`,
+      { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'ignore', 'pipe'] }
     );
 
     // TLS mutual auth → obtener cookies de sesión SII.
