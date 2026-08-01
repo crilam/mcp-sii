@@ -210,7 +210,7 @@ export class SessionManager {
   }
 
   // Los CGI de BHE esperan el RUT partido en cuerpo y dígito verificador.
-  // SII_RUT viene como "11111111-4"; sin guión, el DV es el último carácter.
+  // SII_RUT viene como "11111111-1"; sin guión, el DV es el último carácter.
   identidad(): { rut: string; dv: string } {
     const [rut, dv] = this.config.rut.includes('-')
       ? this.config.rut.split('-')

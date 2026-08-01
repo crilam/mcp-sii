@@ -56,9 +56,9 @@ describe('SessionManager.rutaCookieJar', () => {
   });
 
   it('parte el RUT en cuerpo y dígito verificador', () => {
-    const mgr = new SessionManager({ ...configCert, rut: '11111111-4' }, new MockBrowser());
+    const mgr = new SessionManager({ ...configCert, rut: '11111111-1' }, new MockBrowser());
 
-    expect(mgr.identidad()).toEqual({ rut: '11111111', dv: '4' });
+    expect(mgr.identidad()).toEqual({ rut: '11111111', dv: '1' });
   });
 
   it('acepta el RUT sin guión y normaliza el DV a mayúscula', () => {
