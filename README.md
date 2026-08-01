@@ -35,6 +35,19 @@ SII_CERT_PASSWORD=passwordDelCert
 SII_EMPRESA_RUT=22222222
 ```
 
+## Validar certificado digital
+
+Antes de usar `SII_CERT_PATH`/`SII_CERT_PASSWORD`, puedes verificar que el `.pfx`
+existe y que la contraseña lo desbloquea correctamente (sin exponer el subject/issuer,
+que suele contener datos personales):
+
+```bash
+npm run validate-cert
+```
+
+Lee `SII_CERT_PATH` y `SII_CERT_PASSWORD` desde el entorno (`.env`) y termina con
+código 0 si el certificado es válido, o 1 con un mensaje de error si no.
+
 ## Uso con Claude Desktop
 
 Agregar en `claude_desktop_config.json`:
