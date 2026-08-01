@@ -23,6 +23,7 @@ const SII_SEL_EMPRESA_URL = 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpres
 const SII_LOGIN_URL = 'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html';
 const SII_CERT_CGI = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi';
 const SII_LOGOUT_URL = 'https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi';
+const SEL_EMPRESA_MARKERS = ['SELECCIÓN DE EMPRESA', '- option "'];
 
 // Cookie de expiración que el CGI del SII escribe por JavaScript, con 2 horas
 // de vigencia (el mismo valor que usa su propio script de autenticación).
@@ -109,7 +110,20 @@ export class SessionManager {
   async listEmpresasDisponibles(): Promise<Empresa[]> {
     await this.authenticate();
     this.browser.open(SII_SEL_EMPRESA_URL);
-    return this.parseEmpresas(this.browser.snapshot());
+    // Justo después de inyectar las cookies la página puede no haber rendido
+    // todavía y el snapshot vuelve sin el combo, devolviendo cero empresas.
+    this.browser.waitForAny(SEL_EMPRESA_MARKERS, 20_000);
+    const snapshot = this.browser.snapshot();
+
+    // Igual que arriba: si la página no rindió, un listado vacío se confunde
+    // con "esta persona no opera ninguna empresa".
+    if (!SEL_EMPRESA_MARKERS.some(m => snapshot.includes(m))) {
+      throw new Error(
+        'La página de selección de empresa no terminó de cargar. Reintentá en unos minutos.'
+      );
+    }
+
+    return this.parseEmpresas(snapshot);
   }
 
   // Autentica el RUT persona sin seleccionar empresa. Lo necesitan los portales

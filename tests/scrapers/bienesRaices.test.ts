@@ -160,6 +160,18 @@ describe('BienesRaicesScraper.listBienesRaices', () => {
     expect(session.getSession).not.toHaveBeenCalled();
   });
 
+  it('falla explícitamente si la página no rindió, en vez de reportar cero propiedades', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.authenticateOnly as jest.Mock).mockResolvedValue(undefined);
+    // waitForAny agota el tiempo sin avisar y deja un snapshot sin el listado.
+    (browser.snapshot as jest.Mock).mockReturnValue('- generic\n  - StaticText "Cargando"');
+
+    const scraper = new BienesRaicesScraper(browser, session);
+
+    await expect(scraper.listBienesRaices()).rejects.toThrow(/no terminó de cargar/);
+  });
+
   it('espera a que la SPA renderice antes de leer el snapshot', async () => {
     const { scraper, browser } = makeScraper();
     await scraper.listBienesRaices();

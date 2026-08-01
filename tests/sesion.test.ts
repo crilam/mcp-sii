@@ -55,6 +55,33 @@ describe('SessionManager: reuso de sesión', () => {
 // El CGI de autenticación escribe `locexp` por JavaScript en vez de mandarla en
 // un Set-Cookie, así que curl no la captura. Sin ella el portal rechaza la
 // sesión aunque el resto de las cookies sea válido, y sin mensaje de error.
+describe('SessionManager.listEmpresasDisponibles', () => {
+  it('espera a que rinda la página antes de leer el combo de empresas', async () => {
+    const browser = new MockBrowser();
+    (browser.snapshot as jest.Mock).mockReturnValue(
+      '- option "EMPRESA UNO SPA 11111111-1" [ref=e11]'
+    );
+    const session = new SessionManager(config, browser);
+
+    await session.listEmpresasDisponibles();
+
+    // Sin la espera, un snapshot prematuro devuelve cero empresas.
+    expect(browser.waitForAny).toHaveBeenCalled();
+    const [markers] = (browser.waitForAny as jest.Mock).mock.calls[0];
+    expect(markers).toContain('SELECCIÓN DE EMPRESA');
+  });
+});
+
+describe('SessionManager: página de empresas que no rinde', () => {
+  it('falla explícitamente en vez de reportar cero empresas', async () => {
+    const browser = new MockBrowser();
+    (browser.snapshot as jest.Mock).mockReturnValue('- generic\n  - StaticText "Cargando"');
+    const session = new SessionManager(config, browser);
+
+    await expect(session.listEmpresasDisponibles()).rejects.toThrow(/no terminó de cargar/);
+  });
+});
+
 describe('SessionManager: cookie locexp', () => {
   const certConfig = {
     strategy: AuthStrategy.Certificate,

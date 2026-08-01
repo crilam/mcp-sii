@@ -46,6 +46,15 @@ export class BienesRaicesScraper {
     this.browser.waitForAny(READY_MARKERS, 30_000);
     const snapshot = this.browser.snapshot();
 
+    // waitForAny agota el tiempo sin avisar: sin esta comprobación una página
+    // que no rindió se parsea como cero propiedades, que es indistinguible de
+    // no tener ninguna. El portal usa cola virtual (Queue-it) y a veces demora.
+    if (!READY_MARKERS.some(m => snapshot.includes(m))) {
+      throw new Error(
+        'El portal de bienes raíces no terminó de cargar (puede estar en cola virtual del SII). Reintentá en unos minutos.'
+      );
+    }
+
     return {
       resumen: this.parseResumen(snapshot),
       propiedades: this.parsePropiedades(snapshot),
