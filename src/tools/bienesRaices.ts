@@ -1,5 +1,20 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { BienesRaicesScraper } from '../scrapers/bienesRaices';
+import { SessionManager } from '../session';
+
+export function registerSesionTools(server: McpServer, session: SessionManager): void {
+  server.tool(
+    'sii_cerrar_sesion',
+    'Cierra la sesión abierta en el SII. El SII limita cuántas sesiones simultáneas puede tener un RUT y las bloquea al superarlas (error 01.01.190.500.720.27), así que conviene cerrarla al terminar.',
+    {},
+    async () => {
+      await session.logout();
+      return {
+        content: [{ type: 'text' as const, text: 'Sesión cerrada en el SII.' }],
+      };
+    }
+  );
+}
 
 export function registerBienesRaicesTools(server: McpServer, scraper: BienesRaicesScraper): void {
   server.tool(

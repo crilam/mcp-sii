@@ -5,7 +5,7 @@ import { MipymeScraper } from './scrapers/mipyme';
 import { BienesRaicesScraper } from './scrapers/bienesRaices';
 import { registerMipymeTools } from './tools/mipyme';
 import { registerDteTools } from './tools/dte';
-import { registerBienesRaicesTools } from './tools/bienesRaices';
+import { registerBienesRaicesTools, registerSesionTools } from './tools/bienesRaices';
 import { getConfig } from './env';
 
 export function createServer(): McpServer {
@@ -23,6 +23,7 @@ export function createServer(): McpServer {
   registerMipymeTools(server, scraper);
   registerDteTools(server, scraper);
   registerBienesRaicesTools(server, bienesRaicesScraper);
+  registerSesionTools(server, session);
 
   return server;
 }

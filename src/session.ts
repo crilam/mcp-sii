@@ -22,6 +22,7 @@ const SII_MIPYME_URL = 'https://mipyme.sii.cl/';
 const SII_SEL_EMPRESA_URL = 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi';
 const SII_LOGIN_URL = 'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html';
 const SII_CERT_CGI = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi';
+const SII_LOGOUT_URL = 'https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi';
 
 // Nombres de cookies de sesión que el SII establece tras autenticación.
 const SII_SESSION_COOKIES = [
@@ -83,6 +84,7 @@ function resolveOpensslBin(): string {
 
 export class SessionManager {
   private session: SiiSession | null = null;
+  private authenticated = false;
 
   constructor(
     private config: SiiConfig,
@@ -111,13 +113,33 @@ export class SessionManager {
     return this.authenticate();
   }
 
+  // Cada autenticación abre una sesión nueva en el SII y el servicio limita
+  // cuántas puede tener abiertas un RUT a la vez (error 01.01.190.500.720.27).
+  // Reautenticar en cada consulta las agota, así que se reusa mientras viva.
   private async authenticate(): Promise<void> {
+    if (this.authenticated) return;
+
     if (this.config.strategy === AuthStrategy.Certificate) {
       await this.loginWithCert();
     } else {
       this.browser.open(SII_LOGIN_URL);
       const loginSnapshot = this.browser.snapshot();
       await this.fillClaveForm(loginSnapshot);
+    }
+
+    this.authenticated = true;
+  }
+
+  // Cierra la sesión en el SII. Sin esto las sesiones quedan abiertas del lado
+  // del servicio hasta que expiran, y se acumulan hasta bloquear el acceso.
+  async logout(): Promise<void> {
+    if (!this.authenticated) return;
+
+    try {
+      this.browser.open(SII_LOGOUT_URL);
+    } finally {
+      this.authenticated = false;
+      this.session = null;
     }
   }
 
@@ -128,8 +150,11 @@ export class SessionManager {
     return this.session;
   }
 
+  // La sesión del SII expiró o fue rechazada: hay que reautenticar, así que el
+  // flag de autenticación también se limpia.
   invalidate(): void {
     this.session = null;
+    this.authenticated = false;
   }
 
   // Autentica con certificado digital vía curl (TLS mutual auth), luego inyecta
