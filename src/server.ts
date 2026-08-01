@@ -2,8 +2,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Browser } from './browser';
 import { SessionManager } from './session';
 import { MipymeScraper } from './scrapers/mipyme';
+import { BienesRaicesScraper } from './scrapers/bienesRaices';
 import { registerMipymeTools } from './tools/mipyme';
 import { registerDteTools } from './tools/dte';
+import { registerBienesRaicesTools } from './tools/bienesRaices';
 import { getConfig } from './env';
 
 export function createServer(): McpServer {
@@ -11,6 +13,7 @@ export function createServer(): McpServer {
   const browser = new Browser();
   const session = new SessionManager(config, browser);
   const scraper = new MipymeScraper(browser, session);
+  const bienesRaicesScraper = new BienesRaicesScraper(browser, session);
 
   const server = new McpServer({
     name: 'mcp-sii',
@@ -19,6 +22,7 @@ export function createServer(): McpServer {
 
   registerMipymeTools(server, scraper);
   registerDteTools(server, scraper);
+  registerBienesRaicesTools(server, bienesRaicesScraper);
 
   return server;
 }

@@ -105,6 +105,12 @@ export class SessionManager {
     return this.parseEmpresas(this.browser.snapshot());
   }
 
+  // Autentica el RUT persona sin seleccionar empresa. Lo necesitan los portales
+  // que cuelgan de la persona y no del contribuyente (p. ej. bienes raíces).
+  async authenticateOnly(): Promise<void> {
+    return this.authenticate();
+  }
+
   private async authenticate(): Promise<void> {
     if (this.config.strategy === AuthStrategy.Certificate) {
       await this.loginWithCert();
