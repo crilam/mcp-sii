@@ -52,4 +52,24 @@ describe('registerBheTools', () => {
     expect(scraper.informeAnual).toHaveBeenCalledWith(2025);
     expect(JSON.parse(result.content[0].text).anio).toBe(2025);
   });
+
+  it('registra sii_bhe_list_emitidas y sii_bhe_list_recibidas', () => {
+    const { server, tools } = makeServer();
+
+    registerBheTools(server as any, new MockScraper({} as any, {} as any));
+
+    expect(Object.keys(tools)).toContain('sii_bhe_list_emitidas');
+    expect(Object.keys(tools)).toContain('sii_bhe_list_recibidas');
+  });
+
+  it('sii_bhe_list_recibidas invoca al scraper con recibidas en true', async () => {
+    const { server, tools } = makeServer();
+    const scraper = new MockScraper({} as any, {} as any);
+    (scraper.informeMensual as jest.Mock).mockResolvedValue([]);
+
+    registerBheTools(server as any, scraper);
+    await tools['sii_bhe_list_recibidas'].handler({ anio: 2025, mes: 5 });
+
+    expect(scraper.informeMensual).toHaveBeenCalledWith(2025, 5, true);
+  });
 });

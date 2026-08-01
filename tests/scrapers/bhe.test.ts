@@ -164,3 +164,66 @@ describe('BheScraper.informeAnual', () => {
     expect(informe.meses[0].honorarioBruto).toBe(3884935);
   });
 });
+
+describe('BheScraper.informeMensual', () => {
+  it('parsea las boletas del mes', async () => {
+    const { scraper } = makeScraper(fixture('bhe-informe-mensual.html'));
+
+    const boletas = await scraper.informeMensual(2025, 5);
+
+    expect(boletas).toHaveLength(2);
+    expect(boletas[0]).toEqual({
+      folio: 311,
+      fecha: '22/05/2025',
+      receptorRut: '22222222-2',
+      receptorNombre: 'EMPRESA EJEMPLO SPA',
+      honorarioBruto: 1000000,
+      retencionEmisor: 0,
+      retencionReceptor: 145000,
+      totalLiquido: 855000,
+      anulada: false,
+    });
+  });
+
+  // Los montos vienen envueltos en formatMiles("1000000",'.'), no como string
+  // pelado: un parser que no lo contemple devuelve la expresion o nada.
+  it('desenvuelve los montos de formatMiles', async () => {
+    const { scraper } = makeScraper(fixture('bhe-informe-mensual.html'));
+
+    const boletas = await scraper.informeMensual(2025, 5);
+
+    expect(boletas[1].honorarioBruto).toBe(2000000);
+    expect(boletas[1].retencionReceptor).toBe(290000);
+  });
+
+  it('usa el CGI de emitidas por defecto', async () => {
+    const { scraper, http } = makeScraper(fixture('bhe-informe-mensual.html'));
+    await scraper.informeMensual(2025, 5);
+    expect((http.postForm as jest.Mock).mock.calls[0][0])
+      .toContain('TMBCOC_InformeMensualBhe.cgi');
+  });
+
+  it('usa el CGI con sufijo Rec para las recibidas', async () => {
+    const { scraper, http } = makeScraper(fixture('bhe-informe-mensual.html'));
+    await scraper.informeMensual(2025, 5, true);
+    expect((http.postForm as jest.Mock).mock.calls[0][0])
+      .toContain('TMBCOC_InformeMensualBheRec.cgi');
+  });
+
+  // El formulario del portal manda el mes con dos digitos; con uno solo el SII
+  // responde el informe vacio en vez de un error, que es la peor combinacion.
+  it('rellena el mes a dos digitos y manda pagina_solicitada', async () => {
+    const { scraper, http } = makeScraper(fixture('bhe-informe-mensual.html'));
+    await scraper.informeMensual(2025, 3);
+    const campos = (http.postForm as jest.Mock).mock.calls[0][1];
+    expect(campos.cbmesinformemensual).toBe('03');
+    expect(campos.cbanoinformemensual).toBe('2025');
+    expect(campos.pagina_solicitada).toBe('0');
+    expect(campos.rut_arrastre).toBe('11111111');
+  });
+
+  it('falla si la respuesta no es un informe', async () => {
+    const { scraper } = makeScraper('<html><body>Sesion expirada</body></html>');
+    await expect(scraper.informeMensual(2025, 5)).rejects.toThrow(/no devolvió un informe/);
+  });
+});

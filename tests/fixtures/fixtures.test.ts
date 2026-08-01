@@ -10,7 +10,22 @@ import * as path from 'path';
 // falsos positivos con montos. Un chequeo que captura "cualquier número largo"
 // es frágil y se rompe si una fixture legítima tiene un monto o código que cae
 // en ese rango. Ser específico es ser robusto.
-const RUT_DE_PRUEBA = /^1{8}$/;
+//
+// El patrón cubre cualquier arreglo (no solo xml_values): el informe mensual
+// guarda el RUT del receptor en arr_informe_mensual['rutreceptor_1'], y ese
+// hueco pasaba inadvertido cuando el chequeo solo miraba xml_values.
+//
+// El emisor y el receptor de una BHE nunca pueden ser el mismo RUT —el SII
+// prohíbe emitirse una boleta a uno mismo—, así que la fixture mensual usa
+// 11111111 para el emisor y 22222222 para el receptor: ambos ficticios pero
+// distintos. Por eso el patrón acepta cualquier RUT de ocho dígitos repetidos,
+// no solo "11111111".
+//
+// Limitación conocida: un RUT embebido dentro de otro valor —por ejemplo
+// codigobarras_N, que empieza con el RUT del emisor concatenado con otros
+// dígitos— no lo detecta este chequeo, porque el regex exige que el campo
+// completo sea solo dígitos.
+const RUT_DE_PRUEBA = /^(\d)\1{7}$/;
 
 describe('fixtures anonimizadas', () => {
   const dir = __dirname;
@@ -22,8 +37,9 @@ describe('fixtures anonimizadas', () => {
 
   it.each(fixtures)('%s no contiene RUT fuera del rango de prueba', (nombre) => {
     const contenido = fs.readFileSync(path.join(dir, nombre), 'latin1');
-    // Buscar campos que contengan "rut" en su nombre: xml_values['rut_algo'] = "valor"
-    const ruts = [...contenido.matchAll(/xml_values\['([^']*rut[^']*)'\]\s*=\s*"(\d+)"/gi)]
+    // Buscar campos que contengan "rut" en su nombre, en cualquier arreglo:
+    // xml_values['rut_algo'] = "valor" o arr_informe_mensual['rutreceptor_1'] = "valor"
+    const ruts = [...contenido.matchAll(/\w+\['([^']*rut[^']*)'\]\s*=\s*"(\d+)"/gi)]
       .map(m => m[2]); // m[1] es el nombre del campo, m[2] es el valor numérico
 
     const sospechosos = ruts.filter(r => !RUT_DE_PRUEBA.test(r));
@@ -39,11 +55,26 @@ describe('fixtures anonimizadas', () => {
         xml_values['dv_arrastre'] = "9";
       </script>
     `;
-    const ruts = [...contenido.matchAll(/xml_values\['([^']*rut[^']*)'\]\s*=\s*"(\d+)"/gi)]
+    const ruts = [...contenido.matchAll(/\w+\['([^']*rut[^']*)'\]\s*=\s*"(\d+)"/gi)]
       .map(m => m[2]);
 
     const sospechosos = ruts.filter(r => !RUT_DE_PRUEBA.test(r));
     // Debe detectar 12345678 como sospechoso
     expect(sospechosos).toContain('12345678');
+  });
+
+  // Sin este test, el hueco que ampliamos (mirar solo xml_values) podría
+  // reintroducirse sin que ninguna prueba lo note.
+  it('detecta un RUT real dentro de un arreglo distinto de xml_values', () => {
+    const contenido = `
+      <script>
+        arr_informe_mensual['rutreceptor_1'] = "87654321";
+      </script>
+    `;
+    const ruts = [...contenido.matchAll(/\w+\['([^']*rut[^']*)'\]\s*=\s*"(\d+)"/gi)]
+      .map(m => m[2]);
+
+    const sospechosos = ruts.filter(r => !RUT_DE_PRUEBA.test(r));
+    expect(sospechosos).toContain('87654321');
   });
 });

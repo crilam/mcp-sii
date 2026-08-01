@@ -21,8 +21,22 @@ export interface InformeAnualBhe {
   folioFinal: number | null;
 }
 
+export interface BoletaBhe {
+  folio: number;
+  fecha: string;
+  receptorRut: string;
+  receptorNombre: string;
+  honorarioBruto: number;
+  retencionEmisor: number;
+  retencionReceptor: number;
+  totalLiquido: number;
+  anulada: boolean;
+}
+
 const BASE = 'https://loa.sii.cl/cgi_IMT';
 const CGI_ANUAL = `${BASE}/TMBCOC_InformeAnualBhe.cgi`;
+const CGI_MENSUAL = `${BASE}/TMBCOC_InformeMensualBhe.cgi`;
+const CGI_MENSUAL_REC = `${BASE}/TMBCOC_InformeMensualBheRec.cgi`;
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
                'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -74,6 +88,37 @@ export class BheScraper {
     };
   }
 
+  async informeMensual(
+    anio: number,
+    mes: number,
+    recibidas = false
+  ): Promise<BoletaBhe[]> {
+    // No requiere seleccionar empresa: la BHE es de la persona natural.
+    await this.session.authenticateOnly();
+    const { rut, dv } = this.session.identidad();
+    const html = await this.http.postForm(
+      recibidas ? CGI_MENSUAL_REC : CGI_MENSUAL,
+      {
+        rut_arrastre: rut,
+        dv_arrastre: dv,
+        // Sin este campo el CGI responde el error TMB020a en vez del informe.
+        pagina_solicitada: '0',
+        // El formulario del portal manda el mes con dos digitos.
+        cbmesinformemensual: String(mes).padStart(2, '0'),
+        cbanoinformemensual: String(anio),
+      }
+    );
+
+    const values = this.parseXmlValues(html);
+    if (!values['anio_consulta']) {
+      throw new Error(
+        'El SII no devolvió un informe de boletas de honorarios. La sesión pudo expirar; reintentá.'
+      );
+    }
+
+    return this.parseBoletas(html, this.toInt(values['total_boletas']) ?? 0);
+  }
+
   private parseXmlValues(html: string): Record<string, string> {
     const values: Record<string, string> = {};
     for (const m of html.matchAll(XML_VALUE)) {
@@ -116,5 +161,58 @@ export class BheScraper {
     if (!digits) return null;
     const valor = parseInt(digits, 10);
     return negativo ? -valor : valor;
+  }
+
+  // Las boletas no vienen en xml_values sino en arr_informe_mensual, con el
+  // indice como sufijo de la clave. Varios nombres de campo ya contienen "_",
+  // asi que el indice es el ultimo segmento, no el segundo.
+  private parseArrInforme(html: string): Record<string, string> {
+    const values: Record<string, string> = {};
+    const re = /arr_informe_mensual\['([^']+)'\]\s*=\s*([^;]+);/g;
+    for (const m of html.matchAll(re)) {
+      values[m[1]] = this.desenvolver(m[2]);
+    }
+    return values;
+  }
+
+  // Los montos llegan como formatMiles("145000",'.'), no como string pelado.
+  private desenvolver(expr: string): string {
+    const conFormato = expr.match(/formatMiles\(\s*"([^"]*)"/);
+    if (conFormato) return conFormato[1];
+    const literal = expr.match(/"([^"]*)"/);
+    return literal ? literal[1] : '';
+  }
+
+  private parseBoletas(html: string, total: number): BoletaBhe[] {
+    const arr = this.parseArrInforme(html);
+    const boletas: BoletaBhe[] = [];
+
+    for (let i = 1; i <= total; i++) {
+      const folio = this.toInt(arr[`nroboleta_${i}`]);
+      // Un indice sin folio significa que el SII devolvio menos filas de las
+      // que anuncio: se omite en vez de inventar una boleta vacia.
+      if (folio === null) continue;
+
+      const estado = (arr[`estado_${i}`] ?? '').trim();
+      const fechaAnulacion = (arr[`fechaanulacion_${i}`] ?? '').trim();
+
+      boletas.push({
+        folio,
+        fecha: (arr[`fechaemision_${i}`] ?? '').trim(),
+        receptorRut: `${arr[`rutreceptor_${i}`] ?? ''}-${arr[`dvreceptor_${i}`] ?? ''}`,
+        receptorNombre: (arr[`nombrereceptor_${i}`] ?? '').trim(),
+        honorarioBruto: this.toInt(arr[`totalhonorarios_${i}`]) ?? 0,
+        retencionEmisor: this.toInt(arr[`retencion_emisor_${i}`]) ?? 0,
+        retencionReceptor: this.toInt(arr[`retencion_receptor_${i}`]) ?? 0,
+        totalLiquido: this.toInt(arr[`honorariosliquidos_${i}`]) ?? 0,
+        // Solo el caso vigente esta verificado contra el portal: las boletas
+        // capturadas traen estado "N" y fecha de anulacion vacia. El valor que
+        // usa el SII para una boleta anulada no se confirmo, asi que se miran
+        // las dos senales en vez de comparar contra una constante inventada.
+        anulada: (estado !== '' && estado !== 'N') || fechaAnulacion !== '',
+      });
+    }
+
+    return boletas;
   }
 }
