@@ -1,12 +1,416 @@
-<html><head><title>INFORME ANUAL DE BOLETAS DE HONORARIOS ELECTRONICAS</title></head>
-<body>
-<script>
- xml_values['nombre_contribuyente']      = "JUAN PEREZ SOTO ";
- xml_values['rut_arrastre']      	= "11111111";
- xml_values['dv_arrastre']       	= "1";
- xml_values['anio_consulta']		= "2019";
- xml_values['es_sociedad_profesionales']	= "NO";
- xml_values['tot4']= "";
- xml_values['tot5']= "";
-</script>
-</body></html>
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML>
+<HEAD>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<TITLE>INFORME ANUAL DE BOLETAS DE HONORARIOS ELECTRONICAS</TITLE>
+<link rel="stylesheet" href="/IMT/GLB_estilos.css" type="text/css">
+<script src="https://zeus.sii.cl/admin/barranav.js" type="text/javascript"></script>
+<script type="text/javascript" src="/IMT/js/GLB_links.js" ></script>
+<script type="text/javascript" src="/IMT/js/GLB_Util.js" >/*---*/</script>
+<script type="text/javascript" src="/IMT/js/GLB_comunas.js" >/*---*/</script>
+<script type="text/javascript" src="/IMT/js/overlib_mini.js" >/*---*/</script>
+<script type="text/javascript" src="/AUT2000/js/validaUtil.js" >/*---*/</script>
+<script type="text/javascript" src="/AUT2000/js/manejaAutenticacion.js" ></script>
+
+<SCRIPT type="text/javascript">
+var xml_values = new Array();
+xml_values['nombre_contribuyente']      = "JUAN PEREZ SOTO ANDRADE ";
+xml_values['rut_arrastre']      	= "11111111";
+xml_values['dv_arrastre']       	= "1";
+xml_values['anio_consulta']		= "2015";
+xml_values['es_sociedad_profesionales']	= "NO";
+xml_values['msg_mes']	= "Para ver el detalle de las boletas, hacer click sobre el mes.";
+
+xml_values['ene4']= ""; 	
+xml_values['feb4']= "";	
+xml_values['mar4']= "";	
+xml_values['abr4']= "";	
+xml_values['may4']= "";	
+xml_values['jun4']= "";	
+xml_values['jul4']= "";	
+xml_values['ago4']= "";	
+xml_values['sep4']= "";	
+xml_values['oct4']= "";	
+xml_values['nov4']= "";	
+xml_values['dic4']= "";	
+
+xml_values['ene5']= ""; 	
+xml_values['feb5']= "";	
+xml_values['mar5']= "";	
+xml_values['abr5']= "";	
+xml_values['may5']= "";	
+xml_values['jun5']= "";	
+xml_values['jul5']= "";	
+xml_values['ago5']= "";	
+xml_values['sep5']= "";	
+xml_values['oct5']= "";	
+xml_values['nov5']= "";	
+xml_values['dic5']= "";	
+
+xml_values['ene6']= ""; 	
+xml_values['feb6']= "";	
+xml_values['mar6']= "";	
+xml_values['abr6']= "";	
+xml_values['may6']= "";	
+xml_values['jun6']= "";	
+xml_values['jul6']= "";	
+xml_values['ago6']= "";	
+xml_values['sep6']= "";	
+xml_values['oct6']= "";	
+xml_values['nov6']= "";	
+xml_values['dic6']= "";	
+
+xml_values['ene7']= ""; 	
+xml_values['feb7']= "";	
+xml_values['mar7']= "";	
+xml_values['abr7']= "";	
+xml_values['may7']= "";	
+xml_values['jun7']= "";	
+xml_values['jul7']= "";	
+xml_values['ago7']= "";	
+xml_values['sep7']= "";	
+xml_values['oct7']= "";	
+xml_values['nov7']= "";	
+xml_values['dic7']= "";	
+
+
+if (xml_values['es_sociedad_profesionales']=='SI')
+{
+xml_values['ene1']= ""; 	xml_values['ene2']= "";	xml_values['ene3']= ""; 
+xml_values['feb1']= "";	xml_values['feb2']= "";	xml_values['feb3']= "";
+xml_values['mar1']= "";	xml_values['mar2']= "";	xml_values['mar3']= "";
+xml_values['abr1']= "";	xml_values['abr2']= "";	xml_values['abr3']= "";
+xml_values['may1']= "";	xml_values['may2']= "";	xml_values['may3']= "";
+xml_values['jun1']= "";	xml_values['jun2']= "";	xml_values['jun3']= "";
+xml_values['jul1']= "";	xml_values['jul2']= "";	xml_values['jul3']= "";
+xml_values['ago1']= "";	xml_values['ago2']= "";	xml_values['ago3']= "";
+xml_values['sep1']= "";	xml_values['sep2']= "";	xml_values['sep3']= "";
+xml_values['oct1']= "";	xml_values['oct2']= "";	xml_values['oct3']= "";
+xml_values['nov1']= "";	xml_values['nov2']= "";	xml_values['nov3']= "";
+xml_values['dic1']= "";	xml_values['dic2']= "";	xml_values['dic3']= "";
+}
+else
+{
+xml_values['ene1']= ""; 	xml_values['ene2']= "";	xml_values['ene3']= ""; 
+xml_values['feb1']= "";	xml_values['feb2']= "";	xml_values['feb3']= "";
+xml_values['mar1']= "";	xml_values['mar2']= "";	xml_values['mar3']= "";
+xml_values['abr1']= "";	xml_values['abr2']= "";	xml_values['abr3']= "";
+xml_values['may1']= "";	xml_values['may2']= "";	xml_values['may3']= "";
+xml_values['jun1']= "";	xml_values['jun2']= "";	xml_values['jun3']= "";
+xml_values['jul1']= "";	xml_values['jul2']= "";	xml_values['jul3']= "";
+xml_values['ago1']= "";	xml_values['ago2']= "";	xml_values['ago3']= "";
+xml_values['sep1']= "";	xml_values['sep2']= "";	xml_values['sep3']= "";
+xml_values['oct1']= "";	xml_values['oct2']= "";	xml_values['oct3']= "";
+xml_values['nov1']= "";	xml_values['nov2']= "";	xml_values['nov3']= "";
+xml_values['dic1']= "";	xml_values['dic2']= "";	xml_values['dic3']= "";
+}
+
+xml_values['tot1']= Number(xml_values['ene1']) + Number(xml_values['feb1']) + Number(xml_values['mar1'])+Number(xml_values['abr1'])+Number(xml_values['may1'])+Number(xml_values['jun1'])+Number(xml_values['jul1'])+Number(xml_values['ago1'])+Number(xml_values['sep1'])+Number(xml_values['oct1'])+Number(xml_values['nov1'])+Number(xml_values['dic1']);
+if (xml_values['es_sociedad_profesionales']=='SI')
+{
+xml_values['tot2']= "";
+xml_values['tot3']= "";
+}
+else
+{
+xml_values['tot2']= Number(xml_values['ene2']) + Number(xml_values['feb2']) + Number(xml_values['mar2'])+Number(xml_values['abr2'])+Number(xml_values['may2'])+Number(xml_values['jun2'])+Number(xml_values['jul2'])+Number(xml_values['ago2'])+Number(xml_values['sep2'])+Number(xml_values['oct2'])+Number(xml_values['nov2'])+Number(xml_values['dic2']);
+xml_values['tot3']= Number(xml_values['ene3']) + Number(xml_values['feb3']) + Number(xml_values['mar3'])+Number(xml_values['abr3'])+Number(xml_values['may3'])+Number(xml_values['jun3'])+Number(xml_values['jul3'])+Number(xml_values['ago3'])+Number(xml_values['sep3'])+Number(xml_values['oct3'])+Number(xml_values['nov3'])+Number(xml_values['dic3']);
+}
+
+xml_values['tot4']= "0";
+xml_values['tot5']= "0";
+
+xml_values['tot6']= Number(xml_values['ene6']) + Number(xml_values['feb6']) + Number(xml_values['mar6'])+Number(xml_values['abr6'])+Number(xml_values['may6'])+Number(xml_values['jun6'])+Number(xml_values['jul6'])+Number(xml_values['ago6'])+Number(xml_values['sep6'])+Number(xml_values['oct6'])+Number(xml_values['nov6'])+Number(xml_values['dic6']);
+xml_values['tot7']= Number(xml_values['ene7']) + Number(xml_values['feb7']) + Number(xml_values['mar7'])+Number(xml_values['abr7'])+Number(xml_values['may7'])+Number(xml_values['jun7'])+Number(xml_values['jul7'])+Number(xml_values['ago7'])+Number(xml_values['sep7'])+Number(xml_values['oct7'])+Number(xml_values['nov7'])+Number(xml_values['dic7']);
+
+xml_values['sumene']= Number(xml_values['ene1']) - Number(xml_values['ene2']) - Number(xml_values['ene3']);
+xml_values['sumfeb']= Number(xml_values['feb1']) - Number(xml_values['feb2']) - Number(xml_values['feb3']);
+xml_values['summar']= Number(xml_values['mar1']) - Number(xml_values['mar2']) - Number(xml_values['mar3']);
+xml_values['sumabr']= Number(xml_values['abr1']) - Number(xml_values['abr2']) - Number(xml_values['abr3']);
+xml_values['summay']= Number(xml_values['may1']) - Number(xml_values['may2']) - Number(xml_values['may3']);
+xml_values['sumjun']= Number(xml_values['jun1']) - Number(xml_values['jun2']) - Number(xml_values['jun3']);
+xml_values['sumjul']= Number(xml_values['jul1']) - Number(xml_values['jul2']) - Number(xml_values['jul3']);
+xml_values['sumago']= Number(xml_values['ago1']) - Number(xml_values['ago2']) - Number(xml_values['ago3']);
+xml_values['sumsep']= Number(xml_values['sep1']) - Number(xml_values['sep2']) - Number(xml_values['sep3']);
+xml_values['sumoct']= Number(xml_values['oct1']) - Number(xml_values['oct2']) - Number(xml_values['oct3']);
+xml_values['sumnov']= Number(xml_values['nov1']) - Number(xml_values['nov2']) - Number(xml_values['nov3']);
+xml_values['sumdic']= Number(xml_values['dic1']) - Number(xml_values['dic2']) - Number(xml_values['dic3']);
+
+xml_values['sumtot']= Number(xml_values['sumene']) + Number(xml_values['sumfeb']) + Number(xml_values['summar'])+Number(xml_values['sumabr'])+Number(xml_values['summay'])+Number(xml_values['sumjun'])+Number(xml_values['sumjul'])+Number(xml_values['sumago'])+Number(xml_values['sumsep'])+Number(xml_values['sumoct'])+Number(xml_values['sumnov'])+Number(xml_values['sumdic']);
+
+</SCRIPT>
+
+</HEAD>
+<BODY link="#003399" onLoad="initkeys();">
+<div id="overDiv" style="position:absolute; visibility:hidden; z-index:1000;"></div>
+<DIV align=center>
+<CENTER>
+    <TABLE width=630 border=0 cellSpacing=1>
+      <TBODY>
+        <tr> 
+          <td align="left">
+            <script type="text/javascript">mostrar();</script>
+          </td>
+        </tr>
+        <tr ><TD colspan="2">&nbsp;</TD></TR>
+        <tr align="left"> 
+          <TD colspan="2" align="right"> 
+            <P align=justify><FONT face=Arial color="#000000" size=4><STRONG>INFORME ANUAL DE BOLETAS DE HONORARIOS ELECTRONICAS.</STRONG></FONT><FONT face=Arial size=-1><BR>
+              En este informe se resume por cada mes del a&ntilde;o en consulta, el total 
+              de los honorarios brutos, total de retenci&oacute;n de terceros y totales 
+              de PPM a pagar por contribuyente.</FONT></P></TD>
+        </TR>
+        <tr align="left"> 
+          <TD height=40 colspan="2"> <HR> </TD>
+        </TR>
+        <tr align="left"> 
+          <TD height=10 colspan="2"> <DIV align=center> 
+              <CENTER>
+                <TABLE cellSpacing=1 border=0>
+                  <TBODY>
+                    <tr align="left"> 
+                      <TD >
+                         <font size="2" face="Arial, Helvetica, sans-serif">
+                         Contribuyente:
+                         </font>
+                      </TD>
+                      <TD width="90%">
+                         <font size="2" face="Arial, Helvetica, sans-serif">
+                          <B><script type="text/javascript">document.write(xml_values['nombre_contribuyente']);</script></B>
+                         </font>
+                      </TD>
+                     </TR>
+                     <tr align="left">
+                      <TD>
+                         <font size="2" face="Arial, Helvetica, sans-serif">
+                          RUT: 
+                         </font>
+                      </TD>
+                      <TD>
+                         <font size="2" face="Arial, Helvetica, sans-serif">
+                          <B><script type="text/javascript">document.write(xml_values['rut_arrastre']+'-'+ xml_values['dv_arrastre']);</script></B>
+                         </font>
+                      </TD>
+                     </TR>
+                     <tr align="left"><TD colspan="2">&nbsp;</TD></TR>
+                     <tr align="center"> <TD colspan="2"><B>  <font size="2" face="Arial, Helvetica, sans-serif">
+                          INFORME CORRESPONDIENTE AL  A&Ntilde;O  <script type="text/javascript"> document.write(xml_values['anio_consulta']); </script>
+			  </font></B>  </TD>  </TR>
+                     <tr align="left"><TD colspan="2">&nbsp;</TD></TR>
+                     <tr align="center"><TD colspan="2">
+                        <table width="630" border="1" cellspacing="0" cellpadding="0">
+                          <tr align="left"> 
+                            <td bgcolor="#CCCCCC" rowspan="2" > <div align="center"><font size="2" face="Arial"><strong>PERIODOS</strong></font></div></td>
+                            <td bgcolor="#CCCCCC" colspan="2"> <div align="center"><font size="2" face="Arial"><strong>FOLIOS</strong></font></div></td>
+			    <td bgcolor="#CCCCCC" colspan="2"> <div align="center"><font size="2" face="Arial"><strong>EMISIONES</strong></font></div></td>
+                            <td bgcolor="#CCCCCC" rowspan="2"> <div align="center"><font size="2" face="Arial"><strong>(*)HONORARIO BRUTO</strong></font></div></td>
+                            <td bgcolor="#CCCCCC" rowspan="2"> <div align="center"><font size="2" face="Arial"><strong>(*)RETENCION DE TERCEROS</strong></font></div></td>
+                            <td bgcolor="#CCCCCC" rowspan="2"> <div align="center"><font size="2" face="Arial"><strong>(*)RETENCION CONTRIBUYENTE</strong></font></div></td>
+                            <td bgcolor="#CCCCCC" rowspan="2"> <div align="center"><font size="2" face="Arial"><strong>(*)TOTAL LIQUIDO</strong></font></div></td>
+                          </tr>
+                          <tr align="left"> 
+                            <td bgcolor="#CCCCCC"> <div align="center"><font size="2" face="Arial"><strong>Inicial</strong></font></div></td>
+                            <td bgcolor="#CCCCCC"> <div align="center"><font size="2" face="Arial"><strong>Final</strong></font></div></td>
+			    <td bgcolor="#CCCCCC"> <div align="center"><font size="2" face="Arial"><strong>Vigentes</strong></font></div></td>
+                            <td bgcolor="#CCCCCC"> <div align="center"><font size="2" face="Arial"><strong>Anuladas</strong></font></div></td>
+                          </tr>
+                          <tr align="left"> 
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['ene4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=01&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >ENERO<\/a>'); else document.write('ENERO'); </script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ene4'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ene5'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ene6'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ene7'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ene1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ene2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ene3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumene'],'.')+ '&nbsp;');</script></font></td>
+                          </tr>
+                          <tr align="left"> 
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['feb4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=02&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >FEBRERO<\/a>');else document.write('FEBRERO');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['feb4'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['feb5'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['feb6'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['feb7'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['feb1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['feb2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['feb3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumfeb'],'.')+ '&nbsp;');</script></font></td>
+                          </tr>
+                          <tr align="left"> 
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['mar4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=03&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >MARZO<\/a>');else document.write('MARZO');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['mar4'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['mar5'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['mar6'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['mar7'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['mar1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['mar2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['mar3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['summar'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left"> 
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['abr4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=04&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >ABRIL<\/a>');else document.write('ABRIL');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['abr4'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['abr5'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['abr6'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['abr7'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['abr1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['abr2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['abr3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumabr'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left">
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['may4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=05&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >MAYO<\/a>');else document.write('MAYO');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['may4'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['may5'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['may6'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['may7'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['may1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['may2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['may3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['summay'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left">
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['jun4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=06&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >JUNIO<\/a>');else document.write('JUNIO');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jun4'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jun5'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jun6'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jun7'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jun1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jun2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jun3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumjun'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left">
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['jul4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=07&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >JULIO<\/a>');else document.write('JULIO');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jul4'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jul5'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jul6'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jul7'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jul1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jul2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['jul3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumjul'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left">
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['ago4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=08&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >AGOSTO<\/a>');else document.write('AGOSTO');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ago4'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ago5'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ago6'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ago7'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ago1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ago2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['ago3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumago'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left">
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['sep4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=09&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >SEPTIEMBRE<\/a>');else document.write('SEPTIEMBRE');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sep4'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sep5'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sep6'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sep7'],'.')+ '&nbsp;');</script></font></td>
+			    <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sep1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sep2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sep3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumsep'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left">
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['oct4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=10&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >OCTUBRE<\/a>');else document.write('OCTUBRE');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['oct4'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['oct5'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['oct6'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['oct7'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['oct1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['oct2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['oct3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumoct'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left">
+                            <td><font size="2" face="Arial"><script type="text/javascript"> if ( xml_values['nov4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=11&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >NOVIEMBRE<\/a>');  else document.write('NOVIEMBRE');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['nov4'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['nov5'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['nov6'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['nov7'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['nov1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['nov2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['nov3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumnov'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left">
+                            <td><font size="2" face="Arial"><script type="text/javascript">if ( xml_values['dic4'] > 0) document.write('<a href="TMBCOC_InformeMensualBhe.cgi?cbanoinformemensual='+xml_values['anio_consulta']+'&cbmesinformemensual=12&dv_arrastre='+xml_values['dv_arrastre'] +'&pagina_solicitada=0&rut_arrastre='+xml_values['rut_arrastre']+'" onmouseover="return overlib(\''+ xml_values['msg_mes'] +'\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >DICIEMBRE<\/a>'); else document.write('DICIEMBRE');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['dic4'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['dic5'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['dic6'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['dic7'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['dic1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['dic2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['dic3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumdic'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                          <tr align="left"> 
+                          <td bgcolor="#CCCCCC" ><font size="2" face="Arial">Totales:</font></td>
+				<TD bgcolor="#CCCCCC">&nbsp;</TD>
+				<TD bgcolor="#CCCCCC">&nbsp;</TD>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['tot6'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['tot7'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['tot1'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['tot2'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['tot3'],'.')+ '&nbsp;');</script></font></td>
+                            <td align="right"><font size="2" face="Arial"><script type="text/javascript">document.write(formatMiles(xml_values['sumtot'],'.')+ '&nbsp;');</script></font></td>
+			  </tr>
+                        </table>
+                       <font size="2" face="Arial">(*) Los valores totales no consideran los montos de las boletas anuladas.</font>
+                        <form name="formulario" method="post" action="">
+                        <script type="text/javascript">CampoOculto("rut_arrastre",xml_values['rut_arrastre']);</script>
+    			<script type="text/javascript">CampoOculto("dv_arrastre" ,xml_values['dv_arrastre']);</script>
+                        <script type="text/javascript">CampoOculto("cbanoinformeanual" ,xml_values['anio_consulta']);</script>     
+			
+                        <script type="text/javascript">CampoOculto("liquido1" ,xml_values['sumene']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido2" ,xml_values['sumfeb']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido3" ,xml_values['summar']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido4" ,xml_values['sumabr']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido5" ,xml_values['summay']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido6" ,xml_values['sumjun']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido7" ,xml_values['sumjul']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido8" ,xml_values['sumago']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido9" ,xml_values['sumsep']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido10" ,xml_values['sumoct']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido11" ,xml_values['sumnov']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido12" ,xml_values['sumdic']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido13" ,xml_values['tot6']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido14" ,xml_values['tot7']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido15" ,xml_values['tot1']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido16" ,xml_values['tot2']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido17" ,xml_values['tot3']);</script>      
+                        <script type="text/javascript">CampoOculto("liquido18" ,xml_values['sumtot']);</script>      
+
+
+                        <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                          <tr align="left"> 
+                            <td width="40%"> <div align="center"><font size="2" face="Arial">
+                            <input type="button" value="Volver al Menú" onclick="javascript:history.back();">
+                            </font></div></td>
+                            <td width="30%"> <div align="center"><font size="2" face="Arial">
+                            <input type="submit" name="CmdXls" value="Ver informe como planilla electrónica">
+                            </font></div></td>
+                            <td width="30%"> <div align="center"><font size="2" face="Arial">
+                            <input type="button" name="CmdImprimit" value="Imprimir" onclick="document:print();">
+                            </font></div></td>
+                          </tr>
+                        </table>
+                        </form>
+                        <p>&nbsp;</p></TD>
+                    </TR>
+                </TABLE>
+                   <font size="2" face="Arial">Para ver el detalle de las boletas de un mes, hacer click sobre el mes que desea revisar</font> 
+              </CENTER>
+            </DIV></TD>
+        </TR>
+      </TBODY>
+    </TABLE>
+  </CENTER></DIV></BODY></HTML>
+
+
+
+
