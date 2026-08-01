@@ -1,11 +1,11 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { SiiHttpClient } from '../src/http';
 import { SessionManager } from '../src/session';
 
 jest.mock('child_process');
 jest.mock('../src/session');
 
-const mockExec = execSync as jest.MockedFunction<typeof execSync>;
+const mockExec = execFileSync as jest.MockedFunction<typeof execFileSync>;
 const MockSession = SessionManager as jest.MockedClass<typeof SessionManager>;
 
 function makeClient() {
@@ -23,8 +23,9 @@ describe('SiiHttpClient.get', () => {
 
     await client.get('https://loa.sii.cl/cgi_IMT/X.cgi');
 
-    const cmd = String(mockExec.mock.calls[0][0]);
-    expect(cmd).toContain('-b "/tmp/sii_cookies.txt"');
+    const args = mockExec.mock.calls[0][1] as string[];
+    expect(args).toContain('-b');
+    expect(args).toContain('/tmp/sii_cookies.txt');
   });
 
   it('agrega los parámetros al query string', async () => {
@@ -33,9 +34,9 @@ describe('SiiHttpClient.get', () => {
 
     await client.get('https://loa.sii.cl/cgi_IMT/X.cgi', { anio: '2025', dv: '4' });
 
-    const cmd = String(mockExec.mock.calls[0][0]);
-    expect(cmd).toContain('anio=2025');
-    expect(cmd).toContain('dv=4');
+    const args = mockExec.mock.calls[0][1] as string[];
+    expect(args.some(arg => arg.includes('anio=2025'))).toBe(true);
+    expect(args.some(arg => arg.includes('dv=4'))).toBe(true);
   });
 
   // El SII responde ISO-8859-1 incluso en JSON. Leer como UTF-8 corrompe
@@ -46,8 +47,37 @@ describe('SiiHttpClient.get', () => {
 
     await client.get('https://loa.sii.cl/cgi_IMT/X.cgi');
 
-    const opts = mockExec.mock.calls[0][1] as { encoding?: string };
+    const opts = mockExec.mock.calls[0][2] as { encoding?: string };
     expect(opts.encoding).toBe('latin1');
+  });
+
+  // execFileSync con arreglo de argumentos previene inyección de shell.
+  // URLs con metacaracteres de shell deben ser literales y no alterar el comando.
+  it('previene inyección de shell en la URL', async () => {
+    mockExec.mockReturnValue('<html>ok</html>' as never);
+    const { client } = makeClient();
+
+    // Intentamos inyectar metacaracteres de shell en la URL
+    const maliciousUrl = 'https://loa.sii.cl/X.cgi"; echo "hacked';
+    await client.get(maliciousUrl);
+
+    const args = mockExec.mock.calls[0][1] as string[];
+    // La URL completa (incluyendo los metacaracteres) debe estar en los argumentos,
+    // sin ser interpretada como comando. Verificamos que el último argumento
+    // sea la URL literal.
+    expect(args[args.length - 1]).toBe(maliciousUrl);
+  });
+
+  // Más patrones de inyección de shell que deben ser seguros
+  it('URL con backtick, $() y punto y coma son literales', async () => {
+    mockExec.mockReturnValue('<html>ok</html>' as never);
+    const { client } = makeClient();
+
+    const maliciousUrl = 'https://loa.sii.cl/X.cgi`whoami`$(cat /etc/passwd);';
+    await client.get(maliciousUrl);
+
+    const args = mockExec.mock.calls[0][1] as string[];
+    expect(args[args.length - 1]).toBe(maliciousUrl);
   });
 });
 
@@ -61,8 +91,10 @@ describe('SiiHttpClient.postForm', () => {
       cbmesinformemensual: '03',
     });
 
-    const cmd = String(mockExec.mock.calls[0][0]);
-    expect(cmd).toContain('-d "rut_arrastre=11111111&cbmesinformemensual=03"');
+    const args = mockExec.mock.calls[0][1] as string[];
+    expect(args).toContain('-d');
+    expect(args.some(arg => arg.includes('rut_arrastre=11111111'))).toBe(true);
+    expect(args.some(arg => arg.includes('cbmesinformemensual=03'))).toBe(true);
   });
 
   it('escapa los valores con caracteres especiales', async () => {
@@ -71,7 +103,7 @@ describe('SiiHttpClient.postForm', () => {
 
     await client.postForm('https://loa.sii.cl/cgi_IMT/Y.cgi', { glosa: 'a b&c' });
 
-    const cmd = String(mockExec.mock.calls[0][0]);
-    expect(cmd).toContain('glosa=a%20b%26c');
+    const args = mockExec.mock.calls[0][1] as string[];
+    expect(args.some(arg => arg.includes('glosa=a%20b%26c'))).toBe(true);
   });
 });
