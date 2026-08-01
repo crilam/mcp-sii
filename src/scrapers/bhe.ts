@@ -105,7 +105,16 @@ export class BheScraper {
 
   private toInt(text: string | undefined): number | null {
     if (!text) return null;
+    // El SII usa el punto como separador de miles (se descarta junto con el
+    // resto de caracteres no numéricos), pero el signo negativo se preserva
+    // aparte: si alguna vez llega un valor negativo (ej. una corrección),
+    // truncarlo a positivo corrompería el dato en silencio, sin lanzar ni
+    // registrar nada. La asimetría entre "quitar puntos" y "conservar signo"
+    // es deliberada.
+    const negativo = text.trim().startsWith('-');
     const digits = text.replace(/[^\d]/g, '');
-    return digits ? parseInt(digits, 10) : null;
+    if (!digits) return null;
+    const valor = parseInt(digits, 10);
+    return negativo ? -valor : valor;
   }
 }

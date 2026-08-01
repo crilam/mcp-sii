@@ -110,4 +110,57 @@ describe('BheScraper.informeAnual', () => {
     expect(session.authenticateOnly).toHaveBeenCalled();
     expect(session.getSession).not.toHaveBeenCalled();
   });
+
+  // No hay evidencia de que el SII emita montos negativos en este informe,
+  // pero si alguna vez ocurre (ej. una corrección), truncar el signo
+  // corrompería el dato en silencio. Se arma el HTML a mano porque las
+  // fixtures no deben tocarse y no representan este caso.
+  it('preserva el signo negativo de un monto', async () => {
+    const html = `<html><body><script>
+ xml_values['nombre_contribuyente'] = "JUAN PEREZ SOTO ";
+ xml_values['rut_arrastre'] = "11111111";
+ xml_values['dv_arrastre'] = "1";
+ xml_values['anio_consulta'] = "2025";
+ xml_values['ene1']= "-15000";
+ xml_values['ene2']= "0";
+ xml_values['ene3']= "0";
+ xml_values['ene4']= "101";
+ xml_values['ene5']= "101";
+ xml_values['ene6']= "1";
+ xml_values['ene7']= "";
+ xml_values['tot4']= "101";
+ xml_values['tot5']= "101";
+</script></body></html>`;
+    const { scraper } = makeScraper(html);
+
+    const informe = await scraper.informeAnual(2025);
+
+    expect(informe.meses[0].honorarioBruto).toBe(-15000);
+  });
+
+  // El punto SÍ debe seguir descartándose: el SII lo usa como separador de
+  // miles en varios módulos (ver src/scrapers/bienesRaices.ts, que depende de
+  // este mismo comportamiento para el avalúo fiscal).
+  it('sigue quitando el separador de miles de un monto positivo', async () => {
+    const html = `<html><body><script>
+ xml_values['nombre_contribuyente'] = "JUAN PEREZ SOTO ";
+ xml_values['rut_arrastre'] = "11111111";
+ xml_values['dv_arrastre'] = "1";
+ xml_values['anio_consulta'] = "2025";
+ xml_values['ene1']= "3.884.935";
+ xml_values['ene2']= "0";
+ xml_values['ene3']= "0";
+ xml_values['ene4']= "101";
+ xml_values['ene5']= "101";
+ xml_values['ene6']= "1";
+ xml_values['ene7']= "";
+ xml_values['tot4']= "101";
+ xml_values['tot5']= "101";
+</script></body></html>`;
+    const { scraper } = makeScraper(html);
+
+    const informe = await scraper.informeAnual(2025);
+
+    expect(informe.meses[0].honorarioBruto).toBe(3884935);
+  });
 });
