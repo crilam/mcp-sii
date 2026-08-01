@@ -16,6 +16,10 @@ export interface SiiSession {
 }
 
 const SII_MIPYME_URL = 'https://mipyme.sii.cl/';
+// mipyme.sii.cl solo sirve como `referencia` del CGI de autenticación: navegar a
+// esa raíz devuelve 404 (y sus subrutas, un rechazo del WAF). La selección de
+// empresa vive en el CGI del portal.
+const SII_SEL_EMPRESA_URL = 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi';
 const SII_LOGIN_URL = 'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html';
 const SII_CERT_CGI = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi';
 
@@ -86,6 +90,22 @@ export class SessionManager {
   ) {}
 
   async login(): Promise<SiiSession> {
+    await this.authenticate();
+    const session = await this.selectEmpresa();
+    this.session = session;
+    return session;
+  }
+
+  // Lista las empresas que la persona puede operar sin exigir que una esté
+  // seleccionada: es el paso previo a configurar SII_EMPRESA_RUT, así que no
+  // puede depender de getSession() (que falla justamente cuando hay varias).
+  async listEmpresasDisponibles(): Promise<Empresa[]> {
+    await this.authenticate();
+    this.browser.open(SII_SEL_EMPRESA_URL);
+    return this.parseEmpresas(this.browser.snapshot());
+  }
+
+  private async authenticate(): Promise<void> {
     if (this.config.strategy === AuthStrategy.Certificate) {
       await this.loginWithCert();
     } else {
@@ -93,10 +113,6 @@ export class SessionManager {
       const loginSnapshot = this.browser.snapshot();
       await this.fillClaveForm(loginSnapshot);
     }
-
-    const session = await this.selectEmpresa();
-    this.session = session;
-    return session;
   }
 
   async getSession(): Promise<SiiSession> {
@@ -189,7 +205,7 @@ export class SessionManager {
   }
 
   private async selectEmpresa(): Promise<SiiSession> {
-    this.browser.open(SII_MIPYME_URL);
+    this.browser.open(SII_SEL_EMPRESA_URL);
     const snapshot = this.browser.snapshot();
 
     const empresas = this.parseEmpresas(snapshot);

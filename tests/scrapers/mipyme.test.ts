@@ -42,10 +42,10 @@ describe('MipymeScraper.listEmpresas', () => {
   it('retorna lista de empresas con nombre y rut desde portal mipyme', async () => {
     const browser = new MockBrowser();
     const session = new MockSession({} as any, browser);
-    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMPRESA UNO SPA' });
-    (browser.snapshot as jest.Mock).mockReturnValue(
-      '- option "EMPRESA UNO SPA 11111111-1" [ref=e11]\n- option "EMPRESA DOS LTDA 22222222-2" [ref=e12]'
-    );
+    (session.listEmpresasDisponibles as jest.Mock).mockResolvedValue([
+      { rut: '11111111-1', nombre: 'EMPRESA UNO SPA' },
+      { rut: '22222222-2', nombre: 'EMPRESA DOS LTDA' },
+    ]);
 
     const scraper = new MipymeScraper(browser, session);
     const empresas = await scraper.listEmpresas();
@@ -55,11 +55,27 @@ describe('MipymeScraper.listEmpresas', () => {
     expect(empresas[1]).toEqual({ rut: '22222222-2', nombre: 'EMPRESA DOS LTDA' });
   });
 
-  it('retorna empresa de sesion si snapshot no tiene opciones', async () => {
+  it('no exige empresa seleccionada: no llama a getSession cuando hay empresas', async () => {
     const browser = new MockBrowser();
     const session = new MockSession({} as any, browser);
+    (session.listEmpresasDisponibles as jest.Mock).mockResolvedValue([
+      { rut: '11111111-1', nombre: 'EMPRESA UNO SPA' },
+      { rut: '22222222-2', nombre: 'EMPRESA DOS LTDA' },
+    ]);
+    (session.getSession as jest.Mock).mockRejectedValue(
+      new Error('Esta persona opera 2 empresas. Configura SII_EMPRESA_RUT')
+    );
+
+    const scraper = new MipymeScraper(browser, session);
+    await expect(scraper.listEmpresas()).resolves.toHaveLength(2);
+    expect(session.getSession).not.toHaveBeenCalled();
+  });
+
+  it('retorna empresa de sesion si el portal no lista opciones', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.listEmpresasDisponibles as jest.Mock).mockResolvedValue([]);
     (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: '11111111-1' });
-    (browser.snapshot as jest.Mock).mockReturnValue('sin opciones aqui');
 
     const scraper = new MipymeScraper(browser, session);
     const empresas = await scraper.listEmpresas();
