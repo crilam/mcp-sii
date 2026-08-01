@@ -34,6 +34,9 @@ const BIENES_RAICES_URL = 'https://www2.sii.cl/vica/Menu/BienesRaices';
 // La SPA rinde en ~3s; el primer snapshot vuelve prácticamente vacío.
 const READY_MARKERS = ['LISTADO DE BIENES RAÍCES', 'CONSULTAR MIS BIENES RAÍCES'];
 
+const ERROR_NO_CARGO =
+  'El portal de bienes raíces no terminó de cargar (puede estar en cola virtual del SII). Reintentá en unos minutos.';
+
 export class BienesRaicesScraper {
   constructor(
     private browser: Browser,
@@ -41,6 +44,19 @@ export class BienesRaicesScraper {
   ) {}
 
   async listBienesRaices(): Promise<BienesRaicesResult> {
+    try {
+      return await this.intentarListar();
+    } catch {
+      // La causa más común de que el portal no responda es una sesión del SII
+      // ya caducada. Sin invalidarla, la autenticación cacheada se sigue dando
+      // por buena y cada reintento repite el mismo fallo hasta reiniciar el
+      // proceso. Se reintenta una sola vez, con sesión nueva.
+      this.session.invalidate();
+      return this.intentarListar();
+    }
+  }
+
+  private async intentarListar(): Promise<BienesRaicesResult> {
     await this.session.authenticateOnly();
     this.browser.open(BIENES_RAICES_URL);
     this.browser.waitForAny(READY_MARKERS, 30_000);
@@ -50,15 +66,28 @@ export class BienesRaicesScraper {
     // que no rindió se parsea como cero propiedades, que es indistinguible de
     // no tener ninguna. El portal usa cola virtual (Queue-it) y a veces demora.
     if (!READY_MARKERS.some(m => snapshot.includes(m))) {
-      throw new Error(
-        'El portal de bienes raíces no terminó de cargar (puede estar en cola virtual del SII). Reintentá en unos minutos.'
-      );
+      throw new Error(ERROR_NO_CARGO);
     }
 
-    return {
-      resumen: this.parseResumen(snapshot),
-      propiedades: this.parsePropiedades(snapshot),
-    };
+    // Los marcadores solo prueban que rindió el encabezado, y la SPA lo pinta
+    // antes de que vuelva la consulta de datos. Lo que prueba que los datos
+    // llegaron es el tile del resumen: sin él, el "cero propiedades" que
+    // devolverían los parsers sería inventado.
+    const total = this.tileValue(snapshot, 'Total bienes');
+    if (total === undefined) {
+      throw new Error(ERROR_NO_CARGO);
+    }
+
+    const resumen = this.parseResumen(snapshot);
+    const propiedades = this.parsePropiedades(snapshot);
+
+    // Un total declarado sin filas que lo respalden significa que la tabla
+    // todavía no llegó. Cero y cero, en cambio, es una respuesta legítima.
+    if (resumen.totalBienesRaices > 0 && propiedades.length === 0) {
+      throw new Error(ERROR_NO_CARGO);
+    }
+
+    return { resumen, propiedades };
   }
 
   // Los tiles del encabezado son bloques de StaticText consecutivos: el título,

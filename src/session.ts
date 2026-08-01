@@ -90,7 +90,11 @@ function resolveOpensslBin(): string {
 
 export class SessionManager {
   private session: SiiSession | null = null;
-  private authenticated = false;
+  // Instante en que caduca la autenticación, o null si no hay ninguna vigente.
+  // Guardar un booleano no alcanza: el servidor MCP vive mucho más que la
+  // sesión del SII, y una marca que no caduca hace que las consultas salten el
+  // login, vayan a una página protegida y fallen igual en cada reintento.
+  private autenticadoHasta: number | null = null;
 
   constructor(
     private config: SiiConfig,
@@ -136,7 +140,7 @@ export class SessionManager {
   // cuántas puede tener abiertas un RUT a la vez (error 01.01.190.500.720.27).
   // Reautenticar en cada consulta las agota, así que se reusa mientras viva.
   private async authenticate(): Promise<void> {
-    if (this.authenticated) return;
+    if (this.autenticadoHasta !== null && Date.now() < this.autenticadoHasta) return;
 
     if (this.config.strategy === AuthStrategy.Certificate) {
       await this.loginWithCert();
@@ -146,18 +150,19 @@ export class SessionManager {
       await this.fillClaveForm(loginSnapshot);
     }
 
-    this.authenticated = true;
+    // La sesión dura lo mismo que la cookie `locexp` que el propio SII emite.
+    this.autenticadoHasta = Date.now() + LOCEXP_TTL_MS;
   }
 
   // Cierra la sesión en el SII. Sin esto las sesiones quedan abiertas del lado
   // del servicio hasta que expiran, y se acumulan hasta bloquear el acceso.
   async logout(): Promise<void> {
-    if (!this.authenticated) return;
+    if (this.autenticadoHasta === null) return;
 
     try {
       this.browser.open(SII_LOGOUT_URL);
     } finally {
-      this.authenticated = false;
+      this.autenticadoHasta = null;
       this.session = null;
     }
   }
@@ -173,7 +178,7 @@ export class SessionManager {
   // flag de autenticación también se limpia.
   invalidate(): void {
     this.session = null;
-    this.authenticated = false;
+    this.autenticadoHasta = null;
   }
 
   // Autentica con certificado digital vía curl (TLS mutual auth), luego inyecta
@@ -189,40 +194,47 @@ export class SessionManager {
     const keyPem = path.join(tmpDir, 'sii_key.pem');
     const cookiesFile = path.join(tmpDir, 'sii_cookies.txt');
 
-    // Extraer cert y clave privada del .pfx a PEM temporales (cifrado legacy RC2).
-    const openssl = resolveOpensslBin();
-    execSync(
-      `"${openssl}" pkcs12 -in "${certPath}" -out "${certPem}" -nokeys -legacy -passin pass:"${certPassword}"`,
-      { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'ignore', 'pipe'] }
-    );
-    execSync(
-      `"${openssl}" pkcs12 -in "${certPath}" -out "${keyPem}" -nocerts -nodes -legacy -passin pass:"${certPassword}"`,
-      { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'ignore', 'pipe'] }
-    );
+    // La clave privada se extrae con -nodes, o sea sin cifrar, a un directorio
+    // compartido. El `finally` no es decorativo: sin él, cualquier salida por
+    // excepción —certificado vencido, caída de red— deja material de clave
+    // reutilizable en disco, y justo en el camino de fallo.
+    let cookieMap: Record<string, string>;
+    try {
+      // Extraer cert y clave privada del .pfx a PEM temporales (cifrado legacy RC2).
+      const openssl = resolveOpensslBin();
+      execSync(
+        `"${openssl}" pkcs12 -in "${certPath}" -out "${certPem}" -nokeys -legacy -passin pass:"${certPassword}"`,
+        { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'ignore', 'pipe'] }
+      );
+      execSync(
+        `"${openssl}" pkcs12 -in "${certPath}" -out "${keyPem}" -nocerts -nodes -legacy -passin pass:"${certPassword}"`,
+        { encoding: 'utf-8', timeout: 10_000, stdio: ['ignore', 'ignore', 'pipe'] }
+      );
 
-    // El archivo de cookies persiste entre corridas. Mandar las de la sesión
-    // anterior con -b hace que el SII las cuente como sesiones acumuladas y
-    // responda "Usted ha superado el máximo de sesiones autenticadas"
-    // (01.01.190.500.720.27), bloqueando el acceso. Se autentica en limpio.
-    try { fs.unlinkSync(cookiesFile); } catch { /* no existía */ }
+      // El archivo de cookies persiste entre corridas. Mandar las de la sesión
+      // anterior con -b hace que el SII las cuente como sesiones acumuladas y
+      // responda "Usted ha superado el máximo de sesiones autenticadas"
+      // (01.01.190.500.720.27), bloqueando el acceso. Se autentica en limpio.
+      try { fs.unlinkSync(cookiesFile); } catch { /* no existía */ }
 
-    // TLS mutual auth → obtener cookies de sesión SII.
-    const salida = execSync(
-      `curl -sk --cert "${certPem}" --key "${keyPem}" ` +
-      `-c "${cookiesFile}" ` +
-      `-L --max-redirs 5 ` +
-      `-d "referencia=${SII_MIPYME_URL}" ` +
-      `"${SII_CERT_CGI}?${SII_MIPYME_URL}"`,
-      { encoding: 'utf-8', timeout: 30_000 }
-    );
+      // TLS mutual auth → obtener cookies de sesión SII.
+      const salida = execSync(
+        `curl -sk --cert "${certPem}" --key "${keyPem}" ` +
+        `-c "${cookiesFile}" ` +
+        `-L --max-redirs 5 ` +
+        `-d "referencia=${SII_MIPYME_URL}" ` +
+        `"${SII_CERT_CGI}?${SII_MIPYME_URL}"`,
+        { encoding: 'utf-8', timeout: 30_000 }
+      );
 
-    this.assertAutenticacionExitosa(salida);
+      this.assertAutenticacionExitosa(salida);
 
-    // Parsear cookies del archivo Netscape.
-    const cookieMap = this.parseCookieFile(cookiesFile);
-
-    // Limpiar temporales.
-    try { fs.unlinkSync(certPem); fs.unlinkSync(keyPem); } catch { /* ignore */ }
+      // Parsear cookies del archivo Netscape.
+      cookieMap = this.parseCookieFile(cookiesFile);
+    } finally {
+      try { fs.unlinkSync(certPem); } catch { /* no se alcanzó a crear */ }
+      try { fs.unlinkSync(keyPem); } catch { /* no se alcanzó a crear */ }
+    }
 
     // Inyectar cookies en Chrome: abrir www.sii.cl y setear via document.cookie.
     this.browser.open('https://www.sii.cl');

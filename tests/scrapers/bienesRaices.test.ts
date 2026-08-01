@@ -181,4 +181,51 @@ describe('BienesRaicesScraper.listBienesRaices', () => {
       expect.any(Number)
     );
   });
+
+  // El encabezado se pinta antes de que vuelva la consulta de datos. Si alcanza
+  // para dar la página por lista, el resultado es un resumen en cero y una
+  // lista vacía: indistinguible de alguien que no tiene propiedades.
+  it('falla si el encabezado rindió pero los tiles del resumen no', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.authenticateOnly as jest.Mock).mockResolvedValue(undefined);
+    (browser.snapshot as jest.Mock).mockReturnValue(
+      '- heading "CONSULTAR MIS BIENES RAÍCES" [level=1, ref=e3]\n- generic'
+    );
+
+    const scraper = new BienesRaicesScraper(browser, session);
+
+    await expect(scraper.listBienesRaices()).rejects.toThrow(/no terminó de cargar/);
+  });
+
+  it('falla si el resumen declara propiedades pero la tabla vino vacía', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.authenticateOnly as jest.Mock).mockResolvedValue(undefined);
+    // Tiles cargados —el total dice 3— pero la tabla todavía sin filas.
+    const sinFilas = snapshot.split('- heading "LISTADO DE BIENES RAÍCES"')[0] +
+      '- heading "LISTADO DE BIENES RAÍCES" [level=1, ref=e4]\n      - table';
+    (browser.snapshot as jest.Mock).mockReturnValue(sinFilas);
+
+    const scraper = new BienesRaicesScraper(browser, session);
+
+    await expect(scraper.listBienesRaices()).rejects.toThrow(/no terminó de cargar/);
+  });
+
+  it('acepta un listado vacío cuando el resumen también declara cero', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.authenticateOnly as jest.Mock).mockResolvedValue(undefined);
+    const sinPropiedades = snapshot
+      .replace('- StaticText "3"', '- StaticText "0"')
+      .split('- heading "LISTADO DE BIENES RAÍCES"')[0] +
+      '- heading "LISTADO DE BIENES RAÍCES" [level=1, ref=e4]\n      - table';
+    (browser.snapshot as jest.Mock).mockReturnValue(sinPropiedades);
+
+    const scraper = new BienesRaicesScraper(browser, session);
+    const result = await scraper.listBienesRaices();
+
+    expect(result.resumen.totalBienesRaices).toBe(0);
+    expect(result.propiedades).toHaveLength(0);
+  });
 });
