@@ -56,6 +56,10 @@ const OPENSSL_CANDIDATES = [
   'openssl',
 ];
 
+// Ruta del cookie jar en formato Netscape que curl genera y que el cliente HTTP
+// puede consumir con -b para reusar la sesión sin autenticar por su cuenta.
+const COOKIE_JAR = path.join(os.tmpdir(), 'sii_cookies.txt');
+
 let opensslBin: string | null = null;
 
 function resolveOpensslBin(): string {
@@ -181,6 +185,23 @@ export class SessionManager {
     this.autenticadoHasta = null;
   }
 
+  // El cliente HTTP necesita las cookies, pero no debe autenticar por su
+  // cuenta: dos sesiones simultáneas contra el mismo RUT disparan el bloqueo
+  // del SII. La sesión la administra sólo esta clase.
+  async rutaCookieJar(): Promise<string> {
+    await this.authenticate();
+    return COOKIE_JAR;
+  }
+
+  // Los CGI de BHE esperan el RUT partido en cuerpo y dígito verificador.
+  // SII_RUT viene como "11111111-4"; sin guión, el DV es el último carácter.
+  identidad(): { rut: string; dv: string } {
+    const [rut, dv] = this.config.rut.includes('-')
+      ? this.config.rut.split('-')
+      : [this.config.rut.slice(0, -1), this.config.rut.slice(-1)];
+    return { rut, dv: dv.toUpperCase() };
+  }
+
   // Autentica con certificado digital vía curl (TLS mutual auth), luego inyecta
   // las cookies de sesión en agent-browser navegando a un dominio .sii.cl.
   private async loginWithCert(): Promise<void> {
@@ -192,7 +213,7 @@ export class SessionManager {
     const tmpDir = os.tmpdir();
     const certPem = path.join(tmpDir, 'sii_cert.pem');
     const keyPem = path.join(tmpDir, 'sii_key.pem');
-    const cookiesFile = path.join(tmpDir, 'sii_cookies.txt');
+    const cookiesFile = COOKIE_JAR;
 
     // La clave privada se extrae con -nodes, o sea sin cifrar, a un directorio
     // compartido. El `finally` no es decorativo: sin él, cualquier salida por
