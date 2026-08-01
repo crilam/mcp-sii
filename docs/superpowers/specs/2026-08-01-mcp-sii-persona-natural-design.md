@@ -91,39 +91,88 @@ La Fase 0 es una spike: no entrega tools, reduce incertidumbre. De la 1 a la 5, 
 
 El orden de la 1 a la 5 refleja valor para persona natural, no confianza técnica. Son casi inversos: la Fase 5 es la mejor verificada y la más barata, la Fase 1 la de mayor valor y mayor incertidumbre. Por eso existe la Fase 0 — y por eso, si la spike falla, el orden se reordena en favor de lo verificado.
 
-### Fase 0 — Spike de descubrimiento de BHE
+### Fase 0 — Spike de descubrimiento de BHE — **EJECUTADA, resultado positivo**
 
-**Precede a todo lo demás y no entrega tools.** Su único objetivo es eliminar la incertidumbre más cara del plan antes de comprometerse con el orden de fases.
+Precedió a todo lo demás y no entregó tools. Su objetivo era eliminar la incertidumbre más cara del plan antes de comprometerse con el orden de fases.
 
-El recorrido confirmó que el menú de BHE carga autenticado y que el SII inyecta `rut_arrastre` server-side. Pero no se identificó el CGI que ejecuta la consulta: `TMBCOC_ConsultasContrib.js` (18 KB) no contiene ninguna referencia a `.cgi`, así que el destino se arma en otro lado. Del flujo de emisión no se verificó nada.
+**Criterio de salida: cumplido.** Se ejecutó una consulta de BHE emitidas por HTTP directo y devolvió datos reales. La Fase 1 procede como estaba planificada y el orden de fases no cambia.
 
-La spike debe responder tres preguntas, en este orden:
+#### 1. CGI de consulta — resuelto
 
-1. **¿Cuál es el CGI de consulta y qué parámetros recibe?** Interceptar el POST real del formulario de informes.
-2. **¿La emisión tiene un paso de validación separado del de emisión?** De esto depende que el guardrail de dry-run sea implementable. `TMBECN_ValidaTimbrajeContrib.cgi` sugiere que sí, pero el nombre no es evidencia.
-3. **¿El flujo de emisión mantiene estado server-side entre pasos?** Si lo hace, el cliente HTTP debe preservar el orden y los tokens intermedios.
+Los destinos están en `presionaBoton()` de `TMBCOC_ConsultasContrib.js`:
 
-Se resuelve observando el tráfico del portal con `agent-browser` durante una consulta real —no emitiendo nada— y capturando fixtures en el paso.
+| Informe | CGI | Método | Parámetros |
+|---|---|---|---|
+| Anual emitidas | `TMBCOC_InformeAnualBhe.cgi` | GET | `rut_arrastre`, `dv_arrastre`, `cbanoinformeanual` |
+| Mensual emitidas | `TMBCOC_InformeMensualBhe.cgi` | POST | + `cbmesinformemensual`, `cbanoinformemensual` |
+| Diario emitidas | `TMBCOC_InformeDiarioBhe.cgi` | POST | + `cbdiainformediario`, `cbmes...`, `cbano...` |
+| Recibidas | mismos con sufijo `Rec` | | |
+| Anulación | `TMBCOC_AnulaBhe.cgi` | POST | |
 
-**Criterio de salida:** una consulta de BHE emitidas ejecutada por HTTP directo, devolviendo datos. Si la spike muestra que la emisión es un POST atómico sin validación previa, se aplica el fallback documentado en Guardrails.
+Base: `https://loa.sii.cl/cgi_IMT/`.
 
-**Si la spike falla**, el orden de fases cambia: la Fase 2 (renta F22, la única ya verificada de punta a punta) pasa al frente y BHE se reevalúa. Comprometerse con BHE primero sin esta spike es una apuesta sobre el módulo menos explorado del plan.
+**Los datos no están en el HTML.** El CGI devuelve una tabla vacía y escribe los valores en variables JavaScript `xml_values['<mes><columna>']`, que el navegador renderiza con `document.write`. El parser debe extraerlas con expresión regular sobre el fuente, no recorrer el DOM. Es el mismo patrón que ya usa el menú.
+
+Esquema de columnas del informe anual, decodificado contra datos reales:
+
+| Sufijo | Campo |
+|---|---|
+| 1 | honorario bruto |
+| 2 | retención de terceros |
+| 3 | retención del contribuyente |
+| 4 / 5 | folio inicial / final del mes |
+| 6 | emisiones vigentes |
+| 7 | anuladas |
+
+La verificación cruzada confirma la lectura: columna 2 sobre columna 1 da 14,5 %, la tasa de retención vigente. Los totales vienen aparte como `tot4` y `tot5`.
+
+#### 2. Validación separada de la emisión — resuelto, y a favor del diseño
+
+**Sí existe.** El flujo tiene cinco pasos, y `validar` y `confirmar` son acciones distintas con CGI distinto:
+
+1. `TMBECN_ValidaTimbrajeContrib.cgi` — elegir tipo de retención
+2. `TMBECN_PresentaDatosBoleta.cgi` — formulario de datos
+3. `TMBECN_ConfirmaTimbrajeContrib.cgi` — **previsualización; no emite**
+4. `TMBECN_BoletaHonorariosElectronica.cgi` — **emite**
+5. `TMBECN_PresentaDatosEnvio.cgi` / `TMBECN_EnviarBoleta.cgi` — envío al receptor, posterior
+
+El dry-run se implementa deteniéndose en el paso 3. **El fallback documentado en Guardrails no se necesita**, aunque se conserva por si el SII cambia el flujo.
+
+El paso 5 es relevante para el diseño de la tool: emitir y notificar al receptor son operaciones separadas en el SII.
+
+#### 3. Estado server-side — resuelto
+
+**No hay sesión de wizard.** El estado viaja en campos ocultos del formulario que cada paso reenvía: `rut_arrastre`, `dv_arrastre`, `sin_destinatario`, `OptTipoRetencion`, `hdn_glosa_actividad` y la fecha. Fuera de las cookies de autenticación, los pasos son independientes, así que el cliente HTTP solo debe propagar los campos, sin mantener estado propio.
+
+El paso 2 inyecta además un `tiempo` (timestamp Unix). No se determinó si es anti-replay; el implementador debe propagarlo tal cual y no regenerarlo.
+
+Beneficio lateral: el paso 2 devuelve el último documento emitido —folio y fecha— sin costo adicional. Sirve para validar el dry-run contra el correlativo real.
+
+#### Corrección a este spec
+
+La versión anterior afirmaba que `TMBCOC_ConsultasContrib.js` no contenía ninguna referencia a `.cgi`. **Era falso.** Contiene doce, y de ahí salió la tabla de arriba.
+
+El error fue de herramienta: el archivo está en ISO-8859-1, `grep` lo clasificó como binario y devolvió vacío sin advertirlo. `grep -a` sobre el mismo archivo encuentra las doce.
+
+Vale registrarlo porque no es anecdótico: el encoding ISO-8859-1 ya estaba señalado como riesgo de *parsing*, y resultó ser también un riesgo de *investigación*. Cualquier herramienta que trate estos archivos como UTF-8 puede fallar en silencio, y un falso negativo silencioso es peor que un error. Se aplica a los scrapers y a quien explore el portal.
 
 ### Fase 1 — Boletas de honorarios electrónicas
 
 El hueco más grande para persona natural. Módulo antiguo: CGIs en `https://loa.sii.cl/cgi_IMT/` con formularios POST y respuesta HTML.
 
-Los endpoints de la tabla son las **pantallas de menú** verificadas, no los CGI de consulta: esos los determina la Fase 0. La fase no puede planificarse en detalle antes de que la spike cierre.
+La Fase 0 resolvió los CGI y sus contratos, así que esta fase ya no tiene incógnitas de descubrimiento salvo en la anulación.
 
-| Tool | Descripción | Pantalla | Estado |
+| Tool | Descripción | CGI | Estado |
 |---|---|---|---|
-| `sii_bhe_list_emitidas` | Boletas emitidas en un rango de fechas | `TMBCOC_MenuConsultasContrib.cgi` | por descubrir |
-| `sii_bhe_list_recibidas` | Boletas recibidas | `TMBCOC_MenuConsultasContribRec.cgi` | por descubrir |
-| `sii_bhe_resumen` | Informe anual, mensual o diario | mismo formulario, modo según período | por descubrir |
-| `sii_bhe_emitir` | Emite una BHE | `TMBECN_ValidaTimbrajeContrib.cgi?modo=1` | por descubrir |
-| `sii_bhe_anular` | Anula una BHE emitida | `TMBANU_PrevalidaAnulacion.cgi` | por descubrir |
+| `sii_bhe_resumen` | Informe anual, mensual o diario de emitidas | `TMBCOC_Informe{Anual,Mensual,Diario}Bhe.cgi` | verificado |
+| `sii_bhe_list_emitidas` | Boletas emitidas en un rango | detalle mensual del informe | inferido |
+| `sii_bhe_list_recibidas` | Boletas recibidas | mismos CGI con sufijo `Rec` | inferido |
+| `sii_bhe_emitir` | Emite una BHE (dry-run en paso 3 de 5) | `TMBECN_*`, cadena de 5 pasos | inferido |
+| `sii_bhe_anular` | Anula una BHE emitida | `TMBCOC_AnulaBhe.cgi` | por descubrir |
 
-Lo verificado: las cinco pantallas responden autenticadas, y la de informes expone selectores de año, mes y día con el RUT ya inyectado por el servidor. Nada más.
+`sii_bhe_resumen` está verificada de punta a punta: consulta ejecutada por HTTP, datos reales devueltos, esquema de columnas decodificado.
+
+Las tres "inferidas" tienen el CGI y el contrato identificados desde el código del portal, pero no se ejecutaron: las de listado porque el detalle mensual se abre desde el informe, y la de emisión porque avanzar más habría implicado datos de un receptor real. `sii_bhe_anular` es la única sin explorar, y opera sobre documentos existentes, así que su descubrimiento debe hacerse con el mismo cuidado que la emisión.
 
 Las boletas de terceros (BTE) viven en `https://zeus.sii.cl/cvc_cgi/bte/` (`bte_indiv_cons?1` emitidas, `?2` recibidas). Quedan fuera de esta fase: son un flujo distinto y de menor uso para persona natural.
 
@@ -202,7 +251,7 @@ La anulación de BHE tiene además efecto sobre el receptor, que puede confirmar
 
 ### Si el SII no permite validar sin emitir
 
-El diseño anterior asume que existe un paso de validación separado del de emisión. Eso **no está verificado**: lo resuelve la Fase 0. Si resulta que emisión y validación son un único POST atómico, se aplica este fallback, en orden de preferencia:
+La Fase 0 **verificó que ese paso existe**, así que el diseño de arriba procede. Este fallback queda como contingencia por si el SII cambia el flujo. Si resulta que emisión y validación son un único POST atómico, se aplica este fallback, en orden de preferencia:
 
 1. **Validación local más consulta de solo lectura.** El dry-run valida lo verificable sin escribir —RUT y DV del receptor, montos, cálculo de retención, formato— y consulta el timbraje disponible con una llamada de lectura. Devuelve el preview advirtiendo explícitamente que la validación es parcial y que el SII puede rechazar la emisión.
 2. **Si ni siquiera eso es posible**, `sii_bhe_emitir` no se entrega en la Fase 1 y se documenta por qué. El alcance de lectura se entrega igual.
@@ -240,11 +289,11 @@ Compartir `src/auth/certificado.ts` no garantiza compartir la *sesión*. Si `Sii
 
 **Mitigación, y es requisito de diseño, no una recomendación:** existe **una sola sesión por proceso**, con un único cookie jar, del que ambos transportes leen y al que ambos escriben. `SessionManager` es su dueño. El cliente HTTP obtiene las cookies de ahí, y la inyección al navegador (`document.cookie`) parte del mismo origen. Un test debe verificar que autenticar por ambos caminos produce una sola autenticación.
 
-### 3. El dry-run puede no ser implementable
+### 3. El dry-run puede no ser implementable — **descartado**
 
 **Supuesto en riesgo:** que el SII permita validar una BHE sin emitirla.
 
-Sin verificar. Lo resuelve la Fase 0, y el fallback está en Guardrails.
+Resuelto por la Fase 0: el flujo separa `validar` (paso 3, previsualiza) de `confirmar` (paso 4, emite). El dry-run se implementa deteniéndose en el paso 3. El fallback de Guardrails queda como contingencia, no como plan.
 
 ### 4. Los contratos REST no están documentados
 
