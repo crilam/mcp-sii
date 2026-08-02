@@ -1,0 +1,51 @@
+# Sin CI, el chequeo de anonimización sólo corre si alguien se acuerda de
+# ejecutarlo antes de publicar — y este repositorio es público, así que ese
+# chequeo es lo único que separa un dato personal de quedar publicado. Corre en
+# cada push y cada pull request.
+#
+# Los tests no usan credenciales ni red: todo va contra fixtures y mocks. Lo
+# único que necesitan del sistema es `openssl` (tests/validateCert.test.ts
+# genera un certificado de prueba), que ubuntu-latest ya trae en 3.x.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Las dos puntas del rango que declara `engines` en package.json: la LTS
+        # (24) y la versión sobre la que se desarrolla hoy (26). Validar una
+        # sola dejaba un hueco en las dos direcciones: algo que se rompe sólo en
+        # 26 pasaría el CI en verde, y un uso que 26 tolera y 24 no aparecería
+        # recién al publicar.
+        node: ['24', '26']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # El chequeo de anonimización enumera con `git ls-files`, así que necesita
+      # el repositorio completo, no un árbol exportado.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tipos
+        run: npx tsc --noEmit
+
+      # Incluye tests/anonimizacion.test.ts, el chequeo que evita publicar RUT,
+      # correos e IP reales en un repositorio público.
+      - name: Tests (incluye el chequeo de anonimización)
+        run: npx jest
+
+      - name: Build
+        run: npm run build

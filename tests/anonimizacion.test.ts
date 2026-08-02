@@ -1,7 +1,13 @@
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { extraerRutsSospechosos, esRutaExcluida } from './anonimizacion';
+import {
+  extraerRutsSospechosos,
+  extraerCorreosSospechosos,
+  extraerIpsSospechosas,
+  extraerDatosPersonales,
+  esRutaExcluida,
+} from './anonimizacion';
 
 // Las respuestas del SII traen RUT, nombres y montos reales. El repositorio es
 // público, así que un RUT real filtrado es una filtración — y no sólo en las
@@ -37,10 +43,10 @@ describe('anonimización de los archivos versionados', () => {
 
   // Las respuestas del SII vienen en ISO-8859-1; latin1 lee cualquier byte sin
   // fallar, así que sirve para todo el árbol.
-  it.each(archivos)('%s no contiene RUT reales', (relativa) => {
+  it.each(archivos)('%s no contiene datos personales', (relativa) => {
     const contenido = fs.readFileSync(path.join(RAIZ, relativa), 'latin1');
 
-    expect(extraerRutsSospechosos(contenido)).toEqual([]);
+    expect(extraerDatosPersonales(contenido)).toEqual([]);
   });
 });
 
@@ -91,5 +97,73 @@ describe('extraerRutsSospechosos', () => {
     `;
 
     expect(extraerRutsSospechosos(contenido)).toEqual([]);
+  });
+});
+
+// La fixture de renta que motivó ampliar el chequeo traía correo del
+// contribuyente e IP de presentación: ninguno es un RUT, y por eso pasó.
+describe('extraerCorreosSospechosos', () => {
+  it('detecta un correo de dominio real', () => {
+    const contenido = `xml_values['email'] = "juan.perez@gmail.com";`;
+
+    expect(extraerCorreosSospechosos(contenido)).toContain('juan.perez@gmail.com');
+  });
+
+  it('acepta los dominios de ejemplo que usan las fixtures', () => {
+    const contenido = `
+      contribuyente@ejemplo.cl
+      receptor@ejemplo.cl
+      alguien@example.com
+      qa@test.cl
+    `;
+
+    expect(extraerCorreosSospechosos(contenido)).toEqual([]);
+  });
+});
+
+describe('extraerIpsSospechosas', () => {
+  it('detecta una IP pública', () => {
+    const contenido = `xml_values['ip_presentacion'] = "8.8.4.4";`;
+
+    expect(extraerIpsSospechosas(contenido)).toContain('8.8.4.4');
+  });
+
+  it('acepta IP privadas y de documentación', () => {
+    const contenido = `
+      192.168.1.10
+      10.0.0.5
+      172.16.3.4
+      127.0.0.1
+      203.0.113.10
+      198.51.100.7
+      192.0.2.44
+    `;
+
+    expect(extraerIpsSospechosas(contenido)).toEqual([]);
+  });
+
+  // El código de error de sesiones del SII y los números de versión aparecen
+  // por todo el repositorio: si los marcara, el chequeo terminaría apagado.
+  it('no marca códigos de error ni versiones como IP', () => {
+    const contenido = `
+      Error 01.01.190.500.720.27 del SII
+      "@types/node": "^25.8.0"
+    `;
+
+    expect(extraerIpsSospechosas(contenido)).toEqual([]);
+  });
+});
+
+describe('extraerDatosPersonales', () => {
+  it('agrega los hallazgos de todos los detectores', () => {
+    const contenido = `
+      const rut = "98765432-1";
+      const correo = "juan.perez@gmail.com";
+      const ip = "8.8.4.4";
+    `;
+
+    expect(extraerDatosPersonales(contenido)).toEqual(
+      expect.arrayContaining(['98765432-1', 'juan.perez@gmail.com', '8.8.4.4'])
+    );
   });
 });

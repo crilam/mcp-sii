@@ -12,6 +12,9 @@
     "test:watch": "jest --watch"
   },
   "type": "commonjs",
+  "engines": {
+    "node": ">=24 <27"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^17.4.2",

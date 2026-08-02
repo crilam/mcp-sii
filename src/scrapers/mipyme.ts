@@ -123,6 +123,12 @@ export class MipymeScraper {
   ) {}
 
   async listEmpresas(): Promise<Empresa[]> {
+    // También navega el mismo navegador compartido (la página de selección de
+    // empresa), así que va dentro de la misma cola que el resto.
+    return this.session.conEmpresaExclusiva(() => this.listEmpresasInterno());
+  }
+
+  private async listEmpresasInterno(): Promise<Empresa[]> {
     const empresas = await this.session.listEmpresasDisponibles();
     if (empresas.length === 0) {
       // listEmpresasDisponibles() y getSession()/selectEmpresa() parsean el
@@ -319,7 +325,16 @@ export class MipymeScraper {
     });
   }
 
+  // Toda operación del portal pasa por acá, así que es el único lugar donde
+  // hace falta tomar la exclusión: cubre el ciclo entero (seleccionar empresa
+  // → navegar → leer) y también el reintento por sesión expirada, que vuelve a
+  // seleccionar. Envolver sólo ensureEmpresa dejaría las lecturas fuera de la
+  // sección crítica, que es exactamente el bug.
   private async withReauth<T>(fn: () => Promise<T>): Promise<T> {
+    return this.session.conEmpresaExclusiva(() => this.intentarConReauth(fn));
+  }
+
+  private async intentarConReauth<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
     } catch (err: unknown) {
