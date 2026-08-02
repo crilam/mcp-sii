@@ -1,0 +1,21 @@
+{
+ "data": null,
+ "totDocRes": null,
+ "tieneEmisorAgresivo": false,
+ "pDB": false,
+ "verF29": false,
+ "dataCabecera": null,
+ "metaData": {
+  "conversationId": "TOKEN-DE-PRUEBA",
+  "transactionId": "t-1",
+  "namespace": "cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService/getResumen",
+  "info": null,
+  "errors": null,
+  "page": null
+ },
+ "respEstado": {
+  "codRespuesta": 99,
+  "msgeRespuesta": "Periodo consultado no válido, debe ser mayor igual a 201705",
+  "codError": null
+ }
+}

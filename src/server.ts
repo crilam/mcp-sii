@@ -5,10 +5,14 @@ import { SiiHttpClient } from './http';
 import { MipymeScraper } from './scrapers/mipyme';
 import { BienesRaicesScraper } from './scrapers/bienesRaices';
 import { BheScraper } from './scrapers/bhe';
+import { RentaScraper } from './scrapers/renta';
+import { RcvScraper } from './scrapers/rcv';
 import { registerMipymeTools } from './tools/mipyme';
 import { registerDteTools } from './tools/dte';
 import { registerBienesRaicesTools, registerSesionTools } from './tools/bienesRaices';
 import { registerBheTools } from './tools/bhe';
+import { registerRentaTools } from './tools/renta';
+import { registerRcvTools } from './tools/rcv';
 import { getConfig } from './env';
 
 export function createServer(): McpServer {
@@ -21,6 +25,8 @@ export function createServer(): McpServer {
   // dos sesiones simultáneas contra el mismo RUT disparan el bloqueo del SII.
   const http = new SiiHttpClient(session);
   const bheScraper = new BheScraper(http, session);
+  const rentaScraper = new RentaScraper(http, session);
+  const rcvScraper = new RcvScraper(http, session);
 
   const server = new McpServer({
     name: 'mcp-sii',
@@ -32,6 +38,8 @@ export function createServer(): McpServer {
   registerBienesRaicesTools(server, bienesRaicesScraper);
   registerSesionTools(server, session);
   registerBheTools(server, bheScraper);
+  registerRentaTools(server, rentaScraper);
+  registerRcvTools(server, rcvScraper);
 
   return server;
 }

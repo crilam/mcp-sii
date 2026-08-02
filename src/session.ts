@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Browser } from './browser';
 import { AuthStrategy, SiiConfig } from './env';
+import { partirRut } from './rut';
 
 export interface Empresa {
   rut: string;
@@ -224,6 +225,26 @@ export class SessionManager {
     return COOKIE_JAR;
   }
 
+  // El `conversationId` que exigen las APIs modernas del portal (el sobre SDI)
+  // es el valor de la cookie TOKEN. Vive acá, y no en el cliente HTTP, porque
+  // el dueño del cookie jar es esta clase: si el transporte leyera el archivo
+  // por su cuenta habría dos lugares que saben dónde está y con qué formato.
+  //
+  // Falla explícito cuando la cookie no está: mandar el sobre con un
+  // conversationId vacío devuelve "Acceso no autorizado!", un mensaje que
+  // manda a revisar permisos cuando el problema es que no hay sesión.
+  conversationId(): string {
+    const token = this.parseCookieFile(COOKIE_JAR)['TOKEN'];
+    if (!token) {
+      throw new Error(
+        'No se encontró la cookie TOKEN de la sesión del SII, necesaria para consultar ' +
+        'las APIs del portal. Autenticá con certificado digital (SII_CERT_PATH y ' +
+        'SII_CERT_PASSWORD) antes de consultar.'
+      );
+    }
+    return token;
+  }
+
   // Se expone aparte de `rutaCookieJar` para que quien vaya a consultar por HTTP
   // pueda descartar el caso imposible ANTES de autenticar. Verificarlo recién en
   // `rutaCookieJar` llega tarde: para entonces el scraper ya llamó a
@@ -250,13 +271,13 @@ export class SessionManager {
     }
   }
 
-  // Los CGI de BHE esperan el RUT partido en cuerpo y dígito verificador.
-  // SII_RUT viene como "11111111-1"; sin guión, el DV es el último carácter.
+  // Los CGI de BHE y las APIs del portal esperan el RUT partido en cuerpo y
+  // dígito verificador. SII_RUT viene como "11111111-1"; sin guión, el DV es el
+  // último carácter. La partición vive en `src/rut.ts` porque la comparten esta
+  // clase y el scraper del RCV (que parte el RUT de la empresa consultada): dos
+  // copias divergieron una vez en si validaban o no el resultado.
   identidad(): { rut: string; dv: string } {
-    const [rut, dv] = this.config.rut.includes('-')
-      ? this.config.rut.split('-')
-      : [this.config.rut.slice(0, -1), this.config.rut.slice(-1)];
-    return { rut, dv: dv.toUpperCase() };
+    return partirRut(this.config.rut, 'SII_RUT');
   }
 
   // Autentica con certificado digital vía curl (TLS mutual auth), luego inyecta

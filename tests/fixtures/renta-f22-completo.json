@@ -1,0 +1,394 @@
+{
+ "data": [
+  {
+   "codigo": 1,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Primer Apellido/ Razón Social"
+  },
+  {
+   "codigo": 2,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Segundo Apellido "
+  },
+  {
+   "codigo": 3,
+   "valor": "1000000",
+   "glosa": "Rol Único Tributario"
+  },
+  {
+   "codigo": 5,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Nombres"
+  },
+  {
+   "codigo": 6,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Calle (Domicilio Renta)"
+  },
+  {
+   "codigo": 7,
+   "valor": "1000000",
+   "glosa": "Folio de la Declaración"
+  },
+  {
+   "codigo": 8,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Comuna Domicilio Renta"
+  },
+  {
+   "codigo": 13,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Actividad, Profesión O Giro Negocio"
+  },
+  {
+   "codigo": 14,
+   "valor": "1000",
+   "glosa": "Código Actividad Económica"
+  },
+  {
+   "codigo": 15,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Fecha Vencimiento Declaración"
+  },
+  {
+   "codigo": 31,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "IMPUESTO GLOBAL COMPLEMENTARIO O IUSC, TASA ADICIONAL Y/O DEBITO FISCAL DETERMINADO"
+  },
+  {
+   "codigo": 39,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Reajuste art.72 LIR, código 305  %"
+  },
+  {
+   "codigo": 53,
+   "valor": "13",
+   "glosa": "Región"
+  },
+  {
+   "codigo": 55,
+   "valor": "contribuyente@ejemplo.cl",
+   "glosa": "Correo Electrónico"
+  },
+  {
+   "codigo": 90,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Impuesto Adeudado"
+  },
+  {
+   "codigo": 91,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "TOTAL A PAGAR (códigos 90 y 39)"
+  },
+  {
+   "codigo": 105,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Dividendos afectos al IGC o IA, según art.14 letras A) y/o D) N° 3 LIR"
+  },
+  {
+   "codigo": 110,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Rentas percibidas de los arts. 42 Nº 2 (honorarios) y 48 (rem. directores S.A.) LIR, según Recuadro N° 1"
+  },
+  {
+   "codigo": 155,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Rentas de capitales mobiliarios (art. 20 N° 2 LIR), mayor valor en la enajenación o rescate de cuotas fondos mutuos y fondos de inversión y enajenación de acciones y derechos sociales (art. 17 N° 8 LIR) y retiros de ELD (arts. 42 ter y quáter LIR)"
+  },
+  {
+   "codigo": 157,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "IGC o IUSC, según tabla (arts. 47, 52 o 52 bis LIR)"
+  },
+  {
+   "codigo": 158,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "SUB TOTAL (Si declara IA trasladar a código 133 o  32)"
+  },
+  {
+   "codigo": 159,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Incremento por IDPC, según arts. 54 N° 1 y 62 LIR"
+  },
+  {
+   "codigo": 161,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Rta Art 42 Nro 1"
+  },
+  {
+   "codigo": 162,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Crédito al IGC o IUSC por IUSC, según art. 56 N° 2 LIR"
+  },
+  {
+   "codigo": 170,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "BASE IMPONIBLE ANUAL DE IUSC o IGC (registre solo si diferencia es positiva)"
+  },
+  {
+   "codigo": 198,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Retenciones por rentas declaradas en código 110 (Recuadro N°1)"
+  },
+  {
+   "codigo": 304,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "IGC O IUSC, DÉBITO FISCAL Y/O TASA ADICIONAL DETERMINADO"
+  },
+  {
+   "codigo": 305,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "RESULTADO LIQUIDACIÓN ANUAL IMPUESTO A LA RENTA   (si el resultado es negativo o cero, deberá declarar por Internet)"
+  },
+  {
+   "codigo": 312,
+   "valor": "782",
+   "glosa": "Cod. Sii de Certificación de Software"
+  },
+  {
+   "codigo": 315,
+   "valor": "01/04/2025",
+   "glosa": "Fecha Presentación"
+  },
+  {
+   "codigo": 461,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Honorarios Anuales Con Retención"
+  },
+  {
+   "codigo": 467,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Total Honorarios"
+  },
+  {
+   "codigo": 479,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Total Remuneraciones Directores S.A."
+  },
+  {
+   "codigo": 491,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Impuesto retenido de Total Remuneraciones Directores S.A."
+  },
+  {
+   "codigo": 492,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Impuesto Retenido de Honorarios Anuales Con Retención."
+  },
+  {
+   "codigo": 494,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Gastos presuntos: 30% sobre el código 547, con tope de 15 UTA"
+  },
+  {
+   "codigo": 547,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Total Ingresos Brutos"
+  },
+  {
+   "codigo": 608,
+   "valor": "835",
+   "glosa": "Crédito al IGC por IDPC sin derecho a devolución, según arts. 20 N° 1 letra a), 41 A N° 4 letra A) letra a) y 56 N° 3 LIR"
+  },
+  {
+   "codigo": 610,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Crédito al IGC o IUSC por IPDC con derecho a devolución, según art. 56 N° 3 LIR"
+  },
+  {
+   "codigo": 618,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Total Rentas y Retenciones"
+  },
+  {
+   "codigo": 619,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Impuesto Retenido del Total Rentas y Retenciones."
+  },
+  {
+   "codigo": 645,
+   "valor": "0",
+   "glosa": "CPT positivo final"
+  },
+  {
+   "codigo": 646,
+   "valor": "0",
+   "glosa": "CPT negativo final"
+  },
+  {
+   "codigo": 746,
+   "valor": "78",
+   "glosa": "Crédito al IGC por impuestos soportados en el exterior, según arts. 41 A N° 4 letra A) letra b) LIR"
+  },
+  {
+   "codigo": 748,
+   "valor": "78",
+   "glosa": "Incremento por impuestos soportados en el exterior, según art. 41 A LIR"
+  },
+  {
+   "codigo": 749,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Rebajas Por Incremento Impto de Primera Categoría y/o Impuesto  Exterior"
+  },
+  {
+   "codigo": 765,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Ahorro previsional, según art. 42 bis inc. 1° LIR"
+  },
+  {
+   "codigo": 955,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Otras rentas propias y/o de terceros, provenientes de empresas que determinan su renta efectiva sin contabilidad completa, según art. 14 letra B) N° 1 LIR"
+  },
+  {
+   "codigo": 1026,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "CRÉDITO POR IMPUESTO DE PRIMERA CATEGORÍA/ CON OBLIGACIÓN DE RESTITUCIÓN/ Con derecho a devolución"
+  },
+  {
+   "codigo": 1027,
+   "valor": "200",
+   "glosa": "CRÉDITO POR IMPUESTO DE PRIMERA CATEGORÍA/ SIN OBLIGACIÓN DE RESTITUCIÓN/ Con derecho a devolución"
+  },
+  {
+   "codigo": 1035,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Débito fiscal por restitución crédito por IDPC, según art. 56 N° 3 inc. final LIR"
+  },
+  {
+   "codigo": 1098,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Sueldos, pensiones y otras rentas similares de fuente nacional"
+  },
+  {
+   "codigo": 1594,
+   "valor": "835",
+   "glosa": "CRÉDITO POR IMPUESTO DE PRIMERA CATEGORÍA/ CON OBLIGACIÓN DE RESTITUCIÓN/ Sin derecho a devolución"
+  },
+  {
+   "codigo": 1637,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Crédito al IGC por Impuesto Territorial pagado por explotación de bienes raíces no agrícolas, según art. 56 N° 5 LIR"
+  },
+  {
+   "codigo": 1849,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "a) Rentas del arrendamiento, subarrendamiento, usufructo o cesión de cualquier otra forma del uso o goce temporal de bienes raíces agrícolas y no agrícolas, determinadas mediante el respectivo contrato"
+  },
+  {
+   "codigo": 1869,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "b) Mayor valor obtenido en la enajenación o rescate de cuotas fondos mutuos y fondos de inversión y en la enajenación de acciones y derechos sociales (art. 17 N° 8 LIR) "
+  },
+  {
+   "codigo": 3062,
+   "valor": "1",
+   "glosa": "Obligados F22"
+  },
+  {
+   "codigo": 8772,
+   "valor": "0",
+   "glosa": "Tipo declaración (DP,FP)"
+  },
+  {
+   "codigo": 8809,
+   "valor": "1000000",
+   "glosa": "Rut Representante"
+  },
+  {
+   "codigo": 8811,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Moneda de la Declaración"
+  },
+  {
+   "codigo": 8865,
+   "valor": "3",
+   "glosa": "Código Emisión"
+  },
+  {
+   "codigo": 8866,
+   "valor": "1",
+   "glosa": "Factor de Conversión Moneda Extranjera"
+  },
+  {
+   "codigo": 8876,
+   "valor": "0",
+   "glosa": "Zona Cero"
+  },
+  {
+   "codigo": 8891,
+   "valor": "1",
+   "glosa": null
+  },
+  {
+   "codigo": 8892,
+   "valor": "111",
+   "glosa": null
+  },
+  {
+   "codigo": 8898,
+   "valor": "VALOR EJEMPLO",
+   "glosa": null
+  },
+  {
+   "codigo": 9919,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Campo 9919 campos modificados de Propuesta"
+  },
+  {
+   "codigo": 9920,
+   "valor": "203.0.113.10",
+   "glosa": "Dirección Origen"
+  },
+  {
+   "codigo": 9925,
+   "valor": "RF220000000000000000",
+   "glosa": "Prueba"
+  },
+  {
+   "codigo": 9928,
+   "valor": "VALOR EJEMPLO",
+   "glosa": "Campo correo"
+  },
+  {
+   "codigo": 85,
+   "valor": "",
+   "glosa": "Saldo a Favor"
+  },
+  {
+   "codigo": 86,
+   "valor": "",
+   "glosa": "Saldo Puesto a Disposición de los Socios"
+  },
+  {
+   "codigo": 87,
+   "valor": "",
+   "glosa": "Monto devolución solicitada"
+  },
+  {
+   "codigo": 92,
+   "valor": "",
+   "glosa": "Reajustes Declaración Fuera de Plazo"
+  },
+  {
+   "codigo": 93,
+   "valor": "",
+   "glosa": "Intereses y Multas Declaración Fuera de Plazo"
+  },
+  {
+   "codigo": 94,
+   "valor": "",
+   "glosa": "TOTAL A PAGAR (códigos 91+92+93)"
+  }
+ ],
+ "respCod": null,
+ "errorMsg": null,
+ "metaData": {
+  "conversationId": "TOKEN-DE-PRUEBA",
+  "transactionId": "t-1",
+  "namespace": "cl.sii.sdi.lob.renta.consultaestadof22.data.api.interfaces.FacadeService/f22Compacto",
+  "info": null,
+  "errors": null,
+  "page": null
+ }
+}
