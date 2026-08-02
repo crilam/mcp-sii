@@ -8,6 +8,15 @@ jest.mock('../../src/session');
 const MockBrowser = Browser as jest.MockedClass<typeof Browser>;
 const MockSession = SessionManager as jest.MockedClass<typeof SessionManager>;
 
+// El automock devuelve undefined en cada método, y conEmpresaExclusiva tiene
+// que EJECUTAR la operación que recibe. La exclusión real se prueba en
+// tests/session.exclusion.test.ts; acá sólo se necesita el paso a través.
+beforeEach(() => {
+  MockSession.prototype.conEmpresaExclusiva = jest.fn(
+    (fn: () => Promise<unknown>) => fn()
+  ) as jest.Mock;
+});
+
 // Snapshots en formato accessibility tree (nuevo portal SII Angular)
 const formSnapshot = [
   '- combobox [expanded=false, ref=e9]: Empresa',

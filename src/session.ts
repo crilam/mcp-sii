@@ -101,6 +101,18 @@ export class RequiereCertificado extends Error {}
 
 export class SessionManager {
   private session: SiiSession | null = null;
+  // Cola de exclusión mutua para las operaciones que dependen de la empresa
+  // seleccionada (ver conEmpresaExclusiva). Es una promesa encadenada: cada
+  // operación espera a la anterior antes de empezar. No hace falta más que
+  // esto y no se agregan dependencias.
+  private cola: Promise<void> = Promise.resolve();
+  // Marca de reentrancia: si una operación ya serializada llama a otra (por
+  // ejemplo el reintento de withReauth, o un scraper que compone dos pasos),
+  // la interna NO debe volver a encolarse — esperaría a un candado que sólo
+  // ella misma podría liberar, o sea deadlock. Node es monohilo y el candado
+  // es exclusivo, así que mientras el flag está en true el único código que
+  // puede estar corriendo es el de la sección crítica en curso.
+  private enSeccionCritica = false;
   // Instante en que caduca la autenticación, o null si no hay ninguna vigente.
   // Guardar un booleano no alcanza: el servidor MCP vive mucho más que la
   // sesión del SII, y una marca que no caduca hace que las consultas salten el
@@ -111,6 +123,38 @@ export class SessionManager {
     private config: SiiConfig,
     private browser: Browser
   ) {}
+
+  // Serializa una operación COMPLETA que depende de la empresa seleccionada:
+  // selección más las lecturas posteriores. El candado tiene que abarcar todo
+  // el ciclo, no sólo la selección: la sesión del SII tiene una única empresa
+  // activa, así que si dos llamadas con `empresa_rut` distinto se intercalan
+  // —A selecciona, B selecciona, A lee— la primera lee la página de la
+  // segunda y devuelve datos de otro contribuyente presentados como correctos.
+  // Eso es peor que un error: nadie se entera. Proteger sólo selectEmpresa()
+  // no arreglaría nada, porque la lectura quedaría fuera de la sección.
+  //
+  // El `finally` libera el turno aunque `fn` lance: si un fallo dejara el
+  // candado tomado, toda operación posterior quedaría colgada para siempre.
+  async conEmpresaExclusiva<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.enSeccionCritica) return fn();
+
+    const anterior = this.cola;
+    let liberar!: () => void;
+    const turno = new Promise<void>(resolve => { liberar = resolve; });
+    // La cola avanza con el turno pase lo que pase con la operación previa:
+    // un rechazo no propagado dejaría el resto de la cola sin ejecutarse.
+    this.cola = anterior.then(() => turno, () => turno);
+
+    await anterior.catch(() => { /* el error es del llamador anterior */ });
+
+    this.enSeccionCritica = true;
+    try {
+      return await fn();
+    } finally {
+      this.enSeccionCritica = false;
+      liberar();
+    }
+  }
 
   async login(empresaRut?: string): Promise<SiiSession> {
     await this.authenticate();
