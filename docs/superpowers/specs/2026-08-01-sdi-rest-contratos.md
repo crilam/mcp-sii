@@ -72,6 +72,21 @@ legacy responden ISO-8859-1 y muchos no lo declaran; ahí un `0xF3` suelto sólo
 es `ó` leído como latin1, y como UTF-8 es un byte inválido. Un default UTF-8
 corrompería justamente los casos que no se pueden verificar por header.
 
+La decodificación usa `TextDecoder` (nativo en Node, sin dependencias), con el
+label tal como viene en el header: así queda cubierto cualquier charset que el
+SII declare, sin mantener un mapa de equivalencias a mano. Dos consecuencias a
+tener presentes:
+
+- `windows-1252` se decodifica de verdad, no aproximado a latin1. Difieren en
+  `0x80–0x9F`: ahí windows-1252 tiene imprimibles (`€`, comillas tipográficas,
+  rayas) y latin1 controles C1, así que aproximar corrompía en silencio.
+- Por la tabla WHATWG que sigue `TextDecoder`, el label `iso-8859-1` es alias de
+  windows-1252 — el mismo comportamiento que cualquier navegador contra el
+  portal. Los acentuados (`0xC0–0xFF`) son idénticos en ambas tablas.
+
+Un label que `TextDecoder` no reconoce no voltea la consulta: se cae al default
+y se avisa por stderr.
+
 ## Contratos verificados (F22)
 
 Base: `https://www4.sii.cl/consultaestadof22ui/services/data/facadeService/`

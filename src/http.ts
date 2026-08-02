@@ -27,22 +27,37 @@ const ENCODING_POR_DEFECTO = 'latin1' as const;
 // aunque el cuerpo contuviera la marca, la que corta es la de curl.
 const MARCA_CONTENT_TYPE = '\n__MCP_SII_CONTENT_TYPE__:';
 
-// Traduce el charset declarado a un encoding que entienda Buffer. Cualquier
-// charset desconocido cae al default por la misma razón que arriba.
-export function encodingDesdeContentType(contentType: string): BufferEncoding {
-  const m = /charset\s*=\s*"?([\w-]+)"?/i.exec(contentType ?? '');
-  if (!m) return ENCODING_POR_DEFECTO;
-  switch (m[1].toLowerCase()) {
-    case 'utf-8':
-    case 'utf8':
-      return 'utf8';
-    case 'iso-8859-1':
-    case 'iso8859-1':
-    case 'latin1':
-    case 'windows-1252': // superconjunto de latin1; latin1 es la aproximación segura
-      return 'latin1';
-    default:
-      return ENCODING_POR_DEFECTO;
+// Se decodifica con `TextDecoder` (nativo en Node, sin dependencias nuevas) y
+// no con `Buffer.toString`, que sólo entiende un puñado de encodings. Mantener
+// un mapa de equivalencias a mano obligaba a aproximar: windows-1252 mapeado a
+// latin1 corrompe en silencio el rango 0x80–0x9F, que en windows-1252 son
+// imprimibles (€, comillas tipográficas, rayas) y en latin1 son controles C1.
+// Con TextDecoder el label del header se usa tal cual y cualquier charset
+// futuro que declare el SII queda cubierto sin tocar este archivo.
+const LABEL_POR_DEFECTO = 'iso-8859-1';
+
+// Un label desconocido no debe voltear la consulta: `TextDecoder` lanza ante
+// una etiqueta que no reconoce, así que se cae al default —que es lo que la
+// respuesta habría usado igual— pero dejando rastro en stderr. Mismo criterio
+// que con los códigos de respuesta del RCV: lo desconocido no pasa
+// inadvertido, pero tampoco rompe algo que funcionaría.
+const labelsAvisados = new Set<string>();
+
+export function decodificarRespuesta(cuerpo: Buffer, contentType: string): string {
+  const m = /charset\s*=\s*"?([^";\s]+)"?/i.exec(contentType ?? '');
+  const label = m ? m[1].toLowerCase() : LABEL_POR_DEFECTO;
+
+  try {
+    return new TextDecoder(label).decode(cuerpo);
+  } catch {
+    if (!labelsAvisados.has(label)) {
+      labelsAvisados.add(label);
+      console.error(
+        `[mcp-sii] charset declarado desconocido: "${label}". ` +
+        `Se decodifica como ${LABEL_POR_DEFECTO}; el texto con acentos puede venir corrupto.`
+      );
+    }
+    return new TextDecoder(LABEL_POR_DEFECTO).decode(cuerpo);
   }
 }
 
@@ -152,7 +167,7 @@ export class SiiHttpClient {
     if (corte === -1) {
       // Sin marca no hubo `-w` (o curl murió antes de escribirla): no hay
       // Content-Type que respetar y se usa el default.
-      return bruto.toString(ENCODING_POR_DEFECTO);
+      return decodificarRespuesta(bruto, '');
     }
 
     const cuerpo = bruto.subarray(0, corte);
@@ -161,7 +176,7 @@ export class SiiHttpClient {
       .toString('ascii')
       .trim();
 
-    return cuerpo.toString(encodingDesdeContentType(contentType));
+    return decodificarRespuesta(cuerpo, contentType);
   }
 
   private encodeParams(params: Record<string, string>): string {

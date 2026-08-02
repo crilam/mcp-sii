@@ -75,6 +75,52 @@ describe('SiiHttpClient — decodificación por Content-Type', () => {
     expect(texto).toBe('Factura Electrónica');
   });
 
+  // windows-1252 y latin1 sólo difieren en 0x80–0x9F: ahí windows-1252 tiene
+  // imprimibles (€, comillas tipográficas, rayas) donde latin1 tiene controles
+  // C1. Decodificar uno como el otro corrompe en silencio.
+  it('decodifica windows-1252 con sus imprimibles de 0x80–0x9F', async () => {
+    const bytes = Buffer.from([0x80, 0x93, 0xf3]); // € — ó
+    mockExec.mockReturnValue(
+      respuesta(bytes, 'text/html;charset=windows-1252') as never
+    );
+    const { client } = makeClient();
+
+    expect(await client.get('https://www4.sii.cl/x')).toBe('€“ó');
+  });
+
+  // `TextDecoder` sigue la tabla WHATWG, donde el label `iso-8859-1` es alias
+  // de windows-1252 — es lo que hace cualquier navegador contra el portal. Los
+  // acentuados (0xC0–0xFF) son idénticos en ambas tablas, así que nada de lo
+  // que ya funcionaba cambia; lo único que cambia es que 0x80–0x9F ahora dan el
+  // imprimible en vez de un control C1 invisible.
+  it('trata el label iso-8859-1 como lo hace el navegador (tabla WHATWG)', async () => {
+    const bytes = Buffer.from([0x80, 0xf3]);
+    mockExec.mockReturnValue(
+      respuesta(bytes, 'application/json;charset=ISO-8859-1') as never
+    );
+    const { client } = makeClient();
+
+    expect(await client.get('https://www4.sii.cl/x')).toBe('€ó');
+  });
+
+  // Un charset que no se reconoce no debe voltear la consulta: se cae al
+  // default y se deja rastro en stderr.
+  it('cae al default y avisa por stderr ante un charset desconocido', async () => {
+    const aviso = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockExec.mockReturnValue(
+      respuesta(LATIN1, 'application/json;charset=charset-inventado-9000') as never
+    );
+    const { client } = makeClient();
+
+    const texto = await client.get('https://www4.sii.cl/x');
+
+    expect(texto).toBe('Factura Electrónica');
+    expect(aviso).toHaveBeenCalledWith(
+      expect.stringContaining('charset-inventado-9000')
+    );
+    aviso.mockRestore();
+  });
+
   it('no contamina el cuerpo con el Content-Type que agrega curl', async () => {
     mockExec.mockReturnValue(
       respuesta('{"a":1}', 'application/json;charset=utf-8') as never
