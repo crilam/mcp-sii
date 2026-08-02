@@ -44,6 +44,36 @@ describe('SessionManager.conEmpresaExclusiva', () => {
     expect(orden).toEqual(['seleccionar-A', 'leer-A', 'seleccionar-B', 'leer-B']);
   });
 
+  // El caso que un flag por instancia NO cubre: B llega DESPUÉS de que A ya
+  // entró en su sección crítica y quedó esperando al navegador. Con un booleano
+  // compartido, B lo ve en true, lo interpreta como reentrancia y saltea la
+  // cola — corriendo en paralelo con A, que es exactamente la fuga entre
+  // empresas que el candado existe para impedir. El test anterior no lo detecta
+  // porque encola las dos llamadas antes de que la primera tome el candado.
+  it('no deja entrar a una operación que llega mientras otra ya está adentro', async () => {
+    const mgr = nuevoManager();
+    const orden: string[] = [];
+    const espera = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    const a = mgr.conEmpresaExclusiva(async () => {
+      orden.push('A-entra');
+      await espera(40);
+      orden.push('A-sale');
+    });
+
+    await espera(10); // B llega DESPUÉS de que A ya entró.
+
+    const b = mgr.conEmpresaExclusiva(async () => {
+      orden.push('B-entra');
+      await espera(5);
+      orden.push('B-sale');
+    });
+
+    await Promise.all([a, b]);
+
+    expect(orden).toEqual(['A-entra', 'A-sale', 'B-entra', 'B-sale']);
+  });
+
   it('libera el candado cuando la operación falla', async () => {
     const mgr = nuevoManager();
     const orden: string[] = [];

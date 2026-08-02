@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -109,10 +110,19 @@ export class SessionManager {
   // Marca de reentrancia: si una operación ya serializada llama a otra (por
   // ejemplo el reintento de withReauth, o un scraper que compone dos pasos),
   // la interna NO debe volver a encolarse — esperaría a un candado que sólo
-  // ella misma podría liberar, o sea deadlock. Node es monohilo y el candado
-  // es exclusivo, así que mientras el flag está en true el único código que
-  // puede estar corriendo es el de la sección crítica en curso.
-  private enSeccionCritica = false;
+  // ella misma podría liberar, o sea deadlock.
+  //
+  // Tiene que ser AsyncLocalStorage y NO un booleano de instancia. Node es
+  // monohilo pero asíncrono: mientras la sección crítica hace `await` sobre el
+  // navegador, el event loop sigue corriendo y puede entrar una petición nueva
+  // y ajena. Un flag compartido estaría en true en ese momento, la petición
+  // nueva lo leería como "soy reentrante" y saltearía la cola, corriendo en
+  // paralelo con la operación en curso — justo la fuga entre empresas que el
+  // candado existe para impedir (era un P1 real, no una hipótesis).
+  // AsyncLocalStorage acota la marca a la cadena de llamadas asíncrona: sólo
+  // el código que desciende de `fn()` ve el contexto; una petición que llega
+  // de afuera no lo ve y se encola como corresponde.
+  private contextoSeccionCritica = new AsyncLocalStorage<true>();
   // Instante en que caduca la autenticación, o null si no hay ninguna vigente.
   // Guardar un booleano no alcanza: el servidor MCP vive mucho más que la
   // sesión del SII, y una marca que no caduca hace que las consultas salten el
@@ -136,7 +146,7 @@ export class SessionManager {
   // El `finally` libera el turno aunque `fn` lance: si un fallo dejara el
   // candado tomado, toda operación posterior quedaría colgada para siempre.
   async conEmpresaExclusiva<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.enSeccionCritica) return fn();
+    if (this.contextoSeccionCritica.getStore()) return fn();
 
     const anterior = this.cola;
     let liberar!: () => void;
@@ -147,11 +157,11 @@ export class SessionManager {
 
     await anterior.catch(() => { /* el error es del llamador anterior */ });
 
-    this.enSeccionCritica = true;
     try {
-      return await fn();
+      // `run` devuelve lo que devuelva el callback; el await queda afuera para
+      // que el contexto siga vigente durante toda la promesa de `fn`.
+      return await this.contextoSeccionCritica.run(true, fn);
     } finally {
-      this.enSeccionCritica = false;
       liberar();
     }
   }
