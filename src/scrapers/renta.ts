@@ -61,6 +61,7 @@ const NAMESPACE = 'cl.sii.sdi.lob.renta.consultaestadof22.data.api.interfaces.Fa
 // Registro de Compras y Ventas) traen su propio esquema de códigos, con otros
 // valores y otro nombre de campo. No se comparten.
 const RESP_SIN_DATOS = 2;
+const RESP_EXITO = 0;
 
 export class RentaScraper {
   constructor(
@@ -191,9 +192,22 @@ export class RentaScraper {
 
     if (resp?.respCod === RESP_SIN_DATOS && resp?.data == null) return null;
 
-    // Éxito: `data` con contenido. `respCod` puede venir en 0 o directamente
-    // ausente según el método, así que lo que define el éxito es que haya datos.
-    if (resp?.data != null) return resp.data;
+    // Éxito: `data` con contenido **y** un `respCod` que conocemos. El código
+    // puede venir en 0 o directamente ausente según el método, así que no se
+    // puede exigir; pero aceptar cualquier valor sería el reverso del default
+    // seguro que aplica el RCV — si el SII agrega un código para señalar "datos
+    // parciales" o "datos de otro contribuyente", devolverlos como éxito los
+    // haría pasar por buenos sin que nada avise.
+    if (resp?.data != null) {
+      if (resp.respCod === undefined || resp.respCod === null || resp.respCod === RESP_EXITO) {
+        return resp.data;
+      }
+      throw new Error(
+        `El SII devolvió datos en ${metodo} junto a un código desconocido ` +
+        `(respCod=${resp.respCod}). No se entregan como buenos: el código podría ` +
+        'calificarlos (parciales, de otro período) y no sabemos cómo.'
+      );
+    }
 
     throw new Error(
       `El SII devolvió una respuesta inesperada en ${metodo} ` +

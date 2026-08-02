@@ -9,8 +9,12 @@ export function registerRcvTools(server: McpServer, scraper: RcvScraper): void {
     '(cantidad de documentos, neto, exento, IVA y total), el total de documentos del período y la fecha de ' +
     'última actualización del registro. El campo `totales` viene con las notas de crédito (tipos 61 y 60) ' +
     'RESTADAS, que es como corresponde totalizar: sumarlas infla las ventas y el IVA. ' +
+    'Si aparece un tipo de documento que el servidor no tiene catalogado, se suma a los totales pero la ' +
+    'respuesta trae totalesConfiables=false, tiposDesconocidos y advertencias: en ese caso hay que avisar ' +
+    'que los totales pueden estar mal antes de usarlos. ' +
     'Si el período no tiene documentos registrados, responde sinDatos=true con los totales en cero: es un ' +
-    'mes sin movimientos, no un error. ' +
+    'mes sin movimientos, no un error (el campo mensaje explica el vacío cuando el SII lo explica, por ' +
+    'ejemplo si el período es anterior al que cubre el registro). ' +
     'La empresa es un parámetro de la consulta, no de la sesión: se puede pasar empresa_rut distinto en ' +
     'cada llamada, sin seleccionar empresa; si se omite, se consulta el RUT autenticado. ' +
     'Es solo lectura: no acepta ni reclama documentos.',

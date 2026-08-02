@@ -1,5 +1,6 @@
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
+import { partirRut } from '../rut';
 
 export type OperacionRcv = 'COMPRA' | 'VENTA';
 
@@ -14,6 +15,9 @@ export interface FilaResumenRcv {
   montoTotal: number;
   // Las notas de crédito restan del total del período (ver TIPOS_NOTA_CREDITO).
   esNotaCredito: boolean;
+  // `true` si el tipo de documento no está en ninguna de las dos listas
+  // conocidas: se sumó, pero su signo no está verificado (ver `totalizar`).
+  tipoDesconocido: boolean;
 }
 
 export interface TotalesRcv {
@@ -39,6 +43,17 @@ export interface ResumenRcv {
   actualizadoAl: string | null;
   filas: FilaResumenRcv[];
   totales: TotalesRcv;
+  // `false` cuando el resumen trae algún tipo de documento cuyo signo no
+  // conocemos: los totales se calcularon igual, pero pueden estar mal. Un total
+  // silenciosamente mal es peor que un error, así que el consumidor tiene que
+  // poder enterarse sin leer el código.
+  totalesConfiables: boolean;
+  // Los tipos de documento desconocidos que se encontraron, con su nombre según
+  // el SII. Se listan para que resolverlo sea mirar esta salida y agregar el
+  // código a la lista que corresponda, no salir a reproducir el caso.
+  tiposDesconocidos: { codigo: number; nombre: string }[];
+  // Advertencias en texto plano sobre la totalización. Vacío es lo normal.
+  advertencias: string[];
 }
 
 const BASE = 'https://www4.sii.cl/consdcvinternetui/services/data/facadeService';
@@ -53,9 +68,43 @@ const ESTADO_CONTAB = 'REGISTRO';
 // que una factura — así que sumarlas junto al resto infla ventas e IVA y
 // produce cifras que parecen plausibles y no lo son. Es un error que ya se
 // cometió analizando estos datos.
-//   61 = Nota de Crédito Electrónica
-//   60 = Nota de Crédito (papel)
-const TIPOS_NOTA_CREDITO = [61, 60];
+//   61  = Nota de Crédito Electrónica
+//   60  = Nota de Crédito (papel)
+//   112 = Nota de Crédito de Exportación Electrónica. No es hipotética: la
+//         cuenta con la que se verificó esto emite facturas de exportación
+//         (tipo 110), así que sus notas de crédito llegan como 112.
+const TIPOS_NOTA_CREDITO = [61, 60, 112];
+
+// Tipos de documento que se sabe que SUMAN. Existe por lo mismo que el default
+// de `hayDatos`: el catálogo del SII es largo y no lo conocemos entero, así que
+// un tipo que no está en ninguna de las dos listas no puede tratarse como si
+// supiéramos su signo. Un tipo desconocido se suma —es lo más frecuente— pero
+// **se reporta**: ver `totalizar` y `tiposDesconocidos`.
+//
+// La asimetría importa: si aparece una nota de crédito nueva y la sumamos en
+// silencio, el total queda mal sin que nada avise, que es exactamente el modo de
+// falla que este archivo viene evitando. Un total silenciosamente mal es peor
+// que un error.
+const TIPOS_QUE_SUMAN = [
+  29,  // Factura de Inicio
+  30,  // Factura
+  32,  // Factura de venta exenta
+  33,  // Factura Electrónica
+  34,  // Factura no Afecta o Exenta Electrónica
+  35,  // Boleta
+  38,  // Boleta Exenta
+  39,  // Boleta Electrónica
+  40,  // Liquidación Factura
+  41,  // Boleta Exenta Electrónica
+  43,  // Liquidación Factura Electrónica
+  45,  // Factura de Compra
+  46,  // Factura de Compra Electrónica
+  55,  // Nota de Débito
+  56,  // Nota de Débito Electrónica (un débito SUMA, a diferencia del crédito)
+  110, // Factura de Exportación Electrónica
+  111, // Nota de Débito de Exportación Electrónica
+  914, // Declaración de Ingreso (DIN)
+];
 
 // Códigos de respuesta de ESTA aplicación. No son los de renta: el RCV no usa
 // `respCod`, trae su propio `respEstado.codRespuesta`, con otros valores.
@@ -105,7 +154,7 @@ export class RcvScraper {
 
     this.session.assertPuedeEntregarCookieJar();
     const { rut, dv } = empresaRut
-      ? partirRut(empresaRut)
+      ? partirRut(empresaRut, 'RUT de empresa')
       : this.session.identidad();
 
     const resp = await this.http.postSdi(BASE, NAMESPACE, 'getResumen', {
@@ -131,10 +180,16 @@ export class RcvScraper {
         actualizadoAl: null,
         filas: [],
         totales: { neto: 0, exento: 0, iva: 0, total: 0 },
+        totalesConfiables: true,
+        tiposDesconocidos: [],
+        advertencias: [],
       };
     }
 
-    const filas = (resp.data ?? []).map((f: any) => this.aFila(f));
+    const filas = (resp.data as any[]).map(f => this.aFila(f));
+    const tiposDesconocidos = filas
+      .filter(f => f.tipoDesconocido)
+      .map(f => ({ codigo: f.tipoDocCodigo, nombre: f.tipoDocNombre }));
 
     return {
       ...base,
@@ -143,6 +198,13 @@ export class RcvScraper {
       actualizadoAl: resp.dataCabecera?.dcvFecModificacion ?? null,
       filas,
       totales: this.totalizar(filas),
+      totalesConfiables: tiposDesconocidos.length === 0,
+      tiposDesconocidos,
+      advertencias: tiposDesconocidos.map(t =>
+        `El tipo de documento ${t.codigo} ("${t.nombre}") no está en el catálogo conocido: ` +
+        'se sumó a los totales, pero si es una nota de crédito debería restar. ' +
+        'Revisá los totales antes de usarlos.'
+      ),
     };
   }
 
@@ -157,11 +219,19 @@ export class RcvScraper {
       montoIva: Number(f.rsmnMntIVA ?? 0),
       montoTotal: Number(f.rsmnMntTotal ?? 0),
       esNotaCredito: TIPOS_NOTA_CREDITO.includes(tipoDocCodigo),
+      tipoDesconocido:
+        !TIPOS_NOTA_CREDITO.includes(tipoDocCodigo) &&
+        !TIPOS_QUE_SUMAN.includes(tipoDocCodigo),
     };
   }
 
   // Las notas de crédito entran con signo negativo: el SII las informa en
   // positivo, pero rebajan lo facturado. Ver TIPOS_NOTA_CREDITO.
+  //
+  // Un tipo desconocido se suma, que es lo más frecuente, pero la fila queda
+  // marcada y el resumen sale con `totalesConfiables: false`: no se puede
+  // afirmar el signo de algo que no está en el catálogo, y afirmarlo en
+  // silencio es cómo se produce un total que parece plausible y está mal.
   private totalizar(filas: FilaResumenRcv[]): TotalesRcv {
     return filas.reduce<TotalesRcv>((acc, f) => {
       const signo = f.esNotaCredito ? -1 : 1;
@@ -194,6 +264,17 @@ export class RcvScraper {
 
     switch (codigo) {
       case RESP_EXITO:
+        // Éxito sin datos es una contradicción del servicio, no un período
+        // vacío: para eso están el 3 y el 99. Devolverlo como `sinDatos: false`
+        // con `filas: []` dejaba un resumen que se contradice a sí mismo —cero
+        // filas junto a un `totalDocumentos` que no es cero—, así que se falla.
+        if (resp?.data == null) {
+          throw new Error(
+            'El SII respondió éxito (código 0) en el Registro de Compras y Ventas ' +
+            'pero sin datos. Es una respuesta contradictoria: un período sin ' +
+            'movimientos se informa con el código 3, no con el 0.'
+          );
+        }
         return true;
       case RESP_SIN_DATOS:
         // Vacío legítimo: el período no tiene documentos registrados. El portal
@@ -231,20 +312,4 @@ export class RcvScraper {
         );
     }
   }
-}
-
-// El servicio quiere el RUT sin dígito verificador y el dv aparte. Acepta las
-// dos formas que se usan en el proyecto ("22222222-2" y "222222222"), y también
-// limpia los puntos por si el RUT llega escrito como en el portal.
-export function partirRut(rutCompleto: string): { rut: string; dv: string } {
-  const limpio = rutCompleto.replace(/\./g, '').trim();
-  const [rut, dv] = limpio.includes('-')
-    ? limpio.split('-')
-    : [limpio.slice(0, -1), limpio.slice(-1)];
-
-  if (!/^\d{5,9}$/.test(rut) || !/^[\dkK]$/.test(dv ?? '')) {
-    throw new Error(`RUT de empresa inválido: "${rutCompleto}". Se espera 22222222-2.`);
-  }
-
-  return { rut, dv: dv.toUpperCase() };
 }

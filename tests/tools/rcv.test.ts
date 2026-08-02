@@ -63,6 +63,14 @@ describe('registerRcvTools', () => {
     expect(tools['sii_rcv_resumen'].descripcion).toMatch(/sinDatos/);
   });
 
+  // Si el modelo no sabe que puede venir un total no confiable, va a leer las
+  // cifras como buenas. La bandera sólo sirve si la descripción la nombra.
+  it('avisa en la descripción que los totales pueden venir marcados como no confiables', () => {
+    const { tools } = registrar();
+
+    expect(tools['sii_rcv_resumen'].descripcion).toMatch(/totalesConfiables/);
+  });
+
   it('devuelve el resumen como JSON', async () => {
     const { tools, scraper } = registrar();
     (scraper.resumen as jest.Mock).mockResolvedValue({ periodo: '202607', filas: [] });

@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Browser } from './browser';
 import { AuthStrategy, SiiConfig } from './env';
+import { partirRut } from './rut';
 
 export interface Empresa {
   rut: string;
@@ -270,13 +271,13 @@ export class SessionManager {
     }
   }
 
-  // Los CGI de BHE esperan el RUT partido en cuerpo y dígito verificador.
-  // SII_RUT viene como "11111111-1"; sin guión, el DV es el último carácter.
+  // Los CGI de BHE y las APIs del portal esperan el RUT partido en cuerpo y
+  // dígito verificador. SII_RUT viene como "11111111-1"; sin guión, el DV es el
+  // último carácter. La partición vive en `src/rut.ts` porque la comparten esta
+  // clase y el scraper del RCV (que parte el RUT de la empresa consultada): dos
+  // copias divergieron una vez en si validaban o no el resultado.
   identidad(): { rut: string; dv: string } {
-    const [rut, dv] = this.config.rut.includes('-')
-      ? this.config.rut.split('-')
-      : [this.config.rut.slice(0, -1), this.config.rut.slice(-1)];
-    return { rut, dv: dv.toUpperCase() };
+    return partirRut(this.config.rut, 'SII_RUT');
   }
 
   // Autentica con certificado digital vía curl (TLS mutual auth), luego inyecta

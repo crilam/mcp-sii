@@ -122,6 +122,30 @@ describe('RentaScraper.estadoDeclaracion', () => {
     await expect(scraper.estadoDeclaracion(2025)).rejects.toThrow(/inesperada/);
   });
 
+  // Reverso del default seguro: datos acompañados de un código que no
+  // conocemos tampoco se entregan como buenos. El código podría calificarlos
+  // (parciales, de otro período) y no sabemos cómo.
+  it('no entrega como buenos datos con un respCod desconocido', async () => {
+    const { scraper } = makeScraper({
+      ...fixture('renta-decl-vigente.json'),
+      respCod: 7,
+    });
+
+    await expect(scraper.estadoDeclaracion(2025)).rejects.toThrow(/código desconocido/);
+  });
+
+  it('acepta los datos con respCod 0 o sin respCod', async () => {
+    const conCero = makeScraper({ ...fixture('renta-decl-vigente.json'), respCod: 0 });
+    await expect(conCero.scraper.estadoDeclaracion(2025)).resolves.toMatchObject({
+      sinDatos: false,
+    });
+
+    const sinCodigo = makeScraper({ data: fixture('renta-decl-vigente.json').data });
+    await expect(sinCodigo.scraper.estadoDeclaracion(2025)).resolves.toMatchObject({
+      sinDatos: false,
+    });
+  });
+
   // La consulta va por HTTP: sin cookie jar está condenada, y preguntarlo antes
   // evita abrir en el SII una sesión que no se va a poder usar.
   it('falla antes de consultar si la sesión no puede entregar el cookie jar', async () => {
@@ -136,6 +160,10 @@ describe('RentaScraper.estadoDeclaracion', () => {
 });
 
 describe('RentaScraper.f22Completo', () => {
+  // Se asertan la forma y el orden, no los valores de las casillas: los valores
+  // de la fixture son sintéticos (los 76 códigos del formulario SON los datos
+  // tributarios del contribuyente, así que no puede haber otros) y fijarlos acá
+  // ataría el test a la anonimización en vez de al parser.
   it('parsea el formulario completo', async () => {
     const { scraper } = makeScraper(fixture('renta-f22-completo.json'));
 
@@ -144,11 +172,27 @@ describe('RentaScraper.f22Completo', () => {
     expect(f22.sinDatos).toBe(false);
     expect(f22.folio).toBe(900000001);
     expect(f22.lineas).toHaveLength(76);
-    expect(f22.lineas[0]).toEqual({
-      codigo: 1,
-      valor: 'PEREZ',
-      glosa: 'Primer Apellido/ Razón Social',
-    });
+    for (const linea of f22.lineas) {
+      expect(typeof linea.codigo).toBe('number');
+      expect(Number.isNaN(linea.codigo)).toBe(false);
+      expect(typeof linea.valor).toBe('string');
+      expect(typeof linea.glosa).toBe('string');
+    }
+  });
+
+  // El orden importa: es el orden del formulario, y una casilla se identifica
+  // por su código. La glosa es la definición pública del formulario, no un dato
+  // personal, así que sí se puede fijar.
+  it('respeta el orden del formulario y conserva la glosa de cada código', async () => {
+    const { scraper } = makeScraper(fixture('renta-f22-completo.json'));
+
+    const f22 = await scraper.f22Completo(2025, 900000001);
+    const original = fixture('renta-f22-completo.json').data as any[];
+
+    expect(f22.lineas.map(l => l.codigo)).toEqual(original.map(l => l.codigo));
+    expect(f22.lineas[0].glosa).toBe('Primer Apellido/ Razón Social');
+    expect(f22.lineas[f22.lineas.length - 1].glosa)
+      .toBe('TOTAL A PAGAR (códigos 91+92+93)');
   });
 
   it('consulta f22Completo con folio y periodo', async () => {

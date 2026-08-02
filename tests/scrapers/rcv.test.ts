@@ -61,6 +61,7 @@ describe('RcvScraper.resumen', () => {
       montoIva: 19000000,
       montoTotal: 119000000,
       esNotaCredito: false,
+      tipoDesconocido: false,
     });
   });
 
@@ -110,6 +111,7 @@ describe('RcvScraper.resumen', () => {
       montoIva: 380000,
       montoTotal: 2380000,
       esNotaCredito: false,
+      tipoDesconocido: false,
     });
   });
 
@@ -130,6 +132,80 @@ describe('RcvScraper.resumen', () => {
     // La suma ingenua (sin restar la nota de crédito) daría estos otros.
     expect(resumen.totales.neto).not.toBe(58000000);
     expect(resumen.totales.total).not.toBe(68930000);
+  });
+
+  // La nota de crédito de exportación (112) acompaña a la factura de
+  // exportación (110), que la cuenta verificada sí emite. Sumarla infla las
+  // ventas exactamente igual que sumar una 61.
+  it('resta también la nota de crédito de exportación (112)', async () => {
+    const { scraper } = makeScraper({
+      respEstado: { codRespuesta: 0, msgeRespuesta: null },
+      totDocRes: 2,
+      data: [
+        { rsmnTipoDocInteger: 110, dcvNombreTipoDoc: 'Factura de Exportación Electrónica',
+          rsmnTotDoc: 1, rsmnMntNeto: 0, rsmnMntExe: 1000000, rsmnMntIVA: 0, rsmnMntTotal: 1000000 },
+        { rsmnTipoDocInteger: 112, dcvNombreTipoDoc: 'Nota de Crédito de Exportación Electrónica',
+          rsmnTotDoc: 1, rsmnMntNeto: 0, rsmnMntExe: 400000, rsmnMntIVA: 0, rsmnMntTotal: 400000 },
+      ],
+    });
+
+    const resumen = await scraper.resumen('202607', 'VENTA', '22222222-2');
+
+    expect(resumen.filas[1].esNotaCredito).toBe(true);
+    expect(resumen.totales.exento).toBe(600000);
+    expect(resumen.totales.total).toBe(600000);
+    expect(resumen.totalesConfiables).toBe(true);
+  });
+
+  // El catálogo de tipos del SII es largo y no lo conocemos entero. Un tipo que
+  // no está en ninguna lista se suma —es lo más frecuente— pero el resumen tiene
+  // que decirlo: un total silenciosamente mal es peor que un error.
+  it('marca los totales como no confiables ante un tipo de documento desconocido', async () => {
+    const { scraper } = makeScraper({
+      respEstado: { codRespuesta: 0, msgeRespuesta: null },
+      totDocRes: 1,
+      data: [
+        { rsmnTipoDocInteger: 777, dcvNombreTipoDoc: 'Documento Nuevo del SII',
+          rsmnTotDoc: 1, rsmnMntNeto: 500000, rsmnMntExe: 0, rsmnMntIVA: 95000, rsmnMntTotal: 595000 },
+      ],
+    });
+
+    const resumen = await scraper.resumen('202607', 'VENTA', '22222222-2');
+
+    expect(resumen.filas[0].tipoDesconocido).toBe(true);
+    expect(resumen.totalesConfiables).toBe(false);
+    expect(resumen.tiposDesconocidos).toEqual([
+      { codigo: 777, nombre: 'Documento Nuevo del SII' },
+    ]);
+    // La advertencia nombra el código: resolverlo es mirar esta salida y
+    // agregarlo a la lista que corresponda, no salir a reproducir el caso.
+    expect(resumen.advertencias[0]).toMatch(/777/);
+    // Los totales se calculan igual, sumando: no se rompe la consulta.
+    expect(resumen.totales.neto).toBe(500000);
+  });
+
+  it('no marca nada cuando todos los tipos son conocidos', async () => {
+    const { scraper } = makeScraper(fixture('rcv-resumen-venta.json'));
+
+    const resumen = await scraper.resumen('202607', 'VENTA', '22222222-2');
+
+    expect(resumen.totalesConfiables).toBe(true);
+    expect(resumen.tiposDesconocidos).toEqual([]);
+    expect(resumen.advertencias).toEqual([]);
+  });
+
+  // Éxito sin datos es una contradicción del servicio: un período vacío se
+  // informa con el 3 o el 99, no con el 0. Devolverlo como resumen dejaba un
+  // `totalDocumentos` que contradecía las cero filas.
+  it('falla si el SII responde éxito pero sin datos', async () => {
+    const { scraper } = makeScraper({
+      data: null,
+      totDocRes: 12,
+      respEstado: { codRespuesta: 0, msgeRespuesta: null },
+    });
+
+    await expect(scraper.resumen('202607', 'VENTA', '22222222-2'))
+      .rejects.toThrow(/contradictoria/);
   });
 
   // Código 3: el período no tiene documentos registrados. Un mes tranquilo no
