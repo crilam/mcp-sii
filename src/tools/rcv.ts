@@ -52,6 +52,10 @@ export function registerRcvTools(server: McpServer, scraper: RcvScraper): void {
     'receptor (el cliente); no hay que llamarla proveedor en una consulta de ventas. ' +
     'En notas de crédito y débito, referenciaTipoDoc y referenciaFolio dicen qué documento se está ' +
     'corrigiendo. ' +
+    'CUIDADO al sumar: en las notas de crédito (tipos 61 y 60) los montos vienen POSITIVOS pero RESTAN ' +
+    'del total del período, así que sumar los montoTotal de un detalle produce un total mal. Para ' +
+    'totalizar hay que usar sii_rcv_resumen, que ya aplica el signo; este detalle es para mirar ' +
+    'documento por documento. ' +
     'Si el período o el tipo no tienen documentos registrados, responde sinDatos=true con documentos=[]: ' +
     'es un vacío legítimo, no un error (el campo mensaje explica el vacío cuando el SII lo explica). ' +
     'La empresa es un parámetro de la consulta, no de la sesión: se puede pasar empresa_rut distinto en ' +

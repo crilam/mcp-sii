@@ -108,6 +108,14 @@ export interface DetalleRcv {
   // Mismo criterio que en el resumen: vacío legítimo, no falla.
   sinDatos: boolean;
   mensaje: string | null;
+  // Se cuenta lo que vino: el detalle no trae un total propio (no hay
+  // `totDocRes` como en el resumen). Verificado contra el portal hasta 393
+  // documentos —el tipo más grande disponible, las facturas electrónicas de
+  // venta de julio—: el detalle devolvió las 393 y coincide exacto con el
+  // resumen, y `metaData.page` viene `null`. Es una verificación hasta 393, NO
+  // una garantía para cualquier tamaño: si algún día un período de miles de
+  // documentos no cuadra con el resumen, la paginación es el primer lugar
+  // donde mirar.
   totalDocumentos: number;
   documentos: FilaDetalleRcv[];
 }

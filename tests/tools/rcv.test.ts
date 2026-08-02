@@ -145,6 +145,18 @@ describe('sii_rcv_detalle', () => {
     expect(tools['sii_rcv_detalle'].descripcion).toMatch(/sinDatos/);
   });
 
+  // Los montos de una nota de crédito llegan positivos y restan del período:
+  // sumar los montoTotal de un detalle del tipo 61 da un total silenciosamente
+  // mal. Si la descripción no lo dice, el modelo lo va a hacer.
+  it('advierte que las notas de crédito vienen positivas pero restan, y manda a totalizar con el resumen', () => {
+    const { tools } = registrar();
+    const desc = tools['sii_rcv_detalle'].descripcion;
+
+    expect(desc).toMatch(/POSITIVOS/);
+    expect(desc).toMatch(/RESTAN/);
+    expect(desc).toMatch(/Para\s+totalizar hay que usar sii_rcv_resumen/);
+  });
+
   it('devuelve el detalle como JSON', async () => {
     const { tools, scraper } = registrar();
     (scraper.detalle as jest.Mock).mockResolvedValue({ periodo: '202606', documentos: [] });
