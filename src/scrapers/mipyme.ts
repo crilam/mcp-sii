@@ -326,7 +326,13 @@ export class MipymeScraper {
       const msg = err instanceof Error ? err.message : String(err);
       if (/sesion|session|autenticacion|unauthorized|401/i.test(msg)) {
         this.session.invalidate();
-        await this.session.getSession();
+        // No se llama a getSession() acá: `fn()` ya vuelve a llamar
+        // ensureEmpresa(empresaRut) con la empresa correcta al reintentar.
+        // Llamarlo sin argumento antes del reintento (como se hacía) es
+        // redundante en el caso simple y, con varias empresas y sin
+        // SII_EMPRESA_RUT, revienta con "opera N empresas" aunque el
+        // llamador sí haya pasado empresa_rut — enmascarando el error real
+        // de sesión expirada y perdiendo el reintento.
         return fn();
       }
       throw err;
@@ -378,23 +384,6 @@ export class MipymeScraper {
     if (comboRefs[2]) this.browser.select(comboRefs[2], String(fecha.getFullYear()));
     const btnRef = this.findRef(snapshot, /consultar/i);
     if (btnRef) this.browser.click(btnRef);
-  }
-
-  private parseEmpresas(snapshot: string): Empresa[] {
-    // Formato portal mipyme: option "NOMBRE EMPRESA RUT-DV" [ref=eN]
-    const regex = /option "([^"]+)" /g;
-    const empresas: Empresa[] = [];
-    let match;
-    while ((match = regex.exec(snapshot)) !== null) {
-      const text = match[1];
-      const withName = text.match(/^(.+?)\s+(\d{5,}-[0-9Kk])$/);
-      if (withName) {
-        empresas.push({ rut: withName[2], nombre: withName[1].trim() });
-      } else if (/^\d{5,}-[0-9Kk]$/.test(text)) {
-        empresas.push({ rut: text, nombre: text });
-      }
-    }
-    return empresas;
   }
 
   private parseSummaryTypeLinks(snapshot: string): Array<{ ref: string; tipoDte: number }> {

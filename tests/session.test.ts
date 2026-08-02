@@ -146,6 +146,43 @@ describe('SessionManager.getSession', () => {
     expect(session.empresaRut).toBe('11111111-1');
   });
 
+  // La rama de varias empresas valida que el RUT pedido esté en la lista; la
+  // rama de una sola empresa seleccionaba lo que hubiera sin comparar contra
+  // el RUT pedido. Con una única empresa disponible y un empresa_rut
+  // explícito que no coincide, debe fallar igual que la rama multi — no
+  // quedar seleccionada en la empresa equivocada devolviendo datos que
+  // parecen buenos.
+  it('con una sola empresa disponible, rechaza un empresaRut pedido que no coincide', async () => {
+    const browser = new MockBrowser();
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(loginSnapshot)
+      .mockReturnValueOnce(empresaUnicaSnapshot);
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(mgr.getSession('22222222-2')).rejects.toThrow(/no encontrada/);
+    // Nunca debe seleccionar la empresa 1 como si fuera la 2 pedida.
+    expect(browser.select).not.toHaveBeenCalledWith(expect.any(String), '11111111-1');
+  });
+
+  // selectEmpresa() debe esperar los mismos marcadores que
+  // listEmpresasDisponibles() antes de leer el combo. Sin esa espera, un
+  // render lento deja el snapshot sin opciones y, si hay una empresa
+  // preferida configurada, se fabricaría una sesión "seleccionada" sin haber
+  // tocado el navegador — y quedaría cacheada como válida para siempre.
+  it('si la página de selección no rindió, falla en vez de fabricar una sesión', async () => {
+    const config = { ...configClave, empresaRut: '11111111-1' };
+    const browser = new MockBrowser();
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(loginSnapshot)
+      .mockReturnValueOnce('- generic\n  - StaticText "Cargando"');
+
+    const mgr = new SessionManager(config, browser);
+
+    await expect(mgr.getSession()).rejects.toThrow(/no terminó de cargar/);
+    expect(browser.select).not.toHaveBeenCalled();
+  });
+
   // Pedir otra empresa mientras hay sesión cacheada debe cambiar de empresa sin
   // reautenticar: una segunda autenticación del mismo RUT dispara el bloqueo
   // del SII (01.01.190.500.720.27).

@@ -227,8 +227,47 @@ describe('MipymeScraper.withReauth', () => {
     await scraper.listDocumentosEmitidos({ fechaDesde: '2026-01-01' });
 
     expect(session.invalidate).toHaveBeenCalledTimes(1);
-    // ensureEmpresa(1) + withReauth re-auth(1) + ensureEmpresa retry(1) + applyFiltros(1) = 4
-    expect(session.getSession).toHaveBeenCalledTimes(4);
+    // ensureEmpresa(1) + ensureEmpresa retry(1) + applyFiltros retry(1) = 3.
+    // withReauth ya no llama getSession() suelto antes del reintento: fn()
+    // vuelve a pasar por ensureEmpresa(empresaRut) al reintentar, así que ese
+    // llamado extra era redundante (y, con varias empresas sin
+    // SII_EMPRESA_RUT, reventaba "opera N empresas" enmascarando el error real).
+    expect(session.getSession).toHaveBeenCalledTimes(3);
+  });
+
+  // Bug cerrado: withReauth llamaba session.getSession() SIN argumento antes
+  // de reintentar. Con varias empresas y sin SII_EMPRESA_RUT, ese llamado
+  // suelto revienta "opera N empresas" aunque la llamada original sí haya
+  // pasado empresa_rut — enmascarando el error de sesión expirada y
+  // perdiendo el reintento. Se simula ese mock real: getSession() sin
+  // argumento rechaza, getSession(rut) resuelve.
+  it('reintenta sobre la empresa pedida sin disparar el error de selección multi-empresa', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockImplementation((empresaRut?: string) => {
+      if (!empresaRut) {
+        return Promise.reject(new Error('Esta persona opera 5 empresas. Configura SII_EMPRESA_RUT con uno de: ...'));
+      }
+      return Promise.resolve({ empresaRut, empresaNombre: 'EMPRESA B' });
+    });
+    (session.invalidate as jest.Mock).mockImplementation(() => {});
+    (browser.snapshot as jest.Mock).mockReturnValue(formSnapshot);
+
+    let callCount = 0;
+    (browser.open as jest.Mock).mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) throw new Error('session expirada');
+    });
+
+    const scraper = new MipymeScraper(browser, session);
+    const docs = await scraper.listDocumentosEmitidos({ empresaRut: '22222222-2', fechaDesde: '2026-01-01' });
+
+    expect(docs).toEqual([]);
+    expect(session.invalidate).toHaveBeenCalledTimes(1);
+    // Todos los getSession() de esta llamada deben llevar el empresaRut pedido.
+    for (const [rut] of (session.getSession as jest.Mock).mock.calls) {
+      expect(rut).toBe('22222222-2');
+    }
   });
 
   it('propaga errores que no son de sesion', async () => {

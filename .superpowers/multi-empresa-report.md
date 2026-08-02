@@ -53,3 +53,47 @@ no por comentarios ni por el orden de las líneas.
 
 ### Concerns
 - Ninguno bloqueante.
+
+## Ronda 3 — tres hallazgos Important, mismo riesgo de clase
+
+Los tres eran variantes de "operar contra la empresa equivocada sin fallar":
+
+1. **`selectEmpresa` con una sola empresa ignoraba el `empresaRut` pedido.** La rama de una sola empresa
+   seleccionaba `empresas[0]` sin comparar contra `rutPreferido`, a diferencia de la rama multi que sí
+   valida. Ahora, si `rutPreferido` no coincide con la única empresa disponible, lanza el mismo error
+   `"Empresa ... no encontrada"` en vez de seleccionar la que hay.
+2. **`selectEmpresa` no esperaba a que la página rindiera.** `listEmpresasDisponibles()` ya tenía el guard
+   (`waitForAny(SEL_EMPRESA_MARKERS)` + error si no aparecen); `selectEmpresa()` hacía `open()` + `snapshot()`
+   directo, así que un render lento devolvía `empresas.length === 0` y, con `rutPreferido` seteado, fabricaba
+   una sesión "seleccionada" sin haber tocado el navegador — cacheada como válida para siempre. Se extrajo
+   `abrirPaginaSeleccionEmpresa()` (el guard de `listEmpresasDisponibles`) y ahora lo usan las dos rutas, sin
+   duplicar el chequeo.
+3. **`MipymeScraper.withReauth` llamaba `getSession()` sin argumento tras `invalidate()`.** Redundante,
+   porque `fn()` reintentado ya pasa por `ensureEmpresa(empresaRut)`; y con varias empresas sin
+   `SII_EMPRESA_RUT` ese llamado suelto lanzaba "opera N empresas", enmascarando el error real de sesión
+   expirada y perdiendo el reintento. Se borró la línea.
+
+Menores, resueltos de paso:
+- `MipymeScraper.parseEmpresas` (duplicado exacto del de `SessionManager`, sin usuarios desde que
+  `ensureEmpresa` dejó de scrapear el DOM) — eliminado.
+- Descripciones de `empresa_rut` en `src/tools/dte.ts` y `src/tools/mipyme.ts` actualizadas: ahora mencionan
+  que también se resuelve sola cuando hay una única empresa, no sólo `SII_EMPRESA_RUT`.
+
+Tests nuevos, uno por hallazgo, cada uno falla con el bug presente:
+- `tests/session.test.ts`: una sola empresa disponible + `empresaRut` pedido que no coincide → rechaza sin
+  seleccionar la que hay.
+- `tests/session.test.ts`: snapshot sin los marcadores de la página de selección → rechaza con "no terminó
+  de cargar" en vez de fabricar sesión; no llama `browser.select`.
+- `tests/scrapers/mipyme.test.ts`: `getSession` mockeado para reflejar el comportamiento real (sin argumento
+  rechaza con "opera 5 empresas", con argumento resuelve); simula expiración de sesión en una llamada con
+  `empresa_rut` explícito y verifica que el reintento resuelve sobre esa empresa sin lanzar el error de
+  selección, y que todos los `getSession()` de esa llamada llevan el RUT pedido.
+- Se ajustó el conteo de `session.getSession` en el test de reintento existente (de 4 a 3): ya no hay un
+  llamado suelto antes del reintento.
+
+### Tests
+180 pasando (175 previos + 3 nuevos por hallazgo + 2 ajustes al test de reintento existente).
+`npx tsc --noEmit`, `npx jest`, `npm run build` en verde.
+
+### Concerns
+- Ninguno bloqueante.

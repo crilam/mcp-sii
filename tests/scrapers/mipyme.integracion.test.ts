@@ -13,7 +13,7 @@ const MockBrowser = Browser as jest.MockedClass<typeof Browser>;
 // que un mock ya "sepa" la respuesta correcta. Cubren justo el caso que el
 // reviewer marcó: varias empresas, empresaRut explícito, sin SII_EMPRESA_RUT.
 const config: SiiConfig = {
-  rut: '12345678-9',
+  rut: '99999999-9',
   strategy: AuthStrategy.Clave,
   clave: 'secreta',
   // Sin empresaRut: la única forma de resolver la empresa es el parámetro

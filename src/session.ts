@@ -123,21 +123,28 @@ export class SessionManager {
   // puede depender de getSession() (que falla justamente cuando hay varias).
   async listEmpresasDisponibles(): Promise<Empresa[]> {
     await this.authenticate();
+    const snapshot = this.abrirPaginaSeleccionEmpresa();
+    return this.parseEmpresas(snapshot);
+  }
+
+  // Navega a la página de selección de empresa y espera a que rinda antes de
+  // leer el combo. La usan tanto listEmpresasDisponibles() (listado previo a
+  // configurar SII_EMPRESA_RUT) como selectEmpresa() (selección real): las
+  // dos necesitan el mismo guard, porque justo después de navegar la página
+  // puede no haber rendido todavía y un snapshot prematuro trae cero
+  // empresas, que se confunde con "esta persona no opera ninguna".
+  private abrirPaginaSeleccionEmpresa(): string {
     this.browser.open(SII_SEL_EMPRESA_URL);
-    // Justo después de inyectar las cookies la página puede no haber rendido
-    // todavía y el snapshot vuelve sin el combo, devolviendo cero empresas.
     this.browser.waitForAny(SEL_EMPRESA_MARKERS, 20_000);
     const snapshot = this.browser.snapshot();
 
-    // Igual que arriba: si la página no rindió, un listado vacío se confunde
-    // con "esta persona no opera ninguna empresa".
     if (!SEL_EMPRESA_MARKERS.some(m => snapshot.includes(m))) {
       throw new Error(
         'La página de selección de empresa no terminó de cargar. Reintentá en unos minutos.'
       );
     }
 
-    return this.parseEmpresas(snapshot);
+    return snapshot;
   }
 
   // Autentica el RUT persona sin seleccionar empresa. Lo necesitan los portales
@@ -377,9 +384,11 @@ export class SessionManager {
   // empresaRutParam es la empresa pedida en la llamada (mayor prioridad).
   // Orden de resolución: parámetro > SII_EMPRESA_RUT > única empresa disponible.
   private async selectEmpresa(empresaRutParam?: string): Promise<SiiSession> {
-    this.browser.open(SII_SEL_EMPRESA_URL);
-    const snapshot = this.browser.snapshot();
-
+    // abrirPaginaSeleccionEmpresa() espera los marcadores antes de leer el
+    // snapshot: sin esa espera, un render lento deja empresas=[] y, con
+    // rutPreferido seteado, esta función devolvería una sesión "seleccionada"
+    // sin haber tocado el navegador — y quedaría cacheada como válida.
+    const snapshot = this.abrirPaginaSeleccionEmpresa();
     const empresas = this.parseEmpresas(snapshot);
     const rutPreferido = empresaRutParam ?? this.config.empresaRut;
 
@@ -392,6 +401,13 @@ export class SessionManager {
 
     if (empresas.length === 1) {
       const empresa = empresas[0];
+      // Si pidieron una empresa explícita que no es la única disponible, hay
+      // que fallar igual que la rama de varias empresas: seleccionar la que
+      // hay sin más dejaría la sesión en una empresa distinta a la pedida,
+      // devolviendo datos que parecen correctos pero son de otro contribuyente.
+      if (rutPreferido && rutPreferido !== empresa.rut) {
+        throw new Error(`Empresa ${rutPreferido} no encontrada. Disponibles: ${empresa.rut}`);
+      }
       const selectRef = this.findRef(snapshot, /empresa/i) ?? '@e10';
       this.browser.select(selectRef, empresa.rut);
       return { empresaRut: empresa.rut, empresaNombre: empresa.nombre };

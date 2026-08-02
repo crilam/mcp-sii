@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { MipymeScraper } from '../scrapers/mipyme';
 
 const TipoDteSchema = z.number().int().optional().describe('Tipo DTE: 33=factura, 34=factura exenta, 39=boleta, 61=nota de crédito');
-const EmpresaRutSchema = z.string().optional().describe('RUT empresa a consultar. Usa SII_EMPRESA_RUT si se omite.');
+const EmpresaRutSchema = z.string().optional().describe('RUT empresa a consultar. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si la persona opera una única empresa.');
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
 
 export function registerDteTools(server: McpServer, scraper: MipymeScraper): void {

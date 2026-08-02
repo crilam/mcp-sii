@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MipymeScraper } from '../scrapers/mipyme';
 
-const EmpresaRutSchema = z.string().optional().describe('RUT empresa. Usa SII_EMPRESA_RUT si se omite.');
+const EmpresaRutSchema = z.string().optional().describe('RUT empresa. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si la persona opera una única empresa.');
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
 
 export function registerMipymeTools(server: McpServer, scraper: MipymeScraper): void {
