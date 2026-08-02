@@ -1,5 +1,5 @@
 import { SiiHttpClient } from '../http';
-import { SessionManager } from '../session';
+import { RequiereCertificado, SessionManager } from '../session';
 
 export interface MesBhe {
   mes: number;
@@ -125,9 +125,26 @@ export class BheScraper {
       // Un límite que ya conocemos no se arregla reautenticando: reintentarlo
       // sólo gastaría otra consulta para volver a fallar igual.
       if (e instanceof LimitacionConocida) throw e;
+      // Misma razón: la estrategia de autenticación no cambia entre intentos, así
+      // que reintentar sólo abriría una segunda sesión en el SII para volver a
+      // fallar igual. Es defensa en profundidad — con el chequeo previo de
+      // `intentar*` este error ya no debería llegar acá — pero si algún camino
+      // futuro vuelve a pedir el cookie jar sin preguntar antes, el costo tiene
+      // que quedar en una sesión, no en dos.
+      if (e instanceof RequiereCertificado) throw e;
       this.session.invalidate();
       return intento();
     }
+  }
+
+  // Estos informes se sirven por HTTP, y el cliente HTTP sólo funciona si la
+  // sesión puede entregarle el cookie jar. Si no puede, la consulta está
+  // condenada desde el principio: preguntarlo ANTES de `authenticateOnly()`
+  // evita abrir en el SII una sesión que después no se va a poder usar, y que
+  // igual cuenta para el bloqueo por sesiones simultáneas. El scraper no decide
+  // nada sobre estrategias de autenticación — sólo consulta a su dueña.
+  private assertConsultaHttpPosible(): void {
+    this.session.assertPuedeEntregarCookieJar();
   }
 
   async informeAnual(anio: number): Promise<InformeAnualBhe> {
@@ -135,6 +152,7 @@ export class BheScraper {
   }
 
   private async intentarInformeAnual(anio: number): Promise<InformeAnualBhe> {
+    this.assertConsultaHttpPosible();
     // No requiere seleccionar empresa: la BHE es de la persona natural.
     await this.session.authenticateOnly();
     const { rut, dv } = this.session.identidad();
@@ -184,6 +202,7 @@ export class BheScraper {
     mes: number,
     recibidas: boolean
   ): Promise<BoletaBhe[]> {
+    this.assertConsultaHttpPosible();
     // No requiere seleccionar empresa: la BHE es de la persona natural.
     await this.session.authenticateOnly();
     const { rut, dv } = this.session.identidad();

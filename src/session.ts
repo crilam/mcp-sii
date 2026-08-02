@@ -92,6 +92,12 @@ function resolveOpensslBin(): string {
   );
 }
 
+// La estrategia configurada no puede producir el cookie jar que necesita curl.
+// Es una condición de configuración, no un fallo de sesión: no se arregla
+// reautenticando ni reintentando, y por eso tiene tipo propio (ver
+// BheScraper.conSesionFresca, que la deja pasar sin reintentar).
+export class RequiereCertificado extends Error {}
+
 export class SessionManager {
   private session: SiiSession | null = null;
   // Instante en que caduca la autenticación, o null si no hay ninguna vigente.
@@ -189,6 +195,19 @@ export class SessionManager {
   // cuenta: dos sesiones simultáneas contra el mismo RUT disparan el bloqueo
   // del SII. La sesión la administra sólo esta clase.
   async rutaCookieJar(): Promise<string> {
+    this.assertPuedeEntregarCookieJar();
+    await this.authenticate();
+    return COOKIE_JAR;
+  }
+
+  // Se expone aparte de `rutaCookieJar` para que quien vaya a consultar por HTTP
+  // pueda descartar el caso imposible ANTES de autenticar. Verificarlo recién en
+  // `rutaCookieJar` llega tarde: para entonces el scraper ya llamó a
+  // `authenticateOnly()` y abrió una sesión en el SII que nunca va a poder usar,
+  // sumando al contador que dispara el bloqueo 01.01.190.500.720.27 — justo lo
+  // que este guard existe para evitar. El llamador no necesita conocer las
+  // estrategias de autenticación: sólo pregunta si esta sesión puede servirlo.
+  assertPuedeEntregarCookieJar(): void {
     // Sólo `loginWithCert` escribe el cookie jar (curl -c). Con estrategia de
     // clave la autenticación pasa por el navegador y el archivo nunca existe,
     // así que devolver la ruta igual haría que curl salga sin cookies y el
@@ -198,15 +217,13 @@ export class SessionManager {
     // una sesión anterior, que es justo lo que dispara el bloqueo del SII
     // 01.01.190.500.720.27. Se falla antes de tocar la red.
     if (this.config.strategy !== AuthStrategy.Certificate) {
-      throw new Error(
+      throw new RequiereCertificado(
         'Las consultas por HTTP (boletas de honorarios) requieren autenticación con ' +
         'certificado digital: la autenticación con clave tributaria corre en el navegador ' +
         'y no produce el archivo de cookies que necesita curl. ' +
         'Configurá SII_CERT_PATH y SII_CERT_PASSWORD.'
       );
     }
-    await this.authenticate();
-    return COOKIE_JAR;
   }
 
   // Los CGI de BHE esperan el RUT partido en cuerpo y dígito verificador.

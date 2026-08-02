@@ -21,6 +21,21 @@ const RUT_DE_PRUEBA = /^(\d)\1{6,7}$/;
 const CAMPO_RUT = /\w+\['([^']*rut[^']*)'\]\s*=\s*"(\d+)"/gi;
 const RUT_CON_DV = /\b(\d{7,8})-([\dkK])\b/g;
 
+// FALSOS NEGATIVOS CONOCIDOS. El chequeo es una red de seguridad, no una
+// garantía: se acepta que deje pasar estos casos porque cerrarlos exigiría
+// heurísticas que se llenarían de falsos positivos sobre montos y folios. Quien
+// anonimice una fixture nueva tiene que revisarla a mano, no confiar en que el
+// verde signifique "no quedó nada":
+//   1. Un RUT embebido dentro de otro valor no se detecta, porque el nombre del
+//      campo no contiene "rut" y el RUT no está delimitado. El caso real es
+//      `codigobarras_N`, que arranca con el RUT del emisor concatenado con el
+//      resto del código (por ejemplo "011111111134364C969E7").
+//   2. Un RUT escrito con puntos ("11.111.111-1") no matchea RUT_CON_DV: el
+//      patrón espera el cuerpo sin separadores de miles.
+//   3. Nombres, direcciones y comunas reales no se chequean en absoluto. Nada
+//      acá mira texto libre, así que una razón social o un domicilio verdadero
+//      pasa sin ruido.
+
 // Rutas versionadas que contienen RUT de ejemplo a propósito y no son dato real:
 // este módulo (documenta el formato) y el test que lo ejercita.
 const EXCLUIDOS = [
