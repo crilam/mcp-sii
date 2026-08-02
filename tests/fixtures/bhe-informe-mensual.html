@@ -1,0 +1,264 @@
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<HTML>
+<HEAD>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<TITLE>INFORME MENSUAL DE BOLETAS EMITIDAS 1</TITLE>
+<link rel="stylesheet" href="/IMT/GLB_estilos.css" type="text/css">
+<script src="https://zeus.sii.cl/admin/barranav.js" type="text/javascript">
+</script>
+<script type="text/javascript" src="/IMT/js/GLB_links.js" ></script>
+<script type="text/javascript" src="/IMT/js/GLB_Util.js" ></script>
+<script type="text/javascript" src="/IMT/js/GLB_comunas.js"></script>
+<script type="text/javascript" src="/IMT/js/TMBCOC_ConsultasContrib.js">
+</script>
+<script type="text/javascript" src="/IMT/js/overlib_mini.js"></script>
+<script type="text/javascript" src="/AUT2000/js/validaUtil.js"></script>
+<script type="text/javascript" src="/AUT2000/js/manejaAutenticacion.js">
+</script>
+<script type="text/javascript">
+function paginacion(max, pag_solicitada)
+{
+ var i=0, tot_pag=0, pagina=0;
+ var lista="";
+
+ if (max > 100)
+ { 
+  pagina  = Number(pag_solicitada);
+  tot_pag = Math.ceil(max/100);
+
+  if (pagina>0)
+   lista   += '<a href=\"javascript:listar('+ (pagina-1) + ');\">Anterior<\/a> &nbsp;&nbsp;';
+     
+  while (i<tot_pag)
+  {
+   if (i == pag_solicitada) 
+    lista += '<b>' + (i+1) + '<\/b>&nbsp;&nbsp; ';
+   else
+    lista += '<A href=\"javascript:listar('+ i +');\" >' + (i+1) + '<\/A>&nbsp;&nbsp; ';
+   i++;
+  }
+     
+  if (pagina<(tot_pag-1))
+   lista   += '<a href=\"javascript:listar('+ (pagina+1) +');\">Siguiente<\/a>';
+ }
+ document.write(lista);
+}
+
+function listar(pag_solicitada)
+{
+ document.formulario.action = 'TMBCOC_InformeMensualBhe.cgi';
+ document.formulario.pagina_solicitada.value=pag_solicitada;
+ document.formulario.submit();
+}
+</script>
+
+
+<script type="text/javascript">
+var xml_values = new Array();
+xml_values['nombre_contribuyente'] = "JUAN PEREZ SOTO ANDRADE ";
+xml_values['rut_arrastre'] = "11111111";
+xml_values['dv_arrastre']  = "1";
+xml_values['anio_consulta'] = "2025";
+xml_values['mes_consulta'] = "05";
+xml_values['porcentaje_retencion'] = "54";
+xml_values['total_boletas'] = "2";
+xml_values['pagina_solicitada'] = "0";
+
+
+var arr_informe_mensual = new Array();
+CantidadFilas=2;
+
+xml_values['suma_honorarios'] = 0;
+xml_values['suma_retencion_emisor']     =0;     
+xml_values['suma_retencion_receptor']   =0;     
+xml_values['suma_liquido']              =0;
+
+
+ arr_informe_mensual['nroboleta_1']            =       "311";
+ arr_informe_mensual['usuemisor_1']            =       "JUAN PEREZ SOTO ANDRADE ";
+ arr_informe_mensual['fechaemision_1']         =       "22/05/2025";
+ arr_informe_mensual['rutreceptor_1']          =       "22222222";  
+ arr_informe_mensual['dvreceptor_1']           =       "2"; 
+ arr_informe_mensual['nombrereceptor_1']       =       "EMPRESA EJEMPLO SPA";
+ arr_informe_mensual['fecha_boleta_1']         =       "22/05/2025";
+ arr_informe_mensual['totalhonorarios_1']      =       formatMiles("1000000",'.');
+ arr_informe_mensual['es_soc_profesional_1']   =       "NO";
+ arr_informe_mensual['email_envio_1']          =       "receptor@ejemplo.cl";        
+  
+ xml_values['suma_honorarios'] += 1000000;
+ xml_values['suma_retencion_emisor'] += 0;
+ xml_values['suma_retencion_receptor'] += 145000;
+ xml_values['suma_liquido'] += 855000;
+ 
+ arr_informe_mensual['retencion_emisor_1']     =       formatMiles("0",'.');       
+ arr_informe_mensual['retencion_receptor_1']   =       formatMiles("145000",'.');       
+ arr_informe_mensual['honorariosliquidos_1']   =       formatMiles("855000",'.');       
+ 
+ arr_informe_mensual['estado_1']               =       "N";      
+ arr_informe_mensual['fechaanulacion_1']       =       " ";        
+ arr_informe_mensual['codigobarras_1']         =       "111111110000048F99ED";
+
+ arr_informe_mensual['nroboleta_2']            =       "312";
+ arr_informe_mensual['usuemisor_2']            =       "JUAN PEREZ SOTO ANDRADE ";
+ arr_informe_mensual['fechaemision_2']         =       "29/05/2025";
+ arr_informe_mensual['rutreceptor_2']          =       "22222222";  
+ arr_informe_mensual['dvreceptor_2']           =       "2"; 
+ arr_informe_mensual['nombrereceptor_2']       =       "EMPRESA EJEMPLO SPA";
+ arr_informe_mensual['fecha_boleta_2']         =       "29/05/2025";
+ arr_informe_mensual['totalhonorarios_2']      =       formatMiles("2000000",'.');
+ arr_informe_mensual['es_soc_profesional_2']   =       "NO";
+ arr_informe_mensual['email_envio_2']          =       "receptor@ejemplo.cl";        
+  
+ xml_values['suma_honorarios'] += 2000000;
+ xml_values['suma_retencion_emisor'] += 0;
+ xml_values['suma_retencion_receptor'] += 290000;
+ xml_values['suma_liquido'] += 1710000;
+ 
+ arr_informe_mensual['retencion_emisor_2']     =       formatMiles("0",'.');       
+ arr_informe_mensual['retencion_receptor_2']   =       formatMiles("290000",'.');       
+ arr_informe_mensual['honorariosliquidos_2']   =       formatMiles("1710000",'.');       
+ 
+ arr_informe_mensual['estado_2']               =       "N";      
+ arr_informe_mensual['fechaanulacion_2']       =       " ";        
+ arr_informe_mensual['codigobarras_2']         =       "111111110000087252EA";
+</script>
+
+</head>
+<body link="#003399" onLoad="initkeys();">
+<div id="overDiv" style="position:absolute; visibility:hidden; z-index:1000;"></div>
+<diV align=center>
+<center>
+<script  type="text/javascript">
+document.write('<table width=630 border=0 cellSpacing=1><tr align="left">');
+document.write('<td align="left">');
+</script>
+<script type="text/javascript">mostrar();</script>
+<script  type="text/javascript">
+document.write('<\/td>');
+document.write('<\/tr><tr ><td colspan="2">&nbsp;<\/TD><\/TR> <tr> <TD colspan="2" align="right"> ');
+document.write('<P align=justify><FONT face=Arial color="#000000" size=4><STRONG>INFORME MENSUAL DE BOLETAS EMITIDAS ');
+document.write('&nbsp;<\/STRONG><\/FONT><FONT face=Arial size=-1><BR> ');
+document.write('En este informe se refleja el detalle de cada boleta de honorarios electr&oacute;nica emitida por el contribuyente durante el mes en consulta.<\/FONT><\/P><\/TD> ');
+document.write('<\/TR> <tr align="left"> <TD  colspan="2"> <HR> <\/TD> ');
+document.write('<\/TR> <tr align="left"> <TD height=10 colspan="2"> <DIV align=center>  ');
+document.write('<CENTER> <TABLE  cellSpacing=1 border=0> <tr align="left">  ');
+document.write('<TD > <font size="2" face="Arial, Helvetica, sans-serif"> Contribuyente: ');
+document.write('<\/font> <\/TD> <TD width="90%"> <font size="2" face="Arial, Helvetica, sans-serif"> <B> ');
+document.write(xml_values['nombre_contribuyente']);
+document.write('<\/B> <\/font> <\/TD> <\/TR> <tr align="left"> <TD> ');
+document.write('<font size="2" face="Arial, Helvetica, sans-serif"> RUT:  ');
+document.write('<\/font> <\/TD> <TD> <font size="2" face="Arial, Helvetica, sans-serif"> <B> ');
+document.write(xml_values['rut_arrastre']+'-'+ xml_values['dv_arrastre']);
+document.write('<\/B> <\/font> <\/TD> <\/TR> <tr align="left"><TD colspan="2">&nbsp;<\/TD><\/TR> ');
+document.write('<tr align="center"> <TD colspan="2"> <font size="2" face="Arial, Helvetica, sans-serif"> ');
+document.write(' <B> INFORME CORRESPONDIENTE AL MES ');
+document.write(nombreMes(xml_values['mes_consulta']));
+document.write('  DEL A&Ntilde;O ');
+document.write(xml_values['anio_consulta']);
+document.write('<\/B> <\/font> <\/TD> <\/TR> <\/table>');
+document.write('<table width="900" border="1" cellspacing="0" cellpadding="1"> ');
+document.write('<tr align="left" bgcolor="#CCCCCC" class="reporte"> ');
+document.write('<td colspan="5"><div align="center">Boleta<\/div><\/td> ');
+document.write('<td colspan="3"><div align="center">Emisi&oacute;n<\/div><\/td> ');
+document.write('<td colspan="2"><div align="center">Receptor<\/div><\/td> ');
+document.write('<td colspan="4"><div align="center">Honorarios<\/div><\/td> <\/tr> ');
+document.write('<tr align="left" bgcolor="#CCCCCC" class="reporte">  ');
+document.write('<td> <div align="center">Ver<\/div><\/td> ');
+document.write('<td> <div align="center">Mail<\/div><\/td> ');
+document.write('<td> <div align="center">N&deg;<\/div><\/td> ');
+document.write('<td> <div align="center">Estado<\/div><\/td> ');
+document.write('<td> <div align="center">Fecha<\/div><\/td> ');
+document.write('<td> <div align="center">Usuario<\/div><\/td> ');
+document.write('<td> <div align="center">Fecha<\/div><\/td> ');
+document.write('<td> <div align="center">Soc. Prof.<\/div><\/td> ');
+document.write('<td> <div align="center">Rut<\/div><\/td> ');
+document.write('<td> <div align="center">Nombre o Raz&oacute;n&nbsp;Social<\/div><\/td> ');
+document.write('<td> <div align="center">Brutos<\/div><\/td> ');
+document.write('<td> <div align="center">Ret. Emisor<\/div><\/td> ');
+document.write('<td> <div align="center">Ret. Receptor<\/div><\/td> ');
+document.write('<td> <div align="center">L&iacute;quidos<\/div><\/td> <\/tr> ');
+CampoOculto("CantidadFilas",CantidadFilas);
+ if (CantidadFilas < 1 )  document.write('<tr class="reporte"> <td colspan="14"> Sin Datos <\/td> <\/tr> ' );  
+for (i=1;i<=CantidadFilas;i++)
+{
+document.write('<tr align="left" class="reporte">');  
+document.write('<td><a href="TMBCOT_ConsultaBoletaPdf.cgi?txt_codigobarras='+ arr_informe_mensual['codigobarras_'+i] +
+'&veroriginal=si&origen=PROPIOS&enviar=si" onmouseover="return overlib(\'Para ver esta boleta, hacer click sobre esta imagen.\', AUTOSTATUS, WRAP);" onmouseout="return nd();"><img src="/IMT/img/pdf.gif" border="0"><\/a><\/td>');
+
+document.write('<td><a href="TMBCOT_PresentaDatosEnvio.cgi?txt_codigobarras='+ arr_informe_mensual['codigobarras_'+i] +
+'&veroriginal=si&origen=CUARTO&enviar=si" onmouseover="return overlib(\'Para enviar mail, hacer click sobre esta imagen.\', AUTOSTATUS, WRAP);" onmouseout="return nd();"><img  width="20" height="20" src="/IMT/img/mailbox.gif" border="0"><\/a><\/td>');
+
+document.write('<td>'+ arr_informe_mensual['nroboleta_'+i] +'<\/td>');
+
+DisplayMsgEstado(arr_informe_mensual['estado_'+i],arr_informe_mensual['fechaanulacion_'+i]) ;
+
+document.write('<td>'+ arr_informe_mensual['fecha_boleta_'+i] +'<\/td>');
+document.write('<td>'+ arr_informe_mensual['usuemisor_'+i] +'<\/td>');
+document.write('<td>'+ arr_informe_mensual['fechaemision_'+i] +'<\/td>');
+document.write('<td><div align="center">'+ arr_informe_mensual['es_soc_profesional_'+i] +'<\/div><\/td>');
+document.write('<td><nobr>'+ arr_informe_mensual['rutreceptor_'+i] +'-'+ arr_informe_mensual['dvreceptor_'+i] +'<\/nobr><\/td>');
+if (arr_informe_mensual['email_envio_'+i]!=' ')
+{
+document.write('<td><a href="javascript:void(0);" ' +
+' onmouseover="return overlib(\'Enviada a ' + arr_informe_mensual['email_envio_'+i]+ '.\', CAPTION, \'Correo\',AUTOSTATUS, WRAP);" '+
+' onmouseout="return nd();">'+ arr_informe_mensual['nombrereceptor_'+i] +'<\/a><\/td>');
+}
+else 
+{
+if (arr_informe_mensual['nombrereceptor_'+i]!=" ")  
+document.write('<td>'+ arr_informe_mensual['nombrereceptor_'+i] +'&nbsp;<\/td>');
+else
+document.write('<td>EMITIDA SIN RECEPTOR<\/td>');
+}
+document.write('<td align="right">'+ arr_informe_mensual['totalhonorarios_'+i]+'<\/td>');
+document.write('<td align="right">'+ arr_informe_mensual['retencion_emisor_'+i] +'<\/td>');
+document.write('<td align="right">'+ arr_informe_mensual['retencion_receptor_'+i] +'<\/td>');
+document.write('<td align="right">'+ arr_informe_mensual['honorariosliquidos_'+i] +'<\/td>');
+document.write('<\/tr>');
+}
+document.write('<tr align="left" class="reporte"> <td colspan="10" bgcolor="#CCCCCC" > ');
+document.write('<strong>Totales*&nbsp;:<\/strong><\/td> <td align="right"> ');
+document.write(formatMiles(xml_values['suma_honorarios'],'.')); 
+document.write('<\/td> <td align="right"> ');
+document.write(formatMiles(xml_values['suma_retencion_emisor'],'.'));
+document.write('<\/td> <td align="right"> ');
+document.write(formatMiles(xml_values['suma_retencion_receptor'],'.'));
+document.write('<\/td> <td align="right"> ');
+document.write(formatMiles(xml_values['suma_liquido'],'.')); 
+document.write('<\/td> <\/tr> <\/table> ');
+document.write('<table width="630" border="0" cellspacing="0" cellpadding="1"> <tr align="left"> <TD colspan="2">');
+document.write('<font size="2" face="Arial, Helvetica, sans-serif">(*) Los valores totales no consideran los montos de las boletas anuladas. <\/font> <div align="center"><span class="normal"> ');
+paginacion(xml_values['total_boletas'], xml_values['pagina_solicitada'] );
+document.write('<\/span><\/div><br>  ');
+document.write('<form name="formulario" method="post" action=""> ');
+CampoOculto("rut_arrastre",xml_values['rut_arrastre']);
+CampoOculto("dv_arrastre" ,xml_values['dv_arrastre']);
+CampoOculto("cbanoinformemensual" ,xml_values['anio_consulta']);
+CampoOculto("cbmesinformemensual" ,xml_values['mes_consulta']);
+CampoOculto("pagina_solicitada" ,"0");
+document.write('<\/form> <form name="formulario1" method="post" action=""> ');
+CampoOculto("rut_arrastre",xml_values['rut_arrastre']);
+CampoOculto("dv_arrastre" ,xml_values['dv_arrastre']);
+CampoOculto("cbanoinformemensual" ,xml_values['anio_consulta']);
+CampoOculto("cbmesinformemensual" ,xml_values['mes_consulta']);
+CampoOculto("pagina_solicitada", xml_values['pagina_solicitada']);
+CampoOculto("liquido1", xml_values['suma_honorarios']);
+CampoOculto("liquido2", xml_values['suma_retencion_emisor']);
+CampoOculto("liquido3", xml_values['suma_retencion_receptor']);
+CampoOculto("liquido4", xml_values['suma_liquido']);
+CampoOculto("CmdXls", "a");
+document.write(' <table width="100%" border="0" cellspacing="0" cellpadding="0"> <tr align="left">  ');
+document.write(' <td width="40%"> <div align="center"><font size="2" face="Arial"> <input type="button"  value="Volver al Menú" onclick="javascript:history.back();"> <\/font><\/div><\/td>');
+document.write('<td width="30%"> <div align="center"><font size="2" face="Arial"> ');
+document.write('<input type="button" name="planilla"  value="Ver informe como planilla electrónica" onclick="javascript:VerPlanillaMensual();"> ');
+document.write('<\/font><\/div><\/td> <td width="30%"> <div align="center"><font size="2" face="Arial"> ');
+document.write('<a href="#"><\/a> <input type="button" name="CmdImprimir" value="Imprimir" onclick="document:print();"> ');
+document.write('<\/font><\/div><\/td> <\/tr> <\/table> <\/form> <\/TD> <\/TR> <\/TABLE> ');
+document.write('<img src="/IMT/img/pdf.gif" border="0"> <font size="2" face="Arial"> <a href="http://www.sii.cl/pagina/websrelacionados/descargas.htm" onmouseover="return overlib(\'Descargar Adobe Reader para visualizar la Boleta.\', AUTOSTATUS, WRAP);" onmouseout="return nd();" >Descargar Adobe Reader para visualizar la Boleta.<\/a>.  <\/font> ');
+document.write('<\/center> <\/div><\/td> <\/tr><\/table> ');
+</SCRIPT>
+ </CENTER></DIV></BODY></HTML>
+
+

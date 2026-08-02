@@ -56,6 +56,10 @@ const OPENSSL_CANDIDATES = [
   'openssl',
 ];
 
+// Ruta del cookie jar en formato Netscape que curl genera y que el cliente HTTP
+// puede consumir con -b para reusar la sesión sin autenticar por su cuenta.
+const COOKIE_JAR = path.join(os.tmpdir(), 'sii_cookies.txt');
+
 let opensslBin: string | null = null;
 
 function resolveOpensslBin(): string {
@@ -87,6 +91,12 @@ function resolveOpensslBin(): string {
     'Instalalo con `brew install openssl@3` o apuntá SII_OPENSSL_BIN al binario correcto.'
   );
 }
+
+// La estrategia configurada no puede producir el cookie jar que necesita curl.
+// Es una condición de configuración, no un fallo de sesión: no se arregla
+// reautenticando ni reintentando, y por eso tiene tipo propio (ver
+// BheScraper.conSesionFresca, que la deja pasar sin reintentar).
+export class RequiereCertificado extends Error {}
 
 export class SessionManager {
   private session: SiiSession | null = null;
@@ -181,6 +191,50 @@ export class SessionManager {
     this.autenticadoHasta = null;
   }
 
+  // El cliente HTTP necesita las cookies, pero no debe autenticar por su
+  // cuenta: dos sesiones simultáneas contra el mismo RUT disparan el bloqueo
+  // del SII. La sesión la administra sólo esta clase.
+  async rutaCookieJar(): Promise<string> {
+    this.assertPuedeEntregarCookieJar();
+    await this.authenticate();
+    return COOKIE_JAR;
+  }
+
+  // Se expone aparte de `rutaCookieJar` para que quien vaya a consultar por HTTP
+  // pueda descartar el caso imposible ANTES de autenticar. Verificarlo recién en
+  // `rutaCookieJar` llega tarde: para entonces el scraper ya llamó a
+  // `authenticateOnly()` y abrió una sesión en el SII que nunca va a poder usar,
+  // sumando al contador que dispara el bloqueo 01.01.190.500.720.27 — justo lo
+  // que este guard existe para evitar. El llamador no necesita conocer las
+  // estrategias de autenticación: sólo pregunta si esta sesión puede servirlo.
+  assertPuedeEntregarCookieJar(): void {
+    // Sólo `loginWithCert` escribe el cookie jar (curl -c). Con estrategia de
+    // clave la autenticación pasa por el navegador y el archivo nunca existe,
+    // así que devolver la ruta igual haría que curl salga sin cookies y el
+    // fallo se reporte como "la sesión pudo expirar", que apunta al lugar
+    // equivocado. Peor: si en esta máquina hubo antes una corrida con
+    // certificado, el archivo quedó en $TMPDIR y curl -b mandaría cookies de
+    // una sesión anterior, que es justo lo que dispara el bloqueo del SII
+    // 01.01.190.500.720.27. Se falla antes de tocar la red.
+    if (this.config.strategy !== AuthStrategy.Certificate) {
+      throw new RequiereCertificado(
+        'Las consultas por HTTP (boletas de honorarios) requieren autenticación con ' +
+        'certificado digital: la autenticación con clave tributaria corre en el navegador ' +
+        'y no produce el archivo de cookies que necesita curl. ' +
+        'Configurá SII_CERT_PATH y SII_CERT_PASSWORD.'
+      );
+    }
+  }
+
+  // Los CGI de BHE esperan el RUT partido en cuerpo y dígito verificador.
+  // SII_RUT viene como "11111111-1"; sin guión, el DV es el último carácter.
+  identidad(): { rut: string; dv: string } {
+    const [rut, dv] = this.config.rut.includes('-')
+      ? this.config.rut.split('-')
+      : [this.config.rut.slice(0, -1), this.config.rut.slice(-1)];
+    return { rut, dv: dv.toUpperCase() };
+  }
+
   // Autentica con certificado digital vía curl (TLS mutual auth), luego inyecta
   // las cookies de sesión en agent-browser navegando a un dominio .sii.cl.
   private async loginWithCert(): Promise<void> {
@@ -192,7 +246,7 @@ export class SessionManager {
     const tmpDir = os.tmpdir();
     const certPem = path.join(tmpDir, 'sii_cert.pem');
     const keyPem = path.join(tmpDir, 'sii_key.pem');
-    const cookiesFile = path.join(tmpDir, 'sii_cookies.txt');
+    const cookiesFile = COOKIE_JAR;
 
     // La clave privada se extrae con -nodes, o sea sin cifrar, a un directorio
     // compartido. El `finally` no es decorativo: sin él, cualquier salida por
