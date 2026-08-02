@@ -139,6 +139,24 @@ describe('sii_rcv_detalle', () => {
     expect(desc).toMatch(/solo lectura/);
   });
 
+  // La descripción es lo único que ve el modelo: si no dice que el 55555555-5 es
+  // genérico, va a tratarlo como si identificara al cliente extranjero y va a
+  // agrupar bajo un mismo "cliente" a compradores de países distintos.
+  it('advierte en la descripción que en exportaciones el RUT es genérico y dónde está el identificador real', () => {
+    const { tools } = registrar();
+    const desc = tools['sii_rcv_detalle'].descripcion;
+
+    expect(desc).toMatch(/55555555-5/);
+    expect(desc).toMatch(/genérico/i);
+    expect(desc).toMatch(/no tiene RUT chileno/i);
+    expect(desc).toMatch(/contraparteTipoId/);
+    expect(desc).toMatch(/contraparteIdExtranjero/);
+    // La nacionalidad es un código numérico, no un nombre de país: si la
+    // descripción no lo dice, el modelo va a inventar el país.
+    expect(desc).toMatch(/contraparteNacionalidadCodigo/);
+    expect(desc).toMatch(/CÓDIGO NUMÉRICO/);
+  });
+
   it('explica que un período sin documentos no es un error', () => {
     const { tools } = registrar();
 

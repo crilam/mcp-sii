@@ -52,6 +52,15 @@ export function registerRcvTools(server: McpServer, scraper: RcvScraper): void {
     'receptor (el cliente); no hay que llamarla proveedor en una consulta de ventas. ' +
     'En notas de crédito y débito, referenciaTipoDoc y referenciaFolio dicen qué documento se está ' +
     'corrigiendo. ' +
+    'CUIDADO con la contraparte en documentos de EXPORTACIÓN (tipos 110, 111 y 112): el cliente es ' +
+    'extranjero y NO tiene RUT chileno, así que el SII pone el RUT genérico 55555555-5 en contraparteRut ' +
+    'para TODOS los receptores extranjeros. Ese RUT no identifica a nadie y se repite entre clientes ' +
+    'distintos: no sirve para agrupar, comparar ni cruzar. Hay que mirar contraparteTipoId: vale ' +
+    '"rut_chileno" cuando contraparteRut identifica de verdad a la contraparte, y "extranjero" cuando no. ' +
+    'Con "extranjero", el identificador real de la contraparte está en contraparteIdExtranjero (su RUC, ' +
+    'VAT o tax id de origen; null si el SII no lo informa) y contraparteNacionalidadCodigo trae la ' +
+    'nacionalidad como CÓDIGO NUMÉRICO de la tabla de países del SII (por ejemplo 218), no como nombre de ' +
+    'país: no hay que traducirlo ni adivinar de qué país se trata, se reporta el código tal cual. ' +
     'CUIDADO al sumar: en las notas de crédito (tipos 61 y 60) los montos vienen POSITIVOS pero RESTAN ' +
     'del total del período, así que sumar los montoTotal de un detalle produce un total mal. Para ' +
     'totalizar hay que usar sii_rcv_resumen, que ya aplica el signo; este detalle es para mirar ' +

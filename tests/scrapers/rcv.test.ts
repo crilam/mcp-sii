@@ -381,6 +381,9 @@ describe('RcvScraper.detalle', () => {
     expect(detalle.documentos).toHaveLength(8);
     expect(detalle.documentos[0]).toEqual({
       contraparteRut: '66666666-1',
+      contraparteTipoId: 'rut_chileno',
+      contraparteIdExtranjero: null,
+      contraparteNacionalidadCodigo: null,
       contraparteNombre: 'PROVEEDOR EJEMPLO CUATRO SPA',
       contraparteRol: 'emisor',
       folio: 900000000,
@@ -408,11 +411,55 @@ describe('RcvScraper.detalle', () => {
     expect(detalle.documentos).toHaveLength(1);
     expect(detalle.documentos[0]).toMatchObject({
       contraparteRol: 'receptor',
-      contraparteRut: '88888888-5',
-      contraparteNombre: 'RECEPTOR EJEMPLO SPA',
+      contraparteNombre: 'CLIENTE EXTRANJERO EJEMPLO',
       montoExento: 100000,
       montoTotal: 100000,
     });
+  });
+
+  // El SII pone el RUT genérico 55555555-5 en TODO receptor extranjero, así que
+  // dos clientes de distintos países salen con el mismo contraparteRut. Si el
+  // identificador de origen (detExpNumId) se descarta, la tool deja de poder
+  // responder "con quién" justo en exportaciones.
+  it('expone el identificador extranjero y la nacionalidad en documentos de exportación', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    const detalle = await scraper.detalle('202607', 'VENTA', 110, '22222222-2');
+
+    const doc = detalle.documentos[0];
+    expect(doc.contraparteIdExtranjero).toBe('9999999999999');
+    // Código numérico de la tabla de países del SII, NO un nombre: no tenemos la
+    // tabla y traducirlo sería adivinar el país del cliente.
+    expect(doc.contraparteNacionalidadCodigo).toBe(218);
+  });
+
+  // Devolver el identificador extranjero dentro de `contraparteRut` cambiaría un
+  // problema por otro: un RUC extranjero en un campo llamado "Rut" se lee como
+  // RUT chileno. El tipo explícito es lo que evita esa confusión.
+  it('marca la contraparte extranjera como distinguible de un RUT chileno', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    const detalle = await scraper.detalle('202607', 'VENTA', 110, '22222222-2');
+
+    const doc = detalle.documentos[0];
+    expect(doc.contraparteTipoId).toBe('extranjero');
+    // El RUT genérico se conserva tal cual lo informa el SII, pero queda claro
+    // que no identifica a nadie.
+    expect(doc.contraparteRut).toBe('55555555-5');
+    expect(doc.contraparteRut).not.toBe(doc.contraparteIdExtranjero);
+  });
+
+  // Fuera de exportaciones el SII no informa detExpNumId: si no hay
+  // identificador extranjero, no se inventa uno ni se marca la contraparte como
+  // extranjera.
+  it('no inventa identificador extranjero en documentos no-exportación', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-compra.json'));
+
+    const detalle = await scraper.detalle('202606', 'COMPRA', 61, '22222222-2');
+
+    expect(detalle.documentos.every(d => d.contraparteTipoId === 'rut_chileno')).toBe(true);
+    expect(detalle.documentos.every(d => d.contraparteIdExtranjero === null)).toBe(true);
+    expect(detalle.documentos.every(d => d.contraparteNacionalidadCodigo === null)).toBe(true);
   });
 
   it('marca la contraparte como emisor en compras', async () => {

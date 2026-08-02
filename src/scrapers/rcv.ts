@@ -63,6 +63,28 @@ export interface ResumenRcv {
 // ventas, que es exactamente el tipo de etiqueta que después se lee mal.
 export type RolContraparteRcv = 'emisor' | 'receptor';
 
+// Qué clase de identificador es el de la contraparte.
+//
+//   'rut_chileno' → contraparteRut identifica de verdad a la contraparte.
+//   'extranjero'  → contraparteRut trae el RUT genérico 55555555-5 y NO
+//                   identifica a nadie; el identificador real está en
+//                   contraparteIdExtranjero.
+//
+// Se eligió un discriminador explícito en vez de meter el identificador
+// extranjero dentro de `contraparteRut`: un RUC ecuatoriano en un campo llamado
+// "Rut" se lee como RUT chileno, se valida con módulo 11, se formatea con
+// puntos y guion y se cruza contra otras fuentes chilenas — un problema
+// cambiado por otro. Con el tipo explícito, quien consume sabe siempre qué
+// tiene en la mano, y `contraparteRut` conserva literalmente lo que informa el
+// SII (incluido el genérico) sin que nadie lo confunda con una identidad.
+export type TipoIdContraparteRcv = 'rut_chileno' | 'extranjero';
+
+// El SII usa este RUT genérico para TODO receptor extranjero: un comprador de
+// otro país no tiene RUT chileno. Verificado contra una factura de exportación
+// real (tipo 110). Es una constante pública, no un dato de nadie.
+const RUT_GENERICO_EXTRANJERO = 55555555;
+const DV_GENERICO_EXTRANJERO = '5';
+
 // Una fila del detalle: UN documento del período, de un tipo de documento.
 //
 // La respuesta del SII trae más de 60 campos por fila. Acá se expone sólo el
@@ -75,8 +97,23 @@ export type RolContraparteRcv = 'emisor' | 'receptor';
 // real: exponerlos sin haberlos verificado invita a leerlos como si
 // significaran algo. Cuando alguno haga falta, se agrega con su fixture.
 export interface FilaDetalleRcv {
-  // RUT de la contraparte con dígito verificador (formato 22222222-2).
+  // RUT de la contraparte con dígito verificador (formato 22222222-2), tal como
+  // lo informa el SII. OJO: en documentos de exportación viene el genérico
+  // 55555555-5 para cualquier extranjero, así que dos clientes distintos traen
+  // el mismo valor. Ver contraparteTipoId antes de usarlo como identidad.
   contraparteRut: string;
+  // Ver TipoIdContraparteRcv. Es el campo que hay que mirar para saber si
+  // contraparteRut identifica a alguien.
+  contraparteTipoId: TipoIdContraparteRcv;
+  // Identificador de la contraparte en su país (detExpNumId): RUC, VAT, tax id
+  // — el SII no dice cuál. `null` cuando el SII no lo informa, que es lo normal
+  // fuera de exportaciones: si no viene, no se inventa nada.
+  contraparteIdExtranjero: string | null;
+  // Nacionalidad de la contraparte según el SII (detExpNacionalidad): es un
+  // CÓDIGO NUMÉRICO de su tabla de países (218 = Ecuador), no un nombre. No se
+  // traduce a nombre de país porque no tenemos la tabla y adivinar el país de
+  // un cliente sería peor que exponer el código crudo. `null` si no viene.
+  contraparteNacionalidadCodigo: number | null;
   contraparteNombre: string;
   // Qué es la contraparte respecto del documento: ver RolContraparteRcv.
   contraparteRol: RolContraparteRcv;
@@ -347,8 +384,33 @@ export class RcvScraper {
     const contraparteRol: RolContraparteRcv =
       operacion === 'COMPRA' ? 'emisor' : 'receptor';
 
+    // detExpNumId llega vacío, null o "" en todo lo que no sea exportación: se
+    // normaliza a null para no exponer una cadena vacía que parezca un id.
+    const idExtranjeroCrudo = String(d.detExpNumId ?? '').trim();
+    const contraparteIdExtranjero = idExtranjeroCrudo === '' ? null : idExtranjeroCrudo;
+
+    const nacionalidadCruda = String(d.detExpNacionalidad ?? '').trim();
+    const contraparteNacionalidadCodigo =
+      nacionalidadCruda === '' || Number.isNaN(Number(nacionalidadCruda))
+        ? null
+        : Number(nacionalidadCruda);
+
+    // La contraparte es extranjera si el SII trajo su identificador de origen, o
+    // si puso el RUT genérico de extranjero. Se miran las dos señales: el
+    // genérico solo ya basta para saber que ese "RUT" no identifica a nadie,
+    // aunque el identificador real no venga. Se exige el RUT genérico COMPLETO
+    // (cuerpo y dígito verificador): 55555555 con otro DV es un RUT distinto,
+    // de un contribuyente chileno cualquiera.
+    const esExtranjera =
+      contraparteIdExtranjero !== null ||
+      (Number(d.detRutDoc) === RUT_GENERICO_EXTRANJERO &&
+        String(d.detDvDoc ?? '').trim().toLowerCase() === DV_GENERICO_EXTRANJERO);
+
     return {
       contraparteRut: `${d.detRutDoc ?? ''}-${d.detDvDoc ?? ''}`,
+      contraparteTipoId: esExtranjera ? 'extranjero' : 'rut_chileno',
+      contraparteIdExtranjero,
+      contraparteNacionalidadCodigo,
       contraparteNombre: (d.detRznSoc ?? '').trim(),
       contraparteRol,
       folio: Number(d.detNroDoc ?? 0),
