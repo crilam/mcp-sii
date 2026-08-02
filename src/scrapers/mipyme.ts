@@ -125,6 +125,13 @@ export class MipymeScraper {
   async listEmpresas(): Promise<Empresa[]> {
     const empresas = await this.session.listEmpresasDisponibles();
     if (empresas.length === 0) {
+      // listEmpresasDisponibles() y getSession()/selectEmpresa() parsean el
+      // mismo combo de la misma página de selección de empresa. Si acá vino
+      // vacío, ahí también viene vacío: getSession() no puede caer en el
+      // camino de "opera N empresas, pasá empresa_rut" (ese exige >1 opciones
+      // parseadas), así que no hace falta manejarlo aparte en esta tool —que
+      // además no recibe empresa_rut, así que ese mensaje sería confuso acá.
+      // Sólo queda el caso real: una única empresa implícita en la sesión.
       const session = await this.session.getSession();
       return [{ rut: session.empresaRut, nombre: session.empresaNombre }];
     }
@@ -158,7 +165,11 @@ export class MipymeScraper {
   async getDocumentoEmitido(tipoDte: number, folio: number, empresaRut?: string, fecha?: string): Promise<DocumentoEmitidoDetalle> {
     return this.withReauth(async () => {
       await this.ensureEmpresa(empresaRut);
-      const session = await this.session.getSession();
+      // Se pasa empresaRut explícitamente en vez de confiar en que ensureEmpresa
+      // ya dejó la sesión en la empresa correcta: ese orden es un invariante
+      // implícito que un reordenamiento futuro rompería en silencio, contra la
+      // empresa equivocada. getSession() es idempotente si ya está ahí.
+      const session = await this.session.getSession(empresaRut);
       const rutToUse = empresaRut ?? session.empresaRut;
 
       this.browser.open(MIPYME_EMITIDOS_URL);
@@ -217,7 +228,9 @@ export class MipymeScraper {
   async getDocumentoRecibido(tipoDte: number, folio: number, emisorRut: string, empresaRut?: string, fecha?: string): Promise<DocumentoRecibidoDetalle> {
     return this.withReauth(async () => {
       await this.ensureEmpresa(empresaRut);
-      const session = await this.session.getSession();
+      // Ídem getDocumentoEmitido: empresaRut explícito en vez de depender del
+      // orden de llamadas para no reabrir el mismo bug si alguien reordena.
+      const session = await this.session.getSession(empresaRut);
       const rutToUse = empresaRut ?? session.empresaRut;
 
       this.browser.open(MIPYME_RECIBIDOS_URL);
@@ -313,27 +326,34 @@ export class MipymeScraper {
       const msg = err instanceof Error ? err.message : String(err);
       if (/sesion|session|autenticacion|unauthorized|401/i.test(msg)) {
         this.session.invalidate();
-        await this.session.getSession();
+        // No se llama a getSession() acá: `fn()` ya vuelve a llamar
+        // ensureEmpresa(empresaRut) con la empresa correcta al reintentar.
+        // Llamarlo sin argumento antes del reintento (como se hacía) es
+        // redundante en el caso simple y, con varias empresas y sin
+        // SII_EMPRESA_RUT, revienta con "opera N empresas" aunque el
+        // llamador sí haya pasado empresa_rut — enmascarando el error real
+        // de sesión expirada y perdiendo el reintento.
         return fn();
       }
       throw err;
     }
   }
 
+  // El cambio de empresa (si corresponde) lo hace SessionManager, único dueño
+  // de la sesión: abrir una selección de empresa por fuera de la sesión que
+  // administra el login duplicaría ese estado y podría desalinearse de la
+  // sesión real, sin ganar nada.
   private async ensureEmpresa(empresaRut?: string): Promise<void> {
-    const session = await this.session.getSession();
-    if (empresaRut && empresaRut !== session.empresaRut) {
-      const snapshot = this.browser.snapshot();
-      const selectRef = this.findRef(snapshot, /empresa/i) ?? '@e10';
-      this.browser.select(selectRef, empresaRut);
-    }
+    await this.session.getSession(empresaRut);
   }
 
   private async applyFiltrosEmitidos(filtros: FiltrosEmitidos): Promise<void> {
     const snapshot = this.browser.snapshot();
     // El nuevo portal tiene comboboxes: [0]=empresa, [1]=mes, [2]=año + botón Consultar
     const comboRefs = [...snapshot.matchAll(/combobox \[[^\]]*ref=(e\d+)\]/g)].map(m => m[1]);
-    const session = await this.session.getSession();
+    // empresaRut explícito: no depender de que ensureEmpresa se haya llamado
+    // antes en esta misma pasada para dejar la sesión en la empresa pedida.
+    const session = await this.session.getSession(filtros.empresaRut);
     const empresaRut = filtros.empresaRut ?? session.empresaRut;
     const fecha = filtros.fechaDesde ? new Date(filtros.fechaDesde + 'T00:00:00') : new Date();
     const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -354,7 +374,8 @@ export class MipymeScraper {
   private async applyFiltrosRecibidos(filtros: FiltrosRecibidos): Promise<void> {
     const snapshot = this.browser.snapshot();
     const comboRefs = [...snapshot.matchAll(/combobox \[[^\]]*ref=(e\d+)\]/g)].map(m => m[1]);
-    const session = await this.session.getSession();
+    // Ídem applyFiltrosEmitidos: empresaRut explícito, no por orden implícito.
+    const session = await this.session.getSession(filtros.empresaRut);
     const empresaRut = filtros.empresaRut ?? session.empresaRut;
     const fecha = filtros.fechaDesde ? new Date(filtros.fechaDesde + 'T00:00:00') : new Date();
     const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -363,23 +384,6 @@ export class MipymeScraper {
     if (comboRefs[2]) this.browser.select(comboRefs[2], String(fecha.getFullYear()));
     const btnRef = this.findRef(snapshot, /consultar/i);
     if (btnRef) this.browser.click(btnRef);
-  }
-
-  private parseEmpresas(snapshot: string): Empresa[] {
-    // Formato portal mipyme: option "NOMBRE EMPRESA RUT-DV" [ref=eN]
-    const regex = /option "([^"]+)" /g;
-    const empresas: Empresa[] = [];
-    let match;
-    while ((match = regex.exec(snapshot)) !== null) {
-      const text = match[1];
-      const withName = text.match(/^(.+?)\s+(\d{5,}-[0-9Kk])$/);
-      if (withName) {
-        empresas.push({ rut: withName[2], nombre: withName[1].trim() });
-      } else if (/^\d{5,}-[0-9Kk]$/.test(text)) {
-        empresas.push({ rut: text, nombre: text });
-      }
-    }
-    return empresas;
   }
 
   private parseSummaryTypeLinks(snapshot: string): Array<{ ref: string; tipoDte: number }> {
@@ -542,7 +546,7 @@ export class MipymeScraper {
   }
 
 private async ensureMipymePortalEmpresa(empresaRut?: string): Promise<void> {
-    const session = await this.session.getSession();
+    const session = await this.session.getSession(empresaRut);
     const rutToUse = empresaRut ?? session.empresaRut;
     this.browser.open(MIPYME_PORTAL_URL);
     this.browser.waitFor(rutToUse);
