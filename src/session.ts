@@ -224,6 +224,26 @@ export class SessionManager {
     return COOKIE_JAR;
   }
 
+  // El `conversationId` que exigen las APIs modernas del portal (el sobre SDI)
+  // es el valor de la cookie TOKEN. Vive acá, y no en el cliente HTTP, porque
+  // el dueño del cookie jar es esta clase: si el transporte leyera el archivo
+  // por su cuenta habría dos lugares que saben dónde está y con qué formato.
+  //
+  // Falla explícito cuando la cookie no está: mandar el sobre con un
+  // conversationId vacío devuelve "Acceso no autorizado!", un mensaje que
+  // manda a revisar permisos cuando el problema es que no hay sesión.
+  conversationId(): string {
+    const token = this.parseCookieFile(COOKIE_JAR)['TOKEN'];
+    if (!token) {
+      throw new Error(
+        'No se encontró la cookie TOKEN de la sesión del SII, necesaria para consultar ' +
+        'las APIs del portal. Autenticá con certificado digital (SII_CERT_PATH y ' +
+        'SII_CERT_PASSWORD) antes de consultar.'
+      );
+    }
+    return token;
+  }
+
   // Se expone aparte de `rutaCookieJar` para que quien vaya a consultar por HTTP
   // pueda descartar el caso imposible ANTES de autenticar. Verificarlo recién en
   // `rutaCookieJar` llega tarde: para entonces el scraper ya llamó a
