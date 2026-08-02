@@ -334,3 +334,251 @@ describe('RcvScraper.resumen', () => {
     expect(http.postSdi).not.toHaveBeenCalled();
   });
 });
+
+describe('RcvScraper.detalle', () => {
+  // El detalle se pide SIEMPRE por tipo de documento: el SII no devuelve el
+  // período entero. El código va como string en el sobre, igual que el portal.
+  it('consulta getDetalleCompra con el tipo de documento en el sobre', async () => {
+    const { http, scraper } = makeScraper(fixture('rcv-detalle-compra.json'));
+
+    await scraper.detalle('202606', 'COMPRA', 61, '22222222-2');
+
+    const [base, namespace, metodo, data] = (http.postSdi as jest.Mock).mock.calls[0];
+    expect(base).toContain('consdcvinternetui');
+    expect(namespace).toBe('cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService');
+    expect(metodo).toBe('getDetalleCompra');
+    expect(data).toEqual({
+      rutEmisor: '22222222',
+      dvEmisor: '2',
+      ptributario: '202606',
+      codTipoDoc: '61',
+      operacion: 'COMPRA',
+      estadoContab: 'REGISTRO',
+    });
+  });
+
+  // Compras y ventas son dos endpoints distintos, no un parámetro: pegarle al
+  // método equivocado devuelve el registro que no es.
+  it('usa getDetalleVenta cuando la operación es VENTA', async () => {
+    const { http, scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    await scraper.detalle('202607', 'VENTA', 110, '22222222-2');
+
+    expect((http.postSdi as jest.Mock).mock.calls[0][2]).toBe('getDetalleVenta');
+    expect((http.postSdi as jest.Mock).mock.calls[0][3]).toMatchObject({
+      codTipoDoc: '110', operacion: 'VENTA',
+    });
+  });
+
+  it('parsea el detalle de compras documento por documento', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-compra.json'));
+
+    const detalle = await scraper.detalle('202606', 'COMPRA', 61, '22222222-2');
+
+    expect(detalle.sinDatos).toBe(false);
+    expect(detalle.tipoDocCodigo).toBe(61);
+    expect(detalle.totalDocumentos).toBe(8);
+    expect(detalle.documentos).toHaveLength(8);
+    expect(detalle.documentos[0]).toEqual({
+      contraparteRut: '66666666-1',
+      contraparteTipoId: 'rut_chileno',
+      contraparteIdExtranjero: null,
+      contraparteNacionalidadCodigo: null,
+      contraparteNombre: 'PROVEEDOR EJEMPLO CUATRO SPA',
+      contraparteRol: 'emisor',
+      folio: 900000000,
+      fechaEmision: '23/06/2026',
+      montoNeto: 1000000,
+      montoExento: 0,
+      montoIva: 190000,
+      montoTotal: 1190000,
+      // En una nota de crédito la referencia es lo que la hace útil: dice qué
+      // factura corrige.
+      referenciaTipoDoc: 33,
+      referenciaFolio: 900000000,
+      eventoReceptor: null,
+    });
+  });
+
+  // En COMPRA la contraparte es quien emitió (el proveedor); en VENTA es quien
+  // recibió (el cliente). Llamar "proveedor" a un cliente en una consulta de
+  // ventas es exactamente el error que `contraparteRol` evita.
+  it('marca la contraparte como receptor en ventas', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    const detalle = await scraper.detalle('202607', 'VENTA', 110, '22222222-2');
+
+    expect(detalle.documentos).toHaveLength(1);
+    expect(detalle.documentos[0]).toMatchObject({
+      contraparteRol: 'receptor',
+      contraparteNombre: 'CLIENTE EXTRANJERO EJEMPLO',
+      montoExento: 100000,
+      montoTotal: 100000,
+    });
+  });
+
+  // El SII pone el RUT genérico 55555555-5 en TODO receptor extranjero, así que
+  // dos clientes de distintos países salen con el mismo contraparteRut. Si el
+  // identificador de origen (detExpNumId) se descarta, la tool deja de poder
+  // responder "con quién" justo en exportaciones.
+  it('expone el identificador extranjero y la nacionalidad en documentos de exportación', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    const detalle = await scraper.detalle('202607', 'VENTA', 110, '22222222-2');
+
+    const doc = detalle.documentos[0];
+    expect(doc.contraparteIdExtranjero).toBe('9999999999999');
+    // Código numérico de la tabla de países del SII, NO un nombre: no tenemos la
+    // tabla y traducirlo sería adivinar el país del cliente.
+    expect(doc.contraparteNacionalidadCodigo).toBe(218);
+  });
+
+  // Devolver el identificador extranjero dentro de `contraparteRut` cambiaría un
+  // problema por otro: un RUC extranjero en un campo llamado "Rut" se lee como
+  // RUT chileno. El tipo explícito es lo que evita esa confusión.
+  it('marca la contraparte extranjera como distinguible de un RUT chileno', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    const detalle = await scraper.detalle('202607', 'VENTA', 110, '22222222-2');
+
+    const doc = detalle.documentos[0];
+    expect(doc.contraparteTipoId).toBe('extranjero');
+    // El RUT genérico se conserva tal cual lo informa el SII, pero queda claro
+    // que no identifica a nadie.
+    expect(doc.contraparteRut).toBe('55555555-5');
+    expect(doc.contraparteRut).not.toBe(doc.contraparteIdExtranjero);
+  });
+
+  // Fuera de exportaciones el SII no informa detExpNumId: si no hay
+  // identificador extranjero, no se inventa uno ni se marca la contraparte como
+  // extranjera.
+  it('no inventa identificador extranjero en documentos no-exportación', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-compra.json'));
+
+    const detalle = await scraper.detalle('202606', 'COMPRA', 61, '22222222-2');
+
+    expect(detalle.documentos.every(d => d.contraparteTipoId === 'rut_chileno')).toBe(true);
+    expect(detalle.documentos.every(d => d.contraparteIdExtranjero === null)).toBe(true);
+    expect(detalle.documentos.every(d => d.contraparteNacionalidadCodigo === null)).toBe(true);
+  });
+
+  it('marca la contraparte como emisor en compras', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-compra.json'));
+
+    const detalle = await scraper.detalle('202606', 'COMPRA', 61, '22222222-2');
+
+    expect(detalle.documentos.every(d => d.contraparteRol === 'emisor')).toBe(true);
+  });
+
+  // El SII usa 0 y null indistintamente para "sin documento referenciado": un 0
+  // expuesto tal cual se lee como un tipo o un folio real.
+  it('normaliza a null la referencia ausente', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    const detalle = await scraper.detalle('202607', 'VENTA', 110, '22222222-2');
+
+    expect(detalle.documentos[0].referenciaTipoDoc).toBeNull();
+    expect(detalle.documentos[0].referenciaFolio).toBeNull();
+  });
+
+  // Mismos códigos que el resumen: el 99 (período fuera del rango del registro)
+  // es un vacío legítimo, con el mensaje del SII explicando el porqué.
+  it('trata el código 99 como vacío legítimo y conserva el mensaje', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-vacio.json'));
+
+    const detalle = await scraper.detalle('201501', 'COMPRA', 33, '22222222-2');
+
+    expect(detalle.sinDatos).toBe(true);
+    expect(detalle.documentos).toEqual([]);
+    expect(detalle.totalDocumentos).toBe(0);
+    expect(detalle.mensaje).toMatch(/mayor igual a 201705/);
+  });
+
+  it('trata el código 3 como período sin documentos de ese tipo', async () => {
+    const { scraper } = makeScraper({
+      data: null,
+      respEstado: { codRespuesta: 3, msgeRespuesta: null },
+    });
+
+    const detalle = await scraper.detalle('202607', 'VENTA', 33, '22222222-2');
+
+    expect(detalle.sinDatos).toBe(true);
+    expect(detalle.documentos).toEqual([]);
+  });
+
+  // Un error real no puede salir como un detalle vacío: se vería igual que un
+  // mes sin documentos de ese tipo.
+  it('distingue el error (código 2) del vacío legítimo', async () => {
+    const { scraper } = makeScraper({
+      data: null,
+      respEstado: { codRespuesta: 2, msgeRespuesta: 'Error interno' },
+    });
+
+    await expect(scraper.detalle('202607', 'VENTA', 33, '22222222-2'))
+      .rejects.toThrow(/Error interno/);
+  });
+
+  // Default seguro: la lista de códigos del SII ya demostró no ser exhaustiva.
+  it('falla citando el código ante una respuesta desconocida', async () => {
+    const { scraper } = makeScraper({
+      data: null,
+      respEstado: { codRespuesta: 77, msgeRespuesta: 'Algo nuevo del SII' },
+    });
+
+    await expect(scraper.detalle('202607', 'VENTA', 33, '22222222-2'))
+      .rejects.toThrow(/desconocido.*77.*Algo nuevo del SII/);
+  });
+
+  it('falla si el SII responde éxito pero sin datos', async () => {
+    const { scraper } = makeScraper({
+      data: null,
+      respEstado: { codRespuesta: 0, msgeRespuesta: null },
+    });
+
+    await expect(scraper.detalle('202607', 'VENTA', 33, '22222222-2'))
+      .rejects.toThrow(/contradictoria/);
+  });
+
+  it('rechaza un período mal formado antes de consultar', async () => {
+    const { http, scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    await expect(scraper.detalle('2026-07', 'VENTA', 33))
+      .rejects.toThrow(/Período tributario inválido/);
+    expect(http.postSdi).not.toHaveBeenCalled();
+  });
+
+  // El tipo de documento es obligatorio y tiene que ser un código real: sin él
+  // el SII no devuelve nada útil.
+  it('rechaza un tipo de documento inválido antes de consultar', async () => {
+    const { http, scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    await expect(scraper.detalle('202607', 'VENTA', 0))
+      .rejects.toThrow(/tipo de documento inválido/);
+    expect(http.postSdi).not.toHaveBeenCalled();
+  });
+
+  // La empresa es un parámetro del método, no un estado de la sesión.
+  it('acepta una empresa distinta en cada llamada y usa el RUT autenticado si se omite', async () => {
+    const { http, scraper } = makeScraper(fixture('rcv-detalle-venta.json'));
+
+    await scraper.detalle('202607', 'VENTA', 110, '33333333-3');
+    await scraper.detalle('202607', 'VENTA', 110);
+
+    expect((http.postSdi as jest.Mock).mock.calls[0][3]).toMatchObject({
+      rutEmisor: '33333333', dvEmisor: '3',
+    });
+    expect((http.postSdi as jest.Mock).mock.calls[1][3]).toMatchObject({
+      rutEmisor: '11111111', dvEmisor: '1',
+    });
+  });
+
+  it('falla antes de consultar si la sesión no puede entregar el cookie jar', async () => {
+    const { http, scraper, session } = makeScraper(fixture('rcv-detalle-venta.json'));
+    (session.assertPuedeEntregarCookieJar as jest.Mock).mockImplementation(() => {
+      throw new Error('requiere certificado');
+    });
+
+    await expect(scraper.detalle('202607', 'VENTA', 110)).rejects.toThrow(/certificado/);
+    expect(http.postSdi).not.toHaveBeenCalled();
+  });
+});

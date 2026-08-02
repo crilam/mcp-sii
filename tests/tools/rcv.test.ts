@@ -18,10 +18,10 @@ function registrar() {
 }
 
 describe('registerRcvTools', () => {
-  it('registra sii_rcv_resumen', () => {
+  it('registra sii_rcv_resumen y sii_rcv_detalle', () => {
     const { tools } = registrar();
 
-    expect(Object.keys(tools)).toEqual(['sii_rcv_resumen']);
+    expect(Object.keys(tools)).toEqual(['sii_rcv_resumen', 'sii_rcv_detalle']);
   });
 
   it('pasa período, operación y empresa al scraper', async () => {
@@ -80,5 +80,109 @@ describe('registerRcvTools', () => {
     });
 
     expect(JSON.parse(res.content[0].text).periodo).toBe('202607');
+  });
+});
+
+describe('sii_rcv_detalle', () => {
+  it('pasa período, operación, tipo de documento y empresa al scraper', async () => {
+    const { tools, scraper } = registrar();
+    (scraper.detalle as jest.Mock).mockResolvedValue({ documentos: [] });
+
+    await tools['sii_rcv_detalle'].handler({
+      periodo: '202606', operacion: 'COMPRA', tipo_doc: 61, empresa_rut: '22222222-2',
+    });
+
+    expect(scraper.detalle).toHaveBeenCalledWith('202606', 'COMPRA', 61, '22222222-2');
+  });
+
+  it('acepta la consulta sin empresa_rut', async () => {
+    const { tools, scraper } = registrar();
+    (scraper.detalle as jest.Mock).mockResolvedValue({ documentos: [] });
+
+    await tools['sii_rcv_detalle'].handler({
+      periodo: '202607', operacion: 'VENTA', tipo_doc: 33,
+    });
+
+    expect(scraper.detalle).toHaveBeenCalledWith('202607', 'VENTA', 33, undefined);
+    expect(tools['sii_rcv_detalle'].schema.empresa_rut.isOptional()).toBe(true);
+  });
+
+  // El tipo de documento no es opcional: sin él el modelo va a intentar pedir
+  // el detalle del período entero, que el SII no ofrece.
+  it('exige el tipo de documento en el schema', () => {
+    const { tools } = registrar();
+
+    expect(tools['sii_rcv_detalle'].schema.tipo_doc.isOptional()).toBe(false);
+  });
+
+  // La descripción es lo único que ve el modelo para decidir cuándo usarla:
+  // tiene que decir que el código es obligatorio y de dónde sale.
+  it('explica en la descripción que requiere el tipo de documento y que sale del resumen', () => {
+    const { tools } = registrar();
+    const desc = tools['sii_rcv_detalle'].descripcion;
+
+    expect(desc).toMatch(/REQUIERE/);
+    expect(desc).toMatch(/tipo_doc/);
+    expect(desc).toMatch(/sii_rcv_resumen/);
+    expect(desc).toMatch(/tipoDocCodigo/);
+    // La relación entre las dos tools: primero el resumen, después el detalle.
+    expect(desc).toMatch(/NO del período entero/);
+  });
+
+  it('explica en la descripción el rol de la contraparte y que es solo lectura', () => {
+    const { tools } = registrar();
+    const desc = tools['sii_rcv_detalle'].descripcion;
+
+    expect(desc).toMatch(/contraparteRol/);
+    expect(desc).toMatch(/COMPRA es el emisor/);
+    expect(desc).toMatch(/VENTA es el\s+receptor/);
+    expect(desc).toMatch(/solo lectura/);
+  });
+
+  // La descripción es lo único que ve el modelo: si no dice que el 55555555-5 es
+  // genérico, va a tratarlo como si identificara al cliente extranjero y va a
+  // agrupar bajo un mismo "cliente" a compradores de países distintos.
+  it('advierte en la descripción que en exportaciones el RUT es genérico y dónde está el identificador real', () => {
+    const { tools } = registrar();
+    const desc = tools['sii_rcv_detalle'].descripcion;
+
+    expect(desc).toMatch(/55555555-5/);
+    expect(desc).toMatch(/genérico/i);
+    expect(desc).toMatch(/no tiene RUT chileno/i);
+    expect(desc).toMatch(/contraparteTipoId/);
+    expect(desc).toMatch(/contraparteIdExtranjero/);
+    // La nacionalidad es un código numérico, no un nombre de país: si la
+    // descripción no lo dice, el modelo va a inventar el país.
+    expect(desc).toMatch(/contraparteNacionalidadCodigo/);
+    expect(desc).toMatch(/CÓDIGO NUMÉRICO/);
+  });
+
+  it('explica que un período sin documentos no es un error', () => {
+    const { tools } = registrar();
+
+    expect(tools['sii_rcv_detalle'].descripcion).toMatch(/sinDatos/);
+  });
+
+  // Los montos de una nota de crédito llegan positivos y restan del período:
+  // sumar los montoTotal de un detalle del tipo 61 da un total silenciosamente
+  // mal. Si la descripción no lo dice, el modelo lo va a hacer.
+  it('advierte que las notas de crédito vienen positivas pero restan, y manda a totalizar con el resumen', () => {
+    const { tools } = registrar();
+    const desc = tools['sii_rcv_detalle'].descripcion;
+
+    expect(desc).toMatch(/POSITIVOS/);
+    expect(desc).toMatch(/RESTAN/);
+    expect(desc).toMatch(/Para\s+totalizar hay que usar sii_rcv_resumen/);
+  });
+
+  it('devuelve el detalle como JSON', async () => {
+    const { tools, scraper } = registrar();
+    (scraper.detalle as jest.Mock).mockResolvedValue({ periodo: '202606', documentos: [] });
+
+    const res = await tools['sii_rcv_detalle'].handler({
+      periodo: '202606', operacion: 'COMPRA', tipo_doc: 61,
+    });
+
+    expect(JSON.parse(res.content[0].text).periodo).toBe('202606');
   });
 });

@@ -56,6 +56,107 @@ export interface ResumenRcv {
   advertencias: string[];
 }
 
+// La contraparte de un documento cambia de rol según la operación: en COMPRA el
+// otro es quien emitió (el proveedor), en VENTA es quien recibió (el cliente).
+// Se nombra `contraparte` + `contraparteRol` —igual que en el scraper de boletas
+// de honorarios— para no llamar "proveedor" a un cliente en una consulta de
+// ventas, que es exactamente el tipo de etiqueta que después se lee mal.
+export type RolContraparteRcv = 'emisor' | 'receptor';
+
+// Qué clase de identificador es el de la contraparte.
+//
+//   'rut_chileno' → contraparteRut identifica de verdad a la contraparte.
+//   'extranjero'  → contraparteRut trae el RUT genérico 55555555-5 y NO
+//                   identifica a nadie; el identificador real está en
+//                   contraparteIdExtranjero.
+//
+// Se eligió un discriminador explícito en vez de meter el identificador
+// extranjero dentro de `contraparteRut`: un RUC ecuatoriano en un campo llamado
+// "Rut" se lee como RUT chileno, se valida con módulo 11, se formatea con
+// puntos y guion y se cruza contra otras fuentes chilenas — un problema
+// cambiado por otro. Con el tipo explícito, quien consume sabe siempre qué
+// tiene en la mano, y `contraparteRut` conserva literalmente lo que informa el
+// SII (incluido el genérico) sin que nadie lo confunda con una identidad.
+export type TipoIdContraparteRcv = 'rut_chileno' | 'extranjero';
+
+// El SII usa este RUT genérico para TODO receptor extranjero: un comprador de
+// otro país no tiene RUT chileno. Verificado contra una factura de exportación
+// real (tipo 110). Es una constante pública, no un dato de nadie.
+const RUT_GENERICO_EXTRANJERO = 55555555;
+const DV_GENERICO_EXTRANJERO = '5';
+
+// Una fila del detalle: UN documento del período, de un tipo de documento.
+//
+// La respuesta del SII trae más de 60 campos por fila. Acá se expone sólo el
+// subconjunto que responde la pregunta del caso de uso —con quién, cuándo y por
+// cuánto— más la referencia y el estado de aceptación. El resto son casos
+// tributarios especiales (tabaco, pasajes nacionales/internacionales, depósito
+// de envases, activo fijo, IVA de uso común, IVA no recuperable, retenciones
+// totales/parciales, liquidaciones-factura, ley 18.211) que llegan casi siempre
+// en 0 o null y que no se pueden interpretar sin verificarlos contra un caso
+// real: exponerlos sin haberlos verificado invita a leerlos como si
+// significaran algo. Cuando alguno haga falta, se agrega con su fixture.
+export interface FilaDetalleRcv {
+  // RUT de la contraparte con dígito verificador (formato 22222222-2), tal como
+  // lo informa el SII. OJO: en documentos de exportación viene el genérico
+  // 55555555-5 para cualquier extranjero, así que dos clientes distintos traen
+  // el mismo valor. Ver contraparteTipoId antes de usarlo como identidad.
+  contraparteRut: string;
+  // Ver TipoIdContraparteRcv. Es el campo que hay que mirar para saber si
+  // contraparteRut identifica a alguien.
+  contraparteTipoId: TipoIdContraparteRcv;
+  // Identificador de la contraparte en su país (detExpNumId): RUC, VAT, tax id
+  // — el SII no dice cuál. `null` cuando el SII no lo informa, que es lo normal
+  // fuera de exportaciones: si no viene, no se inventa nada.
+  contraparteIdExtranjero: string | null;
+  // Nacionalidad de la contraparte según el SII (detExpNacionalidad): es un
+  // CÓDIGO NUMÉRICO de su tabla de países (218 = Ecuador), no un nombre. No se
+  // traduce a nombre de país porque no tenemos la tabla y adivinar el país de
+  // un cliente sería peor que exponer el código crudo. `null` si no viene.
+  contraparteNacionalidadCodigo: number | null;
+  contraparteNombre: string;
+  // Qué es la contraparte respecto del documento: ver RolContraparteRcv.
+  contraparteRol: RolContraparteRcv;
+  folio: number;
+  // Fecha de emisión tal como la informa el SII: DD/MM/AAAA. No se convierte a
+  // ISO para no inventar zona horaria ni ocultar un formato inesperado.
+  fechaEmision: string | null;
+  montoNeto: number;
+  montoExento: number;
+  montoIva: number;
+  montoTotal: number;
+  // Documento referenciado. Es lo que hace útil el detalle en notas de crédito y
+  // débito: dice QUÉ factura corrigen. `null` cuando el documento no referencia
+  // nada — el SII usa 0 y null indistintamente para "sin referencia".
+  referenciaTipoDoc: number | null;
+  referenciaFolio: number | null;
+  // Estado de aceptación o reclamo del receptor, en texto del SII. `null` es lo
+  // habitual: significa que no hubo evento registrado, no que fue aceptado.
+  eventoReceptor: string | null;
+}
+
+export interface DetalleRcv {
+  empresaRut: string;
+  periodo: string;
+  operacion: OperacionRcv;
+  // El tipo de documento consultado: el detalle SIEMPRE es por tipo, el SII no
+  // devuelve el período entero de una vez.
+  tipoDocCodigo: number;
+  // Mismo criterio que en el resumen: vacío legítimo, no falla.
+  sinDatos: boolean;
+  mensaje: string | null;
+  // Se cuenta lo que vino: el detalle no trae un total propio (no hay
+  // `totDocRes` como en el resumen). Verificado contra el portal hasta 393
+  // documentos —el tipo más grande disponible, las facturas electrónicas de
+  // venta de julio—: el detalle devolvió las 393 y coincide exacto con el
+  // resumen, y `metaData.page` viene `null`. Es una verificación hasta 393, NO
+  // una garantía para cualquier tamaño: si algún día un período de miles de
+  // documentos no cuadra con el resumen, la paginación es el primer lugar
+  // donde mirar.
+  totalDocumentos: number;
+  documentos: FilaDetalleRcv[];
+}
+
 const BASE = 'https://www4.sii.cl/consdcvinternetui/services/data/facadeService';
 const NAMESPACE = 'cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService';
 
@@ -205,6 +306,124 @@ export class RcvScraper {
         'se sumó a los totales, pero si es una nota de crédito debería restar. ' +
         'Revisá los totales antes de usarlos.'
       ),
+    };
+  }
+
+  // Detalle documento por documento. A diferencia del resumen, el SII exige el
+  // tipo de documento: no existe "el detalle del período entero", se pide un
+  // tipo por vez. Los códigos son los que devuelve `resumen` en
+  // `filas[].tipoDocCodigo`, así que el flujo natural es resumen → detalle del
+  // tipo que interese.
+  async detalle(
+    periodo: string,
+    operacion: OperacionRcv,
+    tipoDocCodigo: number,
+    empresaRut?: string
+  ): Promise<DetalleRcv> {
+    if (!PERIODO_VALIDO.test(periodo)) {
+      throw new Error(
+        `Período tributario inválido: "${periodo}". Se espera AAAAMM (por ejemplo 202607).`
+      );
+    }
+    if (!Number.isInteger(tipoDocCodigo) || tipoDocCodigo <= 0) {
+      throw new Error(
+        `Código de tipo de documento inválido: "${tipoDocCodigo}". Se espera el código ` +
+        'que devuelve sii_rcv_resumen en filas[].tipoDocCodigo (por ejemplo 33 o 61).'
+      );
+    }
+
+    this.session.assertPuedeEntregarCookieJar();
+    const { rut, dv } = empresaRut
+      ? partirRut(empresaRut, 'RUT de empresa')
+      : this.session.identidad();
+
+    // El método cambia con la operación: el servicio no toma la operación como
+    // discriminador acá, son dos endpoints distintos (igual se manda
+    // `operacion`, que el portal envía siempre).
+    const metodo = operacion === 'COMPRA' ? 'getDetalleCompra' : 'getDetalleVenta';
+
+    const resp = await this.http.postSdi(BASE, NAMESPACE, metodo, {
+      rutEmisor: rut,
+      dvEmisor: dv,
+      ptributario: periodo,
+      codTipoDoc: String(tipoDocCodigo),
+      operacion,
+      estadoContab: ESTADO_CONTAB,
+    });
+
+    const base = {
+      empresaRut: `${rut}-${dv}`,
+      periodo,
+      operacion,
+      tipoDocCodigo,
+      mensaje: resp?.respEstado?.msgeRespuesta ?? null,
+    };
+
+    // Misma lógica de códigos que el resumen, sin duplicar: 0 éxito, 3 y 99
+    // vacío legítimo, 2 y 98 error, y lo desconocido falla citando el código.
+    if (!this.hayDatos(resp)) {
+      return { ...base, sinDatos: true, totalDocumentos: 0, documentos: [] };
+    }
+
+    const documentos = (resp.data as any[]).map(d =>
+      this.aFilaDetalle(d, operacion)
+    );
+
+    return {
+      ...base,
+      sinDatos: false,
+      totalDocumentos: documentos.length,
+      documentos,
+    };
+  }
+
+  private aFilaDetalle(d: any, operacion: OperacionRcv): FilaDetalleRcv {
+    // En COMPRA el documento lo emitió el proveedor; en VENTA lo recibió el
+    // cliente. En ambos casos los campos del SII son los mismos (detRutDoc /
+    // detRznSoc apuntan siempre al otro), lo que cambia es qué significa.
+    const contraparteRol: RolContraparteRcv =
+      operacion === 'COMPRA' ? 'emisor' : 'receptor';
+
+    // detExpNumId llega vacío, null o "" en todo lo que no sea exportación: se
+    // normaliza a null para no exponer una cadena vacía que parezca un id.
+    const idExtranjeroCrudo = String(d.detExpNumId ?? '').trim();
+    const contraparteIdExtranjero = idExtranjeroCrudo === '' ? null : idExtranjeroCrudo;
+
+    const nacionalidadCruda = String(d.detExpNacionalidad ?? '').trim();
+    const contraparteNacionalidadCodigo =
+      nacionalidadCruda === '' || Number.isNaN(Number(nacionalidadCruda))
+        ? null
+        : Number(nacionalidadCruda);
+
+    // La contraparte es extranjera si el SII trajo su identificador de origen, o
+    // si puso el RUT genérico de extranjero. Se miran las dos señales: el
+    // genérico solo ya basta para saber que ese "RUT" no identifica a nadie,
+    // aunque el identificador real no venga. Se exige el RUT genérico COMPLETO
+    // (cuerpo y dígito verificador): 55555555 con otro DV es un RUT distinto,
+    // de un contribuyente chileno cualquiera.
+    const esExtranjera =
+      contraparteIdExtranjero !== null ||
+      (Number(d.detRutDoc) === RUT_GENERICO_EXTRANJERO &&
+        String(d.detDvDoc ?? '').trim().toLowerCase() === DV_GENERICO_EXTRANJERO);
+
+    return {
+      contraparteRut: `${d.detRutDoc ?? ''}-${d.detDvDoc ?? ''}`,
+      contraparteTipoId: esExtranjera ? 'extranjero' : 'rut_chileno',
+      contraparteIdExtranjero,
+      contraparteNacionalidadCodigo,
+      contraparteNombre: (d.detRznSoc ?? '').trim(),
+      contraparteRol,
+      folio: Number(d.detNroDoc ?? 0),
+      fechaEmision: d.detFchDoc ?? null,
+      montoNeto: Number(d.detMntNeto ?? 0),
+      montoExento: Number(d.detMntExe ?? 0),
+      montoIva: Number(d.detMntIVA ?? 0),
+      montoTotal: Number(d.detMntTotal ?? 0),
+      // El SII usa 0 y null indistintamente para "sin documento referenciado";
+      // se normalizan a null para que no parezca un folio o un tipo real.
+      referenciaTipoDoc: d.detTipoDocRef ? Number(d.detTipoDocRef) : null,
+      referenciaFolio: d.detFolioDocRef ? Number(d.detFolioDocRef) : null,
+      eventoReceptor: d.detEventoReceptorLeyenda ?? null,
     };
   }
 
