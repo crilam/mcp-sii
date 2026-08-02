@@ -23,7 +23,7 @@ Tres hallazgos determinan el diseño:
 
 2. **Trampa de logout.** La raíz de `https://www4.sii.cl/djconsultarentaui/` responde con JavaScript que borra las cookies de sesión (`TOKEN`, `NETSCAPE_LIVEWIRE.locexp`, `.lms`, `.sec`). Con un cliente HTTP no afecta, porque no ejecuta JS. Con `agent-browser` **desloguea la sesión**. Como el SII bloquea por exceso de sesiones simultáneas, esto es un riesgo real del enfoque actual, que es 100 % navegador.
 
-3. **Las APIs REST rechazan GET.** Devuelven `405` vía `MethodNotAllowedException`; son POST aunque sean consultas de lectura. Y responden `application/json;charset=ISO-8859-1`: decodificar como UTF-8 corrompe todo texto con tilde.
+3. **Las APIs REST rechazan GET.** Devuelven `405` vía `MethodNotAllowedException`; son POST aunque sean consultas de lectura. Y el charset **varía por aplicación** (F22 declara `charset=ISO-8859-1`, el RCV `charset=utf-8`): hay que respetar el `Content-Type` de cada respuesta, con ISO-8859-1 como default. Ver `2026-08-01-sdi-rest-contratos.md`.
 
 ## Decisiones
 

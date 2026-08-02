@@ -3,8 +3,85 @@ import { SessionManager } from './session';
 
 const TIMEOUT_MS = 30_000;
 
-// El SII responde ISO-8859-1 en todo, incluidas las APIs que declaran JSON.
-const ENCODING = 'latin1' as const;
+// El charset NO es uniforme en el portal: varía por aplicación, y hay que
+// respetar el `Content-Type` de cada respuesta. Medido en vivo:
+//
+//   consdcvinternetui   (RCV)        application/json;charset=utf-8
+//   consultaestadof22ui (Renta F22)  application/json;charset=ISO-8859-1
+//   CGI legacy (BHE, loa.sii.cl)     ISO-8859-1
+//
+// Fijar cualquiera de los dos para todo rompe la otra mitad: leer el UTF-8 del
+// RCV como latin1 devuelve "Factura ElectrÃ³nica" (los bytes C3 B3 de la `ó`
+// leídos de a uno), y leer el ISO-8859-1 de F22 como UTF-8 rompe igual.
+//
+// NO "modernizar" este default a UTF-8: los CGI legacy del SII responden
+// ISO-8859-1 y muchos ni siquiera declaran charset. Sin declaración, el byte
+// suelto 0xF3 sólo es `ó` si se lee como latin1; como UTF-8 es inválido y
+// termina en U+FFFD. UTF-8 por defecto corrompería justamente los casos que
+// no podemos verificar por header.
+const ENCODING_POR_DEFECTO = 'latin1' as const;
+
+// Marca para separar el cuerpo del `content_type` que curl agrega con `-w`.
+// Se elige una cadena que no puede aparecer en un Content-Type real, y se
+// busca por el ÚLTIMO índice: `-w` escribe siempre después del cuerpo, así que
+// aunque el cuerpo contuviera la marca, la que corta es la de curl.
+const MARCA_CONTENT_TYPE = '\n__MCP_SII_CONTENT_TYPE__:';
+
+// Se decodifica con `TextDecoder` (nativo en Node, sin dependencias nuevas) y
+// no con `Buffer.toString`, que sólo entiende un puñado de encodings. Mantener
+// un mapa de equivalencias a mano obligaba a aproximar: windows-1252 mapeado a
+// latin1 corrompe en silencio el rango 0x80–0x9F, que en windows-1252 son
+// imprimibles (€, comillas tipográficas, rayas) y en latin1 son controles C1.
+// Con TextDecoder el label del header se usa tal cual y cualquier charset
+// futuro que declare el SII queda cubierto sin tocar este archivo.
+const LABEL_POR_DEFECTO = 'iso-8859-1';
+
+// Un label desconocido no debe voltear la consulta: `TextDecoder` lanza ante
+// una etiqueta que no reconoce, así que se cae al default —que es lo que la
+// respuesta habría usado igual— pero dejando rastro en stderr. Mismo criterio
+// que con los códigos de respuesta del RCV: lo desconocido no pasa
+// inadvertido, pero tampoco rompe algo que funcionaría.
+const labelsAvisados = new Set<string>();
+
+export function decodificarRespuesta(cuerpo: Buffer, contentType: string): string {
+  const m = /charset\s*=\s*"?([^";\s]+)"?/i.exec(contentType ?? '');
+  const label = m ? m[1].toLowerCase() : LABEL_POR_DEFECTO;
+
+  // PASO 1 — sniff de UTF-8, ANTES de mirar el header. El header miente:
+  // medido en vivo, Renta F22 (`consultaestadof22ui`) declara
+  // `charset=ISO-8859-1` y manda bytes UTF-8 (`0xC3 0xB3` para la `ó`).
+  // Honrar la etiqueta al pie de la letra devolvía "declaraciÃ³n". Como el
+  // charset declarado no es confiable, se decide por el contenido.
+  //
+  // Se puede hacer porque UTF-8 es autovalidante: sus secuencias multibyte
+  // tienen una forma estricta (byte líder + continuaciones 10xxxxxx) que un
+  // texto latin1 con acentos prácticamente nunca satisface — `0xF3` suelto,
+  // la `ó` en latin1, es inválido y el sniff lo rechaza. El falso positivo
+  // exigiría que el texto latin1 formara, por casualidad, secuencias UTF-8
+  // bien armadas de punta a punta.
+  //
+  // `fatal: true` es lo que hace que esto funcione: sin él los bytes inválidos
+  // se convierten en U+FFFD en silencio y el sniff nunca fallaría.
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(cuerpo);
+  } catch {
+    // No es UTF-8 válido: recién ahí se le cree al header.
+  }
+
+  // PASO 2 — el charset declarado. PASO 3 (el catch) — el default.
+  try {
+    return new TextDecoder(label).decode(cuerpo);
+  } catch {
+    if (!labelsAvisados.has(label)) {
+      labelsAvisados.add(label);
+      console.error(
+        `[mcp-sii] charset declarado desconocido: "${label}". ` +
+        `Se decodifica como ${LABEL_POR_DEFECTO}; el texto con acentos puede venir corrupto.`
+      );
+    }
+    return new TextDecoder(LABEL_POR_DEFECTO).decode(cuerpo);
+  }
+}
 
 // El `transactionId` sólo necesita ser único por petición: el cliente del
 // portal genera un UUID, pero en las pruebas funcionó cualquier cadena única.
@@ -91,11 +168,37 @@ export class SiiHttpClient {
     // execFileSync con arreglo de argumentos previene inyección de shell: ningún
     // valor pasa por un intérprete de comandos, así que metacaracteres como
     // comillas, backticks, $(...) o ; son literales y seguros.
-    return execFileSync(
+    // Se pide la salida como bytes crudos (`encoding: 'buffer'`) porque el
+    // encoding correcto recién se conoce después de leer el Content-Type que
+    // curl agrega con `-w`. Decodificar antes sería adivinar.
+    const salida = execFileSync(
       'curl',
-      ['-sk', '-b', jar, '-L', '--max-redirs', '5', '--max-time', '25', ...args],
-      { encoding: ENCODING, timeout: TIMEOUT_MS }
+      [
+        '-sk', '-b', jar, '-L', '--max-redirs', '5', '--max-time', '25',
+        '-w', `${MARCA_CONTENT_TYPE}%{content_type}`,
+        ...args,
+      ],
+      { encoding: 'buffer', timeout: TIMEOUT_MS }
     );
+
+    const bruto = Buffer.isBuffer(salida)
+      ? salida
+      : Buffer.from(String(salida), ENCODING_POR_DEFECTO);
+
+    const corte = bruto.lastIndexOf(MARCA_CONTENT_TYPE);
+    if (corte === -1) {
+      // Sin marca no hubo `-w` (o curl murió antes de escribirla): no hay
+      // Content-Type que respetar y se usa el default.
+      return decodificarRespuesta(bruto, '');
+    }
+
+    const cuerpo = bruto.subarray(0, corte);
+    const contentType = bruto
+      .subarray(corte + MARCA_CONTENT_TYPE.length)
+      .toString('ascii')
+      .trim();
+
+    return decodificarRespuesta(cuerpo, contentType);
   }
 
   private encodeParams(params: Record<string, string>): string {

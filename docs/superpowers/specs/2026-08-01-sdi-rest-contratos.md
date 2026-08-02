@@ -49,6 +49,78 @@ Si el sobre está incompleto, la respuesta es `{"errorMsg": "Acceso no autorizad
 
 La distinción entre las dos primeras filas es la de siempre en este proyecto: **`respCod: 2` es un vacío legítimo, no un error.** Un año sin declaración y una declaración sin observaciones responden igual que una consulta correcta que no encontró nada.
 
+## El charset varía por aplicación
+
+Corrección (2026-08-02, medido en vivo). Se venía asumiendo que el SII responde
+ISO-8859-1 en todo, **incluidas las respuestas que declaran JSON**. Es falso: el
+charset varía por aplicación y hay que respetar el `Content-Type` de cada
+respuesta.
+
+| Aplicación | `Content-Type` observado |
+|---|---|
+| Registro de Compras y Ventas (`consdcvinternetui`) | `application/json;charset=utf-8` |
+| Renta F22 (`consultaestadof22ui`) | `application/json;charset=ISO-8859-1` |
+| CGI legacy (BHE, `loa.sii.cl`) | ISO-8859-1 (no siempre declarado) |
+
+Dos aplicaciones del mismo portal, con charsets distintos. Fijar cualquiera de
+los dos para todo rompe la otra: `sii_rcv_resumen` devolvía
+`"tipoDocNombre": "Factura ElectrÃ³nica"` porque los bytes `C3 B3` de la `ó` en
+UTF-8 se leían de a uno como latin1.
+
+**Default cuando no viene charset declarado: ISO-8859-1**, no UTF-8. Los CGI
+legacy responden ISO-8859-1 y muchos no lo declaran; ahí un `0xF3` suelto sólo
+es `ó` leído como latin1, y como UTF-8 es un byte inválido. Un default UTF-8
+corrompería justamente los casos que no se pueden verificar por header.
+
+La decodificación usa `TextDecoder` (nativo en Node, sin dependencias), con el
+label tal como viene en el header: así queda cubierto cualquier charset que el
+SII declare, sin mantener un mapa de equivalencias a mano. Dos consecuencias a
+tener presentes:
+
+- `windows-1252` se decodifica de verdad, no aproximado a latin1. Difieren en
+  `0x80–0x9F`: ahí windows-1252 tiene imprimibles (`€`, comillas tipográficas,
+  rayas) y latin1 controles C1, así que aproximar corrompía en silencio.
+- Por la tabla WHATWG que sigue `TextDecoder`, el label `iso-8859-1` es alias de
+  windows-1252 — el mismo comportamiento que cualquier navegador contra el
+  portal. Los acentuados (`0xC0–0xFF`) son idénticos en ambas tablas.
+
+Un label que `TextDecoder` no reconoce no voltea la consulta: se cae al default
+y se avisa por stderr.
+
+### Y además el charset declarado puede ser incorrecto
+
+Corrección (2026-08-02, verificado en vivo contra las dos aplicaciones). Honrar
+el header al pie de la letra arregló el RCV y **dejó roto Renta F22**: la
+aplicación declara `charset=ISO-8859-1` y manda bytes UTF-8. El síntoma:
+
+```
+glosa: "Tu declaraciÃ³n presenta inconsistencias con respecto a la informaciÃ³n..."
+```
+
+`Ã³` son los bytes `0xC3 0xB3` — la `ó` en UTF-8 — leídos como latin1. O sea, el
+problema no era sólo que el charset varía por aplicación: **el charset declarado
+no es confiable**. La tabla de arriba describe lo que las aplicaciones dicen, no
+necesariamente lo que mandan.
+
+Por eso la decodificación se decide por el contenido, en este orden:
+
+1. **UTF-8 estricto** (`new TextDecoder('utf-8', { fatal: true })`). Si pasa,
+   ése es el resultado, sin mirar el header.
+2. El **charset declarado** en el `Content-Type`.
+3. **ISO-8859-1** si no hay charset, o si el label es desconocido.
+
+El sniff va primero porque el header es la fuente menos confiable de las tres, y
+porque UTF-8 es autovalidante: sus secuencias multibyte tienen una forma
+estricta (byte líder + continuaciones `10xxxxxx`) que un texto latin1 con
+acentos prácticamente nunca satisface — `0xF3` suelto, la `ó` en latin1, es
+inválido y el sniff lo rechaza. El falso positivo exigiría que un texto latin1
+formara secuencias UTF-8 bien armadas de punta a punta. `fatal: true` es lo que
+lo hace posible: sin él los bytes inválidos se vuelven U+FFFD en silencio y el
+sniff nunca fallaría.
+
+Consecuencia práctica: **no vale confiar en el `Content-Type` para nada de esto**
+sin comprobarlo contra el contenido real de la aplicación.
+
 ## Contratos verificados (F22)
 
 Base: `https://www4.sii.cl/consultaestadof22ui/services/data/facadeService/`
