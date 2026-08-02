@@ -75,6 +75,49 @@ describe('SiiHttpClient — decodificación por Content-Type', () => {
     expect(texto).toBe('Factura Electrónica');
   });
 
+  // El header MIENTE: medido en vivo, Renta F22 declara `charset=ISO-8859-1`
+  // y manda bytes UTF-8. Honrar la etiqueta devolvía "declaraciÃ³n". Por eso
+  // se detecta UTF-8 por el contenido antes de creerle al header.
+  it('detecta UTF-8 por contenido aunque el header declare ISO-8859-1 (F22)', async () => {
+    mockExec.mockReturnValue(
+      respuesta(UTF8, 'application/json;charset=ISO-8859-1') as never
+    );
+    const { client } = makeClient();
+
+    const texto = await client.get('https://www4.sii.cl/consultaestadof22ui/x');
+
+    expect(texto).toBe('Factura Electrónica');
+    expect(texto).not.toContain('Ã');
+  });
+
+  // El riesgo del sniff es el inverso: confundir latin1 real con UTF-8. No
+  // pasa porque UTF-8 es autovalidante — `0xF3` suelto no forma una secuencia
+  // multibyte válida, así que la decodificación estricta lo rechaza.
+  it('no confunde latin1 con UTF-8: 0xF3 suelto cae al charset declarado', async () => {
+    mockExec.mockReturnValue(
+      respuesta(Buffer.from([0xf3]), 'text/html;charset=ISO-8859-1') as never
+    );
+    const { client } = makeClient();
+
+    expect(await client.get('https://loa.sii.cl/cgi_IMT/X.cgi')).toBe('ó');
+  });
+
+  it('no confunde latin1 con UTF-8 en un texto largo y realista', async () => {
+    // "Declaración con observación: revisión de años anteriores. Ñuñoa."
+    const frase = 'Declaraci\xf3n con observaci\xf3n: revisi\xf3n de a\xf1os anteriores. \xd1u\xf1oa.';
+    const bytes = Buffer.from(frase, 'latin1');
+    mockExec.mockReturnValue(
+      respuesta(bytes, 'application/json;charset=ISO-8859-1') as never
+    );
+    const { client } = makeClient();
+
+    const texto = await client.get('https://loa.sii.cl/cgi_IMT/X.cgi');
+
+    expect(texto).toBe(
+      'Declaración con observación: revisión de años anteriores. Ñuñoa.'
+    );
+  });
+
   // windows-1252 y latin1 sólo difieren en 0x80–0x9F: ahí windows-1252 tiene
   // imprimibles (€, comillas tipográficas, rayas) donde latin1 tiene controles
   // C1. Decodificar uno como el otro corrompe en silencio.

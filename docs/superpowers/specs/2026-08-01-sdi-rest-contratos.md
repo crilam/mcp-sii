@@ -87,6 +87,40 @@ tener presentes:
 Un label que `TextDecoder` no reconoce no voltea la consulta: se cae al default
 y se avisa por stderr.
 
+### Y además el charset declarado puede ser incorrecto
+
+Corrección (2026-08-02, verificado en vivo contra las dos aplicaciones). Honrar
+el header al pie de la letra arregló el RCV y **dejó roto Renta F22**: la
+aplicación declara `charset=ISO-8859-1` y manda bytes UTF-8. El síntoma:
+
+```
+glosa: "Tu declaraciÃ³n presenta inconsistencias con respecto a la informaciÃ³n..."
+```
+
+`Ã³` son los bytes `0xC3 0xB3` — la `ó` en UTF-8 — leídos como latin1. O sea, el
+problema no era sólo que el charset varía por aplicación: **el charset declarado
+no es confiable**. La tabla de arriba describe lo que las aplicaciones dicen, no
+necesariamente lo que mandan.
+
+Por eso la decodificación se decide por el contenido, en este orden:
+
+1. **UTF-8 estricto** (`new TextDecoder('utf-8', { fatal: true })`). Si pasa,
+   ése es el resultado, sin mirar el header.
+2. El **charset declarado** en el `Content-Type`.
+3. **ISO-8859-1** si no hay charset, o si el label es desconocido.
+
+El sniff va primero porque el header es la fuente menos confiable de las tres, y
+porque UTF-8 es autovalidante: sus secuencias multibyte tienen una forma
+estricta (byte líder + continuaciones `10xxxxxx`) que un texto latin1 con
+acentos prácticamente nunca satisface — `0xF3` suelto, la `ó` en latin1, es
+inválido y el sniff lo rechaza. El falso positivo exigiría que un texto latin1
+formara secuencias UTF-8 bien armadas de punta a punta. `fatal: true` es lo que
+lo hace posible: sin él los bytes inválidos se vuelven U+FFFD en silencio y el
+sniff nunca fallaría.
+
+Consecuencia práctica: **no vale confiar en el `Content-Type` para nada de esto**
+sin comprobarlo contra el contenido real de la aplicación.
+
 ## Contratos verificados (F22)
 
 Base: `https://www4.sii.cl/consultaestadof22ui/services/data/facadeService/`

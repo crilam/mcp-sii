@@ -47,6 +47,28 @@ export function decodificarRespuesta(cuerpo: Buffer, contentType: string): strin
   const m = /charset\s*=\s*"?([^";\s]+)"?/i.exec(contentType ?? '');
   const label = m ? m[1].toLowerCase() : LABEL_POR_DEFECTO;
 
+  // PASO 1 — sniff de UTF-8, ANTES de mirar el header. El header miente:
+  // medido en vivo, Renta F22 (`consultaestadof22ui`) declara
+  // `charset=ISO-8859-1` y manda bytes UTF-8 (`0xC3 0xB3` para la `ó`).
+  // Honrar la etiqueta al pie de la letra devolvía "declaraciÃ³n". Como el
+  // charset declarado no es confiable, se decide por el contenido.
+  //
+  // Se puede hacer porque UTF-8 es autovalidante: sus secuencias multibyte
+  // tienen una forma estricta (byte líder + continuaciones 10xxxxxx) que un
+  // texto latin1 con acentos prácticamente nunca satisface — `0xF3` suelto,
+  // la `ó` en latin1, es inválido y el sniff lo rechaza. El falso positivo
+  // exigiría que el texto latin1 formara, por casualidad, secuencias UTF-8
+  // bien armadas de punta a punta.
+  //
+  // `fatal: true` es lo que hace que esto funcione: sin él los bytes inválidos
+  // se convierten en U+FFFD en silencio y el sniff nunca fallaría.
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(cuerpo);
+  } catch {
+    // No es UTF-8 válido: recién ahí se le cree al header.
+  }
+
+  // PASO 2 — el charset declarado. PASO 3 (el catch) — el default.
   try {
     return new TextDecoder(label).decode(cuerpo);
   } catch {
