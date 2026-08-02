@@ -1,3 +1,8 @@
+// El README indica que las credenciales se leen del .env, y sin esto el script
+// solo veía process.env: con un .env perfectamente válido igual reclamaba que
+// faltaban las variables. Se importa acá y no en validateCert() porque el
+// efecto es de arranque del script, igual que en src/index.ts.
+import 'dotenv/config';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 
