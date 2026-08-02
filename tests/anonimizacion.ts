@@ -21,6 +21,38 @@ const RUT_DE_PRUEBA = /^(\d)\1{6,7}$/;
 const CAMPO_RUT = /\w+\['([^']*rut[^']*)'\]\s*=\s*"(\d+)"/gi;
 const RUT_CON_DV = /\b(\d{7,8})-([\dkK])\b/g;
 
+// Un RUT no es el único dato personal que puede filtrarse: una fixture con una
+// declaración de renta completa trajo correo del contribuyente e IP pública de
+// presentación, y el chequeo —que sólo miraba RUT— la dejó pasar. Estos dos
+// patrones tienen forma reconocible y baja tasa de falsos positivos, que es la
+// condición para que el chequeo siga encendido: uno que grita por cualquier
+// cosa termina desactivado, y eso es peor que no tenerlo.
+const CORREO = /\b[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g;
+
+// Dominios reservados para ejemplos y los que el proyecto usa en fixtures: un
+// correo con estos dominios no puede ser de una persona real.
+const DOMINIOS_DE_EJEMPLO = /(^|\.)(ejemplo\.cl|example\.(com|org|net)|localhost|invalid)$/i;
+const DOMINIO_DE_PRUEBA = /(^|[.-])test([.-]|$)/i;
+
+const IPV4 = /\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b/g;
+
+// Rangos que NO son dato personal y son legítimos en fixtures y documentación:
+// privados (RFC 1918), loopback, link-local, "esta red", broadcast y los tres
+// bloques de documentación de la RFC 5737. Todo lo demás es una IP pública, o
+// sea potencialmente la IP desde la que se presentó una declaración real.
+function esIpNoPersonal(o: number[]): boolean {
+  const [a, b] = o;
+  if (a === 10 || a === 127 || a === 0 || a >= 224) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 169 && b === 254) return true;
+  // RFC 5737: 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24.
+  if (a === 192 && b === 0 && o[2] === 2) return true;
+  if (a === 198 && b === 51 && o[2] === 100) return true;
+  if (a === 203 && b === 0 && o[2] === 113) return true;
+  return false;
+}
+
 // FALSOS NEGATIVOS CONOCIDOS. El chequeo es una red de seguridad, no una
 // garantía: se acepta que deje pasar estos casos porque cerrarlos exigiría
 // heurísticas que se llenarían de falsos positivos sobre montos y folios. Quien
@@ -32,9 +64,18 @@ const RUT_CON_DV = /\b(\d{7,8})-([\dkK])\b/g;
 //      resto del código (por ejemplo "011111111134364C969E7").
 //   2. Un RUT escrito con puntos ("11.111.111-1") no matchea RUT_CON_DV: el
 //      patrón espera el cuerpo sin separadores de miles.
-//   3. Nombres, direcciones y comunas reales no se chequean en absoluto. Nada
-//      acá mira texto libre, así que una razón social o un domicilio verdadero
-//      pasa sin ruido.
+//   3. Nombres, razones sociales, direcciones y comunas reales no se chequean:
+//      no tienen forma reconocible, y cualquier heurística sobre texto libre
+//      daría falsos positivos constantes hasta que alguien apague el chequeo.
+//   4. Montos reales (honorarios, sueldos, base imponible) tampoco. Un monto es
+//      un número más entre folios, códigos y totales de fixture: no hay forma
+//      de distinguir el real del inventado. La fixture de renta que motivó
+//      ampliar esto se detecta ahora por su correo y su IP, no por sus montos.
+//   5. Fechas, folios, números de teléfono y patentes quedan fuera por lo
+//      mismo: se confunden con datos sintéticos legítimos.
+//   6. Un correo con dominio real pero buzón inventado se marca igual (falso
+//      positivo deliberado): es preferible a dejar pasar uno verdadero, y se
+//      resuelve reescribiéndolo con @ejemplo.cl.
 
 // Rutas versionadas que contienen RUT de ejemplo a propósito y no son dato real:
 // este módulo (documenta el formato) y el test que lo ejercita.
@@ -61,4 +102,41 @@ export function extraerRutsSospechosos(contenido: string): string[] {
   }
 
   return encontrados;
+}
+
+// Devuelve los correos que no son de un dominio de ejemplo o de prueba.
+export function extraerCorreosSospechosos(contenido: string): string[] {
+  const encontrados: string[] = [];
+  for (const m of contenido.matchAll(CORREO)) {
+    const dominio = m[1];
+    if (DOMINIOS_DE_EJEMPLO.test(dominio) || DOMINIO_DE_PRUEBA.test(dominio)) continue;
+    encontrados.push(m[0]);
+  }
+  return encontrados;
+}
+
+// Devuelve las IPv4 públicas: las privadas y las de documentación son
+// legítimas en fixtures y no identifican a nadie.
+export function extraerIpsSospechosas(contenido: string): string[] {
+  const encontrados: string[] = [];
+  for (const m of contenido.matchAll(IPV4)) {
+    const octetos = m.slice(1, 5);
+    // Un octeto fuera de rango o con cero a la izquierda no es una IP: así se
+    // descartan los códigos de error del SII (01.01.190.500.720.27) y los
+    // números de versión, que si no serían ruido permanente.
+    if (octetos.some(o => (o.length > 1 && o.startsWith('0')) || Number(o) > 255)) continue;
+    if (esIpNoPersonal(octetos.map(Number))) continue;
+    encontrados.push(m[0]);
+  }
+  return encontrados;
+}
+
+// Punto único de entrada del chequeo: agrega todos los detectores para que
+// agregar uno nuevo no exija tocar también el recorrido de archivos.
+export function extraerDatosPersonales(contenido: string): string[] {
+  return [
+    ...extraerRutsSospechosos(contenido),
+    ...extraerCorreosSospechosos(contenido),
+    ...extraerIpsSospechosas(contenido),
+  ];
 }
