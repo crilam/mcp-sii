@@ -163,6 +163,51 @@ describe('MipymeScraper.listDocumentosRecibidos', () => {
   });
 });
 
+describe('MipymeScraper: empresa_rut por llamada llega hasta getSession', () => {
+  // Bug original: ensureEmpresa llamaba session.getSession() sin argumentos,
+  // así que el empresaRut que ya recibía la tool se perdía antes de resolver
+  // la sesión, y getSession() reventaba con "opera varias empresas" aunque
+  // el llamador hubiera pasado un empresa_rut válido.
+  it('listDocumentosEmitidos pasa el empresaRut de filtros a session.getSession', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '22222222-2', empresaNombre: 'EMP B' });
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(formSnapshot)
+      .mockReturnValueOnce(summarySnapshot)
+      .mockReturnValueOnce(docSnapshot);
+
+    const scraper = new MipymeScraper(browser, session);
+    await scraper.listDocumentosEmitidos({ empresaRut: '22222222-2' });
+
+    expect(session.getSession).toHaveBeenCalledWith('22222222-2');
+  });
+
+  it('emitirDte pasa el empresaRut a session.getSession vía ensureMipymePortalEmpresa', async () => {
+    const browser = new MockBrowser();
+    const session = new MockSession({} as any, browser);
+    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '22222222-2', empresaNombre: 'EMPRESA B' });
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(mipymePortalSnapshot)
+      .mockReturnValueOnce(emisionFormSnapshot)
+      .mockReturnValueOnce(emisionFormSnapshot)
+      .mockReturnValueOnce(emisionFormSnapshot)
+      .mockReturnValueOnce(emisionConfirmSnapshot)
+      .mockReturnValueOnce(emisionSuccessSnapshot);
+
+    const scraper = new MipymeScraper(browser, session);
+    await scraper.emitirDte({
+      empresaRut: '22222222-2',
+      tipoDte: 33,
+      receptorRut: '33333333-3',
+      receptorDv: '1',
+      lineas: [{ descripcion: 'Servicio', cantidad: 1, precioUnitario: 100000 }],
+    });
+
+    expect(session.getSession).toHaveBeenCalledWith('22222222-2');
+  });
+});
+
 describe('MipymeScraper.withReauth', () => {
   it('re-autentica y reintenta si falla con error de sesion', async () => {
     const browser = new MockBrowser();

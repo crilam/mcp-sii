@@ -111,9 +111,9 @@ export class SessionManager {
     private browser: Browser
   ) {}
 
-  async login(): Promise<SiiSession> {
+  async login(empresaRut?: string): Promise<SiiSession> {
     await this.authenticate();
-    const session = await this.selectEmpresa();
+    const session = await this.selectEmpresa(empresaRut);
     this.session = session;
     return session;
   }
@@ -177,11 +177,28 @@ export class SessionManager {
     }
   }
 
-  async getSession(): Promise<SiiSession> {
+  // Orden de resolución de la empresa: el parámetro de la llamada gana siempre
+  // (es la intención explícita de quien invoca la tool); si no vino, cae a
+  // SII_EMPRESA_RUT; si tampoco hay, selectEmpresa() resuelve sola cuando la
+  // persona opera una única empresa. Si ya hay sesión en otra empresa, se
+  // cambia de empresa en la misma sesión: abrir una segunda sesión para la
+  // misma persona dispara el bloqueo del SII (01.01.190.500.720.27).
+  async getSession(empresaRut?: string): Promise<SiiSession> {
     if (!this.session) {
-      return this.login();
+      return this.login(empresaRut);
+    }
+    if (empresaRut && empresaRut !== this.session.empresaRut) {
+      return this.cambiarEmpresa(empresaRut);
     }
     return this.session;
+  }
+
+  // Cambia de empresa reutilizando la autenticación vigente: sólo renavega el
+  // combo de selección de empresa, sin volver a pasar por authenticate().
+  private async cambiarEmpresa(empresaRut: string): Promise<SiiSession> {
+    const session = await this.selectEmpresa(empresaRut);
+    this.session = session;
+    return session;
   }
 
   // La sesión del SII expiró o fue rechazada: hay que reautenticar, así que el
@@ -357,17 +374,20 @@ export class SessionManager {
     this.browser.click(btnRef);
   }
 
-  private async selectEmpresa(): Promise<SiiSession> {
+  // empresaRutParam es la empresa pedida en la llamada (mayor prioridad).
+  // Orden de resolución: parámetro > SII_EMPRESA_RUT > única empresa disponible.
+  private async selectEmpresa(empresaRutParam?: string): Promise<SiiSession> {
     this.browser.open(SII_SEL_EMPRESA_URL);
     const snapshot = this.browser.snapshot();
 
     const empresas = this.parseEmpresas(snapshot);
+    const rutPreferido = empresaRutParam ?? this.config.empresaRut;
 
     if (empresas.length === 0) {
-      if (this.config.empresaRut) {
-        return { empresaRut: this.config.empresaRut, empresaNombre: this.config.empresaRut };
+      if (rutPreferido) {
+        return { empresaRut: rutPreferido, empresaNombre: rutPreferido };
       }
-      throw new Error('No se encontraron empresas disponibles. Configura SII_EMPRESA_RUT.');
+      throw new Error('No se encontraron empresas disponibles. Pasá empresa_rut en la llamada o configura SII_EMPRESA_RUT.');
     }
 
     if (empresas.length === 1) {
@@ -377,16 +397,20 @@ export class SessionManager {
       return { empresaRut: empresa.rut, empresaNombre: empresa.nombre };
     }
 
-    if (!this.config.empresaRut) {
+    // Varias empresas: sin un RUT explícito (por parámetro o env var) no hay
+    // forma de elegir por la persona, así que el error debe darle ambas
+    // salidas y la lista completa para resolverlo sin leer código.
+    if (!rutPreferido) {
       const lista = empresas.map(e => `${e.rut} — ${e.nombre}`).join(', ');
       throw new Error(
-        `Esta persona opera ${empresas.length} empresas. Configura SII_EMPRESA_RUT con uno de: ${lista}`
+        `Esta persona opera ${empresas.length} empresas. Pasá empresa_rut en la llamada, ` +
+        `o configura SII_EMPRESA_RUT, con uno de: ${lista}`
       );
     }
 
-    const empresa = empresas.find(e => e.rut === this.config.empresaRut);
+    const empresa = empresas.find(e => e.rut === rutPreferido);
     if (!empresa) {
-      throw new Error(`Empresa ${this.config.empresaRut} no encontrada. Disponibles: ${empresas.map(e => e.rut).join(', ')}`);
+      throw new Error(`Empresa ${rutPreferido} no encontrada. Disponibles: ${empresas.map(e => e.rut).join(', ')}`);
     }
 
     const selectRef = this.findRef(snapshot, /empresa/i) ?? '@e10';
