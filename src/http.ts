@@ -3,8 +3,48 @@ import { SessionManager } from './session';
 
 const TIMEOUT_MS = 30_000;
 
-// El SII responde ISO-8859-1 en todo, incluidas las APIs que declaran JSON.
-const ENCODING = 'latin1' as const;
+// El charset NO es uniforme en el portal: varía por aplicación, y hay que
+// respetar el `Content-Type` de cada respuesta. Medido en vivo:
+//
+//   consdcvinternetui   (RCV)        application/json;charset=utf-8
+//   consultaestadof22ui (Renta F22)  application/json;charset=ISO-8859-1
+//   CGI legacy (BHE, loa.sii.cl)     ISO-8859-1
+//
+// Fijar cualquiera de los dos para todo rompe la otra mitad: leer el UTF-8 del
+// RCV como latin1 devuelve "Factura ElectrÃ³nica" (los bytes C3 B3 de la `ó`
+// leídos de a uno), y leer el ISO-8859-1 de F22 como UTF-8 rompe igual.
+//
+// NO "modernizar" este default a UTF-8: los CGI legacy del SII responden
+// ISO-8859-1 y muchos ni siquiera declaran charset. Sin declaración, el byte
+// suelto 0xF3 sólo es `ó` si se lee como latin1; como UTF-8 es inválido y
+// termina en U+FFFD. UTF-8 por defecto corrompería justamente los casos que
+// no podemos verificar por header.
+const ENCODING_POR_DEFECTO = 'latin1' as const;
+
+// Marca para separar el cuerpo del `content_type` que curl agrega con `-w`.
+// Se elige una cadena que no puede aparecer en un Content-Type real, y se
+// busca por el ÚLTIMO índice: `-w` escribe siempre después del cuerpo, así que
+// aunque el cuerpo contuviera la marca, la que corta es la de curl.
+const MARCA_CONTENT_TYPE = '\n__MCP_SII_CONTENT_TYPE__:';
+
+// Traduce el charset declarado a un encoding que entienda Buffer. Cualquier
+// charset desconocido cae al default por la misma razón que arriba.
+export function encodingDesdeContentType(contentType: string): BufferEncoding {
+  const m = /charset\s*=\s*"?([\w-]+)"?/i.exec(contentType ?? '');
+  if (!m) return ENCODING_POR_DEFECTO;
+  switch (m[1].toLowerCase()) {
+    case 'utf-8':
+    case 'utf8':
+      return 'utf8';
+    case 'iso-8859-1':
+    case 'iso8859-1':
+    case 'latin1':
+    case 'windows-1252': // superconjunto de latin1; latin1 es la aproximación segura
+      return 'latin1';
+    default:
+      return ENCODING_POR_DEFECTO;
+  }
+}
 
 // El `transactionId` sólo necesita ser único por petición: el cliente del
 // portal genera un UUID, pero en las pruebas funcionó cualquier cadena única.
@@ -91,11 +131,37 @@ export class SiiHttpClient {
     // execFileSync con arreglo de argumentos previene inyección de shell: ningún
     // valor pasa por un intérprete de comandos, así que metacaracteres como
     // comillas, backticks, $(...) o ; son literales y seguros.
-    return execFileSync(
+    // Se pide la salida como bytes crudos (`encoding: 'buffer'`) porque el
+    // encoding correcto recién se conoce después de leer el Content-Type que
+    // curl agrega con `-w`. Decodificar antes sería adivinar.
+    const salida = execFileSync(
       'curl',
-      ['-sk', '-b', jar, '-L', '--max-redirs', '5', '--max-time', '25', ...args],
-      { encoding: ENCODING, timeout: TIMEOUT_MS }
+      [
+        '-sk', '-b', jar, '-L', '--max-redirs', '5', '--max-time', '25',
+        '-w', `${MARCA_CONTENT_TYPE}%{content_type}`,
+        ...args,
+      ],
+      { encoding: 'buffer', timeout: TIMEOUT_MS }
     );
+
+    const bruto = Buffer.isBuffer(salida)
+      ? salida
+      : Buffer.from(String(salida), ENCODING_POR_DEFECTO);
+
+    const corte = bruto.lastIndexOf(MARCA_CONTENT_TYPE);
+    if (corte === -1) {
+      // Sin marca no hubo `-w` (o curl murió antes de escribirla): no hay
+      // Content-Type que respetar y se usa el default.
+      return bruto.toString(ENCODING_POR_DEFECTO);
+    }
+
+    const cuerpo = bruto.subarray(0, corte);
+    const contentType = bruto
+      .subarray(corte + MARCA_CONTENT_TYPE.length)
+      .toString('ascii')
+      .trim();
+
+    return cuerpo.toString(encodingDesdeContentType(contentType));
   }
 
   private encodeParams(params: Record<string, string>): string {

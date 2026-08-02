@@ -49,6 +49,29 @@ Si el sobre está incompleto, la respuesta es `{"errorMsg": "Acceso no autorizad
 
 La distinción entre las dos primeras filas es la de siempre en este proyecto: **`respCod: 2` es un vacío legítimo, no un error.** Un año sin declaración y una declaración sin observaciones responden igual que una consulta correcta que no encontró nada.
 
+## El charset varía por aplicación
+
+Corrección (2026-08-02, medido en vivo). Se venía asumiendo que el SII responde
+ISO-8859-1 en todo, **incluidas las respuestas que declaran JSON**. Es falso: el
+charset varía por aplicación y hay que respetar el `Content-Type` de cada
+respuesta.
+
+| Aplicación | `Content-Type` observado |
+|---|---|
+| Registro de Compras y Ventas (`consdcvinternetui`) | `application/json;charset=utf-8` |
+| Renta F22 (`consultaestadof22ui`) | `application/json;charset=ISO-8859-1` |
+| CGI legacy (BHE, `loa.sii.cl`) | ISO-8859-1 (no siempre declarado) |
+
+Dos aplicaciones del mismo portal, con charsets distintos. Fijar cualquiera de
+los dos para todo rompe la otra: `sii_rcv_resumen` devolvía
+`"tipoDocNombre": "Factura ElectrÃ³nica"` porque los bytes `C3 B3` de la `ó` en
+UTF-8 se leían de a uno como latin1.
+
+**Default cuando no viene charset declarado: ISO-8859-1**, no UTF-8. Los CGI
+legacy responden ISO-8859-1 y muchos no lo declaran; ahí un `0xF3` suelto sólo
+es `ó` leído como latin1, y como UTF-8 es un byte inválido. Un default UTF-8
+corrompería justamente los casos que no se pueden verificar por header.
+
 ## Contratos verificados (F22)
 
 Base: `https://www4.sii.cl/consultaestadof22ui/services/data/facadeService/`
