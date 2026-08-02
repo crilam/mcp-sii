@@ -3,3 +3,8 @@ dist/
 .env
 *.pfx
 *.p12
+
+# Scratch de los agentes: informes, volcados de respuestas del portal y notas
+# de trabajo. Este repositorio es público y ahí se escribe sin filtro para
+# diagnosticar, así que nada de eso puede viajar versionado.
+.superpowers/
