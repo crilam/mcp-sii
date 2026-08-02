@@ -30,6 +30,10 @@ export interface ResumenRcv {
   // `true` cuando el SII respondió código 3: el período no tiene documentos
   // registrados. Es un vacío legítimo, no un fallo.
   sinDatos: boolean;
+  // Mensaje del SII cuando lo hay. Sirve para distinguir un vacío de otro: un
+  // período fuera del rango disponible viene con explicación ("debe ser mayor
+  // igual a 201705"), un mes reciente sin actividad viene sin nada.
+  mensaje: string | null;
   totalDocumentos: number;
   // Última actualización del registro según el SII (dcvFecModificacion).
   actualizadoAl: string | null;
@@ -55,7 +59,7 @@ const TIPOS_NOTA_CREDITO = [61, 60];
 
 // Códigos de respuesta de ESTA aplicación. No son los de renta: el RCV no usa
 // `respCod`, trae su propio `respEstado.codRespuesta`, con otros valores.
-// Los cuatro se mapean explícitamente porque confundir dos de ellos falla en
+// Cada uno se mapea explícitamente porque confundir dos de ellos falla en
 // silencio: tratar el 3 como error reportaría un mes sin movimientos como una
 // falla del servidor, y tratar el 2 como vacío escondería un error real detrás
 // de un resumen en cero que se ve perfectamente normal.
@@ -63,6 +67,18 @@ const RESP_EXITO = 0;
 const RESP_ERROR = 2;
 const RESP_SIN_DATOS = 3;
 const RESP_REDIRECCION = 98;
+
+// La lista de códigos relevada en la spike (0, 3, 2, 98) NO era exhaustiva: el
+// 99 apareció después, consultando un período anterior al que el registro tiene
+// disponible, con `data: null` y un mensaje explícito ("Periodo consultado no
+// válido, debe ser mayor igual a 201705").
+//
+// Se trata como vacío legítimo, no como error, porque describe un límite del
+// registro y no una falla: la respuesta correcta a "¿qué documentos hay en
+// 2015?" es "ninguno registrado", igual que un mes sin movimientos. El mensaje
+// del SII se conserva en `mensaje` para que quede claro POR QUÉ vino vacío y no
+// se confunda con un período reciente sin actividad.
+const RESP_PERIODO_FUERA_DE_RANGO = 99;
 
 const PERIODO_VALIDO = /^\d{4}(0[1-9]|1[0-2])$/;
 
@@ -104,6 +120,7 @@ export class RcvScraper {
       empresaRut: `${rut}-${dv}`,
       periodo,
       operacion,
+      mensaje: resp?.respEstado?.msgeRespuesta ?? null,
     };
 
     if (!this.hayDatos(resp)) {
@@ -182,6 +199,11 @@ export class RcvScraper {
         // Vacío legítimo: el período no tiene documentos registrados. El portal
         // tampoco muestra error acá, simplemente no puebla la vista.
         return false;
+      case RESP_PERIODO_FUERA_DE_RANGO:
+        // También vacío legítimo, por otra razón: el período es anterior al que
+        // el registro cubre (ver la constante). El `mensaje` del SII viaja en el
+        // resultado para que el vacío se pueda explicar.
+        return false;
       case RESP_ERROR:
         throw new Error(
           'El SII devolvió un error al consultar el Registro de Compras y Ventas' +
@@ -194,17 +216,25 @@ export class RcvScraper {
           'aplicación; reintentá.'
         );
       default:
+        // Default seguro: lo desconocido FALLA, nunca cae en la rama de vacío.
+        // La lista de códigos del SII ya demostró no ser exhaustiva (así
+        // apareció el 99), así que cualquier condición nueva del servicio se
+        // convertiría, si no, en "no hay datos" — un mes de movimientos podría
+        // reportarse como vacío sin que nada avise. El código y el mensaje van
+        // en el error para que el próximo desconocido se diagnostique en un
+        // minuto: se mira la respuesta real y se decide si es vacío o error.
         throw new Error(
           `El SII devolvió un código de respuesta desconocido (${codigo}) al consultar ` +
-          'el Registro de Compras y Ventas. No se reporta como período sin movimientos ' +
-          'para no esconder un error real.'
+          'el Registro de Compras y Ventas' +
+          (mensaje ? `: ${mensaje}` : '') +
+          '. No se reporta como período sin movimientos para no esconder un error real.'
         );
     }
   }
 }
 
 // El servicio quiere el RUT sin dígito verificador y el dv aparte. Acepta las
-// dos formas que se usan en el proyecto ("76543210-K" y "765432105"), y también
+// dos formas que se usan en el proyecto ("22222222-2" y "222222222"), y también
 // limpia los puntos por si el RUT llega escrito como en el portal.
 export function partirRut(rutCompleto: string): { rut: string; dv: string } {
   const limpio = rutCompleto.replace(/\./g, '').trim();
@@ -213,7 +243,7 @@ export function partirRut(rutCompleto: string): { rut: string; dv: string } {
     : [limpio.slice(0, -1), limpio.slice(-1)];
 
   if (!/^\d{5,9}$/.test(rut) || !/^[\dkK]$/.test(dv ?? '')) {
-    throw new Error(`RUT de empresa inválido: "${rutCompleto}". Se espera 76543210-K.`);
+    throw new Error(`RUT de empresa inválido: "${rutCompleto}". Se espera 22222222-2.`);
   }
 
   return { rut, dv: dv.toUpperCase() };

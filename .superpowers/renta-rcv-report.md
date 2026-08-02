@@ -144,3 +144,98 @@ movimientos y no un error.
    no en `f22Completo`.** El parseo no depende de ese campo, así que no cambia
    nada acá, pero si el método correcto fuera `f22Compacto` la consulta real
    fallaría. Vale confirmarlo contra el portal antes de usarlo en serio.
+
+---
+
+# Segunda pasada: correcciones tras la revisión
+
+Fecha: 2026-08-01
+
+Tres cosas cerradas, dos de ellas a partir de hallazgos que el coordinador
+verificó en vivo contra el portal.
+
+## 1. RUT de ejemplo fuera de convención (suite roja)
+
+`76543210-K` no es dato real, pero tampoco cumple la convención del proyecto:
+los RUT de ejemplo son de **dígito repetido** (`11111111-1`, `22222222-2`), y
+`tests/anonimizacion.ts` la hace cumplir sobre todo lo versionado.
+
+Se cambió el ejemplo a `22222222-2` en `src/scrapers/rcv.ts` (comentario de
+`partirRut` y mensaje de error) y en la descripción de `sii_rcv_resumen`. **El
+chequeo no se tocó**: la convención es justamente lo que permite reconocer un
+RUT inventado de un vistazo, y relajarla para acomodar un ejemplo destruiría la
+señal.
+
+## 2. Compras verificado, no asumido
+
+El concern sobre la falta de fixture de compras resultó fundado y se capturó
+`tests/fixtures/rcv-resumen-compra.json`. **Compras usa exactamente los mismos
+nombres de campo que ventas**: la implementación ya era correcta, no había una
+sorpresa como la de boletas emitidas vs. recibidas.
+
+Se agregaron dos tests contra esa fixture para que quede constancia:
+
+- el resumen de compras se parsea con el mismo esquema (145 documentos, 5 filas,
+  incluida la Factura de Compra Electrónica tipo 46, que ventas no tiene);
+- las notas de crédito **también restan en compras** (acá rebajan crédito
+  fiscal): totales `neto 56.000.000` en vez de los `58.000.000` de la suma
+  ingenua.
+
+## 3. El código 99 y el default seguro
+
+Apareció un quinto código que la spec no documentaba: `respEstado.codRespuesta:
+99` con `data: null` y el mensaje *"Periodo consultado no válido, debe ser mayor
+igual a 201705"* (`tests/fixtures/rcv-resumen-vacio.json`).
+
+**Decisión: se trata como vacío legítimo.** Describe un límite del registro —el
+período pedido es anterior al que el RCV cubre— y no una falla: la respuesta
+correcta a "qué documentos hay en 2015" es "ninguno registrado", igual que un mes
+sin movimientos. Está justificado en un comentario sobre la constante.
+
+Para no perder la diferencia entre los dos vacíos, `ResumenRcv` gana un campo
+**`mensaje`** con el `msgeRespuesta` del SII: un período fuera de rango llega con
+explicación, un mes reciente sin actividad llega en `null`. Sin eso, "no hay
+datos porque el registro no llega tan atrás" y "no hay datos porque no hubo
+movimientos" se veían idénticos.
+
+**Lo más importante del punto: el default ahora falla, y falla informando.** Un
+código desconocido nunca cae en la rama de vacío —la lista del SII ya demostró no
+ser exhaustiva, así que cualquier condición nueva del servicio se convertiría, si
+no, en "no hay datos", y un mes con movimientos podría reportarse como vacío sin
+que nada avise—. El error incluye **el código recibido y el mensaje del SII**,
+que es lo que hace falta para diagnosticar el próximo desconocido sin salir a
+reproducirlo. Hay un test que lo fija.
+
+## 4. El eco de `f22Compacto` (concern 4, resuelto)
+
+Verificado por el coordinador: `f22Completo` es el método correcto y devuelve los
+76 códigos; el servidor ecoa `f22Compacto` en el `metaData` porque es el nombre
+interno de su implementación. Queda un comentario en `RentaScraper.f22Completo`
+advirtiendo que **no hay que "corregir" el nombre del método al ver el eco**.
+
+## Verificación
+
+- `npx tsc --noEmit` — limpio.
+- `npx jest` — **254 tests, 23 suites, todos en verde** (eran 238; +16).
+- `npm run build` — limpio.
+- Chequeo de anonimización en verde, con la convención intacta.
+
+## Concerns que siguen abiertos
+
+1. **La lista de códigos del RCV sigue sin ser exhaustiva.** Ahora se conocen
+   cinco (0, 2, 3, 98, 99) y el default falla informando, que es la mitigación
+   real; pero cada código nuevo va a aparecer como un error en producción, no
+   como un silencio. Es el modo de falla que queremos, no una garantía de que no
+   falten códigos.
+2. **El 99 se interpretó a partir de un solo caso.** El mensaje que lo acompaña
+   es inequívoco ("debe ser mayor igual a 201705"), pero no está descartado que
+   el SII use el mismo 99 para otras condiciones. Si aparece un 99 con otro
+   mensaje, se estaría reportando como vacío algo que no lo es — por eso el
+   `mensaje` viaja en el resultado.
+3. **La lista de notas de crédito sigue siendo una constante de dos códigos
+   (61 y 60).** La fixture de compras trajo dos tipos nuevos (46 Factura de
+   Compra, 914 DIN) y ninguno resta, así que la regla se sostiene; pero conviene
+   contrastarla con el catálogo completo de `getDatosInicio`.
+4. Se mantienen los concerns 1 y 5 de la primera pasada: el parseo está
+   verificado contra fixtures, no ejecutado contra el portal desde esta sesión,
+   y `sii_renta_get_f22` sin folio hace dos consultas al SII.

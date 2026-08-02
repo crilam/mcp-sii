@@ -20,7 +20,7 @@ export function registerRcvTools(server: McpServer, scraper: RcvScraper): void {
       operacion: z.enum(['COMPRA', 'VENTA'])
         .describe('COMPRA para el registro de compras, VENTA para el de ventas'),
       empresa_rut: z.string().optional()
-        .describe('RUT de la empresa a consultar, con dígito verificador (76543210-K). Si se omite, se usa el RUT autenticado.'),
+        .describe('RUT de la empresa a consultar, con dígito verificador (22222222-2). Si se omite, se usa el RUT autenticado.'),
     },
     async ({ periodo, operacion, empresa_rut }: {
       periodo: string;

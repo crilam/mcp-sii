@@ -96,6 +96,11 @@ export class RentaScraper {
     const periodo = String(anio);
     const folioResuelto = folio ?? await this.folioVigente(anio);
 
+    // OJO: el método es `f22Completo` y está verificado en vivo — devuelve los
+    // 76 códigos del formulario. Lo que confunde es que la respuesta ecoa en su
+    // metaData un namespace terminado en `f22Compacto`: ese es el nombre interno
+    // de la implementación del SII, no el del método que hay que invocar. No lo
+    // "corrijas" al ver el eco: invocar `f22Compacto` no es lo que se verificó.
     const data = await this.consultar('f22Completo', {
       folio: String(folioResuelto),
       periodo,

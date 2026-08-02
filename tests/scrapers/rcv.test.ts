@@ -86,6 +86,52 @@ describe('RcvScraper.resumen', () => {
     expect(resumen.totales.iva).not.toBe(20900000);
   });
 
+  // Compras se verificó contra una respuesta real del portal, no se asumió: usa
+  // exactamente los mismos nombres de campo que ventas (no hay sorpresa como la
+  // que hubo entre boletas emitidas y recibidas).
+  it('parsea el resumen de compras con el mismo esquema que ventas', async () => {
+    const { http, scraper } = makeScraper(fixture('rcv-resumen-compra.json'));
+
+    const resumen = await scraper.resumen('202607', 'COMPRA', '22222222-2');
+
+    expect((http.postSdi as jest.Mock).mock.calls[0][3]).toMatchObject({
+      operacion: 'COMPRA',
+    });
+    expect(resumen.sinDatos).toBe(false);
+    expect(resumen.totalDocumentos).toBe(145);
+    expect(resumen.actualizadoAl).toBe('29/07/2026 04:31:03');
+    expect(resumen.filas).toHaveLength(5);
+    expect(resumen.filas[2]).toEqual({
+      tipoDocCodigo: 46,
+      tipoDocNombre: 'Factura de Compra Electrónica',
+      documentos: 35,
+      montoNeto: 2000000,
+      montoExento: 0,
+      montoIva: 380000,
+      montoTotal: 2380000,
+      esNotaCredito: false,
+    });
+  });
+
+  // Las notas de crédito restan también en compras (acá rebajan el crédito
+  // fiscal): la regla no es de ventas, es del registro.
+  it('resta las notas de crédito también en compras', async () => {
+    const { scraper } = makeScraper(fixture('rcv-resumen-compra.json'));
+
+    const resumen = await scraper.resumen('202607', 'COMPRA', '22222222-2');
+
+    expect(resumen.totales).toEqual({
+      // 50.000.000 + 5.000.000 + 2.000.000 − 1.000.000 de notas de crédito.
+      neto: 56000000,
+      exento: 100000,
+      iva: 10830000,
+      total: 66930000,
+    });
+    // La suma ingenua (sin restar la nota de crédito) daría estos otros.
+    expect(resumen.totales.neto).not.toBe(58000000);
+    expect(resumen.totales.total).not.toBe(68930000);
+  });
+
   // Código 3: el período no tiene documentos registrados. Un mes tranquilo no
   // es una falla.
   it('trata el código 3 como período sin movimientos', async () => {
@@ -124,14 +170,36 @@ describe('RcvScraper.resumen', () => {
       .rejects.toThrow(/98/);
   });
 
+  // Código 99: el período es anterior al que el registro cubre. Es otro vacío
+  // legítimo, con el mensaje del SII explicando por qué vino vacío.
+  it('trata el código 99 como período fuera del rango disponible', async () => {
+    const { scraper } = makeScraper(fixture('rcv-resumen-vacio.json'));
+
+    const resumen = await scraper.resumen('201501', 'VENTA', '22222222-2');
+
+    expect(resumen.sinDatos).toBe(true);
+    expect(resumen.filas).toEqual([]);
+    expect(resumen.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0 });
+    // El vacío se puede explicar: no es lo mismo que un mes reciente sin
+    // actividad, que llega sin mensaje.
+    expect(resumen.mensaje).toMatch(/mayor igual a 201705/);
+  });
+
+  // Default seguro: la lista de códigos del SII ya demostró no ser exhaustiva
+  // (así apareció el 99). Un código nuevo no puede caer en la rama de vacío.
   it('no reporta como vacío un código desconocido', async () => {
     const { scraper } = makeScraper({
       data: null,
-      respEstado: { codRespuesta: 77, msgeRespuesta: null },
+      respEstado: { codRespuesta: 77, msgeRespuesta: 'Algo nuevo del SII' },
     });
 
+    const consulta = scraper.resumen('202607', 'VENTA', '22222222-2');
+
+    // El código y el mensaje van en el error: es lo que hace falta para
+    // diagnosticar al próximo desconocido sin salir a reproducirlo.
+    await expect(consulta).rejects.toThrow(/desconocido/);
     await expect(scraper.resumen('202607', 'VENTA', '22222222-2'))
-      .rejects.toThrow(/desconocido/);
+      .rejects.toThrow(/77.*Algo nuevo del SII/);
   });
 
   it('reporta el sobre mal armado citando el mensaje del SII', async () => {
