@@ -82,19 +82,34 @@ Esto contrasta con el Registro de Compras y Ventas, donde `rutEmisor` **sí** es
 | `consdcvinternetui` (RCV) | La empresa es parámetro del método |
 | `propuestaf29ui` (F29) | La empresa es estado de la sesión |
 
-## Qué falta
+## Qué falta — actualizado el 2026-08-03
 
-Para consultar el F29 de una empresa hay que **establecer una sesión que la represente**. No se determinó cómo hacerlo por HTTP para esta aplicación.
+Para consultar el F29 de una empresa hay que **establecer una sesión que la represente**. Ver [representación de empresa](2026-08-01-representacion-empresa.md), donde el relevamiento está parcialmente hecho.
 
-Dos pistas, ninguna verificada:
+**Conviene separar lo verificado de lo que no lo está**, porque de eso depende cuánto trabajo queda:
 
-1. El portal mipyme usa `mipeSelEmpresa.cgi`, pero su lista de empresas **no coincide** con la de otras aplicaciones — en la cuenta probada, mipyme lista 5 y el RCV habilita 17. La empresa consultada estaba entre las 17, no entre las 5.
-2. El menú del portal expone `https://www2.sii.cl/admin-representantes/representantes-aplicaciones` ("Ingresar a representar"), que parece ser el mecanismo general de representación. Sin relevar.
+| Pieza | Estado |
+|---|---|
+| Acceso a la aplicación (puente `legacy/bridge2`) | **verificado** |
+| Listar representados (`getRepresentantes`) | **verificado** |
+| Establecer la sesión representada (`urlApplicacion`) | **sin verificar** |
+| Origen del `clientId` que ese POST requiere | **sin resolver** |
+| `code_app` de la propuesta F29 | **sin resolver** |
 
-Mientras eso no se resuelva, el cruce entre lo registrado en el RCV y lo declarado en el F29 **no se puede completar por HTTP**. El lado registrado funciona hoy; el declarado, no.
+**Hay un bloqueo de registro, y podría haber además uno técnico.** Se accedió al registro de representantes y devolvió `total: 0`: el RUT probado no tiene ningún representado inscrito en ese sistema. Opera esas empresas por otros mecanismos —la lista del portal mipyme, la autorización del RCV— pero no como representante electrónico registrado.
+
+Eso explica sin misterio por qué el RCV funciona y la propuesta F29 no: el RCV valida contra su propia lista de empresas autorizadas, mientras que la propuesta F29 valida contra el RUT que la sesión representa, que hoy es sólo el propio.
+
+Un dato relacionado que sigue vigente: la lista de empresas del portal mipyme **no coincide** con la de otras aplicaciones — en la cuenta probada, mipyme lista 5 y el RCV habilita 17. La empresa consultada estaba entre las 17, no entre las 5. Cada aplicación tiene su propia noción de autorización.
+
+Mientras la representación no esté inscrita, el cruce entre lo registrado en el RCV y lo declarado en el F29 no se puede completar. El lado registrado funciona hoy; el declarado, no.
 
 ## Recomendación
 
-No construir `sii_f29_*` todavía. El esquema está resuelto, pero sin la representación de empresa la tool solo serviría para el RUT de la persona autenticada, que es justamente quien no declara F29.
+No construir `sii_f29_*` todavía. El esquema está resuelto, pero sin representación inscrita la tool sólo serviría para el RUT de la persona autenticada — que es justamente quien no declara F29.
 
-El próximo paso, si se retoma, es relevar `admin-representantes` — y ese hallazgo probablemente destrabe también otras aplicaciones que sigan el mismo modelo de autorización por sesión.
+El próximo paso es inscribir la representación electrónica en el SII, que es un trámite. **Pero eso es necesario, no necesariamente suficiente.**
+
+Con la representación inscrita, `getRepresentantes` debería listarla y ahí recién se puede ejercitar `urlApplicacion` — que sigue sin verificar y que exige un `clientId` cuyo origen no se determinó y un `code_app` que tampoco. O sea: después del trámite queda trabajo técnico, de tamaño desconocido hasta poder probarlo.
+
+Lo que sí está resuelto y no hay que volver a hacer es el **acceso** a la aplicación: autenticar legacy, cruzar el puente `legacy/bridge2`, y usar los dos juegos de cookies.
