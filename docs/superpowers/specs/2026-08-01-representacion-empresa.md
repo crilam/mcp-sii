@@ -1,7 +1,7 @@
 # Representación de empresa: el puente legacy y el registro vacío
 
 Fecha: 2026-08-01, **corregido el 2026-08-03**
-Estado: **alcanzable y verificado**. El bloqueo real no es técnico.
+Estado: **acceso verificado; el flujo de autorización, no**. Hay un bloqueo de registro y podría haber además uno técnico.
 
 Spike para destrabar el F29 de empresa, que quedó pendiente porque `propuestaf29ui` trata la empresa como estado de sesión y no como parámetro (ver [contratos F29](2026-08-01-f29-declaraciones-contratos.md)).
 
@@ -99,7 +99,7 @@ No se pudo ejercitar por lo que sigue.
 
 Eso cambia la naturaleza del bloqueo del F29 de empresa. No es una barrera técnica: es un registro vacío. La persona opera esas empresas por **otros mecanismos** —la lista del portal mipyme, la autorización del Registro de Compras y Ventas— pero no está inscrita como *representante electrónico* en este registro más nuevo.
 
-La consecuencia práctica es la contraria a lo que decía la versión anterior de este documento: **no hay nada que resolver con código**. Hay que inscribir la representación en el SII, que es un trámite.
+La consecuencia práctica cambia respecto de la versión anterior, pero con un matiz que conviene no perder: hay que inscribir la representación en el SII —un trámite— y **eso es necesario, no necesariamente suficiente**. El POST que establece la sesión representada sigue sin verificarse, y exige un `clientId` cuyo origen no se determinó. Puede que después del trámite quede trabajo técnico; hoy no hay forma de saber cuánto sin poder ejercitarlo.
 
 Esto también explica por qué el RCV funciona y la propuesta F29 no, sin necesidad de invocar dos modelos de autorización distintos: el RCV valida contra su propia lista de empresas autorizadas, y la propuesta F29 valida contra el RUT que la sesión representa — que hoy es sólo el propio.
 
@@ -116,8 +116,11 @@ La versión anterior planteaba elegir entre relevar un handshake OIDC —caro—
 
 El camino correcto, si se quiere consultar el F29 de una empresa:
 
-1. **Inscribir la representación electrónica en el SII.** Es un trámite, no desarrollo. Una vez inscrita, `getRepresentantes` la lista y `urlApplicacion` debería poder establecerla.
-2. Recién entonces implementar el flujo, que ya está mapeado.
+1. **Inscribir la representación electrónica en el SII.** Es un trámite. Sin eso no hay nada que autorizar y el resto no se puede probar.
+2. **Recién entonces terminar el relevamiento**: ejercitar `urlApplicacion`, resolver de dónde sale el `clientId` y cuál es el `code_app` de la propuesta F29. Ese trabajo es técnico y su tamaño es desconocido hasta poder intentarlo.
+3. Después implementar.
+
+Lo que **no** hay que volver a hacer es el acceso a la aplicación: eso quedó resuelto con el puente.
 
 La opción de autenticar directamente con la clave tributaria de la empresa sigue existiendo, pero deja de ser el camino barato frente a un obstáculo técnico: pasa a ser un atajo alrededor de un trámite, con las consecuencias de custodia y de alcance de escritura que eso implica.
 

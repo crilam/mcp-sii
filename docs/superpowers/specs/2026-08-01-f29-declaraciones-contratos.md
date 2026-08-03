@@ -84,9 +84,19 @@ Esto contrasta con el Registro de Compras y Ventas, donde `rutEmisor` **sí** es
 
 ## Qué falta — actualizado el 2026-08-03
 
-Para consultar el F29 de una empresa hay que **establecer una sesión que la represente**. El mecanismo ya está relevado y verificado: ver [representación de empresa](2026-08-01-representacion-empresa.md).
+Para consultar el F29 de una empresa hay que **establecer una sesión que la represente**. Ver [representación de empresa](2026-08-01-representacion-empresa.md), donde el relevamiento está parcialmente hecho.
 
-**El bloqueo no es técnico.** Se accedió al registro de representantes y devolvió `total: 0`: el RUT probado no tiene ningún representado inscrito en ese sistema. Opera esas empresas por otros mecanismos —la lista del portal mipyme, la autorización del RCV— pero no como representante electrónico registrado.
+**Conviene separar lo verificado de lo que no lo está**, porque de eso depende cuánto trabajo queda:
+
+| Pieza | Estado |
+|---|---|
+| Acceso a la aplicación (puente `legacy/bridge2`) | **verificado** |
+| Listar representados (`getRepresentantes`) | **verificado** |
+| Establecer la sesión representada (`urlApplicacion`) | **sin verificar** |
+| Origen del `clientId` que ese POST requiere | **sin resolver** |
+| `code_app` de la propuesta F29 | **sin resolver** |
+
+**Hay un bloqueo de registro, y podría haber además uno técnico.** Se accedió al registro de representantes y devolvió `total: 0`: el RUT probado no tiene ningún representado inscrito en ese sistema. Opera esas empresas por otros mecanismos —la lista del portal mipyme, la autorización del RCV— pero no como representante electrónico registrado.
 
 Eso explica sin misterio por qué el RCV funciona y la propuesta F29 no: el RCV valida contra su propia lista de empresas autorizadas, mientras que la propuesta F29 valida contra el RUT que la sesión representa, que hoy es sólo el propio.
 
@@ -98,4 +108,8 @@ Mientras la representación no esté inscrita, el cruce entre lo registrado en e
 
 No construir `sii_f29_*` todavía. El esquema está resuelto, pero sin representación inscrita la tool sólo serviría para el RUT de la persona autenticada — que es justamente quien no declara F29.
 
-El próximo paso **no es desarrollo**: es inscribir la representación electrónica en el SII, que es un trámite. Una vez inscrita, el flujo ya está mapeado y el acceso a la aplicación ya está resuelto por el puente `legacy/bridge2`.
+El próximo paso es inscribir la representación electrónica en el SII, que es un trámite. **Pero eso es necesario, no necesariamente suficiente.**
+
+Con la representación inscrita, `getRepresentantes` debería listarla y ahí recién se puede ejercitar `urlApplicacion` — que sigue sin verificar y que exige un `clientId` cuyo origen no se determinó y un `code_app` que tampoco. O sea: después del trámite queda trabajo técnico, de tamaño desconocido hasta poder probarlo.
+
+Lo que sí está resuelto y no hay que volver a hacer es el **acceso** a la aplicación: autenticar legacy, cruzar el puente `legacy/bridge2`, y usar los dos juegos de cookies.
