@@ -315,6 +315,61 @@ describe('DteScraper: el rol de la contraparte', () => {
   });
 });
 
+// `documentos: []` se veía idéntico en dos situaciones que no son la misma:
+// "no se pidió el detalle" y "no hay documentos". `detalleIncluido` las separa,
+// y estos dos tests las fijan por separado porque desde afuera se confunden.
+describe('DteScraper.listar: detalle no pedido contra detalle vacío', () => {
+  it('sin pedir el detalle: documentos vacío con detalleIncluido=false', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+
+    expect(r.detalleIncluido).toBe(false);
+    expect(r.documentos).toEqual([]);
+    // Y los documentos EXISTEN: el resumen dice que hay 393. La lista está
+    // vacía porque no se pidió, no porque no haya nada.
+    expect(r.totalDocumentos).toBe(393);
+    expect(r.sinDatos).toBe(false);
+  });
+
+  it('pidiendo el detalle y sin documentos: detalleIncluido=true y lista vacía', async () => {
+    const { scraper } = makeScraper({
+      getResumen: EMITIDOS.getResumen,
+      getDetalle: {
+        data: null,
+        dataResp: { detalles: [], totMntNeto: 0, totMntExe: 0, totMntIVA: 0, totMntTotal: 0 },
+        respEstado: { codRespuesta: 0, msgeRespuesta: null, codError: null },
+      },
+    });
+
+    const r = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+    });
+
+    expect(r.detalleIncluido).toBe(true);
+    expect(r.documentos).toEqual([]);
+    expect(r.totalDocumentos).toBe(0);
+    expect(r.sinDatos).toBe(true);
+  });
+
+  it('un período sin filas informa detalleIncluido=false aunque se pida el detalle', async () => {
+    const { scraper } = makeScraper({
+      getResumen: {
+        data: { resumenDte: [], datosAsync: null },
+        respEstado: { codRespuesta: 0, msgeRespuesta: null, codError: null },
+      },
+    });
+
+    // Sin filas no hay ningún detalle que pedirle al SII: decir que se incluyó
+    // sería afirmar algo que no pasó.
+    const r = await scraper.listar('202607', 'EMITIDOS', { incluirDetalle: true });
+
+    expect(r.detalleIncluido).toBe(false);
+    expect(r.sinDatos).toBe(true);
+  });
+});
+
 // `limit` y `contraparteRut` son filtros del lado del cliente: el servicio del
 // SII no los recibe. No ahorran llamadas, y los tests lo fijan para que nadie
 // los lea como si acotaran la consulta.

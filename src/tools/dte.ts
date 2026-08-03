@@ -36,7 +36,9 @@ const ADVERTENCIA_PERIODO =
 const ADVERTENCIA_DETALLE =
   'El detalle CUESTA: incluir_detalle=true dispara una consulta al SII por cada fila del resumen. ' +
   'Empezá sin detalle para ver qué tipos hay en el período y después pedí el detalle acotado con ' +
-  'tipo_doc.';
+  'tipo_doc. Para saber qué significa una lista `documentos` vacía mirá `detalleIncluido`: en false ' +
+  'no se pidió el detalle (los documentos existen, no se trajeron), y en true con la lista vacía no hay ' +
+  'documentos de verdad. No las confundas: son dos cosas distintas que se ven igual.';
 
 const ADVERTENCIA_TOTALES =
   'El campo `totales` es la SUMA DE LOS DOCUMENTOS QUE COINCIDEN con lo pedido (todos, no sólo los que ' +

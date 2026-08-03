@@ -91,6 +91,16 @@ export interface ListadoDte {
   sinDatos: boolean;
   mensaje: string | null;
   filas: FilaResumenDte[];
+  // `documentos: []` significaba DOS cosas distintas —"no se pidió el detalle" y
+  // "no hay documentos"— y desde afuera se veían idénticas. Este campo las
+  // separa sin leer prosa: `false` es que no se pidió (ver `incluirDetalle`);
+  // `true` con `documentos` vacío es que de verdad no hay documentos.
+  //
+  // Un vacío que significa dos cosas es el modo de falla que este proyecto viene
+  // cerrando en todos los frentes (el `sinDatos` del RCV, el mes vacío contra la
+  // página que no cargó en el resumen anual de boletas): quien consume una tool
+  // consume el dato, no la descripción.
+  detalleIncluido: boolean;
   documentos: FilaDetalleDte[];
   // Cuántos documentos coinciden con lo pedido (después del filtro por
   // contraparte, ANTES del `limit`). Si es mayor que `documentos.length`, la
@@ -208,6 +218,8 @@ export class DteScraper {
         ...base,
         sinDatos: true,
         filas: [],
+        // Sin filas no hay detalle que pedir, ni siquiera si lo pidieron.
+        detalleIncluido: false,
         documentos: [],
         totalDocumentos: 0,
         documentosTruncados: false,
@@ -228,6 +240,7 @@ export class DteScraper {
         ...base,
         sinDatos: false,
         filas,
+        detalleIncluido: false,
         documentos: [],
         totalDocumentos: filas.reduce((n, f) => n + f.documentos, 0),
         documentosTruncados: false,
@@ -285,6 +298,7 @@ export class DteScraper {
       ...base,
       sinDatos: coincidentes.length === 0,
       filas,
+      detalleIncluido: true,
       documentos,
       totalDocumentos: coincidentes.length,
       documentosTruncados: documentos.length < coincidentes.length,

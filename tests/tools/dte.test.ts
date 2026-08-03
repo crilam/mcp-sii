@@ -116,6 +116,8 @@ describe('registerDteTools', () => {
       expect(tools[nombre].descripcion).toContain('incluir_detalle=true');
       // La consulta es mensual: nadie debería esperar un rango de fechas.
       expect(tools[nombre].descripcion).toContain('POR PERÍODO MENSUAL');
+      // Y que una lista vacía se interpreta mirando detalleIncluido.
+      expect(tools[nombre].descripcion).toContain('detalleIncluido');
       expect(tools[nombre].descripcion).toContain('NO existe consulta por rango de fechas');
     }
   });
