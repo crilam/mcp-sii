@@ -23,8 +23,24 @@ const ADVERTENCIA_SECCION =
   'No las agrupes ni las sumes por tipo. S1 = afectos y exentos, S2 = facturas de compra y sus notas ' +
   'de crédito, S4 = exportación, S5 = guías de despacho.';
 
+// El SII entrega estos datos POR PERÍODO MENSUAL. No hay consulta por rango de
+// fechas, y no se emula una: fingir un rango recorriendo meses haría pasar por
+// una capacidad del servicio algo que son N consultas, y con un límite de
+// sesiones y sin control de tasa propio eso se paga caro. Se dice explícitamente
+// para que nadie espere fecha_desde/fecha_hasta.
+const ADVERTENCIA_PERIODO =
+  'La consulta es POR PERÍODO MENSUAL (periodo, AAAAMM): el SII entrega estos datos por mes y NO existe ' +
+  'consulta por rango de fechas. Para varios meses hay que llamar una vez por mes. Si el usuario pide un ' +
+  'rango, decile en qué meses se traduce antes de hacer varias llamadas.';
+
+const ADVERTENCIA_DETALLE =
+  'El detalle CUESTA: incluir_detalle=true dispara una consulta al SII por cada fila del resumen. ' +
+  'Empezá sin detalle para ver qué tipos hay en el período y después pedí el detalle acotado con ' +
+  'tipo_doc.';
+
 const ADVERTENCIA_TOTALES =
-  'El campo `totales` es la SUMA DE LOS DOCUMENTOS DEVUELTOS. `totalesDeclarados` es lo que declara el ' +
+  'El campo `totales` es la SUMA DE LOS DOCUMENTOS QUE COINCIDEN con lo pedido (todos, no sólo los que ' +
+  'devuelve limit). `totalesDeclarados` es lo que declara el ' +
   'SII y NO coincide con esa suma (verificado: 163.060.976 sumando 393 documentos contra 197.733.705 ' +
   'declarados). Usá `totales`; `totalesDeclarados` está sólo para explicar la cifra que muestra el ' +
   'portal. Si totalesDifierenDelDeclarado es true, eso es lo normal, no una falla.';
@@ -55,18 +71,31 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
     seccion: z.string().optional()
       .describe('Acota a una sección (S1, S2, S4, S5). Sirve para separar las dos filas de un mismo ' +
         'tipo de documento.'),
-    incluir_detalle: z.boolean().default(true)
-      .describe('true (por defecto) devuelve el resumen y los documentos uno por uno. false devuelve ' +
-        'sólo el resumen por (tipo, sección) con una única consulta: conviene para ver qué hay en el ' +
-        'período antes de pedir el detalle de un tipo.'),
+    contraparte_rut: z.string().optional()
+      .describe('Filtra los documentos por RUT de la contraparte (22222222-2): el cliente en los ' +
+        'emitidos, el proveedor en los recibidos. Es un filtro del lado del servidor MCP, sobre el ' +
+        'detalle ya traído: NO reduce las consultas al SII. Requiere incluir_detalle=true.'),
+    limit: z.number().int().min(1).max(500).optional()
+      .describe('Máximo de documentos a devolver. Recorta la lista después de traerla, así que NO ' +
+        'reduce las consultas al SII; sirve para no volcar cientos de documentos. Cuando recorta, ' +
+        'documentosTruncados queda en true y totalDocumentos dice cuántos hay en realidad (los ' +
+        'totales se calculan sobre todos, no sobre los devueltos).'),
+    incluir_detalle: z.boolean().default(false)
+      .describe('false por defecto: devuelve SÓLO el resumen por (tipo, sección) con UNA consulta. ' +
+        'true trae además cada documento, y eso cuesta una consulta al SII POR CADA fila del resumen ' +
+        '(siete en un período típico si no se acota con tipo_doc). El uso normal es resumen primero, ' +
+        'y después el detalle del tipo que interese con tipo_doc: pedí incluir_detalle=true sólo ' +
+        'cuando de verdad hagan falta los documentos.'),
   });
 
   const handler = (operacion: OperacionDte) =>
-    async ({ periodo, empresa_rut, tipo_doc, seccion, incluir_detalle }: {
+    async ({ periodo, empresa_rut, tipo_doc, seccion, contraparte_rut, limit, incluir_detalle }: {
       periodo: string;
       empresa_rut?: string;
       tipo_doc?: number;
       seccion?: string;
+      contraparte_rut?: string;
+      limit?: number;
       incluir_detalle: boolean;
     }) => ({
       content: [{
@@ -76,6 +105,8 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
             empresaRut: empresa_rut,
             tipoDocCodigo: tipo_doc,
             seccion,
+            contraparteRut: contraparte_rut,
+            limit,
             incluirDetalle: incluir_detalle,
           }),
           null,
@@ -87,8 +118,9 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
   server.tool(
     'sii_dte_list_documentos_emitidos',
     'Documentos tributarios electrónicos EMITIDOS por la empresa en un período, según Consultas DTE del ' +
-    'SII: el resumen por (tipo de documento, sección) y, salvo que se pida lo contrario, cada documento ' +
-    'con su contraparte, folio, fechas y montos. ' +
+    'SII: por defecto el resumen por (tipo de documento, sección), y con incluir_detalle=true además ' +
+    'cada documento con su contraparte, folio, fechas y montos. ' +
+    ADVERTENCIA_PERIODO + ' ' + ADVERTENCIA_DETALLE + ' ' +
     ADVERTENCIA_SECCION + ' ' + ADVERTENCIA_CONTRAPARTE + ' ' + ADVERTENCIA_TOTALES + ' ' +
     'Un período sin documentos responde sinDatos=true con las listas vacías: es un mes sin movimientos, ' +
     'no un error. ' + ADVERTENCIA_RCV + ' Es solo lectura.',
@@ -99,8 +131,9 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
   server.tool(
     'sii_dte_list_documentos_recibidos',
     'Documentos tributarios electrónicos RECIBIDOS por la empresa en un período, según Consultas DTE del ' +
-    'SII: el resumen por (tipo de documento, sección) y, salvo que se pida lo contrario, cada documento ' +
-    'con su contraparte, folio, fechas y montos. ' +
+    'SII: por defecto el resumen por (tipo de documento, sección), y con incluir_detalle=true además ' +
+    'cada documento con su contraparte, folio, fechas y montos. ' +
+    ADVERTENCIA_PERIODO + ' ' + ADVERTENCIA_DETALLE + ' ' +
     'La contraparte de un documento recibido es el PROVEEDOR que lo emitió, y llega con ' +
     'contraparteRol="emisor" aunque el SII la informe en campos que se llaman "receptor". ' +
     ADVERTENCIA_SECCION + ' ' + ADVERTENCIA_CONTRAPARTE + ' ' + ADVERTENCIA_TOTALES + ' ' +

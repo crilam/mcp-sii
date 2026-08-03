@@ -90,6 +90,7 @@ describe('DteScraper: el sobre de la consulta', () => {
     await scraper.listar('202607', 'EMITIDOS', {
       empresaRut: '22222222-2',
       tipoDocCodigo: 33,
+      incluirDetalle: true,
     });
 
     const data = llamada(http, 'getDetalle')![3];
@@ -111,7 +112,7 @@ describe('DteScraper: el sobre de la consulta', () => {
   it('recibidos usa getDetalleRecibidos con los mismos nombres rut/dv', async () => {
     const { http, scraper } = makeScraper(RECIBIDOS);
 
-    await scraper.listar('202607', 'RECIBIDOS', { tipoDocCodigo: 33 });
+    await scraper.listar('202607', 'RECIBIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     expect(llamada(http, 'getDetalle')).toBeUndefined();
     const data = llamada(http, 'getDetalleRecibidos')![3];
@@ -190,11 +191,26 @@ describe('DteScraper.listar: el resumen', () => {
     expect(llamadas(http)).toHaveLength(1);
   });
 
+  // El detalle es OPT-IN: por defecto una sola consulta. Sin esto, un listado
+  // sin `tipoDocCodigo` dispara una consulta por fila del resumen (siete acá) y
+  // el límite de sesiones del SII se agota sin que nadie lo haya pedido.
+  it('el detalle NO se trae por defecto', async () => {
+    const { http, scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS');
+
+    expect(llamadas(http)).toHaveLength(1);
+    expect(r.documentos).toEqual([]);
+    // El resumen sí trae la cuenta de documentos del período.
+    expect(r.filas).toHaveLength(7);
+    expect(r.totalDocumentos).toBe(474);
+  });
+
   it('con detalle pide una consulta por fila del resumen filtrada', async () => {
     const { http, scraper } = makeScraper(EMITIDOS);
 
     // El tipo 61 tiene dos filas (S1 y S2): son dos consultas de detalle.
-    await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 61 });
+    await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 61, incluirDetalle: true });
 
     const detalles = llamadas(http).filter(c => c[2] === 'getDetalle');
     expect(detalles).toHaveLength(2);
@@ -207,6 +223,7 @@ describe('DteScraper.listar: el resumen', () => {
     const r = await scraper.listar('202607', 'EMITIDOS', {
       tipoDocCodigo: 61,
       seccion: 'S2',
+      incluirDetalle: true,
     });
 
     expect(r.filas).toHaveLength(1);
@@ -223,7 +240,7 @@ describe('DteScraper.listar: el detalle', () => {
     // un período vacío donde hay documentos.
     expect(EMITIDOS.getDetalle.data).toBeNull();
 
-    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     expect(r.totalDocumentos).toBe(4);
     expect(r.documentos.map(d => d.folio)).toEqual([1000, 1001, 1002, 1003]);
@@ -232,7 +249,7 @@ describe('DteScraper.listar: el detalle', () => {
   it('parsea un documento emitido completo', async () => {
     const { scraper } = makeScraper(EMITIDOS);
 
-    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     expect(r.documentos[0]).toEqual({
       tipoDocCodigo: 33,
@@ -258,7 +275,7 @@ describe('DteScraper.listar: el detalle', () => {
   it('conserva la descripción del evento cuando el SII la informa', async () => {
     const { scraper } = makeScraper(EMITIDOS);
 
-    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     const conEvento = r.documentos.find(d => d.folio === 1003)!;
     expect(conEvento.eventoCodigo).toBe('2');
@@ -272,7 +289,7 @@ describe('DteScraper: el rol de la contraparte', () => {
   it('en emitidos la contraparte es el receptor (el cliente)', async () => {
     const { scraper } = makeScraper(EMITIDOS);
 
-    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     expect(r.documentos.every(d => d.contraparteRol === 'receptor')).toBe(true);
   });
@@ -286,11 +303,130 @@ describe('DteScraper: el rol de la contraparte', () => {
     expect(crudo.rznSocEmisor).toBeNull();
     expect(crudo.rznSocRecep).toContain('PROVEEDOR');
 
-    const r = await scraper.listar('202607', 'RECIBIDOS', { tipoDocCodigo: 33 });
+    const r = await scraper.listar('202607', 'RECIBIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     expect(r.documentos.every(d => d.contraparteRol === 'emisor')).toBe(true);
-    expect(r.documentos[0].contraparteNombre).toBe('PROVEEDOR EJEMPLO UNO SPA');
-    expect(r.documentos[0].contraparteRut).toBe('22222222-2');
+    // El nombre sale de rznSocRecep y el RUT se compone de rutReceptor+dvReceptor,
+    // que es el punto: los campos se llaman "receptor" y traen al proveedor. Se
+    // comparan contra la fixture en vez de contra un literal, porque lo que
+    // importa es DE DÓNDE se leen, no qué RUT concreto trae la fila.
+    expect(r.documentos[0].contraparteNombre).toBe(crudo.rznSocRecep);
+    expect(r.documentos[0].contraparteRut).toBe(`${crudo.rutReceptor}-${crudo.dvReceptor}`);
+  });
+});
+
+// `limit` y `contraparteRut` son filtros del lado del cliente: el servicio del
+// SII no los recibe. No ahorran llamadas, y los tests lo fijan para que nadie
+// los lea como si acotaran la consulta.
+describe('DteScraper.listar: los filtros del lado del cliente', () => {
+  it('el filtro por contraparte no cambia las consultas al SII', async () => {
+    const { http, scraper } = makeScraper(EMITIDOS);
+
+    const conFiltro = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+      contraparteRut: '33333333-3',
+    });
+
+    // Una de resumen y una de detalle: las mismas que sin filtro.
+    expect(llamadas(http)).toHaveLength(2);
+    expect(llamadas(http)[1][3]).not.toHaveProperty('contraparteRut');
+
+    expect(conFiltro.documentos).toHaveLength(1);
+    expect(conFiltro.documentos[0].contraparteRut).toBe('33333333-3');
+    expect(conFiltro.totalDocumentos).toBe(1);
+    // Los totales son los del subconjunto filtrado, no los del período.
+    expect(conFiltro.totales.total).toBe(1190000);
+  });
+
+  it('acepta el RUT de contraparte con puntos o sin guión', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    for (const forma of ['33.333.333-3', '333333333', '33333333-3']) {
+      const r = await scraper.listar('202607', 'EMITIDOS', {
+        tipoDocCodigo: 33,
+        incluirDetalle: true,
+        contraparteRut: forma,
+      });
+      expect(r.documentos).toHaveLength(1);
+    }
+  });
+
+  // Un vacío por filtro sigue siendo un vacío legítimo, no un error.
+  it('una contraparte sin documentos da sinDatos, no falla', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+      contraparteRut: '55555555-5',
+    });
+
+    expect(r.documentos).toEqual([]);
+    expect(r.totalDocumentos).toBe(0);
+    expect(r.sinDatos).toBe(true);
+  });
+
+  // Con un subconjunto filtrado el total declarado por el SII —que es del
+  // período completo— se leería como el total de ese subconjunto.
+  it('con filtro por contraparte no expone el total declarado', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+      contraparteRut: '33333333-3',
+    });
+
+    expect(r.totalesDeclarados).toBeNull();
+    expect(r.totalesDifierenDelDeclarado).toBe(false);
+  });
+
+  it('un RUT de contraparte mal escrito falla en vez de devolver vacío', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    // Devolver cero documentos se leería como "esa contraparte no tiene
+    // documentos", que es peor que un error.
+    await expect(
+      scraper.listar('202607', 'EMITIDOS', {
+        tipoDocCodigo: 33,
+        incluirDetalle: true,
+        contraparteRut: 'no-es-un-rut',
+      })
+    ).rejects.toThrow(/RUT de contraparte/);
+  });
+
+  it('limit recorta la lista, avisa que recortó y no toca los totales', async () => {
+    const { http, scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+      limit: 2,
+    });
+
+    expect(r.documentos).toHaveLength(2);
+    expect(r.documentosTruncados).toBe(true);
+    // El total de documentos es el real, no el de la página.
+    expect(r.totalDocumentos).toBe(4);
+    // Y los totales cubren los 4: si dependieran del tamaño de página, cambiar
+    // `limit` cambiaría los montos del período.
+    expect(r.totales.total).toBe(4760000);
+    // No ahorra llamadas: recorta después de traer.
+    expect(llamadas(http)).toHaveLength(2);
+  });
+
+  it('un limit que no recorta deja documentosTruncados en false', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+      limit: 50,
+    });
+
+    expect(r.documentos).toHaveLength(4);
+    expect(r.documentosTruncados).toBe(false);
   });
 });
 
@@ -300,7 +436,7 @@ describe('DteScraper: la totalización', () => {
   it('suma los documentos y NO usa el total declarado', async () => {
     const { scraper } = makeScraper(EMITIDOS);
 
-    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     expect(r.totales).toEqual({
       neto: 4000000,
@@ -316,7 +452,7 @@ describe('DteScraper: la totalización', () => {
   it('expone el total declarado aparte y avisa que difiere', async () => {
     const { scraper } = makeScraper(EMITIDOS);
 
-    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     expect(r.totalesDeclarados).toEqual({
       neto: 9999999,
@@ -330,7 +466,7 @@ describe('DteScraper: la totalización', () => {
   it('en recibidos la totalización también suma los documentos', async () => {
     const { scraper } = makeScraper(RECIBIDOS);
 
-    const r = await scraper.listar('202607', 'RECIBIDOS', { tipoDocCodigo: 33 });
+    const r = await scraper.listar('202607', 'RECIBIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     expect(r.totales.total).toBe(4760000);
     expect(r.totalesDeclarados!.total).toBe(11899998);
@@ -416,7 +552,7 @@ describe('DteScraper: vacío legítimo contra error real', () => {
       },
     });
 
-    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
     expect(r.documentos).toEqual([]);
     expect(r.filas).toHaveLength(1);
@@ -482,12 +618,12 @@ describe('DteScraper: la empresa es parámetro, no estado de sesión', () => {
       incluirDetalle: false,
     });
     await scraper.listar('202607', 'EMITIDOS', {
-      empresaRut: '22222223-2',
+      empresaRut: '33333333-3',
       incluirDetalle: false,
     });
 
     const ruts = llamadas(http).map(c => c[3].rutContribuyente);
-    expect(ruts).toEqual(['22222222', '22222223']);
+    expect(ruts).toEqual(['22222222', '33333333']);
   });
 
   it('un RUT de empresa mal escrito falla antes de consultar', async () => {

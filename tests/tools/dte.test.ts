@@ -68,6 +68,8 @@ describe('registerDteTools', () => {
       periodo: '202607',
       empresa_rut: '22222222-2',
       tipo_doc: 33,
+      contraparte_rut: '33333333-3',
+      limit: 10,
       incluir_detalle: true,
     });
 
@@ -75,6 +77,8 @@ describe('registerDteTools', () => {
       empresaRut: '22222222-2',
       tipoDocCodigo: 33,
       seccion: undefined,
+      contraparteRut: '33333333-3',
+      limit: 10,
       incluirDetalle: true,
     });
   });
@@ -92,8 +96,44 @@ describe('registerDteTools', () => {
       empresaRut: undefined,
       tipoDocCodigo: undefined,
       seccion: undefined,
+      contraparteRut: undefined,
+      limit: undefined,
       incluirDetalle: false,
     });
+  });
+
+  // Lo costoso se pide explícitamente: el detalle dispara una consulta al SII
+  // por cada fila del resumen, así que el default no puede traerlo.
+  it('incluir_detalle es opt-in: su default es false', () => {
+    const { tools } = setup();
+    for (const nombre of [
+      'sii_dte_list_documentos_emitidos',
+      'sii_dte_list_documentos_recibidos',
+    ]) {
+      const schema = tools[nombre].schema;
+      expect(schema.incluir_detalle.parse(undefined)).toBe(false);
+      // Y la descripción dice que el uso normal es resumen primero.
+      expect(tools[nombre].descripcion).toContain('incluir_detalle=true');
+      // La consulta es mensual: nadie debería esperar un rango de fechas.
+      expect(tools[nombre].descripcion).toContain('POR PERÍODO MENSUAL');
+      expect(tools[nombre].descripcion).toContain('NO existe consulta por rango de fechas');
+    }
+  });
+
+  // limit y contraparte_rut sobrevivieron a la migración, pero filtran del lado
+  // del cliente: la descripción tiene que decir que no ahorran consultas.
+  it('limit y contraparte_rut existen y se declaran como filtros del cliente', () => {
+    const { tools } = setup();
+    for (const nombre of [
+      'sii_dte_list_documentos_emitidos',
+      'sii_dte_list_documentos_recibidos',
+    ]) {
+      const schema = tools[nombre].schema;
+      expect(schema.limit.isOptional()).toBe(true);
+      expect(schema.contraparte_rut.isOptional()).toBe(true);
+      expect(schema.limit.description).toContain('NO ');
+      expect(schema.contraparte_rut.description).toContain('NO reduce las consultas al SII');
+    }
   });
 
   it('el documento puntual pasa tipo, folio y operación', async () => {

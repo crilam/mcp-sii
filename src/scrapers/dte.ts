@@ -92,9 +92,17 @@ export interface ListadoDte {
   mensaje: string | null;
   filas: FilaResumenDte[];
   documentos: FilaDetalleDte[];
+  // Cuántos documentos coinciden con lo pedido (después del filtro por
+  // contraparte, ANTES del `limit`). Si es mayor que `documentos.length`, la
+  // lista viene recortada: ver `documentosTruncados`.
   totalDocumentos: number;
-  // SUMA DE LOS DOCUMENTOS DEVUELTOS, no el total que declara el SII. Ver
-  // `totalizar` y `totalesDeclarados`.
+  // `true` cuando `limit` recortó la lista. Existe para que "10 documentos" no
+  // se lea como "hay 10 documentos": `totalDocumentos` dice cuántos hay.
+  documentosTruncados: boolean;
+  // SUMA DE LOS DOCUMENTOS QUE COINCIDEN, no el total que declara el SII. Se
+  // calcula sobre los `totalDocumentos`, no sobre la página recortada por
+  // `limit`: totalizar sólo lo que se alcanzó a mostrar daría un total que
+  // depende del tamaño de página. Ver `totalizar` y `totalesDeclarados`.
   totales: TotalesDte;
   // Los totales que declara el SII en `dataResp` (sumados si se pidió más de un
   // tipo). Se exponen porque el portal muestra estos, así que un usuario que
@@ -163,6 +171,11 @@ export class DteScraper {
   // detalle por cada fila que corresponda. `tipoDocCodigo` acota a un tipo (y
   // `seccion`, a una sola fila) para no gastar llamadas cuando ya se sabe qué se
   // busca.
+  //
+  // `incluirDetalle` es OPT-IN, y el default importa: sin él, un listado sin
+  // `tipoDocCodigo` dispara una consulta por fila del resumen (7 en el período
+  // que se relevó). Con el límite de sesiones del SII y sin control de tasa
+  // propio, eso se dispara sin querer. Lo costoso se pide explícitamente.
   async listar(
     periodo: string,
     operacion: OperacionDte,
@@ -170,9 +183,14 @@ export class DteScraper {
       empresaRut?: string;
       tipoDocCodigo?: number;
       seccion?: string;
-      // Sin `incluirDetalle` la respuesta trae sólo el resumen: una llamada en
-      // vez de una por tipo. Útil para "¿qué hay en el período?".
+      // `false` por defecto: sólo el resumen, una llamada.
       incluirDetalle?: boolean;
+      // Filtros del lado del CLIENTE, sobre el detalle ya traído: el servicio
+      // del SII no los recibe, así que no ahorran ninguna llamada. Se sostienen
+      // igual porque preservan el contrato que tenían las tools con el
+      // navegador y porque un tipo de documento puede traer cientos de filas.
+      contraparteRut?: string;
+      limit?: number;
     } = {}
   ): Promise<ListadoDte> {
     const { rut, dv } = this.identidadConsultada(opciones.empresaRut);
@@ -192,6 +210,7 @@ export class DteScraper {
         filas: [],
         documentos: [],
         totalDocumentos: 0,
+        documentosTruncados: false,
         totales: { neto: 0, exento: 0, iva: 0, total: 0 },
         totalesDeclarados: null,
         totalesDifierenDelDeclarado: false,
@@ -203,13 +222,15 @@ export class DteScraper {
       (opciones.seccion === undefined || f.seccion === opciones.seccion)
     );
 
-    if (opciones.incluirDetalle === false) {
+    // Default: sólo el resumen. Ver el comentario de `incluirDetalle`.
+    if (opciones.incluirDetalle !== true) {
       return {
         ...base,
         sinDatos: false,
         filas,
         documentos: [],
         totalDocumentos: filas.reduce((n, f) => n + f.documentos, 0),
+        documentosTruncados: false,
         // Sin detalle no hay documentos que sumar, y los montos del resumen son
         // otra cosa: no se rellena `totales` con algo que no se calculó.
         totales: { neto: 0, exento: 0, iva: 0, total: 0 },
@@ -218,12 +239,12 @@ export class DteScraper {
       };
     }
 
-    const documentos: FilaDetalleDte[] = [];
+    const todos: FilaDetalleDte[] = [];
     let declarados: TotalesDte | null = null;
 
     for (const fila of filas) {
       const det = await this.detalleDeFila(periodo, operacion, rut, dv, fila);
-      documentos.push(...det.documentos);
+      todos.push(...det.documentos);
       if (det.declarados) {
         declarados = declarados
           ? {
@@ -236,17 +257,45 @@ export class DteScraper {
       }
     }
 
-    const totales = this.totalizar(documentos);
+    // El filtro por contraparte se aplica acá, del lado del cliente: el
+    // servicio no lo recibe. Se normaliza el RUT con `partirRut` para que
+    // "22.222.222-2" y "222222222" coincidan con el "22222222-2" que armamos, en
+    // vez de fallar por formato y devolver cero documentos —que se leería como
+    // "esa contraparte no tiene documentos", el peor de los resultados.
+    const coincidentes = opciones.contraparteRut
+      ? (() => {
+          const { rut: cRut, dv: cDv } = partirRut(
+            opciones.contraparteRut,
+            'RUT de contraparte'
+          );
+          const buscado = `${cRut}-${cDv}`;
+          return todos.filter(d => d.contraparteRut.toUpperCase() === buscado);
+        })()
+      : todos;
+
+    // Los totales se calculan sobre TODO lo que coincide, antes de recortar:
+    // ver el comentario de `totales` en ListadoDte.
+    const totales = this.totalizar(coincidentes);
+
+    const limit = opciones.limit;
+    const documentos =
+      limit !== undefined && limit >= 0 ? coincidentes.slice(0, limit) : coincidentes;
 
     return {
       ...base,
-      sinDatos: documentos.length === 0,
+      sinDatos: coincidentes.length === 0,
       filas,
       documentos,
-      totalDocumentos: documentos.length,
+      totalDocumentos: coincidentes.length,
+      documentosTruncados: documentos.length < coincidentes.length,
       totales,
-      totalesDeclarados: declarados,
+      // Con filtro por contraparte el declarado NO se expone: el SII lo calcula
+      // sobre el período completo, así que junto a un subconjunto filtrado se
+      // leería como el total de ese subconjunto. Un número que no significa lo
+      // que parece es peor que ninguno.
+      totalesDeclarados: opciones.contraparteRut ? null : declarados,
       totalesDifierenDelDeclarado:
+        !opciones.contraparteRut &&
         declarados !== null &&
         (declarados.neto !== totales.neto ||
           declarados.exento !== totales.exento ||
