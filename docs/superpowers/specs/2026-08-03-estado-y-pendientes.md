@@ -51,7 +51,7 @@ Y una regla de método, aprendida a costa de una spike mal leída: **al probar a
 ### Se pueden hacer ya, sin nada de afuera
 
 1. **`sii_dte_*` y `sii_rcv_*` no son comparables** y ya lo dicen sus descripciones. Lo que falta es *por qué* difieren los recibidos (85 contra 83 facturas, 3 contra 5 notas de crédito). Hipótesis sin verificar: el RCV refleja lo que el contribuyente registró o aceptó; Consultas DTE, lo que el SII recibió. Se confirma comparando documento por documento con `sii_rcv_detalle` y el detalle de DTE — las dos tools ya existen. ([spec](2026-08-03-migrar-navegador-a-http.md))
-2. **Migrar el portal mipyme a HTTP.** Es la deuda grande de navegador (~70 llamadas) y no está relevada. Sin ella no hay aislamiento por identidad, o sea no hay servicio multi-entidad. `getEmpContribuyente` ya mostró que la selección de empresa probablemente desaparece en el camino HTTP.
+2. **Migrar el portal mipyme a HTTP.** Es la deuda grande de navegador (~70 llamadas) y no está relevada. **Es el prerrequisito de todo lo multi-empresa**: con una credencial por empresa hace falta una sesión por identidad, y un Chrome con un solo almacén de cookies no puede sostener dos. `getEmpContribuyente` ya mostró que la selección de empresa probablemente desaparece en el camino HTTP.
 3. **`buscaObservacion` (renta F22)** devolvió `respCod: 2` contra una declaración limpia, y eso no distingue "sin observaciones" de "parámetros incorrectos". Requiere una declaración **observada** para verificar. Hasta entonces no se construye la tool.
 4. **`consultarPeriodo`** (renta): parámetros sin determinar. Puede ser innecesario si `buscaDeclVgte` ya cubre el caso.
 5. **Los otros valores de `estadoContab`** en el RCV: sólo se verificó `REGISTRO`.
@@ -61,19 +61,23 @@ Y una regla de método, aprendida a costa de una spike mal leída: **al probar a
 
 **`vica` (bienes raíces)** usa cola virtual Queue-it, que un cliente HTTP sin JavaScript podría no atravesar. Son 3 llamadas contra 70: no vale forzarlo.
 
-### Bloqueado por un trámite (esto sí depende de vos)
+### El F29 de empresa: el camino es autenticar como la empresa, no representarla
 
-**El F29 de empresa.** El esquema de `propuestaf29ui` está verificado y el acceso a la aplicación de representantes también. El bloqueo es de **registro**: `getRepresentantes` devolvió `total: 0` — el RUT probado no tiene ninguna empresa inscrita como representación electrónica. Opera esas empresas por otros mecanismos (la lista de mipyme, la autorización del RCV), pero no como representante electrónico registrado.
+**La lista de empresas es nuestra, no del SII.** El usuario del servicio administra un conjunto de empresas y **para cada una tiene su RUT y su clave del SII**. Ese listado se define del lado del servicio; no es un dato que haya que descubrir en el portal ni una autorización que el SII deba conceder.
 
-Eso explica sin misterio por qué el RCV funciona y la propuesta F29 no: el RCV valida contra su propia lista de autorizadas; la propuesta F29, contra el RUT que la sesión representa — hoy sólo el propio.
+Eso reencuadra el pendiente. La representación electrónica —el camino que relevaron las spikes de [F29](2026-08-01-f29-declaraciones-contratos.md) y [representación](2026-08-01-representacion-empresa.md)— resolvía el problema de operar varias empresas **desde una sola identidad**. Con credenciales por empresa ese problema no existe: se autentica como la empresa y `propuestaf29ui` valida contra el RUT que la sesión ya es.
 
-**Inscribir la representación es necesario, no necesariamente suficiente.** Después del trámite quedan tres cosas técnicas sin resolver, de tamaño desconocido hasta poder intentarlas: ejercitar `authorize/v1/urlApplicacion`, determinar de dónde sale el `clientId` que ese POST exige, y cuál es el `code_app` de la propuesta F29.
+Consecuencia práctica: **el F29 de empresa no está bloqueado por un trámite.** No hace falta `getRepresentantes`, ni `authorize/v1/urlApplicacion`, ni resolver el `clientId` o el `code_app` — todo eso era maquinaria para representar a un tercero. El esquema de `propuestaf29ui` ya está verificado; falta ejercitarlo con una sesión de empresa.
 
-Mientras eso no esté, el cruce "lo registrado contra lo declarado" no se puede completar: el lado registrado (RCV) funciona hoy, el declarado no. **No construir `sii_f29_*` todavía** — sólo serviría para el RUT de la persona autenticada, que es justamente quien no declara F29. ([spec F29](2026-08-01-f29-declaraciones-contratos.md), [spec representación](2026-08-01-representacion-empresa.md))
+Lo que sí queda por resolver, y es la razón real por la que no se construye `sii_f29_*` hoy:
 
-La alternativa —autenticar con la clave tributaria de cada empresa— sigue existiendo, pero no es el camino barato: es un atajo alrededor de un trámite, con custodia de credenciales de terceros y alcance de escritura como consecuencia.
+1. **El modelo de credenciales del servidor.** Hoy `env.ts` toma un único juego (`SII_RUT` + `SII_CLAVE` o certificado) y `server.ts` comparte **un** `SessionManager`. Varias empresas con clave propia exigen una credencial por identidad y una sesión por identidad — con el candado que ya existe: dos sesiones simultáneas contra el mismo RUT disparan el bloqueo del SII.
+2. **Que eso sea posible.** Es exactamente lo que la migración a HTTP compra y el navegador impide: un Chrome con un solo almacén de cookies no puede sostener dos identidades. Por eso **migrar mipyme a HTTP es prerrequisito del multi-empresa**, no un refactor cosmético.
+3. **Custodia.** Guardar claves tributarias de varias empresas es una decisión de seguridad con consecuencias propias, y habilita escritura sobre cada una. Hay que resolverla explícitamente, no heredarla del hecho de que las claves existan.
 
-### Bloqueado por una decisión sobre datos de terceros (también depende de vos)
+La spike de representación no se desperdicia: el puente `legacy/bridge2` es genérico y sirve para cualquier aplicación de tercera generación del portal, con la sesión que sea.
+
+### Bloqueado por una decisión sobre datos de terceros (esto sí depende de vos)
 
 **`sii_bhe_emitir` / `sii_bhe_anular`.** Los pasos de lectura del flujo están relevados. Lo que falta:
 
@@ -87,17 +91,19 @@ Hasta tener 1, escribir `sii_bhe_emitir` sería inventar el contrato. ([spec](20
 
 Cosas que el proyecto da por ciertas y que romperían cosas si son falsas:
 
-1. **Cada aplicación del SII tiene su propia noción de autorización.** Verificado tres veces con la misma cuenta: mipyme lista 5 empresas, el RCV habilita 17, Consultas DTE devuelve las mismas 17, el registro de representantes 0. **No existe "la lista de empresas del usuario".**
+1. **La lista de empresas del servicio es propia, y cada empresa trae sus credenciales.** El usuario administra un conjunto de empresas y tiene el RUT y la clave del SII **de cada una**. No es un dato que el portal deba entregar ni una autorización que el SII deba conceder.
+
+   Eso convive con un hecho verificado y no lo contradice: **cada aplicación del SII tiene su propia noción de autorización** — con la misma cuenta, mipyme lista 5 empresas, el RCV habilita 17, Consultas DTE las mismas 17, el registro de representantes 0. La lección sigue en pie para cualquier listado que devuelva el portal: **ninguna de esas listas es "la lista de empresas del usuario"**, y no son intercambiables entre aplicaciones. Con credenciales por empresa el problema deja de importar para operar, pero sigue importando al interpretar lo que devuelve cada aplicación.
 2. **Alcance de solo lectura.** Ningún método de escritura se invoca: `eliminarPublicacionDte` (DTE), `ingresarAceptacionReclamoDocs` (RCV, acepta o reclama documentos con efecto sobre terceros), el paso 4 de emisión de BHE. `sii_mipyme_emitir_dte` es la única excepción y es explícita.
-3. **`SII_EMPRESA_RUT` sigue existiendo para el camino de navegador.** En el camino HTTP la empresa es parámetro de cada consulta, así que no hace falta — pero mientras `mipyme.ts` viva en el navegador, la variable importa.
+3. **La configuración de hoy es de una sola identidad.** `env.ts` toma un único juego de credenciales y `server.ts` comparte un único `SessionManager`; `SII_EMPRESA_RUT` selecciona la empresa para el camino de navegador. El modelo multi-empresa —una credencial y una sesión por empresa— **todavía no está implementado**, y no es un cambio de configuración sino de arquitectura de sesión.
 4. **Los endpoints de PDF** (`createSpecialServiceOperation`, mismo sobre con `responseType: arraybuffer`) están fuera del alcance acordado.
 5. **`agent-browser` global** sigue siendo requisito de instalación, y va a seguir siéndolo mientras mipyme y bienes raíces no migren.
 6. **Los totales que declara el SII no reconcilian con sus propias filas.** En un período real, `totMntNeto` daba 197.733.705 y la suma del detalle 163.060.976. El parser suma las filas; el declarado se expone aparte. Una fixture conserva la discrepancia a propósito.
 
 ## 5. Qué depende de vos, corto
 
-1. **Inscribir la representación electrónica en el SII** — desbloquea el F29 de empresa (y después queda trabajo técnico de tamaño desconocido).
+1. **Cómo se custodian las claves de las empresas administradas.** Es la decisión que habilita el multi-empresa entero, y es de seguridad antes que de código: dónde viven las credenciales, quién las provee, y qué alcance de escritura se acepta al tenerlas.
 2. **Decidir el receptor real para ejercitar el paso 3 de BHE** — desbloquea `sii_bhe_emitir`.
-3. **Confirmar si migrar el portal mipyme es la prioridad** frente a los pendientes de verificación. Es el trabajo más grande que se puede empezar hoy sin depender de nada externo, y es lo único que destraba el aislamiento por identidad.
+3. **Confirmar el orden**: la migración de mipyme a HTTP es prerrequisito del multi-empresa y el trabajo más grande que se puede empezar hoy sin depender de nada externo. Los pendientes de verificación (1, 3–6 de la sección 3) son más chicos y no compiten.
 
 Todo lo demás de la sección 3 se puede avanzar sin consultarte.
