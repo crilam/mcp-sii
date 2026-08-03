@@ -1,7 +1,7 @@
 # Migrar el camino de navegador a HTTP: spike
 
 Fecha: 2026-08-03
-Estado: **viable, con una pregunta abierta que decide el valor de la migración**
+Estado: **viable y con el aislamiento confirmado.** Queda un detalle de contrato para resolver al implementar.
 
 Spike previa a migrar `sii_dte_*` y `sii_mipyme_*` desde `agent-browser` a HTTP directo.
 
@@ -55,18 +55,26 @@ Devuelve `{resumenDte, datosAsync}` con `respEstado.codRespuesta: 0`. Verificado
 
 **Los nombres de campo son `rutContribuyente` / `dvContribuyente`, no `rut` / `dv`.** Enviar `rut` produce un 400 que nombra la clase Java (`ConsemitidosUiData$DteResumenEntityId`) y el campo rechazado — el mismo mecanismo de descubrimiento que en propuesta F29.
 
-## La pregunta abierta, y por qué decide el valor de la migración
+## La pregunta que decidía el valor: resuelta a favor
 
-`getDatosAsync` respondió `codRespuesta: 0` pero con `datosAsync: []` y `resumenDte: null` para una empresa que **sí tiene documentos** en ese período — el Registro de Compras y Ventas informa 415 documentos de venta para el mismo RUT y período.
+La duda era si la aplicación trata la empresa como **parámetro** o como **estado de sesión**. Si fuera lo segundo, migrar movería el estado compartido del navegador a la sesión SDI sin eliminarlo, y no compraría el aislamiento que motiva el trabajo.
 
-Dos explicaciones posibles, y no se distinguieron:
+**Es parámetro.** `getEmpContribuyente` recibe `{rutContribuyente, dvContribuyente}` y devuelve las empresas de **ese** usuario, con sus privilegios:
 
-1. **`getDatosAsync` no es el listado**, sino el disparador o consultor de un trabajo asíncrono. El nombre lo sugiere, y en ese caso hay que encontrar el método que devuelve los datos.
-2. **La aplicación valida la empresa contra la sesión**, no como parámetro. Hay un indicio fuerte: `getEmpContribuyente` se invoca en el bundle con `{rutContribuyente: sdiSession.rut, dvContribuyente: sdiSession.dv}` — o sea, el RUT **de la sesión**, igual que en la propuesta F29.
+```json
+[{ "usrEmpRut": 33333333, "usrEmpDv": "3", "usrUsuarioRut": 11111111,
+   "usrUsuarioDv": "1", "usrPrivilegios": "SSSSSS", "usrEmpRutDv": "33333333-3" }]
+```
 
-**Si es la explicación 2, la migración no compra el aislamiento buscado.** Movería el problema de la empresa seleccionada desde el navegador hacia la sesión SDI, sin resolverlo: seguiría habiendo estado compartido por proceso, sólo en otro lugar.
+17 empresas para la cuenta probada — **la misma cantidad que habilita el Registro de Compras y Ventas**, a diferencia de las 5 que lista el portal mipyme. Dos aplicaciones distintas con la misma lista de autorización, y una tercera con otra.
 
-Eso hay que determinarlo **antes** de migrar, porque decide si el trabajo sirve para el objetivo o sólo cambia de tecnología.
+Consecuencia: **la migración procede** y sí elimina el estado compartido. El aislamiento por identidad queda alcanzable.
+
+### El detalle que queda
+
+`getResumen` y `getDatosAsync` responden `codRespuesta: 0` con lista vacía para una empresa que sí tiene documentos en el período, y también para el RUT propio. Como la autorización quedó descartada, la causa está en el contrato: falta un parámetro, el período va en otro formato, o son endpoints asíncronos que requieren un disparador previo.
+
+Es un detalle de implementación, no un obstáculo de decisión. La pista está en el camino de navegador que hoy funciona: `applyFiltrosEmitidos` selecciona tres combos —empresa, **mes como nombre**, año— lo que sugiere que el período puede no viajar como `AAAAMM` concatenado.
 
 ## `codRespuesta` significa cosas distintas en cada aplicación
 
@@ -82,8 +90,13 @@ Es la confirmación empírica de que el default seguro implementado en `rcv.ts` 
 
 ## Próximo paso
 
-Resolver la pregunta abierta antes de escribir código: determinar si `consemitidosinternetui` trata la empresa como parámetro o como estado de sesión.
+Resolver por qué `getResumen` y `getDatosAsync` devuelven vacío, que es lo único que separa a `sii_dte_*` de poder migrarse. La pista está en el camino de navegador que hoy funciona: selecciona el mes **como nombre**, no como número, así que el período puede no viajar como `AAAAMM`.
 
-La prueba es directa: consultar con `rutContribuyente` de una empresa y comparar contra el total que informa el RCV para el mismo período. Si coinciden, es parámetro y la migración procede. Si vuelve vacío, es sesión y hay que decidir si la migración sigue teniendo sentido.
+Después, por orden de dificultad creciente:
 
-Un error a no repetir de esta spike: se probó `getEmpContribuyente` con un RUT ficticio en lugar del RUT real de la sesión, y el "Usuario no autorizado" resultante no prueba nada sobre el modelo de autorización. Al probar autorización, los datos tienen que ser reales.
+1. **`sii_dte_*`** — la app es SDI y parámetrica. Es mapeo, no reescritura.
+2. **La selección de empresa** — `mipeSelEmpresa.cgi` es un CGI con formulario. Si `getEmpContribuyente` cubre el listado, puede que la selección deje de ser necesaria en el camino HTTP.
+3. **El portal mipyme** — listado y emisión. Sin relevar.
+4. **`vica`** (bienes raíces) — con cola virtual Queue-it. El candidato más probable a quedarse en navegador, y está bien que quede: son 3 llamadas contra 70.
+
+Un error a no repetir de esta spike: se probó `getEmpContribuyente` con un RUT ficticio en lugar del RUT real de la sesión, y el "Usuario no autorizado" resultante llevó a sospechar un modelo de autorización que no existía. Al probar autorización, los datos tienen que ser reales — con datos falsos, un rechazo no significa nada.
