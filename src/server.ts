@@ -7,6 +7,7 @@ import { BienesRaicesScraper } from './scrapers/bienesRaices';
 import { BheScraper } from './scrapers/bhe';
 import { RentaScraper } from './scrapers/renta';
 import { RcvScraper } from './scrapers/rcv';
+import { DteScraper } from './scrapers/dte';
 import { registerMipymeTools } from './tools/mipyme';
 import { registerDteTools } from './tools/dte';
 import { registerBienesRaicesTools, registerSesionTools } from './tools/bienesRaices';
@@ -27,6 +28,10 @@ export function createServer(): McpServer {
   const bheScraper = new BheScraper(http, session);
   const rentaScraper = new RentaScraper(http, session);
   const rcvScraper = new RcvScraper(http, session);
+  // Consultas DTE ya no usa el navegador: la empresa es un parámetro de cada
+  // consulta, así que no hay estado compartido que aislar. `MipymeScraper`
+  // sigue existiendo para las tools `sii_mipyme_*`, que sí lo necesitan.
+  const dteScraper = new DteScraper(http, session);
 
   const server = new McpServer({
     name: 'mcp-sii',
@@ -34,7 +39,7 @@ export function createServer(): McpServer {
   });
 
   registerMipymeTools(server, scraper);
-  registerDteTools(server, scraper);
+  registerDteTools(server, dteScraper);
   registerBienesRaicesTools(server, bienesRaicesScraper);
   registerSesionTools(server, session);
   registerBheTools(server, bheScraper);
