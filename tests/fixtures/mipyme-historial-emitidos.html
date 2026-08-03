@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head><title>Facturacion Electr&oacute;nica - Administrar documentos emitidos</title>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1"/></head>
+<body>
+<!-- Captura anonimizada de mipeAdminDocsEmi.cgi.
+     SE PRESERVA A PROPÓSITO EL <td> SIN CERRAR de la celda del RUT del
+     receptor, tal como lo manda el SII: es HTML malformado y un parser que
+     exija </td> devuelve 7 celdas contra las 8 del header, pierde el RUT y
+     corre todas las columnas un lugar — dejando receptorRut poblado con la
+     razón social, sin ningún error. El test fija las 8 columnas contra esta
+     fixture justamente para que ese modo de falla no vuelva.
+
+     También se preserva el formato real del HTML, distinto del de la tabla
+     renderizada: fechas AAAA-MM-DD y montos sin separador de miles. -->
+<table class="table">
+  <tr>
+    <th>Ver</th><th>Receptor</th><th>Raz&oacute;n Social</th><th>Documento</th>
+    <th>Folio</th><th>Fecha</th><th>Monto</th><th>Estado</th>
+  </tr>
+  <tr>
+    <td><a href="/cgi-bin/Portal001/mipeGesDocEmi.cgi?ALL_PAGE_ANT=1&CODIGO=987654"><img src="/Portal001/button_edit.gif" border="0"></a></td>
+    <td>33333333-3<td>COMERCIAL TRES LTDA</td>
+    <td>Factura Electronica</td>
+    <td>244</td>
+    <td>2026-07-08</td>
+    <td>24783</td>
+    <td>Documento Emitido</td>
+  </tr>
+  <tr>
+    <td><a href="/cgi-bin/Portal001/mipeGesDocEmi.cgi?ALL_PAGE_ANT=1&CODIGO=987655"><img src="/Portal001/button_edit.gif" border="0"></a></td>
+    <td>44444444-4<td>SERVICIOS CUATRO SPA</td>
+    <td>Nota de Credito Electronica</td>
+    <td>12</td>
+    <td>2026-06-30</td>
+    <td>119000</td>
+    <td>Documento Emitido</td>
+  </tr>
+</table>
+<div>P&aacute;gina 1&nbsp;de 3&nbsp;</div>
+</body>
+</html>

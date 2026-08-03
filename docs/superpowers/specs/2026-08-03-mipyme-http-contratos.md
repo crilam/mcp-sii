@@ -17,10 +17,10 @@ Consecuencia: la migración de mipyme son **tres flujos sobre CGI legacy** (`www
 
 | Flujo | Estado tras esta spike |
 |---|---|
-| `listEmpresas` | **contrato resuelto** |
-| `listMipymeDteEmitidos` | **contrato resuelto**, incluidos filtros y paginación |
+| `listEmpresas` | **migrado a HTTP** y verificado contra el portal |
+| `listMipymeDteEmitidos` | **migrado a HTTP** y verificado: filtros, paginación y detalle |
 | `emitirDte` | ruta del portal identificada; **el código actual apunta a una URL que da 404** |
-| Los cuatro métodos de `consemitidos` | **borrar**, con sus tests |
+| Los cuatro métodos de `consemitidos` | **borrados**, con sus tests |
 
 ## Selección de empresa
 
@@ -32,6 +32,12 @@ POST https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi   RUT_EMP=<RUT-DV>
 El GET autenticado devuelve la página real (`<title>Facturacion Electrónica MIPYME - Seleccion de Empresa</title>`), con un `<select name="RUT_EMP">` y una `<option value="RUT-DV">` por empresa. **El valor es el RUT con dígito verificador**, y el texto de la opción trae el nombre. No hay campos ocultos: el POST lleva `RUT_EMP` y nada más.
 
 En la cuenta probada el combo trae **5 empresas** — el mismo número que ya estaba documentado para mipyme, contra 17 en el RCV y en Consultas DTE. Sigue vigente que cada aplicación tiene su propia lista.
+
+### Los `<option>` no cierran, y eso costó dos empresas
+
+Al implementar apareció un bug que vale documentar porque el mecanismo se repite: **el SII no cierra los `<option>`**, y una regex que corta el texto consumiendo el `<` del siguiente avanza el `lastIndex` más allá de su apertura. Resultado: **se saltea una empresa de cada dos** — cinco en el combo, tres devueltas, sin ningún error.
+
+Se detectó comparando el conteo crudo de `<option>` contra lo que devolvía el parser, contra el portal real. La corrección es cortar con un lookahead (`(?=<)`) en vez de consumir. Es el mismo remedio que el `<td>` sin cerrar de la tabla del historial, y conviene asumir que **todo el HTML de estos CGI está malformado**: cualquier parseo nuevo sobre este portal debería cortar por lookahead desde el principio.
 
 Esto reemplaza el navegador entero para `sii_mipyme_list_empresas`: es un GET y un parseo de `<option>`.
 
@@ -138,7 +144,7 @@ No se ejercitó `mipeLaunchPage.cgi` en esta spike para no acumular sesiones abi
 
 ## Lo que falta
 
-1. **Confirmar el estado de `sii_mipyme_emitir_dte`.** Es lectura pura: un GET a `mipeLaunchPage.cgi?OPCION=33&TIPO=4` dice si la ruta vive y qué formulario sirve. Si el código apunta a un 404, la tool está rota y hay que decirlo antes que migrarla.
+1. ~~Confirmar el estado de `sii_mipyme_emitir_dte`.~~ **Confirmado el 2026-08-03: la tool está rota.** `mipeDocAlta.cgi` responde 404; `mipeLaunchPage.cgi?OPCION=33&TIPO=4` vive y responde un "Launcher" que abre `mipeGenFacEx.cgi?PTDC_CODIGO=33`. La URL NO se corrigió: apuntarla al CGI correcto sin relevar el formulario convertiría un fallo visible en un camino que emite con parámetros adivinados. Queda advertido en la descripción de la tool y en el README.
 2. **El formulario de emisión**: campos, obligatoriedad, formato, y si hay un paso de previsualización como en las boletas. Sin eso, migrar `emitirDte` sería reescribir a ciegas un camino que además emite.
 3. **El detalle de líneas de un documento emitido**, si se lo quiere: no está en `mipeGesDocEmi.cgi`.
 4. **Qué devuelve el historial cuando la empresa no tiene documentos.** El código actual espera el texto "No existen documentos"; no se pudo verificar porque la empresa probada tiene 184.

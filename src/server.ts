@@ -3,6 +3,7 @@ import { Browser } from './browser';
 import { SessionManager } from './session';
 import { SiiHttpClient } from './http';
 import { MipymeScraper } from './scrapers/mipyme';
+import { MipymeHttpScraper } from './scrapers/mipymeHttp';
 import { BienesRaicesScraper } from './scrapers/bienesRaices';
 import { BheScraper } from './scrapers/bhe';
 import { RentaScraper } from './scrapers/renta';
@@ -32,13 +33,18 @@ export function createServer(): McpServer {
   // consulta, así que no hay estado compartido que aislar. `MipymeScraper`
   // sigue existiendo para las tools `sii_mipyme_*`, que sí lo necesitan.
   const dteScraper = new DteScraper(http, session);
+  // Las dos consultas del portal mipyme (empresas e historial de emitidos) ya no
+  // usan el navegador: son CGI legacy que responden HTML por HTTP. `scraper`
+  // sigue existiendo sólo por `sii_mipyme_emitir_dte`, cuyo formulario no está
+  // relevado — y que además apunta a un CGI que responde 404.
+  const mipymeHttpScraper = new MipymeHttpScraper(http, session);
 
   const server = new McpServer({
     name: 'mcp-sii',
     version: '0.1.0',
   });
 
-  registerMipymeTools(server, scraper);
+  registerMipymeTools(server, mipymeHttpScraper, scraper);
   registerDteTools(server, dteScraper);
   registerBienesRaicesTools(server, bienesRaicesScraper);
   registerSesionTools(server, session);
