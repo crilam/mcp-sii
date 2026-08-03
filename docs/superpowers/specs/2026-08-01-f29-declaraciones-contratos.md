@@ -82,19 +82,20 @@ Esto contrasta con el Registro de Compras y Ventas, donde `rutEmisor` **sí** es
 | `consdcvinternetui` (RCV) | La empresa es parámetro del método |
 | `propuestaf29ui` (F29) | La empresa es estado de la sesión |
 
-## Qué falta
+## Qué falta — actualizado el 2026-08-03
 
-Para consultar el F29 de una empresa hay que **establecer una sesión que la represente**. No se determinó cómo hacerlo por HTTP para esta aplicación.
+Para consultar el F29 de una empresa hay que **establecer una sesión que la represente**. El mecanismo ya está relevado y verificado: ver [representación de empresa](2026-08-01-representacion-empresa.md).
 
-Dos pistas, ninguna verificada:
+**El bloqueo no es técnico.** Se accedió al registro de representantes y devolvió `total: 0`: el RUT probado no tiene ningún representado inscrito en ese sistema. Opera esas empresas por otros mecanismos —la lista del portal mipyme, la autorización del RCV— pero no como representante electrónico registrado.
 
-1. El portal mipyme usa `mipeSelEmpresa.cgi`, pero su lista de empresas **no coincide** con la de otras aplicaciones — en la cuenta probada, mipyme lista 5 y el RCV habilita 17. La empresa consultada estaba entre las 17, no entre las 5.
-2. El menú del portal expone `https://www2.sii.cl/admin-representantes/representantes-aplicaciones` ("Ingresar a representar"), que parece ser el mecanismo general de representación. Sin relevar.
+Eso explica sin misterio por qué el RCV funciona y la propuesta F29 no: el RCV valida contra su propia lista de empresas autorizadas, mientras que la propuesta F29 valida contra el RUT que la sesión representa, que hoy es sólo el propio.
 
-Mientras eso no se resuelva, el cruce entre lo registrado en el RCV y lo declarado en el F29 **no se puede completar por HTTP**. El lado registrado funciona hoy; el declarado, no.
+Un dato relacionado que sigue vigente: la lista de empresas del portal mipyme **no coincide** con la de otras aplicaciones — en la cuenta probada, mipyme lista 5 y el RCV habilita 17. La empresa consultada estaba entre las 17, no entre las 5. Cada aplicación tiene su propia noción de autorización.
+
+Mientras la representación no esté inscrita, el cruce entre lo registrado en el RCV y lo declarado en el F29 no se puede completar. El lado registrado funciona hoy; el declarado, no.
 
 ## Recomendación
 
-No construir `sii_f29_*` todavía. El esquema está resuelto, pero sin la representación de empresa la tool solo serviría para el RUT de la persona autenticada, que es justamente quien no declara F29.
+No construir `sii_f29_*` todavía. El esquema está resuelto, pero sin representación inscrita la tool sólo serviría para el RUT de la persona autenticada — que es justamente quien no declara F29.
 
-El próximo paso, si se retoma, es relevar `admin-representantes` — y ese hallazgo probablemente destrabe también otras aplicaciones que sigan el mismo modelo de autorización por sesión.
+El próximo paso **no es desarrollo**: es inscribir la representación electrónica en el SII, que es un trámite. Una vez inscrita, el flujo ya está mapeado y el acceso a la aplicación ya está resuelto por el puente `legacy/bridge2`.

@@ -1,81 +1,128 @@
-# Representación de empresa: el mecanismo y por qué no alcanza con las cookies
+# Representación de empresa: el puente legacy y el registro vacío
 
-Fecha: 2026-08-01
-Estado: mecanismo identificado, **no ejecutable con la autenticación actual**
+Fecha: 2026-08-01, **corregido el 2026-08-03**
+Estado: **alcanzable y verificado**. El bloqueo real no es técnico.
 
-Spike acotada para destrabar el F29 de empresa, que quedó bloqueado porque `propuestaf29ui` trata la empresa como estado de sesión y no como parámetro (ver [contratos F29](2026-08-01-f29-declaraciones-contratos.md)).
+Spike para destrabar el F29 de empresa, que quedó pendiente porque `propuestaf29ui` trata la empresa como estado de sesión y no como parámetro (ver [contratos F29](2026-08-01-f29-declaraciones-contratos.md)).
 
-## Resultado en una línea
+## Corrección de la versión anterior
 
-El mecanismo existe y quedó mapeado, pero vive sobre una **pila de identidad distinta** de la que usa el resto del MCP. No es cuestión de agregar un parámetro: es otro sistema de autenticación.
+La primera versión de este documento afirmaba que la aplicación de representantes **no aceptaba las cookies legacy** y que el mecanismo era **no ejecutable con la autenticación actual**. **Las dos afirmaciones eran falsas**, por dos errores de la spike original:
 
-## Tres pilas de tecnología, no dos
+1. **Ruta mal construida.** El bundle hace `userSessionDV = e.userId`, y se interpretó por el nombre de la variable que era el dígito verificador. Es el **RUT completo con DV**. Se estuvo consultando `/admin-representantes/4/...` cuando la ruta correcta es `/admin-representantes/11111111-1/...`.
+2. **La spike se cortó antes de encontrar el puente.** Existe `/app/session/legacy/bridge2/`, que convierte una sesión legacy en una sesión de la pila nueva. No se encontró porque la exploración se detuvo al concluir que el `clientId` era inalcanzable.
 
-El portal ya mostraba dos generaciones —CGI legacy y SPA sobre el sobre SDI—. Esta spike encontró una tercera:
+La lección general: un `401` no prueba que la autenticación sea incompatible. Puede ser una ruta mal armada. Conviene descartar el error propio antes de declarar un límite ajeno.
+
+## Las tres generaciones del portal
 
 | Generación | Ejemplo | Autenticación |
 |---|---|---|
 | CGI legacy | `loa.sii.cl/cgi_IMT/` (BHE) | Cookies de sesión |
-| SPA + sobre SDI | `www4.sii.cl/*ui/` (F22, RCV) | Cookies + cookie `TOKEN` como `conversationId` |
-| **App moderna** | `www2.sii.cl/admin-representantes` | **OAuth/OIDC con `clientId`** |
+| SPA + sobre SDI | `www4.sii.cl/*ui/` (F22, RCV) | Cookies + `TOKEN` como `conversationId` |
+| App moderna | `www2.sii.cl/admin-representantes` | Cookies legacy **más** estado del puente |
 
-La tercera es una aplicación Vite (Vue) con cliente axios, y **no acepta las cookies legacy**: las llamadas a su API devuelven `401`.
+La tercera no exige un handshake OAuth propio: exige un paso extra sobre la sesión que ya se tiene.
 
-## El mecanismo de representación
-
-Dos endpoints, extraídos del bundle.
-
-### Listar representados
+## La receta, verificada
 
 ```
-GET /app/admin-representantes/{DV}/representante/v1/{tipo}/getRepresentantes/{RUT}
-    ?pageNo=0&pageSize=10
+1. Autenticar legacy con certificado
+   → cookies NETSCAPE_LIVEWIRE.*, TOKEN, CSESSIONID
+
+2. GET https://www2.sii.cl/app/session/legacy/bridge2/?originalUrl=<destino urlencoded>
+   → responde 307 y emite:
+        X-SII-STATE-TYPE=CL
+        X-SII-STATE-CL=<blob cifrado, ~1100 caracteres>
+
+3. Usar AMBOS juegos de cookies contra /app/...
 ```
 
-`{tipo}` es `consulta` o `consulta_rpte`, según se consulte como representado o como representante. Devuelve `representadosDto`.
+**El puente es imprescindible.** Verificado con un control sobre el mismo request, cambiando sólo las cookies de estado:
 
-### Obtener la URL que establece la representación
+| Cookies | Respuesta |
+|---|---|
+| Sólo legacy | `401` |
+| Legacy + `X-SII-STATE-*` | `200` |
+
+Nota operativa: `curl -c` **no guarda** las cookies `X-SII-STATE-*` en el cookie jar. Hay que leerlas de los headers de respuesta y agregarlas a mano. Quien implemente esto va a perder tiempo si no lo sabe.
+
+## El estado de la sesión nueva
+
+`GET /app/session/status?originalUrl=<url>` funciona **con las cookies legacy solas**, sin el puente:
+
+```json
+{ "seconds": 5999, "userId": "11111111-1", "userProfiles": ["00000"],
+  "userAuthType": "CT", "authTime": 1785602849, "userRte": "11111111-1" }
+```
+
+O sea que la pila nueva **nunca rechazó el certificado**. Reconoce la sesión y la reporta como `userAuthType: "CT"`.
+
+**No devuelve `clientId`**, que es el campo que el bundle lee (`this.client_id = e.clientId`) para armar la llamada de autorización. Queda sin determinar si aparece por otra vía.
+
+## Los endpoints
+
+Base: `https://www2.sii.cl/app/admin-representantes/{RUT-con-DV}/`
+Microservicio detrás (revelado por un error 500): `admin-representantes-ms`
+
+### Listar representados — verificado
 
 ```
-POST /app/admin-representantes/{DV}/authorize/v1/{tipo}/urlApplicacion
-{
-  "rut_rpte":  "<RUT del representante>",
-  "rut_rdo":   "<RUT del representado>",
-  "client_id": "<de la sesión>",
-  "code_app":  "<código de la aplicación destino>",
-  "state":     "<uuid>"
-}
+GET .../representante/v1/{tipo}/getRepresentantes/{RUT-sin-DV}?pageNo=0&pageSize=20
 ```
 
-Responde `{success, url}`, y el cliente hace `window.location.href = url`. Esa navegación es la que deja la sesión actuando como la empresa representada, **para la aplicación indicada en `code_app`**.
+`{tipo}` es `consulta_rpte` o `consulta`. **Sólo `consulta_rpte` responde**; `consulta` devuelve `500` para el RUT probado.
 
-Es decir: la representación **no es global**, se otorga por aplicación destino. Eso encaja con lo observado antes — el Registro de Compras y Ventas funciona sin representación porque su modelo de autorización es distinto, mientras que la propuesta F29 la exige.
+Respuesta:
 
-## Por qué no se pudo ejecutar
+```json
+{ "pageable": { "pageSize": 20, "pageNumber": 0, ... },
+  "total": 0, "representadosDto": [],
+  "rut": 11111111, "name": "JUAN PEREZ SOTO" }
+```
 
-Los dos valores que faltan no son constantes:
+### Establecer la representación — sin verificar
 
-- **`client_id`** sale de `$getSession().clientId`, un store persistido que llena un handshake previo de OAuth/OIDC. No está en el bundle ni en ninguna cookie legacy.
-- **`code_app`** es el código de la aplicación destino, tomado de un listado que la propia app obtiene autenticada.
+```
+POST .../authorize/v1/{tipo}/urlApplicacion
+{ "rut_rpte": "...", "rut_rdo": "...", "client_id": "...", "code_app": "...", "state": "<uuid>" }
+→ { "success": true, "url": "..." }
+```
 
-Sin resolver el handshake de identidad, ambos son inalcanzables. Y ese handshake es un sistema completo —no un parámetro— que habría que relevar por separado.
+El cliente navega a esa `url` y con eso la sesión pasa a actuar como la empresa representada, **para la aplicación indicada en `code_app`**. La representación no es global: se otorga por aplicación destino.
 
-## Qué significa para el proyecto
+No se pudo ejercitar por lo que sigue.
 
-**Se cierra el camino corto al F29 de empresa.** No hay un ajuste chico que lo destrabe.
+## El hallazgo que reemplaza el diagnóstico
 
-Quedan dos opciones reales, y conviene elegirla como decisión de diseño:
+**`total: 0`.** El RUT probado **no tiene ningún representado registrado en este sistema**.
 
-1. **Relevar el handshake OAuth/OIDC del SII.** Es la solución general: destrabaría todas las aplicaciones de tercera generación, que presumiblemente serán más con el tiempo. Es también la más cara, y depende de un sistema que el SII puede cambiar sin aviso.
-2. **Autenticar directamente como la empresa**, con su propio RUT y clave tributaria. Evita la representación por completo: si la sesión ya *es* la empresa, `sdiSession.rut` coincide y `propuestaf29ui` responde.
+Eso cambia la naturaleza del bloqueo del F29 de empresa. No es una barrera técnica: es un registro vacío. La persona opera esas empresas por **otros mecanismos** —la lista del portal mipyme, la autorización del Registro de Compras y Ventas— pero no está inscrita como *representante electrónico* en este registro más nuevo.
 
-La opción 2 es mucho más barata, pero tiene consecuencias que no son técnicas:
+La consecuencia práctica es la contraria a lo que decía la versión anterior de este documento: **no hay nada que resolver con código**. Hay que inscribir la representación en el SII, que es un trámite.
 
-- **El código de hoy asume una sola identidad.** `SiiConfig` tiene un `SII_RUT` y un `SII_CLAVE`. Soportar varias exige rediseñar `env.ts` y `SessionManager`, decidir qué identidad usa cada tool, y administrar pools de sesión separados — el SII cuenta las sesiones por RUT.
-- **Una clave tributaria de empresa habilita actos de escritura** con consecuencias económicas y legales: declarar F29, emitir documentos, presentar declaraciones juradas. Cualquier tool que lea `SII_CLAVE` la alcanzaría, incluidas las de escritura que ya existen. Si se toma este camino, conviene separar credenciales de lectura de las de escritura, o poner las de escritura detrás de un flag explícito.
+Esto también explica por qué el RCV funciona y la propuesta F29 no, sin necesidad de invocar dos modelos de autorización distintos: el RCV valida contra su propia lista de empresas autorizadas, y la propuesta F29 valida contra el RUT que la sesión representa — que hoy es sólo el propio.
 
-## Lo que sí quedó disponible
+## Lo que queda sin verificar
 
-El **Registro de Compras y Ventas funciona hoy** para cualquier empresa autorizada, sin representación y sin credenciales nuevas, porque su modelo trata la empresa como parámetro. Cubre lo registrado —compras, ventas, IVA débito y crédito por período—, que es la mitad del cruce que se buscaba.
+1. **El `clientId`.** El bundle lo espera y `session/status` no lo devuelve. Puede venir de otra llamada, o el campo puede ser opcional en la práctica.
+2. **`authorize/v1/urlApplicacion`.** Con cero representados no hay nada que autorizar.
+3. **El `code_app` de la propuesta F29**, que sale de un listado que la app obtiene autenticada.
+4. **Si `consulta` (sin `_rpte`) sirve para otro caso** o su `500` es un defecto del servicio.
 
-Lo que no se puede sin resolver lo anterior es la otra mitad: lo declarado.
+## Qué recomienda este documento ahora
+
+La versión anterior planteaba elegir entre relevar un handshake OIDC —caro— o acumular claves tributarias de empresas —riesgoso—. **Las dos opciones partían de una premisa falsa.**
+
+El camino correcto, si se quiere consultar el F29 de una empresa:
+
+1. **Inscribir la representación electrónica en el SII.** Es un trámite, no desarrollo. Una vez inscrita, `getRepresentantes` la lista y `urlApplicacion` debería poder establecerla.
+2. Recién entonces implementar el flujo, que ya está mapeado.
+
+La opción de autenticar directamente con la clave tributaria de la empresa sigue existiendo, pero deja de ser el camino barato frente a un obstáculo técnico: pasa a ser un atajo alrededor de un trámite, con las consecuencias de custodia y de alcance de escritura que eso implica.
+
+## Valor más allá del F29
+
+El puente `legacy/bridge2` probablemente destrabe **cualquier** aplicación de tercera generación del portal, no sólo la de representantes. Es un paso genérico sobre la sesión, no algo específico de este dominio.
+
+Si aparecen más aplicaciones sobre esa pila —y la tendencia del portal indica que van a aparecer—, el trabajo de acceso ya está hecho: autenticar legacy, cruzar el puente, y usar los dos juegos de cookies.
