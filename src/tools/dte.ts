@@ -1,96 +1,161 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { MipymeScraper } from '../scrapers/mipyme';
+import { DteScraper, OperacionDte } from '../scrapers/dte';
 
-const TipoDteSchema = z.number().int().optional().describe('Tipo DTE: 33=factura, 34=factura exenta, 39=boleta, 61=nota de crédito');
-const EmpresaRutSchema = z.string().optional().describe('RUT empresa a consultar. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si la persona opera una única empresa.');
-const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
+// Advertencia compartida por las cuatro tools. Va en las descripciones —no sólo
+// en un comentario— porque el destinatario es un modelo que puede tener las dos
+// salidas a la vista: `sii_dte_*` y `sii_rcv_*` consultan registros DISTINTOS y
+// dan cifras que no cuadran, y sin este párrafo la conclusión natural es que uno
+// de los dos está mal.
+const ADVERTENCIA_RCV =
+  'NO COMPARABLE CON sii_rcv_*: Consultas DTE y el Registro de Compras y Ventas responden preguntas ' +
+  'distintas y sus cifras NO cuadran; ninguno de los dos está mal. En los emitidos coinciden al peso ' +
+  'en los tipos que ambos comparten, pero Consultas DTE incluye además las GUÍAS DE DESPACHO ' +
+  '(tipo 52), que no existen en el RCV porque no afectan el IVA, y clasifica las FACTURAS DE COMPRA ' +
+  '(tipo 46) como EMITIDAS —sección S2—, mientras el RCV las pone del lado de las compras (las emite ' +
+  'el comprador, así que las dos tienen razón). En los recibidos los números directamente difieren. ' +
+  'Para totales tributarios y de IVA usá sii_rcv_*; esto es la vista de documentos del SII. ' +
+  'No presentes una diferencia entre las dos fuentes como un error de ninguna.';
 
-export function registerDteTools(server: McpServer, scraper: MipymeScraper): void {
+const ADVERTENCIA_SECCION =
+  'La clave de una fila del resumen es (tipoDocCodigo, seccion), NO el tipo solo: el mismo tipo puede ' +
+  'aparecer dos veces con secciones distintas (por ejemplo el 61 en S1 y en S2) y son filas diferentes. ' +
+  'No las agrupes ni las sumes por tipo. S1 = afectos y exentos, S2 = facturas de compra y sus notas ' +
+  'de crédito, S4 = exportación, S5 = guías de despacho.';
+
+const ADVERTENCIA_TOTALES =
+  'El campo `totales` es la SUMA DE LOS DOCUMENTOS DEVUELTOS. `totalesDeclarados` es lo que declara el ' +
+  'SII y NO coincide con esa suma (verificado: 163.060.976 sumando 393 documentos contra 197.733.705 ' +
+  'declarados). Usá `totales`; `totalesDeclarados` está sólo para explicar la cifra que muestra el ' +
+  'portal. Si totalesDifierenDelDeclarado es true, eso es lo normal, no una falla.';
+
+const ADVERTENCIA_CONTRAPARTE =
+  'La contraparte de cada documento viene en `contraparte*` con un `contraparteRol` explícito: en los ' +
+  'EMITIDOS el rol es "receptor" (el cliente) y en los RECIBIDOS es "emisor" (el proveedor que nos ' +
+  'emitió el documento). Usá contraparteRol y no el nombre de ningún otro campo para decidir quién es ' +
+  'quién.';
+
+const EMPRESA_RUT_DESC =
+  'RUT de la empresa a consultar, con dígito verificador (22222222-2). La empresa es un parámetro de ' +
+  'cada consulta, no de la sesión: no hay que seleccionarla antes y se puede cambiar en cada llamada. ' +
+  'Si se omite, se consulta el RUT autenticado.';
+
+const PERIODO_DESC = 'Período tributario en formato AAAAMM (por ejemplo 202607)';
+
+export function registerDteTools(server: McpServer, scraper: DteScraper): void {
+  // Las dos tools de listado toman exactamente los mismos parámetros: sólo
+  // cambia la operación, que va en el nombre de la tool y no en el esquema.
+  const schemaListado = () => ({
+    periodo: z.string().regex(/^\d{6}$/).describe(PERIODO_DESC),
+    empresa_rut: z.string().optional().describe(EMPRESA_RUT_DESC),
+    tipo_doc: z.number().int().positive().optional()
+      .describe('Acota a un tipo de documento (33 factura electrónica, 34 exenta, 61 nota de crédito, ' +
+        '46 factura de compra, 52 guía de despacho, 110 exportación). Si se omite, trae todos los ' +
+        'tipos del período, con una consulta de detalle por fila del resumen.'),
+    seccion: z.string().optional()
+      .describe('Acota a una sección (S1, S2, S4, S5). Sirve para separar las dos filas de un mismo ' +
+        'tipo de documento.'),
+    incluir_detalle: z.boolean().default(true)
+      .describe('true (por defecto) devuelve el resumen y los documentos uno por uno. false devuelve ' +
+        'sólo el resumen por (tipo, sección) con una única consulta: conviene para ver qué hay en el ' +
+        'período antes de pedir el detalle de un tipo.'),
+  });
+
+  const handler = (operacion: OperacionDte) =>
+    async ({ periodo, empresa_rut, tipo_doc, seccion, incluir_detalle }: {
+      periodo: string;
+      empresa_rut?: string;
+      tipo_doc?: number;
+      seccion?: string;
+      incluir_detalle: boolean;
+    }) => ({
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify(
+          await scraper.listar(periodo, operacion, {
+            empresaRut: empresa_rut,
+            tipoDocCodigo: tipo_doc,
+            seccion,
+            incluirDetalle: incluir_detalle,
+          }),
+          null,
+          2
+        ),
+      }],
+    });
+
   server.tool(
     'sii_dte_list_documentos_emitidos',
-    'Lista DTEs emitidos por la empresa en Consultas DTE del SII. Requiere certificado digital.',
-    {
-      empresa_rut: EmpresaRutSchema,
-      tipo_dte: TipoDteSchema,
-      fecha_desde: FechaSchema,
-      fecha_hasta: FechaSchema,
-      receptor_rut: z.string().optional().describe('Filtrar por RUT del receptor'),
-      limit: z.number().int().min(1).max(500).default(50),
-    },
-    async ({ empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, limit }) => {
-      const docs = await scraper.listDocumentosEmitidos({
-        empresaRut: empresa_rut,
-        tipoDte: tipo_dte,
-        fechaDesde: fecha_desde,
-        fechaHasta: fecha_hasta,
-        receptorRut: receptor_rut,
-        limit,
-      });
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(docs, null, 2) }],
-      };
-    }
-  );
-
-  server.tool(
-    'sii_dte_get_documento_emitido',
-    'Detalle de un DTE emitido específico por tipo y folio en Consultas DTE. Si el documento no es del mes actual, indica fecha_doc en formato YYYY-MM-DD. Requiere certificado digital.',
-    {
-      tipo_dte: z.number().int().describe('Tipo DTE: 33=factura, 34=factura exenta, 39=boleta, 61=nota de crédito'),
-      folio: z.number().int().describe('Número de folio del documento'),
-      empresa_rut: EmpresaRutSchema,
-      fecha_doc: FechaSchema.describe('Fecha aproximada del documento (YYYY-MM-DD) para buscar en el mes correcto. Por defecto busca en el mes actual.'),
-    },
-    async ({ tipo_dte, folio, empresa_rut, fecha_doc }) => {
-      const doc = await scraper.getDocumentoEmitido(tipo_dte, folio, empresa_rut, fecha_doc);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(doc, null, 2) }],
-      };
-    }
+    'Documentos tributarios electrónicos EMITIDOS por la empresa en un período, según Consultas DTE del ' +
+    'SII: el resumen por (tipo de documento, sección) y, salvo que se pida lo contrario, cada documento ' +
+    'con su contraparte, folio, fechas y montos. ' +
+    ADVERTENCIA_SECCION + ' ' + ADVERTENCIA_CONTRAPARTE + ' ' + ADVERTENCIA_TOTALES + ' ' +
+    'Un período sin documentos responde sinDatos=true con las listas vacías: es un mes sin movimientos, ' +
+    'no un error. ' + ADVERTENCIA_RCV + ' Es solo lectura.',
+    schemaListado(),
+    handler('EMITIDOS')
   );
 
   server.tool(
     'sii_dte_list_documentos_recibidos',
-    'Lista DTEs recibidos por la empresa en Consultas DTE del SII. Requiere certificado digital.',
-    {
-      empresa_rut: EmpresaRutSchema,
-      tipo_dte: TipoDteSchema,
-      fecha_desde: FechaSchema,
-      fecha_hasta: FechaSchema,
-      emisor_rut: z.string().optional().describe('Filtrar por RUT del emisor'),
-      limit: z.number().int().min(1).max(500).default(50),
-    },
-    async ({ empresa_rut, tipo_dte, fecha_desde, fecha_hasta, emisor_rut, limit }) => {
-      const docs = await scraper.listDocumentosRecibidos({
-        empresaRut: empresa_rut,
-        tipoDte: tipo_dte,
-        fechaDesde: fecha_desde,
-        fechaHasta: fecha_hasta,
-        emisorRut: emisor_rut,
-        limit,
-      });
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(docs, null, 2) }],
-      };
-    }
+    'Documentos tributarios electrónicos RECIBIDOS por la empresa en un período, según Consultas DTE del ' +
+    'SII: el resumen por (tipo de documento, sección) y, salvo que se pida lo contrario, cada documento ' +
+    'con su contraparte, folio, fechas y montos. ' +
+    'La contraparte de un documento recibido es el PROVEEDOR que lo emitió, y llega con ' +
+    'contraparteRol="emisor" aunque el SII la informe en campos que se llaman "receptor". ' +
+    ADVERTENCIA_SECCION + ' ' + ADVERTENCIA_CONTRAPARTE + ' ' + ADVERTENCIA_TOTALES + ' ' +
+    'Un período sin documentos responde sinDatos=true con las listas vacías: es un mes sin movimientos, ' +
+    'no un error. ' + ADVERTENCIA_RCV + ' Es solo lectura.',
+    schemaListado(),
+    handler('RECIBIDOS')
+  );
+
+  const schemaDocumento = {
+    periodo: z.string().regex(/^\d{6}$/).describe(PERIODO_DESC),
+    tipo_doc: z.number().int().positive()
+      .describe('Código del tipo de documento (33 factura electrónica, 34 exenta, 61 nota de crédito, ' +
+        '46 factura de compra, 52 guía de despacho, 110 exportación)'),
+    folio: z.number().int().positive().describe('Número de folio del documento'),
+    empresa_rut: z.string().optional().describe(EMPRESA_RUT_DESC),
+  };
+
+  const handlerDocumento = (operacion: OperacionDte) =>
+    async ({ periodo, tipo_doc, folio, empresa_rut }: {
+      periodo: string;
+      tipo_doc: number;
+      folio: number;
+      empresa_rut?: string;
+    }) => ({
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify(
+          await scraper.getDocumento(periodo, operacion, tipo_doc, folio, empresa_rut),
+          null,
+          2
+        ),
+      }],
+    });
+
+  server.tool(
+    'sii_dte_get_documento_emitido',
+    'Un documento EMITIDO puntual, por tipo y folio, en Consultas DTE del SII. ' +
+    'REQUIERE el período (AAAAMM): el SII entrega los documentos por período, así que un folio de otro ' +
+    'mes responde encontrado=false — eso significa "no está en ESTE período", no que el documento no ' +
+    'exista. Se buscan todas las secciones del tipo, así que no hace falta saber la sección. ' +
+    ADVERTENCIA_CONTRAPARTE + ' ' + ADVERTENCIA_RCV + ' Es solo lectura.',
+    schemaDocumento,
+    handlerDocumento('EMITIDOS')
   );
 
   server.tool(
     'sii_dte_get_documento_recibido',
-    'Detalle de un DTE recibido específico por folio en Consultas DTE. Si el documento no es del mes actual, indica fecha_doc en formato YYYY-MM-DD. Requiere certificado digital.',
-    {
-      tipo_dte: z.number().int().describe('Tipo DTE del documento recibido'),
-      folio: z.number().int().describe('Número de folio del documento'),
-      emisor_rut: z.string().describe('RUT del emisor del documento'),
-      empresa_rut: EmpresaRutSchema,
-      fecha_doc: FechaSchema.describe('Fecha aproximada del documento (YYYY-MM-DD) para buscar en el mes correcto.'),
-    },
-    async ({ tipo_dte, folio, emisor_rut, empresa_rut, fecha_doc }) => {
-      const doc = await scraper.getDocumentoRecibido(tipo_dte, folio, emisor_rut, empresa_rut, fecha_doc);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(doc, null, 2) }],
-      };
-    }
+    'Un documento RECIBIDO puntual, por tipo y folio, en Consultas DTE del SII. ' +
+    'REQUIERE el período (AAAAMM): el SII entrega los documentos por período, así que un folio de otro ' +
+    'mes responde encontrado=false — eso significa "no está en ESTE período", no que el documento no ' +
+    'exista. Se buscan todas las secciones del tipo, así que no hace falta saber la sección. ' +
+    'La contraparte es el PROVEEDOR que emitió el documento y llega con contraparteRol="emisor". ' +
+    ADVERTENCIA_CONTRAPARTE + ' ' + ADVERTENCIA_RCV + ' Es solo lectura.',
+    schemaDocumento,
+    handlerDocumento('RECIBIDOS')
   );
 }
