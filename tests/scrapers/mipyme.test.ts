@@ -25,28 +25,6 @@ const formSnapshot = [
   '- button "Consultar" [ref=e12]',
 ].join('\n');
 
-const summarySnapshot = [
-  'DTE de ventas emitidos',
-  '- link "Factura Electronica (33)" [ref=e34]',
-].join('\n');
-
-// Fila de documento individual con 12 celdas (formato accessibility tree)
-const docSnapshot = [
-  '      - row',
-  '        - cell "1" [ref=e1]',
-  '        - cell "33333333-3" [ref=e2]',
-  '        - cell "1001" [ref=e3]',
-  '        - cell "15/01/2026" [ref=e4]',
-  '        - cell "15/01/2026" [ref=e5]',
-  '        - cell "100.000" [ref=e6]',
-  '        - cell "0" [ref=e7]',
-  '        - cell "19.000" [ref=e8]',
-  '        - cell "119.000" [ref=e9]',
-  '        - cell',
-  '        - cell " Publicar" [ref=e11]',
-  '        - cell',
-].join('\n');
-
 describe('MipymeScraper.listEmpresas', () => {
   it('retorna lista de empresas con nombre y rut desde portal mipyme', async () => {
     const browser = new MockBrowser();
@@ -94,100 +72,19 @@ describe('MipymeScraper.listEmpresas', () => {
   });
 });
 
-describe('MipymeScraper.listDocumentosEmitidos', () => {
-  it('retorna documentos emitidos con filtros', async () => {
-    const browser = new MockBrowser();
-    const session = new MockSession({} as any, browser);
-    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMP A' });
-    (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce(formSnapshot)   // applyFiltrosEmitidos
-      .mockReturnValueOnce(summarySnapshot) // summary tras waitFor
-      .mockReturnValueOnce(docSnapshot);    // detalle tras waitFor Folio
-
-    const scraper = new MipymeScraper(browser, session);
-    const docs = await scraper.listDocumentosEmitidos({ fechaDesde: '2026-01-01' });
-
-    expect(docs.length).toBeGreaterThan(0);
-    expect(docs[0]).toMatchObject({
-      folio: 1001,
-      tipoDte: 33,
-      fecha: '15/01/2026',
-      receptorRut: '33333333-3',
-    });
-  });
-});
-
-// Fila de documento recibido con 12 celdas (formato accessibility tree)
-const docRecibidoSnapshot = [
-  '      - row',
-  '        - cell "1" [ref=e1]',
-  '        - cell "33333333-3" [ref=e2]',
-  '        - cell "2001" [ref=e3]',
-  '        - cell "10/01/2026" [ref=e4]',
-  '        - cell "10/01/2026" [ref=e5]',
-  '        - cell "200.000" [ref=e6]',
-  '        - cell "0" [ref=e7]',
-  '        - cell "38.000" [ref=e8]',
-  '        - cell "238.000" [ref=e9]',
-  '        - cell "Recibido" [ref=e10]',
-  '        - cell',
-  '        - cell',
-].join('\n');
-
-const tabRecibidosSnapshot = [
-  '- link " DTE Emitidos" [ref=e7]',
-  '- link " DTE Recibidos" [ref=e8]',
-  '- link " Descargas Diferidas" [ref=e9]',
-  '- heading "CONSULTA DTE RECIBIDOS"',
-].join('\n');
-
-const summaryRecibidosSnapshot = [
-  'CONSULTA DTE RECIBIDOS',
-  'Tipo Documento',
-  '- link "Factura Electronica (33)" [ref=e20]',
-].join('\n');
-
-describe('MipymeScraper.listDocumentosRecibidos', () => {
-  it('retorna documentos recibidos con filtros', async () => {
-    const browser = new MockBrowser();
-    const session = new MockSession({} as any, browser);
-    (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMP A' });
-    (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce(tabRecibidosSnapshot) // navegarATabRecibidos: findRef tab
-      .mockReturnValueOnce(formSnapshot)          // applyFiltrosRecibidos
-      .mockReturnValueOnce(summaryRecibidosSnapshot) // summary tras waitForAny
-      .mockReturnValueOnce(docRecibidoSnapshot);  // detalle tras waitFor Folio
-
-    const scraper = new MipymeScraper(browser, session);
-    const docs = await scraper.listDocumentosRecibidos({ fechaDesde: '2026-01-01' });
-
-    expect(docs.length).toBeGreaterThan(0);
-    expect(docs[0]).toMatchObject({
-      folio: 2001,
-      tipoDte: 33,
-      emisorRut: '33333333-3',
-      fecha: '10/01/2026',
-      total: 238000,
-    });
-  });
-});
-
 describe('MipymeScraper: empresa_rut por llamada llega hasta getSession', () => {
-  // Bug original: ensureEmpresa llamaba session.getSession() sin argumentos,
-  // así que el empresaRut que ya recibía la tool se perdía antes de resolver
-  // la sesión, y getSession() reventaba con "opera varias empresas" aunque
-  // el llamador hubiera pasado un empresa_rut válido.
-  it('listDocumentosEmitidos pasa el empresaRut de filtros a session.getSession', async () => {
+  // Bug original: la resolución de empresa llamaba session.getSession() sin
+  // argumentos, así que el empresaRut que ya recibía la tool se perdía antes de
+  // resolver la sesión, y getSession() reventaba con "opera varias empresas"
+  // aunque el llamador hubiera pasado un empresa_rut válido.
+  it('listMipymeDteEmitidos pasa el empresaRut de filtros a session.getSession', async () => {
     const browser = new MockBrowser();
     const session = new MockSession({} as any, browser);
     (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '22222222-2', empresaNombre: 'EMP B' });
-    (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce(formSnapshot)
-      .mockReturnValueOnce(summarySnapshot)
-      .mockReturnValueOnce(docSnapshot);
+    (browser.snapshot as jest.Mock).mockReturnValue(formSnapshot);
 
     const scraper = new MipymeScraper(browser, session);
-    await scraper.listDocumentosEmitidos({ empresaRut: '22222222-2' });
+    await scraper.listMipymeDteEmitidos({ empresaRut: '22222222-2' });
 
     expect(session.getSession).toHaveBeenCalledWith('22222222-2');
   });
@@ -223,7 +120,7 @@ describe('MipymeScraper.withReauth', () => {
     const session = new MockSession({} as any, browser);
     (session.getSession as jest.Mock).mockResolvedValue({ empresaRut: '11111111-1', empresaNombre: 'EMP A' });
     (session.invalidate as jest.Mock).mockImplementation(() => {});
-    // snapshot vacío hace que parseSummaryTypeLinks retorne [] y el método retorne []
+    // Un snapshot sin filas hace que el parser del historial retorne [].
     (browser.snapshot as jest.Mock).mockReturnValue(formSnapshot);
 
     let callCount = 0;
@@ -233,15 +130,15 @@ describe('MipymeScraper.withReauth', () => {
     });
 
     const scraper = new MipymeScraper(browser, session);
-    await scraper.listDocumentosEmitidos({ fechaDesde: '2026-01-01' });
+    await scraper.listMipymeDteEmitidos({ fechaDesde: '2026-01-01' });
 
     expect(session.invalidate).toHaveBeenCalledTimes(1);
-    // ensureEmpresa(1) + ensureEmpresa retry(1) + applyFiltros retry(1) = 3.
+    // ensureMipymePortalEmpresa(1) + el mismo en el reintento(1) = 2.
     // withReauth ya no llama getSession() suelto antes del reintento: fn()
-    // vuelve a pasar por ensureEmpresa(empresaRut) al reintentar, así que ese
-    // llamado extra era redundante (y, con varias empresas sin
+    // vuelve a pasar por ensureMipymePortalEmpresa(empresaRut) al reintentar,
+    // así que ese llamado extra era redundante (y, con varias empresas sin
     // SII_EMPRESA_RUT, reventaba "opera N empresas" enmascarando el error real).
-    expect(session.getSession).toHaveBeenCalledTimes(3);
+    expect(session.getSession).toHaveBeenCalledTimes(2);
   });
 
   // Bug cerrado: withReauth llamaba session.getSession() SIN argumento antes
@@ -269,7 +166,7 @@ describe('MipymeScraper.withReauth', () => {
     });
 
     const scraper = new MipymeScraper(browser, session);
-    const docs = await scraper.listDocumentosEmitidos({ empresaRut: '22222222-2', fechaDesde: '2026-01-01' });
+    const docs = await scraper.listMipymeDteEmitidos({ empresaRut: '22222222-2', fechaDesde: '2026-01-01' });
 
     expect(docs).toEqual([]);
     expect(session.invalidate).toHaveBeenCalledTimes(1);
@@ -288,7 +185,7 @@ describe('MipymeScraper.withReauth', () => {
     });
 
     const scraper = new MipymeScraper(browser, session);
-    await expect(scraper.listDocumentosEmitidos({})).rejects.toThrow('Error de red inesperado');
+    await expect(scraper.listMipymeDteEmitidos({})).rejects.toThrow('Error de red inesperado');
     expect(session.invalidate).not.toHaveBeenCalled();
   });
 });
