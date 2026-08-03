@@ -36,16 +36,33 @@ const ADVERTENCIA_PERIODO =
 const ADVERTENCIA_DETALLE =
   'El detalle CUESTA: incluir_detalle=true dispara una consulta al SII por cada fila del resumen. ' +
   'Empezá sin detalle para ver qué tipos hay en el período y después pedí el detalle acotado con ' +
-  'tipo_doc. Para saber qué significa una lista `documentos` vacía mirá `detalleIncluido`: en false ' +
-  'no se pidió el detalle (los documentos existen, no se trajeron), y en true con la lista vacía no hay ' +
-  'documentos de verdad. No las confundas: son dos cosas distintas que se ven igual.';
+  'tipo_doc. Para saber qué significa una lista `documentos` vacía mirá `estadoDetalle`: ' +
+  '"no_pedido" = no se pidió el detalle, los documentos pueden existir y no se trajeron; "incluido" = se ' +
+  'trajo, así que la lista vacía significa que NO hay documentos; "sin_filas_que_pedir" = se pidió, pero ' +
+  'el período no tenía ninguna fila en ese alcance. Son tres situaciones distintas que se ven igual si ' +
+  'sólo se mira la lista.';
 
+// De dónde salen los montos es la pregunta que hay que responder ANTES de citar
+// una cifra: hay dos clases de monto en esta aplicación y sólo una es auditable.
 const ADVERTENCIA_TOTALES =
-  'El campo `totales` es la SUMA DE LOS DOCUMENTOS QUE COINCIDEN con lo pedido (todos, no sólo los que ' +
-  'devuelve limit). `totalesDeclarados` es lo que declara el ' +
-  'SII y NO coincide con esa suma (verificado: 163.060.976 sumando 393 documentos contra 197.733.705 ' +
-  'declarados). Usá `totales`; `totalesDeclarados` está sólo para explicar la cifra que muestra el ' +
-  'portal. Si totalesDifierenDelDeclarado es true, eso es lo normal, no una falla.';
+  'DE DÓNDE SALEN LOS MONTOS: mirá `origenDeMontos` antes de citar cualquier cifra. ' +
+  'Con "suma_de_documentos" (sólo cuando incluir_detalle=true) el campo `totales` está calculado sumando ' +
+  'los documentos que coinciden con lo pedido —todos, no sólo los que devuelve limit— y ES auditable. ' +
+  'Con "declarados_por_el_sii" (el camino por defecto, sin detalle) `totales` viene en null y los únicos ' +
+  'montos son filas[].montoNetoDeclarado / montoIvaDeclarado / montoTotalDeclarado: son DECLARADOS por el ' +
+  'SII y NO cuadran con la suma de los documentos (verificado: 163.060.976 sumando 393 documentos contra ' +
+  '197.733.705 declarados). Podés citarlos, pero SIEMPRE diciendo que son los montos que declara el SII y ' +
+  'que no se pueden reconciliar documento por documento; para una cifra auditable hay que pedir el ' +
+  'detalle. Y `totales: null` NO significa cero pesos: significa que no se sumó nada porque no se pidió ' +
+  'el detalle. Si totalesDifierenDelDeclarado es true, eso es lo normal, no una falla.';
+
+const ADVERTENCIA_VACIO =
+  'CÓMO LEER UN RESULTADO VACÍO, sin adivinar: `sinDatos=true` significa que el alcance consultado ' +
+  '(período + tipo_doc + seccion) no tiene documentos, y se mide igual con detalle y sin él. ' +
+  '`filtroContraparteSinCoincidencias=true` es OTRA cosa: el período SÍ tiene documentos, pero ninguno es ' +
+  'de la contraparte pedida —típicamente el RUT está mal— y NO hay que reportarlo como un mes sin ' +
+  'movimientos. `alcance` repite qué se pidió, incluido si el detalle se pidió y qué filtros quedaron ' +
+  'aplicados: usalo para no atribuir al período entero una cifra que es de un tipo o de una contraparte.';
 
 const ADVERTENCIA_CONTRAPARTE =
   'La contraparte de cada documento viene en `contraparte*` con un `contraparteRol` explícito: en los ' +
@@ -76,12 +93,16 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
     contraparte_rut: z.string().optional()
       .describe('Filtra los documentos por RUT de la contraparte (22222222-2): el cliente en los ' +
         'emitidos, el proveedor en los recibidos. Es un filtro del lado del servidor MCP, sobre el ' +
-        'detalle ya traído: NO reduce las consultas al SII. Requiere incluir_detalle=true.'),
+        'detalle ya traído: NO reduce las consultas al SII. EXIGE incluir_detalle=true; con ' +
+        'incluir_detalle=false la llamada FALLA en vez de devolver el resumen sin filtrar. Si no ' +
+        'coincide ningún documento, la respuesta trae filtroContraparteSinCoincidencias=true, que no ' +
+        'es lo mismo que un período sin movimientos.'),
     limit: z.number().int().min(1).max(500).optional()
       .describe('Máximo de documentos a devolver. Recorta la lista después de traerla, así que NO ' +
-        'reduce las consultas al SII; sirve para no volcar cientos de documentos. Cuando recorta, ' +
-        'documentosTruncados queda en true y totalDocumentos dice cuántos hay en realidad (los ' +
-        'totales se calculan sobre todos, no sobre los devueltos).'),
+        'reduce las consultas al SII; sirve para no volcar cientos de documentos. EXIGE ' +
+        'incluir_detalle=true: sin detalle la llamada FALLA en vez de ignorar el límite. Cuando ' +
+        'recorta, documentosTruncados queda en true y totalDocumentos dice cuántos hay en realidad ' +
+        '(los totales se calculan sobre todos, no sobre los devueltos).'),
     incluir_detalle: z.boolean().default(false)
       .describe('false por defecto: devuelve SÓLO el resumen por (tipo, sección) con UNA consulta. ' +
         'true trae además cada documento, y eso cuesta una consulta al SII POR CADA fila del resumen ' +
@@ -124,8 +145,7 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
     'cada documento con su contraparte, folio, fechas y montos. ' +
     ADVERTENCIA_PERIODO + ' ' + ADVERTENCIA_DETALLE + ' ' +
     ADVERTENCIA_SECCION + ' ' + ADVERTENCIA_CONTRAPARTE + ' ' + ADVERTENCIA_TOTALES + ' ' +
-    'Un período sin documentos responde sinDatos=true con las listas vacías: es un mes sin movimientos, ' +
-    'no un error. ' + ADVERTENCIA_RCV + ' Es solo lectura.',
+    ADVERTENCIA_VACIO + ' ' + ADVERTENCIA_RCV + ' Es solo lectura.',
     schemaListado(),
     handler('EMITIDOS')
   );
@@ -139,8 +159,7 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
     'La contraparte de un documento recibido es el PROVEEDOR que lo emitió, y llega con ' +
     'contraparteRol="emisor" aunque el SII la informe en campos que se llaman "receptor". ' +
     ADVERTENCIA_SECCION + ' ' + ADVERTENCIA_CONTRAPARTE + ' ' + ADVERTENCIA_TOTALES + ' ' +
-    'Un período sin documentos responde sinDatos=true con las listas vacías: es un mes sin movimientos, ' +
-    'no un error. ' + ADVERTENCIA_RCV + ' Es solo lectura.',
+    ADVERTENCIA_VACIO + ' ' + ADVERTENCIA_RCV + ' Es solo lectura.',
     schemaListado(),
     handler('RECIBIDOS')
   );

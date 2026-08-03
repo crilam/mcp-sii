@@ -161,10 +161,10 @@ describe('DteScraper.listar: el resumen', () => {
       seccion: 'S1',
       seccionDescripcion: 'Documentos afectos y exentos',
       documentos: 393,
-      montoNeto: 1000000,
-      montoExento: 0,
-      montoIva: 190000,
-      montoTotal: 1190000,
+      montoNetoDeclarado: 1000000,
+      montoExentoDeclarado: 0,
+      montoIvaDeclarado: 190000,
+      montoTotalDeclarado: 1190000,
       refNCD: 0,
       documentosNotaCreditoDebito: 0,
     });
@@ -324,7 +324,7 @@ describe('DteScraper.listar: detalle no pedido contra detalle vacío', () => {
 
     const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
 
-    expect(r.detalleIncluido).toBe(false);
+    expect(r.estadoDetalle).toBe('no_pedido');
     expect(r.documentos).toEqual([]);
     // Y los documentos EXISTEN: el resumen dice que hay 393. La lista está
     // vacía porque no se pidió, no porque no haya nada.
@@ -347,7 +347,7 @@ describe('DteScraper.listar: detalle no pedido contra detalle vacío', () => {
       incluirDetalle: true,
     });
 
-    expect(r.detalleIncluido).toBe(true);
+    expect(r.estadoDetalle).toBe('incluido');
     expect(r.documentos).toEqual([]);
     expect(r.totalDocumentos).toBe(0);
     expect(r.sinDatos).toBe(true);
@@ -365,8 +365,129 @@ describe('DteScraper.listar: detalle no pedido contra detalle vacío', () => {
     // sería afirmar algo que no pasó.
     const r = await scraper.listar('202607', 'EMITIDOS', { incluirDetalle: true });
 
-    expect(r.detalleIncluido).toBe(false);
+    // El tercer estado se distingue solo, sin correlacionar con sinDatos.
+    expect(r.estadoDetalle).toBe('sin_filas_que_pedir');
     expect(r.sinDatos).toBe(true);
+  });
+});
+
+// El camino por defecto (sin detalle) es el recomendado, y era el que dejaba
+// escapar la trampa de los montos: `totales` en ceros y las filas con montos
+// declarados sin ninguna marca. Estos tests fijan que la respuesta diga de dónde
+// salen sus propios números.
+describe('DteScraper.listar: de dónde salen los montos', () => {
+  it('sin detalle: totales en null y montos marcados como declarados', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+
+    // Ceros habrían dicho "cero pesos en el período", que es una afirmación que
+    // no se consultó nada para sostener.
+    expect(r.totales).toBeNull();
+    expect(r.origenDeMontos).toBe('declarados_por_el_sii');
+    // Y los únicos montos que hay llevan el origen en el nombre.
+    expect(r.filas[0].montoTotalDeclarado).toBe(1190000);
+    expect(r.filas[0]).not.toHaveProperty('montoTotal');
+    expect(r.filas[0]).not.toHaveProperty('montoNeto');
+  });
+
+  it('con detalle: totales sumados y el origen dice que son auditables', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+    });
+
+    expect(r.origenDeMontos).toBe('suma_de_documentos');
+    expect(r.totales).not.toBeNull();
+    // Auditable quiere decir esto: el total es la suma de lo que se devolvió.
+    expect(r.totales!.total).toBe(
+      r.documentos.reduce((n, d) => n + d.montoTotal, 0)
+    );
+  });
+});
+
+// La MISMA pregunta tiene que dar la MISMA respuesta con detalle y sin él. Antes
+// un tipo inexistente decía sinDatos=false sin detalle y sinDatos=true con
+// detalle: dos respuestas contradictorias a la misma consulta.
+describe('DteScraper.listar: consistencia entre los dos modos', () => {
+  it('un tipo que no está en el período da sinDatos en los dos modos', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const sinDetalle = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 999 });
+    const conDetalle = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 999,
+      incluirDetalle: true,
+    });
+
+    expect(sinDetalle.sinDatos).toBe(true);
+    expect(conDetalle.sinDatos).toBe(true);
+    expect(sinDetalle.filas).toEqual([]);
+    expect(conDetalle.filas).toEqual([]);
+    // Y el estado del detalle sí distingue los dos casos, que es su trabajo.
+    expect(sinDetalle.estadoDetalle).toBe('no_pedido');
+    expect(conDetalle.estadoDetalle).toBe('sin_filas_que_pedir');
+  });
+
+  it('un tipo inexistente no gasta ninguna consulta de detalle', async () => {
+    const { http, scraper } = makeScraper(EMITIDOS);
+
+    await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 999, incluirDetalle: true });
+
+    expect(llamadas(http).filter(c => c[2] === 'getDetalle')).toHaveLength(0);
+  });
+
+  it('un período con documentos no es sinDatos en ninguno de los dos modos', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const sinDetalle = await scraper.listar('202607', 'EMITIDOS', { tipoDocCodigo: 33 });
+    const conDetalle = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+    });
+
+    expect(sinDetalle.sinDatos).toBe(false);
+    expect(conDetalle.sinDatos).toBe(false);
+  });
+});
+
+// `alcance` dice QUÉ SE PIDIÓ: sin eso, una cifra de un tipo o de una
+// contraparte se atribuye al período entero.
+describe('DteScraper.listar: el alcance de la consulta', () => {
+  it('devuelve lo que se pidió, incluido si el detalle se pidió', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 61,
+      seccion: 'S2',
+      contraparteRut: '33.333.333-3',
+      limit: 5,
+      incluirDetalle: true,
+    });
+
+    expect(r.alcance).toEqual({
+      tipoDocCodigo: 61,
+      seccion: 'S2',
+      // Normalizado, que es la forma con la que efectivamente se filtró.
+      contraparteRut: '33333333-3',
+      limit: 5,
+      detallePedido: true,
+    });
+  });
+
+  it('sin filtros el alcance lo dice con null, no omitiendo campos', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS');
+
+    expect(r.alcance).toEqual({
+      tipoDocCodigo: null,
+      seccion: null,
+      contraparteRut: null,
+      limit: null,
+      detallePedido: false,
+    });
   });
 });
 
@@ -391,7 +512,7 @@ describe('DteScraper.listar: los filtros del lado del cliente', () => {
     expect(conFiltro.documentos[0].contraparteRut).toBe('33333333-3');
     expect(conFiltro.totalDocumentos).toBe(1);
     // Los totales son los del subconjunto filtrado, no los del período.
-    expect(conFiltro.totales.total).toBe(1190000);
+    expect(conFiltro.totales!.total).toBe(1190000);
   });
 
   it('acepta el RUT de contraparte con puntos o sin guión', async () => {
@@ -407,8 +528,10 @@ describe('DteScraper.listar: los filtros del lado del cliente', () => {
     }
   });
 
-  // Un vacío por filtro sigue siendo un vacío legítimo, no un error.
-  it('una contraparte sin documentos da sinDatos, no falla', async () => {
+  // Un filtro que no coincide NO es un mes sin movimientos. Antes esto devolvía
+  // `sinDatos: true` y un período de 393 documentos se leía como vacío por haber
+  // escrito mal el RUT de un proveedor.
+  it('una contraparte sin coincidencias NO es sinDatos', async () => {
     const { scraper } = makeScraper(EMITIDOS);
 
     const r = await scraper.listar('202607', 'EMITIDOS', {
@@ -419,7 +542,60 @@ describe('DteScraper.listar: los filtros del lado del cliente', () => {
 
     expect(r.documentos).toEqual([]);
     expect(r.totalDocumentos).toBe(0);
-    expect(r.sinDatos).toBe(true);
+    // El período SÍ tiene documentos: lo que no coincidió es el filtro.
+    expect(r.sinDatos).toBe(false);
+    expect(r.filtroContraparteSinCoincidencias).toBe(true);
+  });
+
+  it('sin filtro por contraparte el campo del filtro es null, no false', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    // `false` afirmaría que un filtro coincidió; no se aplicó ninguno.
+    const r = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+    });
+
+    expect(r.filtroContraparteSinCoincidencias).toBeNull();
+  });
+
+  it('con coincidencias el campo del filtro es false', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    const r = await scraper.listar('202607', 'EMITIDOS', {
+      tipoDocCodigo: 33,
+      incluirDetalle: true,
+      contraparteRut: '33333333-3',
+    });
+
+    expect(r.filtroContraparteSinCoincidencias).toBe(false);
+  });
+
+  // Ignorarlos en silencio devolvía el resumen COMPLETO del período, que el
+  // consumidor atribuía a la contraparte pedida.
+  it('los filtros sin incluirDetalle FALLAN en vez de ignorarse', async () => {
+    const { http, scraper } = makeScraper(EMITIDOS);
+
+    await expect(
+      scraper.listar('202607', 'EMITIDOS', { contraparteRut: '33333333-3' })
+    ).rejects.toThrow(/incluirDetalle=true/);
+    await expect(
+      scraper.listar('202607', 'EMITIDOS', { limit: 10 })
+    ).rejects.toThrow(/incluirDetalle=true/);
+    // Y falla antes de consultar: no gasta llamadas para después descartarlas.
+    expect(llamadas(http)).toHaveLength(0);
+  });
+
+  // `limit: 0` daba lista vacía con documentosTruncados=true, o sea "hay
+  // documentos y no te muestro ninguno". No es un pedido con sentido.
+  it('rechaza un limit menor a 1 o no entero', async () => {
+    const { scraper } = makeScraper(EMITIDOS);
+
+    for (const limit of [0, -1, 1.5]) {
+      await expect(
+        scraper.listar('202607', 'EMITIDOS', { incluirDetalle: true, limit })
+      ).rejects.toThrow(/Límite inválido/);
+    }
   });
 
   // Con un subconjunto filtrado el total declarado por el SII —que es del
@@ -466,7 +642,7 @@ describe('DteScraper.listar: los filtros del lado del cliente', () => {
     expect(r.totalDocumentos).toBe(4);
     // Y los totales cubren los 4: si dependieran del tamaño de página, cambiar
     // `limit` cambiaría los montos del período.
-    expect(r.totales.total).toBe(4760000);
+    expect(r.totales!.total).toBe(4760000);
     // No ahorra llamadas: recorta después de traer.
     expect(llamadas(http)).toHaveLength(2);
   });
@@ -501,7 +677,7 @@ describe('DteScraper: la totalización', () => {
     });
     // Si algún día esto vale 9999999, alguien "arregló" la totalización usando
     // el campo que parece más directo. No lo es: no es el mismo número.
-    expect(r.totales.neto).not.toBe(9999999);
+    expect(r.totales!.neto).not.toBe(9999999);
   });
 
   it('expone el total declarado aparte y avisa que difiere', async () => {
@@ -523,7 +699,7 @@ describe('DteScraper: la totalización', () => {
 
     const r = await scraper.listar('202607', 'RECIBIDOS', { tipoDocCodigo: 33, incluirDetalle: true });
 
-    expect(r.totales.total).toBe(4760000);
+    expect(r.totales!.total).toBe(4760000);
     expect(r.totalesDeclarados!.total).toBe(11899998);
   });
 });
@@ -580,7 +756,9 @@ describe('DteScraper: vacío legítimo contra error real', () => {
     expect(r.sinDatos).toBe(true);
     expect(r.filas).toEqual([]);
     expect(r.documentos).toEqual([]);
-    expect(r.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0 });
+    // `null`, no ceros: no se sumó nada. Un cero se lee como "cero pesos".
+    expect(r.totales).toBeNull();
+    expect(r.origenDeMontos).toBe('sin_montos');
     expect(r.totalesDeclarados).toBeNull();
   });
 

@@ -30,10 +30,17 @@ export interface FilaResumenDte {
   // está en la tabla relevada: se reporta el código crudo antes que inventar.
   seccionDescripcion: string | null;
   documentos: number;
-  montoNeto: number;
-  montoExento: number;
-  montoIva: number;
-  montoTotal: number;
+  // OJO CON ESTOS CUATRO: son montos DECLARADOS POR EL SII, la misma clase de
+  // número que `ListadoDte.totalesDeclarados` — y por lo tanto NO cuadran con la
+  // suma de los documentos del detalle. Llevan el sufijo en el nombre porque el
+  // camino por defecto (sin detalle) devuelve estas filas como lo único con
+  // montos, y con un nombre neutro se leen como auditables: sumarlas produce una
+  // cifra plausible que no se puede reconciliar con ningún documento. Si hacen
+  // falta montos auditables, hay que pedir el detalle y usar `totales`.
+  montoNetoDeclarado: number;
+  montoExentoDeclarado: number;
+  montoIvaDeclarado: number;
+  montoTotalDeclarado: number;
   // `refNCD` y `totalDocNCD` son de la fila y hay que devolvérselos al SII tal
   // cual para pedir el detalle de ESTA fila (ver `detalleDeFila`). Sin ellos, la
   // segunda fila de un mismo tipo (el 61 de S2, por ejemplo) no se puede pedir.
@@ -83,37 +90,95 @@ export interface TotalesDte {
   total: number;
 }
 
+// Los tres estados del detalle. Era un booleano y no alcanzaba: con el resumen
+// vacío devolvía `false`, que significa "no se pidió" —lo contrario de lo que
+// había pasado— y sólo se desambiguaba correlacionando con `sinDatos`, que es
+// justo lo que el campo venía a evitar. Ahora los tres se distinguen solos:
+//
+//   'no_pedido'            → no se pidió el detalle. Los documentos pueden
+//                            existir y no se trajeron: `documentos` vacío NO
+//                            significa que no haya nada.
+//   'incluido'             → se pidió y se trajo. `documentos` vacío acá sí
+//                            significa que no hay documentos.
+//   'sin_filas_que_pedir'  → se pidió, pero el resumen no tenía ninguna fila en
+//                            el alcance consultado, así que no había ningún
+//                            detalle que pedirle al SII.
+export type EstadoDetalle = 'no_pedido' | 'incluido' | 'sin_filas_que_pedir';
+
+// De dónde salen los montos que trae la respuesta. Es el campo que evita el
+// peor malentendido de la migración: en el camino por defecto lo único con
+// montos son las filas del resumen, que son DECLARADOS por el SII y no cuadran
+// con ningún documento.
+//
+//   'declarados_por_el_sii' → sólo hay montos declarados (filas[].monto*Declarado
+//                             y, si vino, totalesDeclarados). NO son auditables
+//                             contra los documentos.
+//   'suma_de_documentos'    → `totales` está calculado sumando los documentos
+//                             traídos, y es el número que se puede auditar.
+//   'sin_montos'            → no hay montos en la respuesta.
+export type OrigenDeMontos = 'declarados_por_el_sii' | 'suma_de_documentos' | 'sin_montos';
+
+// QUÉ SE PIDIÓ, literalmente. Se devuelve porque los campos de resultado se leen
+// distinto según el alcance —un `sinDatos` de un tipo puntual no dice nada del
+// período— y porque un filtro que quedó aplicado o no es exactamente el tipo de
+// cosa que no puede quedar implícita.
+export interface AlcanceConsultaDte {
+  tipoDocCodigo: number | null;
+  seccion: string | null;
+  contraparteRut: string | null;
+  limit: number | null;
+  detallePedido: boolean;
+}
+
 export interface ListadoDte {
   empresaRut: string;
   periodo: string;
   operacion: OperacionDte;
-  // Vacío legítimo: el período no tiene documentos. No es un error.
-  sinDatos: boolean;
-  mensaje: string | null;
-  filas: FilaResumenDte[];
-  // `documentos: []` significaba DOS cosas distintas —"no se pidió el detalle" y
-  // "no hay documentos"— y desde afuera se veían idénticas. Este campo las
-  // separa sin leer prosa: `false` es que no se pidió (ver `incluirDetalle`);
-  // `true` con `documentos` vacío es que de verdad no hay documentos.
+  alcance: AlcanceConsultaDte;
+  // `true` cuando el alcance consultado no tiene documentos: un vacío legítimo,
+  // no un error.
   //
-  // Un vacío que significa dos cosas es el modo de falla que este proyecto viene
-  // cerrando en todos los frentes (el `sinDatos` del RCV, el mes vacío contra la
-  // página que no cargó en el resumen anual de boletas): quien consume una tool
-  // consume el dato, no la descripción.
-  detalleIncluido: boolean;
+  // Se mide ANTES del filtro por contraparte, y se calcula igual con detalle y
+  // sin él (con detalle, contando los documentos traídos; sin detalle, sumando
+  // lo que declaran las filas). Las dos cosas son deliberadas:
+  //
+  //   - Antes del filtro, porque "el proveedor que busqué no aparece" NO es "la
+  //     empresa no tuvo movimientos": con el RUT mal escrito, un mes de 393
+  //     documentos se leía como un mes vacío. Eso vive en
+  //     `filtroContraparteSinCoincidencias`.
+  //   - Igual en los dos modos, porque si no la MISMA pregunta daba dos
+  //     respuestas: con tipo_doc inexistente, sin detalle decía `false` y con
+  //     detalle decía `true`.
+  sinDatos: boolean;
+  // `true` cuando se pidió un `contraparteRut` y ningún documento del alcance es
+  // de esa contraparte. Distinto de `sinDatos`: acá el período SÍ tiene
+  // documentos. `null` cuando no se filtró por contraparte.
+  filtroContraparteSinCoincidencias: boolean | null;
+  mensaje: string | null;
+  // OJO: los montos de las filas son DECLARADOS por el SII. Ver
+  // FilaResumenDte y `origenDeMontos`.
+  filas: FilaResumenDte[];
+  estadoDetalle: EstadoDetalle;
   documentos: FilaDetalleDte[];
   // Cuántos documentos coinciden con lo pedido (después del filtro por
   // contraparte, ANTES del `limit`). Si es mayor que `documentos.length`, la
-  // lista viene recortada: ver `documentosTruncados`.
+  // lista viene recortada: ver `documentosTruncados`. Sin detalle es lo que
+  // declaran las filas del resumen.
   totalDocumentos: number;
   // `true` cuando `limit` recortó la lista. Existe para que "10 documentos" no
   // se lea como "hay 10 documentos": `totalDocumentos` dice cuántos hay.
   documentosTruncados: boolean;
+  // De dónde salen los montos de esta respuesta. Ver OrigenDeMontos.
+  origenDeMontos: OrigenDeMontos;
   // SUMA DE LOS DOCUMENTOS QUE COINCIDEN, no el total que declara el SII. Se
   // calcula sobre los `totalDocumentos`, no sobre la página recortada por
   // `limit`: totalizar sólo lo que se alcanzó a mostrar daría un total que
   // depende del tamaño de página. Ver `totalizar` y `totalesDeclarados`.
-  totales: TotalesDte;
+  //
+  // `null` —NO ceros— cuando no se trajo el detalle: no hay nada que sumar, y un
+  // cero se lee como "cero pesos en el período", que es una afirmación sobre los
+  // datos que no se hizo ninguna consulta para sostener.
+  totales: TotalesDte | null;
   // Los totales que declara el SII en `dataResp` (sumados si se pidió más de un
   // tipo). Se exponen porque el portal muestra estos, así que un usuario que
   // compare va a ver este número — pero NO cuadran con la suma de los
@@ -122,7 +187,7 @@ export interface ListadoDte {
   totalesDeclarados: TotalesDte | null;
   // `true` cuando `totales` y `totalesDeclarados` no coinciden, que es lo
   // habitual. Existe para que la discrepancia se pueda explicar sin que parezca
-  // un bug del servidor.
+  // un bug del servidor. `false` cuando no hay con qué comparar.
   totalesDifierenDelDeclarado: boolean;
 }
 
@@ -203,50 +268,111 @@ export class DteScraper {
       limit?: number;
     } = {}
   ): Promise<ListadoDte> {
+    const detallePedido = opciones.incluirDetalle === true;
+
+    // Los filtros del lado del cliente operan sobre el detalle: sin detalle no
+    // hay nada que filtrar. Antes se ignoraban en silencio y la respuesta era el
+    // resumen COMPLETO del período — que el consumidor atribuía a la contraparte
+    // que había pedido. Se falla en vez de devolver otra cosa parecida.
+    if (!detallePedido && (opciones.contraparteRut !== undefined || opciones.limit !== undefined)) {
+      throw new Error(
+        'Los filtros contraparteRut y limit se aplican sobre el detalle, así que requieren ' +
+        'incluirDetalle=true. Sin detalle la respuesta sería el resumen completo del período, ' +
+        'no lo filtrado: se falla para no devolver un resultado que se lee como si el filtro ' +
+        'se hubiera aplicado.'
+      );
+    }
+
+    // `limit: 0` devolvía una lista vacía con `documentosTruncados: true`, que se
+    // lee como "hay documentos y no te muestro ninguno". No es un pedido con
+    // sentido: se rechaza.
+    if (opciones.limit !== undefined && (!Number.isInteger(opciones.limit) || opciones.limit < 1)) {
+      throw new Error(
+        `Límite inválido: "${opciones.limit}". Se espera un entero mayor o igual a 1.`
+      );
+    }
+
+    // El RUT de la contraparte se normaliza ACÁ, antes de cualquier consulta: un
+    // RUT mal escrito tiene que fallar y no devolver cero documentos, que se
+    // leería como "esa contraparte no tiene documentos".
+    const contraparteBuscada = opciones.contraparteRut
+      ? (() => {
+          const { rut, dv } = partirRut(opciones.contraparteRut, 'RUT de contraparte');
+          return `${rut}-${dv}`;
+        })()
+      : null;
+
     const { rut, dv } = this.identidadConsultada(opciones.empresaRut);
     const resumen = await this.resumenCrudo(periodo, operacion, rut, dv);
+
+    // QUÉ SE PIDIÓ, explícito en la respuesta: los demás campos se leen distinto
+    // según el alcance.
+    const alcance: AlcanceConsultaDte = {
+      tipoDocCodigo: opciones.tipoDocCodigo ?? null,
+      seccion: opciones.seccion ?? null,
+      contraparteRut: contraparteBuscada,
+      limit: opciones.limit ?? null,
+      detallePedido,
+    };
 
     const base = {
       empresaRut: `${rut}-${dv}`,
       periodo,
       operacion,
+      alcance,
       mensaje: resumen.mensaje,
     };
-
-    if (resumen.filas.length === 0) {
-      return {
-        ...base,
-        sinDatos: true,
-        filas: [],
-        // Sin filas no hay detalle que pedir, ni siquiera si lo pidieron.
-        detalleIncluido: false,
-        documentos: [],
-        totalDocumentos: 0,
-        documentosTruncados: false,
-        totales: { neto: 0, exento: 0, iva: 0, total: 0 },
-        totalesDeclarados: null,
-        totalesDifierenDelDeclarado: false,
-      };
-    }
 
     const filas = resumen.filas.filter(f =>
       (opciones.tipoDocCodigo === undefined || f.tipoDocCodigo === opciones.tipoDocCodigo) &&
       (opciones.seccion === undefined || f.seccion === opciones.seccion)
     );
 
-    // Default: sólo el resumen. Ver el comentario de `incluirDetalle`.
-    if (opciones.incluirDetalle !== true) {
+    // Sin filas en el alcance no hay documentos y no hay ningún detalle que
+    // pedirle al SII. La MISMA respuesta se da con detalle y sin él: antes, un
+    // tipo inexistente decía `sinDatos: false` sin detalle y `true` con detalle,
+    // o sea la misma pregunta con dos respuestas contradictorias.
+    if (filas.length === 0) {
       return {
         ...base,
-        sinDatos: false,
-        filas,
-        detalleIncluido: false,
+        sinDatos: true,
+        // No se filtró nada porque no había nada: afirmar que el filtro no
+        // coincidió sería otra explicación del vacío, y la explicación es que el
+        // alcance está vacío.
+        filtroContraparteSinCoincidencias: null,
+        filas: [],
+        estadoDetalle: detallePedido ? 'sin_filas_que_pedir' : 'no_pedido',
         documentos: [],
-        totalDocumentos: filas.reduce((n, f) => n + f.documentos, 0),
+        totalDocumentos: 0,
         documentosTruncados: false,
-        // Sin detalle no hay documentos que sumar, y los montos del resumen son
-        // otra cosa: no se rellena `totales` con algo que no se calculó.
-        totales: { neto: 0, exento: 0, iva: 0, total: 0 },
+        origenDeMontos: 'sin_montos',
+        totales: null,
+        totalesDeclarados: null,
+        totalesDifierenDelDeclarado: false,
+      };
+    }
+
+    // Default: sólo el resumen. Ver el comentario de `incluirDetalle`.
+    if (!detallePedido) {
+      const declaradosPorFilas = filas.reduce((n, f) => n + f.documentos, 0);
+      return {
+        ...base,
+        // Mismo criterio que con detalle: no hay documentos en el alcance. Acá se
+        // mide con lo que declaran las filas, que es lo único que se consultó.
+        sinDatos: declaradosPorFilas === 0,
+        filtroContraparteSinCoincidencias: null,
+        filas,
+        estadoDetalle: 'no_pedido',
+        documentos: [],
+        totalDocumentos: declaradosPorFilas,
+        documentosTruncados: false,
+        // Lo único con montos son las filas, y son DECLARADOS por el SII: la
+        // misma clase de número que `totalesDeclarados`, que no cuadra con la
+        // suma de los documentos. Queda dicho en el dato, no sólo en la prosa.
+        origenDeMontos: 'declarados_por_el_sii',
+        // `null`, no ceros: sin detalle no se sumó nada, y un cero se lee como
+        // "cero pesos en el período".
+        totales: null,
         totalesDeclarados: null,
         totalesDifierenDelDeclarado: false,
       };
@@ -270,46 +396,41 @@ export class DteScraper {
       }
     }
 
-    // El filtro por contraparte se aplica acá, del lado del cliente: el
-    // servicio no lo recibe. Se normaliza el RUT con `partirRut` para que
-    // "22.222.222-2" y "222222222" coincidan con el "22222222-2" que armamos, en
-    // vez de fallar por formato y devolver cero documentos —que se leería como
-    // "esa contraparte no tiene documentos", el peor de los resultados.
-    const coincidentes = opciones.contraparteRut
-      ? (() => {
-          const { rut: cRut, dv: cDv } = partirRut(
-            opciones.contraparteRut,
-            'RUT de contraparte'
-          );
-          const buscado = `${cRut}-${cDv}`;
-          return todos.filter(d => d.contraparteRut.toUpperCase() === buscado);
-        })()
+    // El filtro por contraparte se aplica acá, del lado del cliente: el servicio
+    // no lo recibe.
+    const coincidentes = contraparteBuscada
+      ? todos.filter(d => d.contraparteRut.toUpperCase() === contraparteBuscada)
       : todos;
 
-    // Los totales se calculan sobre TODO lo que coincide, antes de recortar:
-    // ver el comentario de `totales` en ListadoDte.
+    // Los totales se calculan sobre TODO lo que coincide, antes de recortar: ver
+    // el comentario de `totales` en ListadoDte.
     const totales = this.totalizar(coincidentes);
 
-    const limit = opciones.limit;
     const documentos =
-      limit !== undefined && limit >= 0 ? coincidentes.slice(0, limit) : coincidentes;
+      opciones.limit !== undefined ? coincidentes.slice(0, opciones.limit) : coincidentes;
 
     return {
       ...base,
-      sinDatos: coincidentes.length === 0,
+      // Se mide ANTES del filtro por contraparte: "el proveedor que busqué no
+      // aparece" no es "la empresa no tuvo movimientos".
+      sinDatos: todos.length === 0,
+      filtroContraparteSinCoincidencias: contraparteBuscada
+        ? coincidentes.length === 0 && todos.length > 0
+        : null,
       filas,
-      detalleIncluido: true,
+      estadoDetalle: 'incluido',
       documentos,
       totalDocumentos: coincidentes.length,
       documentosTruncados: documentos.length < coincidentes.length,
+      origenDeMontos: 'suma_de_documentos',
       totales,
       // Con filtro por contraparte el declarado NO se expone: el SII lo calcula
       // sobre el período completo, así que junto a un subconjunto filtrado se
       // leería como el total de ese subconjunto. Un número que no significa lo
       // que parece es peor que ninguno.
-      totalesDeclarados: opciones.contraparteRut ? null : declarados,
+      totalesDeclarados: contraparteBuscada ? null : declarados,
       totalesDifierenDelDeclarado:
-        !opciones.contraparteRut &&
+        !contraparteBuscada &&
         declarados !== null &&
         (declarados.neto !== totales.neto ||
           declarados.exento !== totales.exento ||
@@ -450,10 +571,10 @@ export class DteScraper {
       seccion,
       seccionDescripcion: SECCIONES[seccion] ?? null,
       documentos: Number(f.totalDoc ?? 0),
-      montoNeto: Number(f.mntNeto ?? 0),
-      montoExento: Number(f.mntExento ?? 0),
-      montoIva: Number(f.mntIVA ?? 0),
-      montoTotal: Number(f.mntTotal ?? 0),
+      montoNetoDeclarado: Number(f.mntNeto ?? 0),
+      montoExentoDeclarado: Number(f.mntExento ?? 0),
+      montoIvaDeclarado: Number(f.mntIVA ?? 0),
+      montoTotalDeclarado: Number(f.mntTotal ?? 0),
       refNCD: Number(f.refNCD ?? 0),
       documentosNotaCreditoDebito: Number(f.totalDocNCD ?? 0),
     };

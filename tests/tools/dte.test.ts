@@ -25,30 +25,15 @@ describe('registerDteTools', () => {
     expect(tools['sii_dte_get_documento_recibido']).toBeDefined();
   });
 
-  // La advertencia no es cosmética: un modelo con las dos salidas a la vista y
-  // sin este párrafo concluye que una de las dos fuentes está mal.
-  it('las cuatro descripciones advierten que no son comparables con sii_rcv_*', () => {
+  // Lo único que se verifica de la prosa: que las cuatro nombren sii_rcv_*, que
+  // es un requisito del relevamiento (sin eso, un modelo con las dos salidas a
+  // la vista concluye que una de las dos fuentes está mal). No se assertean
+  // frases: repetir la copia en un test no detecta ningún error de lógica y se
+  // rompe al reescribir una oración.
+  it('las cuatro descripciones nombran sii_rcv_* para advertir que no son comparables', () => {
     const { tools } = setup();
-    for (const nombre of [
-      'sii_dte_list_documentos_emitidos',
-      'sii_dte_list_documentos_recibidos',
-      'sii_dte_get_documento_emitido',
-      'sii_dte_get_documento_recibido',
-    ]) {
+    for (const nombre of Object.keys(tools)) {
       expect(tools[nombre].descripcion).toContain('sii_rcv_');
-      expect(tools[nombre].descripcion).toContain('NO cuadran');
-    }
-  });
-
-  it('las descripciones de los listados explican la clave (tipo, sección)', () => {
-    const { tools } = setup();
-    for (const nombre of [
-      'sii_dte_list_documentos_emitidos',
-      'sii_dte_list_documentos_recibidos',
-    ]) {
-      expect(tools[nombre].descripcion).toContain('(tipoDocCodigo, seccion)');
-      // Y que los totales confiables son la suma, no lo declarado.
-      expect(tools[nombre].descripcion).toContain('totalesDeclarados');
     }
   });
 
@@ -110,21 +95,41 @@ describe('registerDteTools', () => {
       'sii_dte_list_documentos_emitidos',
       'sii_dte_list_documentos_recibidos',
     ]) {
-      const schema = tools[nombre].schema;
-      expect(schema.incluir_detalle.parse(undefined)).toBe(false);
-      // Y la descripción dice que el uso normal es resumen primero.
-      expect(tools[nombre].descripcion).toContain('incluir_detalle=true');
-      // La consulta es mensual: nadie debería esperar un rango de fechas.
-      expect(tools[nombre].descripcion).toContain('POR PERÍODO MENSUAL');
-      // Y que una lista vacía se interpreta mirando detalleIncluido.
-      expect(tools[nombre].descripcion).toContain('detalleIncluido');
-      expect(tools[nombre].descripcion).toContain('NO existe consulta por rango de fechas');
+      expect(tools[nombre].schema.incluir_detalle.parse(undefined)).toBe(false);
     }
   });
 
-  // limit y contraparte_rut sobrevivieron a la migración, pero filtran del lado
-  // del cliente: la descripción tiene que decir que no ahorran consultas.
-  it('limit y contraparte_rut existen y se declaran como filtros del cliente', () => {
+  // El período es obligatorio y mensual: el esquema tiene que rechazar un rango
+  // de fechas, no sólo desaconsejarlo en la descripción.
+  it('el período es obligatorio y sólo acepta AAAAMM', () => {
+    const { tools } = setup();
+    for (const nombre of Object.keys(tools)) {
+      const periodo = tools[nombre].schema.periodo;
+      expect(periodo.isOptional()).toBe(false);
+      expect(periodo.safeParse('202607').success).toBe(true);
+      expect(periodo.safeParse('2026-07').success).toBe(false);
+      expect(periodo.safeParse('2026-07-01').success).toBe(false);
+    }
+  });
+
+  // Los filtros del cliente exigen el detalle, y el que decide es el scraper:
+  // acá se verifica que la tool le pase el pedido tal cual, sin apagar el error.
+  it('propaga el error del scraper cuando se filtra sin detalle', async () => {
+    const { scraper, tools } = setup();
+    (scraper.listar as jest.Mock).mockRejectedValue(new Error('requieren incluirDetalle=true'));
+
+    await expect(
+      tools['sii_dte_list_documentos_emitidos'].handler({
+        periodo: '202607',
+        contraparte_rut: '33333333-3',
+        incluir_detalle: false,
+      })
+    ).rejects.toThrow(/incluirDetalle=true/);
+  });
+
+  // limit y contraparte_rut sobrevivieron a la migración: filtran del lado del
+  // cliente y exigen el detalle.
+  it('limit y contraparte_rut existen y son opcionales', () => {
     const { tools } = setup();
     for (const nombre of [
       'sii_dte_list_documentos_emitidos',
@@ -133,8 +138,9 @@ describe('registerDteTools', () => {
       const schema = tools[nombre].schema;
       expect(schema.limit.isOptional()).toBe(true);
       expect(schema.contraparte_rut.isOptional()).toBe(true);
-      expect(schema.limit.description).toContain('NO ');
-      expect(schema.contraparte_rut.description).toContain('NO reduce las consultas al SII');
+      // Y el esquema rechaza un limit sin sentido, no sólo el scraper.
+      expect(schema.limit.safeParse(0).success).toBe(false);
+      expect(schema.limit.safeParse(50).success).toBe(true);
     }
   });
 
