@@ -1,7 +1,7 @@
 # Contratos de las declaraciones F29
 
-Fecha: 2026-08-01
-Estado: esquema verificado; acceso a empresas **bloqueado por autorización de sesión**
+Fecha: 2026-08-01, **corregido el 2026-08-03**
+Estado: esquema verificado. La empresa es **estado de la sesión, no parámetro** — con credenciales propias de la empresa eso deja de ser un bloqueo y pasa a ser sólo un requisito sobre qué sesión se usa.
 
 Spike acotada para cerrar el cruce "lo registrado contra lo declarado". Complementa los contratos del [Registro de Compras y Ventas](2026-08-01-f29-rcv-contratos.md).
 
@@ -65,9 +65,9 @@ Constantes del bundle, necesarias para interpretar `estadoDeclaracionId`:
 | 67 | Pendiente de anulación |
 | 70 | Pago inconcluso |
 
-## El bloqueo: autorización a nivel de sesión
+## La empresa es estado de la sesión, no parámetro
 
-Consultar una **empresa** devuelve un error de negocio, no de formato:
+Consultar una **empresa** desde la sesión de una persona devuelve un error de negocio, no de formato:
 
 ```json
 {"data": null, "errors": [{"id":"0","descripcion":"Ocurrio un error de negocio. Consulta RUT[...] no esta autorizado"}]}
@@ -82,34 +82,37 @@ Esto contrasta con el Registro de Compras y Ventas, donde `rutEmisor` **sí** es
 | `consdcvinternetui` (RCV) | La empresa es parámetro del método |
 | `propuestaf29ui` (F29) | La empresa es estado de la sesión |
 
-## Qué falta — actualizado el 2026-08-03
+## Qué falta — corregido el 2026-08-03
 
-Para consultar el F29 de una empresa hay que **establecer una sesión que la represente**. Ver [representación de empresa](2026-08-01-representacion-empresa.md), donde el relevamiento está parcialmente hecho.
+La versión anterior de esta sección concluía que había que **establecer una sesión que representara a la empresa**, y de ahí salía una recomendación de inscribir la representación electrónica —un trámite— antes de poder seguir. **Esa conclusión partía de un modelo equivocado del proyecto** y queda descartada.
 
-**Conviene separar lo verificado de lo que no lo está**, porque de eso depende cuánto trabajo queda:
+El modelo real: la lista de empresas la define el servicio, y para cada empresa administrada se cuenta con **su RUT y su clave del SII**. Se autentica *como* la empresa, así que `sdiSession.rut` **ya es** el RUT de la empresa y el backend valida contra el valor correcto. El hallazgo de arriba —la empresa es estado de sesión, no parámetro— sigue siendo cierto; deja de ser un obstáculo y pasa a ser un requisito sobre con qué credenciales se abre la sesión.
+
+Lo que eso **saca** del camino: `getRepresentantes`, `authorize/v1/urlApplicacion`, el `clientId` y el `code_app`. Todo eso era maquinaria para representar a un tercero. La spike que los relevó ([representación de empresa](2026-08-01-representacion-empresa.md)) conserva un hallazgo útil y sólo uno: el puente `legacy/bridge2`, que es genérico y da acceso a las aplicaciones de tercera generación con cualquier sesión.
+
+Lo que **queda** por resolver antes de `sii_f29_*`, y es de arquitectura, no de contrato:
 
 | Pieza | Estado |
 |---|---|
-| Acceso a la aplicación (puente `legacy/bridge2`) | **verificado** |
-| Listar representados (`getRepresentantes`) | **verificado** |
-| Establecer la sesión representada (`urlApplicacion`) | **sin verificar** |
-| Origen del `clientId` que ese POST requiere | **sin resolver** |
-| `code_app` de la propuesta F29 | **sin resolver** |
+| Esquema de `getDeclaracionConEstados` | **verificado** |
+| Estados de declaración | **verificado** (del bundle) |
+| Una credencial por empresa administrada | **sin implementar** — `env.ts` toma un único juego |
+| Una sesión por identidad | **sin implementar** — `server.ts` comparte un `SessionManager` |
+| Migración de `mipyme.ts` a HTTP | **pendiente**, y es prerrequisito: un Chrome con un almacén de cookies no sostiene dos identidades |
+| Custodia de las claves de empresa | **decisión pendiente**, de seguridad |
+| `getDeclaracionConEstados` con una sesión de empresa real | **sin ejercitar** |
 
-**Hay un bloqueo de registro, y podría haber además uno técnico.** Se accedió al registro de representantes y devolvió `total: 0`: el RUT probado no tiene ningún representado inscrito en ese sistema. Opera esas empresas por otros mecanismos —la lista del portal mipyme, la autorización del RCV— pero no como representante electrónico registrado.
-
-Eso explica sin misterio por qué el RCV funciona y la propuesta F29 no: el RCV valida contra su propia lista de empresas autorizadas, mientras que la propuesta F29 valida contra el RUT que la sesión representa, que hoy es sólo el propio.
-
-Un dato relacionado que sigue vigente: la lista de empresas del portal mipyme **no coincide** con la de otras aplicaciones — en la cuenta probada, mipyme lista 5 y el RCV habilita 17. La empresa consultada estaba entre las 17, no entre las 5. Cada aplicación tiene su propia noción de autorización.
-
-Mientras la representación no esté inscrita, el cruce entre lo registrado en el RCV y lo declarado en el F29 no se puede completar. El lado registrado funciona hoy; el declarado, no.
+Un dato relacionado que sigue vigente: la lista de empresas del portal mipyme **no coincide** con la de otras aplicaciones — en la cuenta probada, mipyme lista 5 y el RCV habilita 17. La empresa consultada estaba entre las 17, no entre las 5. Ninguna de esas listas es "la lista de empresas del usuario": importa al interpretar lo que devuelve cada aplicación, no al decidir qué se puede operar.
 
 ## Recomendación
 
-No construir `sii_f29_*` todavía. El esquema está resuelto, pero sin representación inscrita la tool sólo serviría para el RUT de la persona autenticada — que es justamente quien no declara F29.
+**No construir `sii_f29_*` todavía, por una razón distinta a la anterior.** El esquema está resuelto y el camino ya no está bloqueado por un trámite; lo que falta es el soporte multi-identidad del servidor. Con la configuración de hoy —un solo juego de credenciales— la tool sólo serviría para el RUT de la persona autenticada, que es justamente quien no declara F29.
 
-El próximo paso es inscribir la representación electrónica en el SII, que es un trámite. **Pero eso es necesario, no necesariamente suficiente.**
+Orden sugerido:
 
-Con la representación inscrita, `getRepresentantes` debería listarla y ahí recién se puede ejercitar `urlApplicacion` — que sigue sin verificar y que exige un `clientId` cuyo origen no se determinó y un `code_app` que tampoco. O sea: después del trámite queda trabajo técnico, de tamaño desconocido hasta poder probarlo.
+1. Migrar `mipyme.ts` a HTTP (prerrequisito del multi-identidad).
+2. Resolver credencial y sesión por empresa, respetando el candado contra sesiones simultáneas del mismo RUT.
+3. Ejercitar `getDeclaracionConEstados` con una sesión de empresa real y capturar una fixture anonimizada.
+4. Recién entonces implementar, con la advertencia de escritura de arriba explícita en la descripción de la tool.
 
-Lo que sí está resuelto y no hay que volver a hacer es el **acceso** a la aplicación: autenticar legacy, cruzar el puente `legacy/bridge2`, y usar los dos juegos de cookies.
+Ver [estado y pendientes](2026-08-03-estado-y-pendientes.md) para cómo se ordena esto contra el resto del proyecto.
