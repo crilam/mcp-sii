@@ -16,7 +16,15 @@ function armar() {
   return { http, navegador, tools: (server as any)._registeredTools };
 }
 
+// Estas tools leen SII_EMPRESA_RUT del entorno, así que se restaura el env
+// completo después de cada test: mutarlo sin devolverlo contamina los que
+// siguen según el orden en que jest los corra.
 describe('registerMipymeTools', () => {
+  const envOriginal = { ...process.env };
+  afterEach(() => {
+    process.env = { ...envOriginal };
+  });
+
   it('sii_mipyme_list_empresas consulta por HTTP, no por navegador', async () => {
     const { http, navegador, tools } = armar();
     (http.listEmpresas as jest.Mock).mockResolvedValue([
@@ -33,7 +41,7 @@ describe('registerMipymeTools', () => {
   it('sii_mipyme_list_dte_emitidos pasa los filtros al scraper HTTP', async () => {
     const { http, tools } = armar();
     (http.listDteEmitidos as jest.Mock).mockResolvedValue({
-      documentos: [], pagina: 1, empresaRut: '22222222-2',
+      documentos: [], pagina: 1, totalPaginas: 3, empresaRut: '22222222-2',
     });
 
     await tools['sii_mipyme_list_dte_emitidos'].handler({
@@ -53,20 +61,34 @@ describe('registerMipymeTools', () => {
     );
   });
 
-  // Sin empresa no se puede consultar, y el error tiene que decir cómo salir del
-  // paso en vez de dejar que el CGI responda un error genérico del portal.
-  it('sii_mipyme_list_dte_emitidos falla nombrando la tool de listado si no hay empresa', async () => {
+  // Sin empresa_rut ni SII_EMPRESA_RUT la tool NO falla: delega en el scraper,
+  // que la resuelve sola si este RUT opera una única empresa. Falla recién con
+  // varias, y ese caso lo cubre el test del scraper.
+  it('sii_mipyme_list_dte_emitidos delega la resolución de empresa al scraper', async () => {
     const { http, tools } = armar();
-    const previo = process.env.SII_EMPRESA_RUT;
-    delete process.env.SII_EMPRESA_RUT;
-    process.env.SII_RUT = '11111111-1';
-    process.env.SII_CLAVE = 'x';
+    (http.listDteEmitidos as jest.Mock).mockResolvedValue({
+      documentos: [], pagina: 1, totalPaginas: 1, empresaRut: '22222222-2',
+    });
 
-    await expect(tools['sii_mipyme_list_dte_emitidos'].handler({ pagina: 1 }))
-      .rejects.toThrow(/sii_mipyme_list_empresas/);
-    expect(http.listDteEmitidos).not.toHaveBeenCalled();
+    await tools['sii_mipyme_list_dte_emitidos'].handler({ pagina: 1 });
 
-    if (previo !== undefined) process.env.SII_EMPRESA_RUT = previo;
+    expect(http.listDteEmitidos).toHaveBeenCalledWith(
+      expect.objectContaining({ empresaRut: undefined })
+    );
+  });
+
+  it('sii_mipyme_list_dte_emitidos usa SII_EMPRESA_RUT cuando no viene empresa_rut', async () => {
+    const { http, tools } = armar();
+    (http.listDteEmitidos as jest.Mock).mockResolvedValue({
+      documentos: [], pagina: 1, totalPaginas: 1, empresaRut: '44444444-4',
+    });
+    process.env.SII_EMPRESA_RUT = '44444444-4';
+
+    await tools['sii_mipyme_list_dte_emitidos'].handler({ pagina: 1 });
+
+    expect(http.listDteEmitidos).toHaveBeenCalledWith(
+      expect.objectContaining({ empresaRut: '44444444-4' })
+    );
   });
 
   it('sii_mipyme_emitir_dte sigue usando el navegador y avisa del 404 en su descripción', async () => {

@@ -6,20 +6,13 @@ import { getConfig } from '../env';
 
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
 
-// La consulta por HTTP necesita el RUT de la empresa: el portal mipyme no tiene
-// una "empresa por defecto" que se pueda inferir sin consultar. Se resuelve acá
-// —parámetro de la llamada, si no SII_EMPRESA_RUT— para no cambiar el contrato
-// que tenían estas tools, y si no hay ninguno se falla nombrando la tool que
-// lista las empresas en vez de dejar que el CGI responda un error genérico.
-function resolverEmpresa(empresaRut?: string): string {
-  const rut = empresaRut ?? getConfig().empresaRut;
-  if (!rut) {
-    throw new Error(
-      'Falta el RUT de la empresa: pasá empresa_rut en la llamada o configura SII_EMPRESA_RUT. ' +
-      'Usá sii_mipyme_list_empresas para ver las disponibles.'
-    );
-  }
-  return rut;
+// Orden de resolución de la empresa, el mismo que el resto del proyecto: el
+// parámetro de la llamada gana, si no vino cae a SII_EMPRESA_RUT, y si tampoco
+// hay, el scraper la resuelve solo cuando este RUT opera una única empresa
+// (con varias, falla listándolas). No se exige acá para no romper el contrato
+// que tenía la tool con el navegador.
+function empresaPedida(empresaRut?: string): string | undefined {
+  return empresaRut ?? getConfig().empresaRut;
 }
 
 export function registerMipymeTools(
@@ -52,7 +45,7 @@ export function registerMipymeTools(
     'portal, así que puede no coincidir con sii_dte_list_documentos_emitidos ni con sii_rcv_*, ' +
     'que consultan otros registros del SII.',
     {
-      empresa_rut: z.string().optional().describe('RUT de la empresa con dígito verificador. Si se omite, usa SII_EMPRESA_RUT.'),
+      empresa_rut: z.string().optional().describe('RUT de la empresa con dígito verificador. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si este RUT opera una única empresa en el portal.'),
       tipo_dte: z.number().int().optional().describe('Filtrar por tipo: 33=factura, 34=exenta, 61=N.crédito, 56=N.débito, 52=guía, 46=F.compra'),
       fecha_desde: FechaSchema,
       fecha_hasta: FechaSchema,
@@ -62,7 +55,7 @@ export function registerMipymeTools(
     },
     async ({ empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, folio, pagina }) => {
       const resultado = await http.listDteEmitidos({
-        empresaRut: resolverEmpresa(empresa_rut),
+        empresaRut: empresaPedida(empresa_rut),
         tipoDte: tipo_dte,
         fechaDesde: fecha_desde,
         fechaHasta: fecha_hasta,

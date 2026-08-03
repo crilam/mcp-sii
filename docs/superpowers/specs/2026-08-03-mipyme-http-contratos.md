@@ -84,7 +84,8 @@ GET .../mipeAdminDocsEmi.cgi?RUT_RECP=&FOLIO=&RZN_SOC=&FEC_DESDE=&FEC_HASTA=&TPO
 Los parámetros que ya arma `buildHistorialUrl` son correctos y funcionan por HTTP tal cual. Verificado:
 
 - **`TPO_DOC` filtra de verdad.** Con `33` las 100 filas de la página son `Factura Electronica`; sin filtro, la misma página trae 94 facturas, 6 notas de crédito.
-- **`NUM_PAG` pagina de verdad.** Página 1 trae 100 filas, página 2 trae 84, y son documentos distintos. El HTML dice "Página 1 de 3".
+- **`NUM_PAG` pagina de verdad.** Página 1 trae 100 filas, página 2 trae 84, y son documentos distintos.
+- **El total de páginas se cuenta de los enlaces `NUM_PAG=n`, no de la leyenda.** El HTML dice "Página 1 de 3", pero esa leyenda viaja **dentro de un comentario HTML**, así que cualquier limpieza de tags la borra antes de poder leerla. La primera implementación de `totalPaginas` hacía justamente eso: devolvía `null` contra el portal real mientras su test pasaba contra una fixture que tenía la leyenda visible. La fixture ahora reproduce el comentario, y el total sale del máximo `NUM_PAG` de los enlaces de paginación, que es dato vivo. **Lección repetida: una fixture escrita a mano en vez de capturada valida el parser contra una ficción.**
 - **Con filtros vacíos devuelve el histórico completo**, no el período actual: en la empresa probada, documentos desde 2018.
 - Las fechas van y vuelven como **`AAAA-MM-DD`**, y los montos **sin separador de miles**. El parser del navegador esperaba `dd/mm/yyyy` y montos con puntos: es la representación de la tabla renderizada, no la del HTML. **No reusar ese parser.**
 

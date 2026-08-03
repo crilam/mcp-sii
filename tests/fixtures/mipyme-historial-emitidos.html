@@ -37,6 +37,15 @@
     <td>Documento Emitido</td>
   </tr>
 </table>
-<div>P&aacute;gina 1&nbsp;de 3&nbsp;</div>
+<!-- Paginación tal como la manda el SII: los enlaces de página son el dato
+     vivo, y la leyenda "Página 1 de 3" viaja DENTRO DE UN COMENTARIO HTML.
+     Un parser que limpie tags antes de buscarla la borra junto con el
+     comentario: por eso el total se cuenta de los enlaces NUM_PAG. -->
+<div class="paginacion">
+  <a href="/cgi-bin/Portal001/mipeAdminDocsEmi.cgi?RUT_RECP=&FOLIO=&NUM_PAG=2&TPO_DOC=" id="pagina_siguiente">Pagina siguiente</a>
+  <a href="/cgi-bin/Portal001/mipeAdminDocsEmi.cgi?RUT_RECP=&FOLIO=&NUM_PAG=3&TPO_DOC=" id="ultima_pagina">&Uacute;ltima</a>
+  <!--  P&aacute;gina 1&nbsp;de 3&nbsp;
+   -->
+</div>
 </body>
 </html>

@@ -21,9 +21,6 @@ const SIN_EMPRESA = fixture('mipyme-sin-empresa.html');
 function armar() {
   const session = new MockSession({} as any, {} as any);
   const http = new MockHttp(session);
-  (MockSession.prototype.conEmpresaExclusiva as jest.Mock) = jest.fn(
-    (fn: () => Promise<unknown>) => fn()
-  );
   (session.conEmpresaExclusiva as jest.Mock) = jest.fn((fn: () => Promise<unknown>) => fn());
   (session.assertPuedeEntregarCookieJar as jest.Mock).mockImplementation(() => {});
   const scraper = new MipymeHttpScraper(http, session);
@@ -202,5 +199,133 @@ describe('MipymeHttpScraper.listDteEmitidos', () => {
     await expect(scraper.listDteEmitidos({ empresaRut: '33333333-3', pagina: 0 }))
       .rejects.toThrow(/pagina/i);
     expect(http.get).not.toHaveBeenCalled();
+  });
+
+  // El punto de diseño central de la migración: la empresa activa es estado del
+  // servidor, así que dos consultas con empresas distintas se pisan igual sin
+  // navegador. Si alguien saca el envoltorio, este test cae.
+  it('serializa el ciclo completo con conEmpresaExclusiva', async () => {
+    const { scraper, http, session } = armar();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce(HISTORIAL);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+    await scraper.listDteEmitidos({ empresaRut: '33333333-3' });
+
+    expect(session.conEmpresaExclusiva).toHaveBeenCalledTimes(1);
+  });
+
+  it('informa cuántas páginas hay, que el HTML sí trae', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce(HISTORIAL);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+    const res = await scraper.listDteEmitidos({ empresaRut: '33333333-3' });
+
+    expect(res.totalPaginas).toBe(3);
+  });
+
+  // Un parser que no rinde no puede devolver una lista vacía: 100 documentos con
+  // el parser roto se leerían como "esta empresa no emitió nada". Es el mismo
+  // vacío ambiguo que el proyecto cierra en el RCV y en Consultas DTE.
+  it('falla si hay filas de datos que el parser no pudo interpretar', async () => {
+    const { scraper, http } = armar();
+    // Fila con las 8 celdas y su link, pero sin el parámetro CODIGO: es una fila
+    // de datos legítima que el parser no sabe representar.
+    const roto = HISTORIAL.replace('?ALL_PAGE_ANT=1&CODIGO=987654', '?ALL_PAGE_ANT=1&OTRO=987654');
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce(roto);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+    await expect(scraper.listDteEmitidos({ empresaRut: '33333333-3' }))
+      .rejects.toThrow(/no pudo interpretar/i);
+  });
+
+  it('no confunde la fila de encabezado con una fila que falló', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce(HISTORIAL);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+    const res = await scraper.listDteEmitidos({ empresaRut: '33333333-3' });
+
+    expect(res.documentos).toHaveLength(2);
+  });
+
+  // Un historial legítimamente vacío no puede confundirse con un parser roto:
+  // sin filas de datos no hay nada que interpretar, y la lista vacía es correcta.
+  it('devuelve lista vacía sin fallar cuando el historial no tiene filas', async () => {
+    const { scraper, http } = armar();
+    const vacio = '<html><body><table><tr><th>Ver</th><th>Receptor</th></tr></table>' +
+      '<div>P&aacute;gina 1&nbsp;de 1&nbsp;</div></body></html>';
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce(vacio);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+    const res = await scraper.listDteEmitidos({ empresaRut: '33333333-3' });
+
+    expect(res.documentos).toEqual([]);
+  });
+
+  it('con varias empresas y sin empresa_rut, falla dando las dos salidas', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock).mockResolvedValue(SEL_EMPRESA);
+
+    await expect(scraper.listDteEmitidos({}))
+      .rejects.toThrow(/empresa_rut.*SII_EMPRESA_RUT/s);
+    expect(http.postForm).not.toHaveBeenCalled();
+  });
+
+  // Contrato que tenía el camino de navegador y que la migración conserva: con
+  // una sola empresa no hay nada que elegir.
+  it('con una sola empresa la resuelve sola, sin exigir empresa_rut', async () => {
+    const { scraper, http } = armar();
+    const unaSola = SEL_EMPRESA
+      .replace(/<option value="33333333-3">[^\n]*\n/, '')
+      .replace(/<option value="44444444-4">[^\n]*\n/, '')
+      .replace(/<option value="55555555-5">[^\n]*\n/, '');
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(unaSola)
+      .mockResolvedValueOnce(HISTORIAL);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+    const res = await scraper.listDteEmitidos({});
+
+    expect(res.empresaRut).toBe('22222222-2');
+    expect(http.postForm).toHaveBeenCalledWith(expect.any(String), { RUT_EMP: '22222222-2' });
+  });
+});
+
+// El camino HTTP necesita el cookie jar, que sólo produce la autenticación con
+// certificado. Es un CAMBIO respecto del camino de navegador, que funcionaba con
+// clave tributaria: hay que fallar antes de tocar la red y con el mensaje que
+// explica qué configurar, no con un "sesión expirada" más adelante.
+describe('MipymeHttpScraper: requiere certificado digital', () => {
+  it('listEmpresas falla sin consultar cuando la sesión no puede dar el cookie jar', async () => {
+    const { scraper, http, session } = armar();
+    (session.assertPuedeEntregarCookieJar as jest.Mock).mockImplementation(() => {
+      throw new Error('requieren autenticación con certificado digital');
+    });
+
+    await expect(scraper.listEmpresas()).rejects.toThrow(/certificado digital/i);
+    expect(http.get).not.toHaveBeenCalled();
+  });
+
+  it('listDteEmitidos falla sin consultar por la misma razón', async () => {
+    const { scraper, http, session } = armar();
+    (session.assertPuedeEntregarCookieJar as jest.Mock).mockImplementation(() => {
+      throw new Error('requieren autenticación con certificado digital');
+    });
+
+    await expect(scraper.listDteEmitidos({ empresaRut: '33333333-3' }))
+      .rejects.toThrow(/certificado digital/i);
+    expect(http.get).not.toHaveBeenCalled();
+    expect(http.postForm).not.toHaveBeenCalled();
   });
 });

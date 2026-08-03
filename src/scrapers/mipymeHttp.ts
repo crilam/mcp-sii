@@ -40,7 +40,10 @@ export interface DteEmitidoMipyme {
 }
 
 export interface FiltrosDteEmitidos {
-  empresaRut: string;
+  // Opcional a propósito: si la persona opera UNA sola empresa en este portal,
+  // se resuelve sola. Con varias, se exige elegir — devolver la primera sería
+  // consultar un contribuyente distinto al que el llamador tenía en mente.
+  empresaRut?: string;
   tipoDte?: number;
   fechaDesde?: string;
   fechaHasta?: string;
@@ -51,10 +54,12 @@ export interface FiltrosDteEmitidos {
 
 export interface DteEmitidosResult {
   documentos: DteEmitidoMipyme[];
-  // El CGI pagina de a 100 filas y no informa cuántas páginas hay en un campo
-  // legible. Sin decir qué página se pidió, una página inexistente devuelve una
-  // lista vacía indistinguible de "esta empresa no emitió nada".
+  // Qué página se pidió y cuántas hay. Sin las dos, una página inexistente
+  // devuelve una lista vacía indistinguible de "esta empresa no emitió nada".
+  // `totalPaginas` sale del "Página 1 de 3" del propio HTML; es null si esa
+  // leyenda no está, y entonces no se puede afirmar cuántas hay.
   pagina: number;
+  totalPaginas: number | null;
   empresaRut: string;
 }
 
@@ -88,14 +93,9 @@ export class MipymeHttpScraper {
 
     return this.session.conEmpresaExclusiva(async () => {
       const empresas = this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
-      if (!empresas.some(e => e.rut === filtros.empresaRut)) {
-        throw new Error(
-          `La empresa ${filtros.empresaRut} no está entre las que este RUT puede operar en el ` +
-          `portal mipyme. Disponibles: ${empresas.map(e => e.rut).join(', ')}`
-        );
-      }
+      const empresaRut = this.resolverEmpresa(empresas, filtros.empresaRut);
 
-      await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: filtros.empresaRut });
+      await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: empresaRut });
 
       const html = await this.http.get(HISTORIAL_URL, this.params(filtros, pagina));
       this.assertEmpresaSeleccionada(html);
@@ -103,9 +103,32 @@ export class MipymeHttpScraper {
       return {
         documentos: this.parseHistorial(html),
         pagina,
-        empresaRut: filtros.empresaRut,
+        totalPaginas: this.parseTotalPaginas(html),
+        empresaRut,
       };
     });
+  }
+
+  // Con una sola empresa no hay ambigüedad y se resuelve sola, que es el
+  // comportamiento que tenía el camino de navegador. Con varias hay que elegir:
+  // el error da las dos salidas (parámetro o variable de entorno) y la lista, del
+  // mismo modo que SessionManager.selectEmpresa — son las empresas del propio
+  // contribuyente autenticado, las mismas que devuelve sii_mipyme_list_empresas.
+  private resolverEmpresa(empresas: Empresa[], pedida?: string): string {
+    if (pedida) {
+      if (!empresas.some(e => e.rut === pedida)) {
+        throw new Error(
+          `La empresa ${pedida} no está entre las que este RUT puede operar en el portal ` +
+          `mipyme. Disponibles: ${empresas.map(e => e.rut).join(', ')}`
+        );
+      }
+      return pedida;
+    }
+    if (empresas.length === 1) return empresas[0].rut;
+    throw new Error(
+      `Este RUT opera ${empresas.length} empresas en el portal mipyme: pasá empresa_rut en la ` +
+      `llamada o configura SII_EMPRESA_RUT, con uno de: ${empresas.map(e => e.rut).join(', ')}`
+    );
   }
 
   private params(filtros: FiltrosDteEmitidos, pagina: number): Record<string, string> {
@@ -178,18 +201,30 @@ export class MipymeHttpScraper {
   // malformación y un test que fija las 8 columnas.
   private parseHistorial(html: string): DteEmitidoMipyme[] {
     const docs: DteEmitidoMipyme[] = [];
+    // Filas que SON de datos (traen el link al detalle) pero que el parser no
+    // logró representar. No se pueden saltear en silencio: si el CGI cambia el
+    // href o el orden de las columnas, cien documentos se convertirían en una
+    // lista vacía que se lee como "esta empresa no emitió nada". Es el mismo
+    // vacío ambiguo que el proyecto cierra en el RCV y en Consultas DTE.
+    let filasNoInterpretadas = 0;
 
     for (const fila of html.matchAll(/<tr[\s\S]*?<\/tr>/gi)) {
       const bruto = fila[0];
+      // Marca de fila de datos, independiente de que el parseo salga bien: es el
+      // enlace de la columna "Ver". Así el encabezado y las filas decorativas no
+      // cuentan como fallos, y una fila de datos que no rinde sí.
+      const esFilaDeDatos = /mipeGesDocEmi\.cgi/i.test(bruto);
+
       const celdas = [...bruto.matchAll(/<td[^>]*>([\s\S]*?)(?=<\/td>|<td)/gi)]
         .map(c => this.decodificar(c[1].replace(/<[^>]*>/g, ' ')).trim());
 
       // [0]=Ver (link, sin texto) [1]=RUT receptor [2]=razón social
       // [3]=tipo de documento [4]=folio [5]=fecha [6]=monto [7]=estado
-      if (celdas.length < 8 || !/^\d+$/.test(celdas[4])) continue;
-
-      const codigo = bruto.match(/CODIGO=(\d+)/)?.[1];
-      if (!codigo) continue;
+      const codigo = bruto.match(/[?&]CODIGO=(\d+)/)?.[1];
+      if (celdas.length < 8 || !/^\d+$/.test(celdas[4]) || !codigo) {
+        if (esFilaDeDatos) filasNoInterpretadas++;
+        continue;
+      }
 
       docs.push({
         receptorRut: celdas[1],
@@ -206,12 +241,40 @@ export class MipymeHttpScraper {
         codigo,
       });
     }
+
+    if (filasNoInterpretadas > 0) {
+      throw new Error(
+        `El portal mipyme devolvió ${filasNoInterpretadas} fila(s) de documentos que este parser ` +
+        `no pudo interpretar (se interpretaron ${docs.length}). El formato del historial pudo ` +
+        `cambiar: revisar el parseo antes de confiar en el resultado.`
+      );
+    }
     return docs;
+  }
+
+  // El total de páginas se cuenta de los ENLACES de paginación (`NUM_PAG=n`), no
+  // de la leyenda "Página 1 de 3": medido contra el portal real, esa leyenda
+  // viaja DENTRO de un comentario HTML, así que cualquier limpieza de tags la
+  // borra — la primera versión de esto devolvía null en vivo mientras el test
+  // pasaba contra una fixture que la tenía visible.
+  //
+  // Null cuando no hay enlaces y no se puede afirmar nada. No se devuelve 1:
+  // asegurar "hay una sola página" sin saberlo haría que un historial largo
+  // parezca completo, que es el vacío ambiguo de siempre.
+  private parseTotalPaginas(html: string): number | null {
+    const paginas = [...html.matchAll(/[?&]NUM_PAG=(\d+)/g)].map(m => parseInt(m[1], 10));
+    if (paginas.length === 0) return null;
+    return Math.max(...paginas);
   }
 
   // Las entidades HTML de los CGI legacy vienen sin decodificar. Sólo se
   // traducen las que aparecen en estos campos (nombres de empresa y de tipos de
   // documento); no hace falta un decodificador general.
+  //
+  // `&amp;` va ÚLTIMO y tiene que seguir yendo último: si se resolviera primero,
+  // un `&amp;aacute;` del origen quedaría como `&aacute;` y la pasada siguiente
+  // lo convertiría en `á`, decodificando dos veces algo que el SII escribió
+  // escapado. Cualquier entidad nueva se agrega ARRIBA de esa línea.
   private decodificar(texto: string): string {
     return texto
       .replace(/&aacute;/g, 'á').replace(/&eacute;/g, 'é').replace(/&iacute;/g, 'í')

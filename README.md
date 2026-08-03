@@ -111,6 +111,26 @@ Todas las consultas son de **solo lectura**, con una única excepción marcada c
 Todas requieren **certificado digital**, salvo la emisión de DTE, que corre por navegador
 y acepta clave tributaria.
 
+### Cambios recientes que rompen contrato
+
+La migración del portal mipyme a HTTP directo (2026-08-03) cambió dos cosas para
+quien ya usaba estas tools:
+
+- **`sii_mipyme_list_empresas` y `sii_mipyme_list_dte_emitidos` ahora requieren
+  certificado digital.** Antes corrían por navegador y aceptaban clave tributaria.
+  El camino HTTP necesita el archivo de cookies que sólo produce la autenticación
+  con certificado, igual que el resto de las consultas. Fallan de entrada, con el
+  mensaje que dice qué configurar. `sii_mipyme_emitir_dte` sigue por navegador y
+  sigue aceptando clave.
+- **`limit` ya no existe en `sii_mipyme_list_dte_emitidos`: se reemplaza por
+  `pagina`.** El CGI entrega de a 100 documentos por página y recortar del lado
+  del cliente escondía que había más. La respuesta ahora informa `pagina` y
+  `totalPaginas`.
+
+La resolución de la empresa no cambió: el parámetro gana, si no vino se usa
+`SII_EMPRESA_RUT`, y si tampoco hay se resuelve sola cuando el RUT opera una única
+empresa en el portal.
+
 ### Advertencias
 
 - **`sii_mipyme_emitir_dte` está probablemente inoperativa.** Apunta a `mipeDocAlta.cgi`,
