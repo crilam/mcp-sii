@@ -1,0 +1,80 @@
+{
+ "data": {
+  "resumenDte": [
+   {
+    "tipoDoc": 33,
+    "tipoDocDesc": "Factura Electronica",
+    "totalDoc": 85,
+    "mntExento": 0,
+    "mntNeto": 1000000,
+    "mntIVA": 190000,
+    "mntTotal": 1190000,
+    "seccion": "S1",
+    "periodo": "2026-07",
+    "rut": 22222222,
+    "dv": "2",
+    "refNCD": 0,
+    "totalDocNCD": 0
+   },
+   {
+    "tipoDoc": 61,
+    "tipoDocDesc": "Nota de Credito Electronica",
+    "totalDoc": 3,
+    "mntExento": 0,
+    "mntNeto": 1000000,
+    "mntIVA": 190000,
+    "mntTotal": 1190000,
+    "seccion": "S1",
+    "periodo": "2026-07",
+    "rut": 22222222,
+    "dv": "2",
+    "refNCD": 0,
+    "totalDocNCD": 3
+   },
+   {
+    "tipoDoc": 34,
+    "tipoDocDesc": "Factura No Afecta o Exenta Electrónica",
+    "totalDoc": 20,
+    "mntExento": 0,
+    "mntNeto": 1000000,
+    "mntIVA": 190000,
+    "mntTotal": 1190000,
+    "seccion": "S1",
+    "periodo": "2026-07",
+    "rut": 22222222,
+    "dv": "2",
+    "refNCD": 0,
+    "totalDocNCD": 0
+   },
+   {
+    "tipoDoc": 52,
+    "tipoDocDesc": "Guia de Despacho Electronica",
+    "totalDoc": 10,
+    "mntExento": 0,
+    "mntNeto": 1000000,
+    "mntIVA": 190000,
+    "mntTotal": 1190000,
+    "seccion": "S5",
+    "periodo": "2026-07",
+    "rut": 22222222,
+    "dv": "2",
+    "refNCD": 0,
+    "totalDocNCD": 0
+   }
+  ],
+  "datosAsync": null
+ },
+ "metaData": {
+  "conversationId": "TOKEN-DE-PRUEBA",
+  "transactionId": "t-1",
+  "namespace": "cl.sii.sdi.lob.diii.consemitidos.data.api.interfaces.FacadeService/getResumen",
+  "info": null,
+  "errors": null,
+  "page": null
+ },
+ "respEstado": {
+  "codRespuesta": 0,
+  "msgeRespuesta": null,
+  "codError": null
+ }
+}
