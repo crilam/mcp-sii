@@ -73,7 +73,12 @@ Lo que sí queda por resolver, y es la razón real por la que no se construye `s
 
 1. **El modelo de credenciales del servidor.** Hoy `env.ts` toma un único juego (`SII_RUT` + `SII_CLAVE` o certificado) y `server.ts` comparte **un** `SessionManager`. Varias empresas con clave propia exigen una credencial por identidad y una sesión por identidad — con el candado que ya existe: dos sesiones simultáneas contra el mismo RUT disparan el bloqueo del SII.
 2. **Que eso sea posible.** Es exactamente lo que la migración a HTTP compra y el navegador impide: un Chrome con un solo almacén de cookies no puede sostener dos identidades. Por eso **migrar mipyme a HTTP es prerrequisito del multi-empresa**, no un refactor cosmético.
-3. **Custodia.** Guardar claves tributarias de varias empresas es una decisión de seguridad con consecuencias propias, y habilita escritura sobre cada una. Hay que resolverla explícitamente, no heredarla del hecho de que las claves existan.
+3. **Custodia: resuelta — variables de entorno, un juego por empresa.** El operador del servidor custodia las claves, igual que hoy con la única credencial. Consecuencias que el diseño tiene que asumir en vez de descubrir:
+
+   - **Las claves no viajan en las invocaciones de las tools.** La tool recibe el RUT de la empresa; la credencial se resuelve del entorno. Un RUT sin credencial configurada **falla citando eso**, y no cae de vuelta a la credencial por defecto — ese fallback silencioso consultaría una empresa distinta a la pedida.
+   - **Nunca en un mensaje de error ni en un log.** Ya hay tests de anonimización; el modelo multi-credencial les agrega superficie.
+   - **Cada credencial habilita escritura** sobre su empresa (`sii_mipyme_emitir_dte` hoy, y los métodos de escritura que las apps SDI exponen y no se tocan). Tener la clave de N empresas multiplica el alcance de un error por N.
+   - El formato concreto de las variables queda para el diseño, junto con la resolución de sesión por identidad.
 
 La spike de representación no se desperdicia: el puente `legacy/bridge2` es genérico y sirve para cualquier aplicación de tercera generación del portal, con la sesión que sea.
 
@@ -102,8 +107,9 @@ Cosas que el proyecto da por ciertas y que romperían cosas si son falsas:
 
 ## 5. Qué depende de vos, corto
 
-1. **Cómo se custodian las claves de las empresas administradas.** Es la decisión que habilita el multi-empresa entero, y es de seguridad antes que de código: dónde viven las credenciales, quién las provee, y qué alcance de escritura se acepta al tenerlas.
-2. **Decidir el receptor real para ejercitar el paso 3 de BHE** — desbloquea `sii_bhe_emitir`.
-3. **Confirmar el orden**: la migración de mipyme a HTTP es prerrequisito del multi-empresa y el trabajo más grande que se puede empezar hoy sin depender de nada externo. Los pendientes de verificación (1, 3–6 de la sección 3) son más chicos y no compiten.
+1. **Decidir el receptor real para ejercitar el paso 3 de BHE** — desbloquea `sii_bhe_emitir`.
+2. **Confirmar el orden**: la migración de mipyme a HTTP es prerrequisito del multi-empresa y el trabajo más grande que se puede empezar hoy sin depender de nada externo. Los pendientes de verificación (1, 3–6 de la sección 3) son más chicos y no compiten.
+
+**Decidido el 2026-08-03:** la custodia de las claves de empresa va por **variables de entorno, un juego por empresa** — el operador del servidor custodia. Las consecuencias de diseño están arriba, en el punto 3 de la sección del F29.
 
 Todo lo demás de la sección 3 se puede avanzar sin consultarte.
