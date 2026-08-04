@@ -1,59 +1,83 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MipymeScraper } from '../scrapers/mipyme';
+import { MipymeHttpScraper } from '../scrapers/mipymeHttp';
+import { getConfig } from '../env';
 
-const EmpresaRutSchema = z.string().optional().describe('RUT empresa. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si la persona opera una única empresa.');
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
 
-export function registerMipymeTools(server: McpServer, scraper: MipymeScraper): void {
+// Orden de resolución de la empresa, el mismo que el resto del proyecto: el
+// parámetro de la llamada gana, si no vino cae a SII_EMPRESA_RUT, y si tampoco
+// hay, el scraper la resuelve solo cuando este RUT opera una única empresa
+// (con varias, falla listándolas). No se exige acá para no romper el contrato
+// que tenía la tool con el navegador.
+function empresaPedida(empresaRut?: string): string | undefined {
+  return empresaRut ?? getConfig().empresaRut;
+}
+
+export function registerMipymeTools(
+  server: McpServer,
+  http: MipymeHttpScraper,
+  navegador: MipymeScraper
+): void {
   server.tool(
     'sii_mipyme_list_empresas',
-    'Lista todas las empresas que la persona autenticada puede operar en el Sistema de Facturación Gratuito del SII (mipyme.sii.cl). Usar antes de otras tools cuando SII_EMPRESA_RUT no está configurado.',
+    'Lista las empresas que la persona autenticada puede operar en el Sistema de Facturación ' +
+    'Gratuito del SII (mipyme.sii.cl). Usar antes de otras tools cuando SII_EMPRESA_RUT no está ' +
+    'configurado. OJO: esta lista es la del portal mipyme y NO coincide con la de otras ' +
+    'aplicaciones del SII — el Registro de Compras y Ventas y Consultas DTE habilitan su propio ' +
+    'conjunto de empresas, que puede ser más amplio.',
     {},
     async () => {
-      const empresas = await scraper.listEmpresas();
+      const empresas = await http.listEmpresas();
       return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify(empresas, null, 2),
-        }],
+        content: [{ type: 'text' as const, text: JSON.stringify(empresas, null, 2) }],
       };
     }
   );
 
   server.tool(
     'sii_mipyme_list_dte_emitidos',
-    'Lista el historial de DTE emitidos en el Sistema de Facturación Gratuito del SII (mipyme.sii.cl). Devuelve folio, tipo, receptor, monto y estado de cada documento.',
+    'Lista el historial de DTE emitidos en el Sistema de Facturación Gratuito del SII ' +
+    '(mipyme.sii.cl): folio, tipo, receptor, monto y estado de cada documento. Sin filtros de ' +
+    'fecha devuelve el historial completo de la empresa, no el período actual. Entrega de a 100 ' +
+    'documentos por página: usá "pagina" para las siguientes. Cubre sólo lo emitido POR ESTE ' +
+    'portal, así que puede no coincidir con sii_dte_list_documentos_emitidos ni con sii_rcv_*, ' +
+    'que consultan otros registros del SII.',
     {
-      empresa_rut: EmpresaRutSchema,
+      empresa_rut: z.string().optional().describe('RUT de la empresa con dígito verificador. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si este RUT opera una única empresa en el portal.'),
       tipo_dte: z.number().int().optional().describe('Filtrar por tipo: 33=factura, 34=exenta, 61=N.crédito, 56=N.débito, 52=guía, 46=F.compra'),
       fecha_desde: FechaSchema,
       fecha_hasta: FechaSchema,
       receptor_rut: z.string().optional().describe('Filtrar por RUT del receptor'),
       folio: z.number().int().optional().describe('Filtrar por folio exacto'),
-      limit: z.number().int().min(1).max(500).default(50),
+      pagina: z.number().int().min(1).default(1).describe('Página del historial (100 documentos por página)'),
     },
-    async ({ empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, folio, limit }) => {
-      const docs = await scraper.listMipymeDteEmitidos({
-        empresaRut: empresa_rut,
+    async ({ empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, folio, pagina }) => {
+      const resultado = await http.listDteEmitidos({
+        empresaRut: empresaPedida(empresa_rut),
         tipoDte: tipo_dte,
         fechaDesde: fecha_desde,
         fechaHasta: fecha_hasta,
         receptorRut: receptor_rut,
         folio,
-        limit,
+        pagina,
       });
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(docs, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(resultado, null, 2) }],
       };
     }
   );
 
   server.tool(
     'sii_mipyme_emitir_dte',
-    'Emite un DTE (factura, nota de crédito, guía de despacho, etc.) en el Sistema de Facturación Gratuito del SII (mipyme.sii.cl). Requiere RUT y DV del receptor separados. Devuelve el folio asignado.',
+    'Emite un DTE (factura, nota de crédito, guía de despacho, etc.) en el Sistema de ' +
+    'Facturación Gratuito del SII (mipyme.sii.cl). ADVERTENCIA: emitir es un acto tributario ' +
+    'real e irreversible que notifica al receptor. ADEMÁS, hoy esta tool está probablemente ' +
+    'inoperativa: el CGI al que apunta (mipeDocAlta.cgi) responde 404, medido el 2026-08-03. ' +
+    'Requiere RUT y DV del receptor separados. Devuelve el folio asignado.',
     {
-      empresa_rut: EmpresaRutSchema,
+      empresa_rut: z.string().optional().describe('RUT empresa. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si la persona opera una única empresa.'),
       tipo_dte: z.number().int().describe('Tipo DTE: 33=factura, 34=exenta, 61=N.crédito, 56=N.débito, 52=guía, 46=F.compra'),
       receptor_rut: z.string().describe('RUT del receptor sin DV (ej: "33333333")'),
       receptor_dv: z.string().describe('DV del receptor (ej: "1" o "K")'),
@@ -64,7 +88,7 @@ export function registerMipymeTools(server: McpServer, scraper: MipymeScraper): 
       })).min(1).describe('Líneas de detalle del documento'),
     },
     async ({ empresa_rut, tipo_dte, receptor_rut, receptor_dv, lineas }) => {
-      const result = await scraper.emitirDte({
+      const result = await navegador.emitirDte({
         empresaRut: empresa_rut,
         tipoDte: tipo_dte,
         receptorRut: receptor_rut,

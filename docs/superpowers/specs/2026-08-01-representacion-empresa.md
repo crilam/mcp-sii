@@ -1,11 +1,32 @@
 # Representación de empresa: el puente legacy y el registro vacío
 
-Fecha: 2026-08-01, **corregido el 2026-08-03**
-Estado: **acceso verificado; el flujo de autorización, no**. Hay un bloqueo de registro y podría haber además uno técnico.
+Fecha: 2026-08-01, **corregido dos veces el 2026-08-03**
+Estado: **la representación electrónica no es el camino del proyecto.** El acceso a la aplicación quedó verificado y ese hallazgo sigue sirviendo; el flujo de autorización no se verificó y ya no hace falta.
 
 Spike para destrabar el F29 de empresa, que quedó pendiente porque `propuestaf29ui` trata la empresa como estado de sesión y no como parámetro (ver [contratos F29](2026-08-01-f29-declaraciones-contratos.md)).
 
-## Corrección de la versión anterior
+## Segunda corrección: la representación resuelve un problema que el proyecto no tiene
+
+Este documento —en las dos versiones anteriores— asumía que operar una empresa exigía **representarla desde la identidad de una persona**. Toda la spike, y su recomendación de inscribir un trámite, salen de ahí.
+
+**El modelo del proyecto es otro.** La lista de empresas la define el servicio, y para cada empresa administrada se cuenta con **su RUT y su clave del SII**. Se autentica *como* la empresa. `propuestaf29ui` valida contra el RUT que la sesión representa, y con credenciales propias ese RUT ya es el de la empresa: no hay nada que representar.
+
+Consecuencia sobre lo que sigue de este documento:
+
+| Parte | Sigue válida |
+|---|---|
+| Las tres generaciones del portal | **sí** |
+| El puente `legacy/bridge2` y su receta | **sí** — es genérico, sirve con cualquier sesión |
+| `GET /app/session/status` | **sí** |
+| `getRepresentantes` y el `total: 0` | sí como dato, **irrelevante** para el proyecto |
+| `authorize/v1/urlApplicacion`, `clientId`, `code_app` | **no hacen falta**: son maquinaria para representar a un tercero |
+| La recomendación de inscribir la representación | **descartada** |
+
+Dónde está el bloqueo real del multi-empresa, entonces: en **una credencial y una sesión por identidad**. Hoy `env.ts` toma un único juego y `server.ts` comparte un `SessionManager` —porque dos sesiones simultáneas contra el mismo RUT disparan el bloqueo del SII—, y un Chrome con un solo almacén de cookies no sostiene dos identidades. Eso hace de la migración de `mipyme.ts` a HTTP un prerrequisito, y de la custodia de las claves una decisión de seguridad a tomar explícitamente. Ver [estado y pendientes](2026-08-03-estado-y-pendientes.md).
+
+La lección de método, que es la misma de la primera corrección con otro disfraz: **antes de relevar un mecanismo, verificar que el problema que resuelve sea el que se tiene.** Esta spike relevó bien un camino que no había que tomar.
+
+## Primera corrección: el 401 no era incompatibilidad
 
 La primera versión de este documento afirmaba que la aplicación de representantes **no aceptaba las cookies legacy** y que el mecanismo era **no ejecutable con la autenticación actual**. **Las dos afirmaciones eran falsas**, por dos errores de la spike original:
 
@@ -99,30 +120,24 @@ No se pudo ejercitar por lo que sigue.
 
 Eso cambia la naturaleza del bloqueo del F29 de empresa. No es una barrera técnica: es un registro vacío. La persona opera esas empresas por **otros mecanismos** —la lista del portal mipyme, la autorización del Registro de Compras y Ventas— pero no está inscrita como *representante electrónico* en este registro más nuevo.
 
-La consecuencia práctica cambia respecto de la versión anterior, pero con un matiz que conviene no perder: hay que inscribir la representación en el SII —un trámite— y **eso es necesario, no necesariamente suficiente**. El POST que establece la sesión representada sigue sin verificarse, y exige un `clientId` cuyo origen no se determinó. Puede que después del trámite quede trabajo técnico; hoy no hay forma de saber cuánto sin poder ejercitarlo.
+La consecuencia práctica que se sacó de acá —inscribir la representación, un trámite— **quedó descartada por la segunda corrección**: con clave propia de cada empresa no hay nada que representar. Se deja el hallazgo porque el `total: 0` explica el comportamiento observado, no porque marque un camino.
 
 Esto también explica por qué el RCV funciona y la propuesta F29 no, sin necesidad de invocar dos modelos de autorización distintos: el RCV valida contra su propia lista de empresas autorizadas, y la propuesta F29 valida contra el RUT que la sesión representa — que hoy es sólo el propio.
 
-## Lo que queda sin verificar
+## Lo que quedó sin verificar, y ya no hace falta
 
-1. **El `clientId`.** El bundle lo espera y `session/status` no lo devuelve. Puede venir de otra llamada, o el campo puede ser opcional en la práctica.
-2. **`authorize/v1/urlApplicacion`.** Con cero representados no hay nada que autorizar.
+Se listan para cerrar el registro, no como pendientes. Los tres primeros sólo importan si algún día se quisiera representar a un tercero — no es el caso del proyecto:
+
+1. **El `clientId`.** El bundle lo espera y `session/status` no lo devuelve.
+2. **`authorize/v1/urlApplicacion`.** Con cero representados no había nada que autorizar.
 3. **El `code_app` de la propuesta F29**, que sale de un listado que la app obtiene autenticada.
-4. **Si `consulta` (sin `_rpte`) sirve para otro caso** o su `500` es un defecto del servicio.
+4. **Si `consulta` (sin `_rpte`) sirve para otro caso** o su `500` es un defecto del servicio. Éste es el único que podría reaparecer, si alguna vez se consume esta aplicación por otro motivo.
 
 ## Qué recomienda este documento ahora
 
-La versión anterior planteaba elegir entre relevar un handshake OIDC —caro— o acumular claves tributarias de empresas —riesgoso—. **Las dos opciones partían de una premisa falsa.**
+**No tomar este camino.** Para consultar el F29 de una empresa se autentica con las credenciales de esa empresa; la representación electrónica sobra. El pendiente real es de arquitectura de sesión y de custodia de claves, y vive en [estado y pendientes](2026-08-03-estado-y-pendientes.md).
 
-El camino correcto, si se quiere consultar el F29 de una empresa:
-
-1. **Inscribir la representación electrónica en el SII.** Es un trámite. Sin eso no hay nada que autorizar y el resto no se puede probar.
-2. **Recién entonces terminar el relevamiento**: ejercitar `urlApplicacion`, resolver de dónde sale el `clientId` y cuál es el `code_app` de la propuesta F29. Ese trabajo es técnico y su tamaño es desconocido hasta poder intentarlo.
-3. Después implementar.
-
-Lo que **no** hay que volver a hacer es el acceso a la aplicación: eso quedó resuelto con el puente.
-
-La opción de autenticar directamente con la clave tributaria de la empresa sigue existiendo, pero deja de ser el camino barato frente a un obstáculo técnico: pasa a ser un atajo alrededor de un trámite, con las consecuencias de custodia y de alcance de escritura que eso implica.
+Lo que **sí** hay que conservar de esta spike es el acceso: autenticar legacy, cruzar el puente `legacy/bridge2`, y usar los dos juegos de cookies. Eso no depende de a quién represente la sesión.
 
 ## Valor más allá del F29
 

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Facturacion Electr&oacute;nica MIPYME - Seleccion de Empresa</title>
+	<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1"/>
+</head>
+<body>
+<!-- Captura anonimizada de mipeSelEmpresa.cgi con sesión autenticada.
+     El valor de cada opción es el RUT CON dígito verificador, y el texto trae
+     el nombre seguido del mismo RUT. No hay campos ocultos: el POST de
+     selección lleva RUT_EMP y nada más.
+
+     SE PRESERVA A PROPÓSITO QUE LOS <option> NO CIERREN, como los manda el SII.
+     Un parser cuya regex consuma el "<" del option siguiente se saltea una
+     empresa de cada dos —con cinco opciones devuelve tres— y no hay ningún
+     error: simplemente faltan empresas. Pasó de verdad. -->
+<form class="form-horizontal" name="fPrmEmpPOP" id="fPrmEmpPOP" method="post" action="/cgi-bin/Portal001/mipeSelEmpresa.cgi" >
+  <div class="form-group">
+    <label class="col-sm-4 control-label">Empresa</label>
+    <div class="col-sm-8">
+      <select class="form-control" name="RUT_EMP">
+        <option value="22222222-2">EMPRESA DOS SPA 22222222-2
+        <option value="33333333-3">COMERCIAL TRES LTDA 33333333-3
+        <option value="44444444-4">SERVICIOS CUATRO SPA 44444444-4
+        <option value="55555555-5">TRANSPORTES CINCO SPA 55555555-5
+      </select>
+    </div>
+  </div>
+  <button class="btn btn-default btn-sm" type="submit">Ingresar</button>
+</form>
+</body>
+</html>

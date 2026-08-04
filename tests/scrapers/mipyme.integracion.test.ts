@@ -9,9 +9,16 @@ const MockBrowser = Browser as jest.MockedClass<typeof Browser>;
 // A diferencia de tests/scrapers/mipyme.test.ts (que mockea SessionManager
 // entero), estos tests usan un SessionManager real: sólo así se puede
 // verificar que empresaRut recorre el camino completo hasta el navegador —
-// ensureEmpresa → getSession → selectEmpresa/cambiarEmpresa — sin depender de
-// que un mock ya "sepa" la respuesta correcta. Cubren justo el caso que el
-// reviewer marcó: varias empresas, empresaRut explícito, sin SII_EMPRESA_RUT.
+// ensureMipymePortalEmpresa → getSession → selectEmpresa/cambiarEmpresa — sin
+// depender de que un mock ya "sepa" la respuesta correcta. Cubren el caso de
+// varias empresas con empresaRut explícito y sin SII_EMPRESA_RUT.
+//
+// Antes ejercitaban getDocumentoEmitido/getDocumentoRecibido. Esos métodos se
+// borraron: apuntaban a `consemitidosinternetui`, que ya se consulta por HTTP
+// en DteScraper, y ninguna tool los llamaba. La garantía que verificaban —que
+// dos llamadas con empresas distintas no se contaminan y no abren una segunda
+// sesión— es del camino de empresa, no de esos métodos, así que se conserva
+// acá sobre listMipymeDteEmitidos, que sigue usando el navegador.
 const config: SiiConfig = {
   rut: '99999999-9',
   strategy: AuthStrategy.Clave,
@@ -32,45 +39,31 @@ const dosEmpresasSnapshot = [
   '- option "EMPRESA DOS LTDA 22222222-2" [ref=e12]',
 ].join('\n');
 
-const formSnapshot = [
-  '- combobox [expanded=false, ref=e9]: Empresa',
-  '- combobox [expanded=false, ref=e20]: Enero',
-  '- combobox [expanded=false, ref=e21]: 2026',
-  '- button "Consultar" [ref=e22]',
+// Página de selección del portal mipyme (mipeSelEmpresa.cgi) que abre
+// ensureMipymePortalEmpresa antes de consultar el historial.
+const portalSnapshot = [
+  '- combobox [expanded=false, ref=e30]: Empresa',
+  '- button "Ingresar" [ref=e31]',
 ].join('\n');
 
-const summarySnapshot = [
-  'DTE de ventas emitidos',
-  '- link "Factura Electronica (33)" [ref=e34]',
-].join('\n');
-
-function listSnapshot(folio: number): string {
+// Fila del historial con el RUT del receptor distinto por empresa: sirve para
+// confirmar que cada llamada realmente terminó operando sobre datos propios de
+// la empresa pedida, no sobre una respuesta reciclada de la anterior.
+function historialSnapshot(folio: number, receptorRut: string): string {
   return [
-    'Folio',
-    `- link "${folio}" [ref=e40]`,
-  ].join('\n');
-}
-
-// Fila de documento con el RUT del receptor distinto por empresa: sirve para
-// confirmar que cada llamada realmente terminó operando sobre datos propios
-// de la empresa pedida, no sobre una respuesta reciclada de la anterior.
-function detailSnapshot(folio: number, receptorRut: string): string {
-  return [
-    'Total documentos',
+    'Receptor RUT',
     '      - row',
-    '        - cell "1" [ref=e1]',
-    `        - cell "${receptorRut}" [ref=e2]`,
-    `        - cell "${folio}" [ref=e3]`,
-    '        - cell "15/01/2026" [ref=e4]',
-    '        - cell "15/01/2026" [ref=e5]',
-    '        - cell "100.000" [ref=e6]',
-    '        - cell "0" [ref=e7]',
-    '        - cell "19.000" [ref=e8]',
-    '        - cell "119.000" [ref=e9]',
+    `        - cell "${receptorRut}" [ref=e1]`,
+    '        - cell "CLIENTE SPA" [ref=e2]',
+    '        - cell "Factura Electronica" [ref=e3]',
+    `        - cell "${folio}" [ref=e4]`,
+    '        - cell "2026-01-15" [ref=e5]',
+    '        - cell "119000" [ref=e6]',
+    '        - cell "Documento Emitido" [ref=e7]',
   ].join('\n');
 }
 
-describe('MipymeScraper + SessionManager real: getDocumentoEmitido con varias empresas', () => {
+describe('MipymeScraper + SessionManager real: listMipymeDteEmitidos con varias empresas', () => {
   it('opera sobre la empresa pedida en cada llamada, no sobre la cacheada de la anterior', async () => {
     const browser = new MockBrowser();
     const session = new SessionManager(config, browser);
@@ -81,24 +74,22 @@ describe('MipymeScraper + SessionManager real: getDocumentoEmitido con varias em
       // --- Llamada 1: empresa A (11111111-1) ---
       loginSnapshot,       // authenticate() -> fillClaveForm
       dosEmpresasSnapshot, // selectEmpresa(A) durante login()
-      formSnapshot,        // applyFiltrosEmitidos
-      summarySnapshot,     // tras waitFor('DTE de ventas emitidos')
-      listSnapshot(1001),  // tras waitFor('Folio')
-      detailSnapshot(1001, '11111111-1'), // tras waitFor('Total documentos')
+      portalSnapshot,      // ensureMipymePortalEmpresa
+      historialSnapshot(1001, '11111111-1'),
       // --- Llamada 2: empresa B (22222222-2), sesión ya autenticada ---
       dosEmpresasSnapshot, // cambiarEmpresa(B): sólo selectEmpresa, sin authenticate()
-      formSnapshot,        // applyFiltrosEmitidos
-      summarySnapshot,
-      listSnapshot(2002),
-      detailSnapshot(2002, '22222222-2'),
+      portalSnapshot,
+      historialSnapshot(2002, '22222222-2'),
     ];
     (browser.snapshot as jest.Mock).mockImplementation(() => cola.shift());
 
-    const docA = await scraper.getDocumentoEmitido(33, 1001, '11111111-1');
-    const docB = await scraper.getDocumentoEmitido(33, 2002, '22222222-2');
+    const docsA = await scraper.listMipymeDteEmitidos({ empresaRut: '11111111-1' });
+    const docsB = await scraper.listMipymeDteEmitidos({ empresaRut: '22222222-2' });
 
-    expect(docA.receptorRut).toBe('11111111-1');
-    expect(docB.receptorRut).toBe('22222222-2');
+    expect(docsA[0].receptorRut).toBe('11111111-1');
+    expect(docsA[0].folio).toBe(1001);
+    expect(docsB[0].receptorRut).toBe('22222222-2');
+    expect(docsB[0].folio).toBe(2002);
 
     // El combo de selección de empresa se usó con cada RUT pedido, en orden:
     // primero A, después B — confirma que la segunda llamada no se quedó con
@@ -115,20 +106,6 @@ describe('MipymeScraper + SessionManager real: getDocumentoEmitido con varias em
       .filter(([url]) => /IngresoRutClave/.test(url));
     expect(loginOpens).toHaveLength(1);
   });
-});
-
-describe('MipymeScraper + SessionManager real: getDocumentoRecibido con varias empresas', () => {
-  const tabRecibidosSnapshot = [
-    '- link " DTE Emitidos" [ref=e7]',
-    '- link " DTE Recibidos" [ref=e8]',
-    '- heading "CONSULTA DTE RECIBIDOS"',
-  ].join('\n');
-
-  const summaryRecibidosSnapshot = [
-    'CONSULTA DTE RECIBIDOS',
-    'Tipo Documento',
-    '- link "Factura Electronica (33)" [ref=e20]',
-  ].join('\n');
 
   it('resuelve la empresa pedida por parámetro, sin SII_EMPRESA_RUT configurado', async () => {
     const browser = new MockBrowser();
@@ -137,18 +114,15 @@ describe('MipymeScraper + SessionManager real: getDocumentoRecibido con varias e
 
     const cola: string[] = [
       loginSnapshot,
-      dosEmpresasSnapshot,       // selectEmpresa(B) durante login()
-      tabRecibidosSnapshot,      // navegarATabRecibidos
-      formSnapshot,              // applyFiltrosRecibidos
-      summaryRecibidosSnapshot,  // tras waitForAny
-      listSnapshot(3003),        // tras waitFor('Folio')
-      detailSnapshot(3003, '22222222-2'), // tras waitFor('Total documentos')
+      dosEmpresasSnapshot, // selectEmpresa(B) durante login()
+      portalSnapshot,
+      historialSnapshot(3003, '22222222-2'),
     ];
     (browser.snapshot as jest.Mock).mockImplementation(() => cola.shift());
 
-    const doc = await scraper.getDocumentoRecibido(33, 3003, '22222222-2', '22222222-2');
+    const docs = await scraper.listMipymeDteEmitidos({ empresaRut: '22222222-2' });
 
-    expect(doc.emisorRut).toBe('22222222-2');
+    expect(docs[0].receptorRut).toBe('22222222-2');
     expect(browser.select).toHaveBeenCalledWith(expect.any(String), '22222222-2');
   });
 });
