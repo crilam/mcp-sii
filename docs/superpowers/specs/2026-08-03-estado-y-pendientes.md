@@ -46,6 +46,22 @@ Dos corolarios operativos:
 
 Y una regla de método, aprendida a costa de una spike mal leída: **al probar autorización, los datos tienen que ser reales.** Un rechazo con un RUT ficticio no significa nada — así se inventó un modelo de autorización que no existía.
 
+
+### Corolario: la contraparte extranjera
+
+**Toda tool que exponga una contraparte debe distinguir el RUT genérico de extranjeros del RUT real de un contribuyente.**
+
+En documentos de exportación (tipos 110, 111, 112) el SII pone `55555555-5` como RUT de **todo** receptor extranjero. Ese valor no identifica a nadie y se repite entre clientes distintos: no sirve para agrupar, comparar ni cruzar. El identificador real —RUC, VAT, tax id de origen— viaja en otro campo.
+
+Es la misma regla de arriba aplicada a la identidad: un valor no puede significar "este contribuyente" y "cualquier extranjero" a la vez.
+
+`sii_rcv_detalle` lo resuelve con `contraparteTipoId` (`rut_chileno` | `extranjero`), `contraparteIdExtranjero` y `contraparteNacionalidadCodigo` — el código numérico crudo, sin traducir a país.
+
+**Está escrito como regla y no como pendiente por una razón concreta:** se arregló en `sii_rcv_detalle` y **no viajó a `sii_dte_*`**, que tiene el mismo defecto. Verificado en vivo: `sii_dte_list_documentos_emitidos` devuelve `contraparteRut: "55555555-5"` sin marca. Se trató como bug de un archivo en vez de como propiedad del dominio, y por eso se repitió.
+
+Antes de arreglarlo hay que resolver si el dato está disponible: la respuesta de `getDetalle` trae `datosExpA`, `datosExpB` y `datosExpB1`, sin relevar.
+
+
 ## 3. Pendientes, ordenados por si dependen de vos o no
 
 ### Se pueden hacer ya, sin nada de afuera
@@ -116,3 +132,21 @@ Cosas que el proyecto da por ciertas y que romperían cosas si son falsas:
 **Decidido el 2026-08-03:** la custodia de las claves de empresa va por **variables de entorno, un juego por empresa** — el operador del servidor custodia. Las consecuencias de diseño están arriba, en el punto 3 de la sección del F29.
 
 Todo lo demás de la sección 3 se puede avanzar sin consultarte.
+
+---
+
+## 6. Cómo verificar en este proyecto
+
+Los modos de falla que **efectivamente ocurrieron** durante el desarrollo. Todos dieron **falsos negativos** — el resultado que dice "está bien" cuando no lo está.
+
+**El servidor miente sobre sí mismo.** El `Content-Type` de renta declara `ISO-8859-1` y manda UTF-8. Medir el header no alcanzaba: había que mirar los bytes. Ninguna afirmación del portal cuenta como verificada hasta contrastarla con datos reales.
+
+**Las fixtures pueden ocultar el bug que las justifican.** Guardan texto ya decodificado, así que ningún test de parseo detecta un error de decodificación. Y una anonimización descuidada borró el `55555555-5` que era justamente la señal del problema. Un test que debe cubrir decodificación tiene que partir de bytes.
+
+**Un test puede dar seguridad falsa.** El del candado de sesión pasaba porque encolaba las dos llamadas antes de que el flag se activara: nunca reprodujo el escenario real. Verificá que el test **falle** al revertir el arreglo — por mutación, no por confianza.
+
+**Las herramientas fallan en silencio.** `grep` trata los archivos ISO-8859-1 del SII como binarios y devuelve vacío sin advertir: usar `grep -a`. Un `git show` mal armado dentro de un loop informó "todo limpio" sobre commits que sí tenían el dato.
+
+**Con datos falsos, un rechazo no significa nada.** Un endpoint de autorización probado con un RUT ficticio respondió "Usuario no autorizado", y eso llevó a documentar un modelo de autorización que no existía.
+
+**Un `401` no prueba incompatibilidad.** Puede ser una ruta mal armada. Descartá el error propio antes de declarar un límite ajeno.
