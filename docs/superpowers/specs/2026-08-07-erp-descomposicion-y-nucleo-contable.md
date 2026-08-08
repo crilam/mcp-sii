@@ -127,3 +127,42 @@ Impuestos, sueldos, ingesta desde el SII, corrección monetaria, moneda extranje
 Un libro contable oficial y una liquidación de sueldos tienen consecuencias legales. Este sistema puede ser correcto en su aritmética y aun así estar mal en su criterio tributario, porque el criterio no es código: es normativa interpretada.
 
 **El diseño debe ser validado por un contador antes de que este sistema reemplace al que la empresa usa hoy**, y las liquidaciones y declaraciones que produzca deben contrastarse en paralelo con el método actual durante al menos un ciclo completo antes de confiar en ellas.
+
+---
+
+# Estado al 7 de agosto de 2026
+
+665 tests en 39 suites. `tsc` limpio, `npm run build` en verde.
+
+## Construido
+
+**A. Núcleo contable.** Plan de cuentas con jerarquía y detección de ciclos, calendario de períodos, borradores, asientos, mayor, balance de comprobación, balance general, estado de resultados, cierre del ejercicio y apertura del siguiente. Esquema Postgres con las invariantes adentro, incluido el cuadre como `CONSTRAINT TRIGGER` diferido al `COMMIT`. Repositorio con todo parametrizado y filtrado por empresa.
+
+**B. Ingesta y reglas.** Documento normalizado, clave de idempotencia que respeta la contraparte extranjera, motor de reglas como datos en JSONB, conciliación al reingestar, y conector que traduce el detalle del RCV.
+
+**C. Determinación mensual.** Tabla de parámetros con vigencia y fuente, determinación de IVA con remanente que nunca se asume, armado del F29.
+
+**D. Remuneraciones.** Motor de liquidación completo, tabla de tramos para impuestos progresivos, y el puente que convierte la nómina en asiento.
+
+**E. Renta.** Determinación de RLI a partir del resultado contable, con clasificación tributaria por cuenta.
+
+## Lo que falta, y por qué
+
+**Los valores de todos los parámetros.** El sistema tiene la estructura y ningún número real: tasas de AFP, topes imponibles, tramos del impuesto único, valores de UF y UTM, códigos del F29 y del F22. Están vacíos a propósito. Cargarlos es trabajo de quien tenga la fuente autorizada, y hasta que estén cargados el sistema **se niega a calcular** en vez de inventar.
+
+**Los registros empresariales del 14D — RAI, DDAN, REX y SAC.** No están implementados, y no es por falta de tiempo.
+
+Estos registros tienen un orden de imputación que determina qué crédito se asigna a cada retiro y en qué prelación se consumen los saldos. A diferencia de una tasa, que es un número que alguien puede cargar en una tabla, el orden de imputación es un **algoritmo**: no basta con parametrizar un valor, hay que codificar la secuencia correcta. Y esa secuencia no la puedo verificar contra nada — no hay endpoint del SII que la devuelva, y escribirla de memoria produciría un resultado que parece razonable y determina mal los créditos de los socios.
+
+Implementarla requiere que un contador especifique la secuencia, con sus casos de borde, antes de escribir la primera línea. Es el único lugar del proyecto donde el diseño mismo está bloqueado a la espera de esa especificación, y por eso está anotado acá en vez de resuelto a medias.
+
+**La corrección monetaria.** Misma razón: es un procedimiento, no un parámetro.
+
+**La interfaz.** El agente como asistente adentro, según lo conversado. No se empezó porque hasta ahora no había suficiente que mostrar.
+
+## Antes de usarlo para algo real
+
+1. Cargar los parámetros con su fuente.
+2. Que un contador valide la secuencia de la liquidación y la determinación de RLI.
+3. Correr un ciclo completo en paralelo con el método actual y contrastar.
+4. Confirmar la regla de redondeo de las cotizaciones con quien lleva las remuneraciones hoy.
