@@ -12,6 +12,6 @@
     "resolveJsonModule": true,
     "types": ["jest", "node"]
   },
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "tests/**/*", "erp/src/**/*", "erp/tests/**/*"],
   "exclude": ["node_modules", "dist"]
 }
