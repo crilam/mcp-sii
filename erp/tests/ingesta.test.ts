@@ -28,6 +28,7 @@ function doc(parcial: Partial<DocumentoIngestado> = {}): DocumentoIngestado {
     folio: '500',
     fecha: '2026-01-10',
     contraparteRut: '99999999-9',
+    contraparteTipoId: 'rut_chileno',
     contraparteNombre: 'Proveedor Ejemplo SpA',
     montoNeto: 50_000,
     montoExento: 0,
@@ -59,27 +60,56 @@ describe('clave de idempotencia', () => {
     expect(claveDeIdempotencia(doc({ operacion: 'venta' }))).not.toBe(claveDeIdempotencia(doc()));
   });
 
-  it('no fusiona dos extranjeros distintos con el mismo folio', () => {
-    // El SII le da a toda contraparte extranjera el mismo RUT genérico. Sin la
-    // razón social en la clave, estos dos documentos serían uno solo y se
-    // perdería una compra sin que nada lo delate.
-    const uno = doc({ contraparteRut: RUT_CONTRAPARTE_EXTRANJERA, contraparteNombre: 'Amazon Web Services' });
-    const otro = doc({ contraparteRut: RUT_CONTRAPARTE_EXTRANJERA, contraparteNombre: 'Google Cloud' });
+  function extranjero(parcial: Partial<DocumentoIngestado> = {}) {
+    return doc({
+      contraparteRut: RUT_CONTRAPARTE_EXTRANJERA,
+      contraparteTipoId: 'extranjero',
+      ...parcial,
+    });
+  }
 
-    expect(claveDeIdempotencia(uno)).not.toBe(claveDeIdempotencia(otro));
+  it('no fusiona dos extranjeros distintos con el mismo folio', () => {
+    // El SII le da a toda contraparte extranjera el mismo RUT genérico. Sin un
+    // discriminador, estos dos documentos serían uno solo y se perdería una
+    // compra sin que nada lo delate.
+    expect(claveDeIdempotencia(extranjero({ contraparteNombre: 'Amazon Web Services' }))).not.toBe(
+      claveDeIdempotencia(extranjero({ contraparteNombre: 'Google Cloud' })),
+    );
+  });
+
+  it('prefiere el identificador extranjero a la razón social', () => {
+    // El nombre de una empresa se escribe de muchas formas; su tax id no.
+    const conRazonSocialDistinta = [
+      extranjero({ contraparteIdExtranjero: 'VAT-123', contraparteNombre: 'Acme Inc' }),
+      extranjero({ contraparteIdExtranjero: 'VAT-123', contraparteNombre: 'ACME INCORPORATED' }),
+    ];
+    expect(claveDeIdempotencia(conRazonSocialDistinta[0] as DocumentoIngestado)).toBe(
+      claveDeIdempotencia(conRazonSocialDistinta[1] as DocumentoIngestado),
+    );
+  });
+
+  it('cae a la razón social cuando el SII no informa identificador extranjero', () => {
+    // Fuera de exportaciones el identificador viene null, que es lo normal.
+    const sinId = extranjero({ contraparteIdExtranjero: null, contraparteNombre: 'Stripe Inc' });
+    expect(claveDeIdempotencia(sinId)).toMatch(/\|nombre:stripe inc$/);
   });
 
   it('trata al mismo extranjero como el mismo aunque cambie acentos o espacios', () => {
-    const uno = doc({ contraparteRut: RUT_CONTRAPARTE_EXTRANJERA, contraparteNombre: 'Telefónica  España' });
-    const otro = doc({ contraparteRut: RUT_CONTRAPARTE_EXTRANJERA, contraparteNombre: 'telefonica españa' });
-
-    expect(claveDeIdempotencia(uno)).toBe(claveDeIdempotencia(otro));
+    expect(claveDeIdempotencia(extranjero({ contraparteNombre: 'Telefónica  España' }))).toBe(
+      claveDeIdempotencia(extranjero({ contraparteNombre: 'telefonica españa' })),
+    );
   });
 
-  it('marca ambiguo al extranjero sin razón social en vez de arriesgar la fusión', () => {
-    expect(() =>
-      claveDeIdempotencia(doc({ contraparteRut: RUT_CONTRAPARTE_EXTRANJERA, contraparteNombre: '  ' })),
-    ).toThrow(DocumentoAmbiguo);
+  it('marca ambiguo al extranjero sin identificador ni razón social', () => {
+    expect(() => claveDeIdempotencia(extranjero({ contraparteNombre: '  ' }))).toThrow(
+      DocumentoAmbiguo,
+    );
+  });
+
+  it('mira el tipo de identificación, no el valor del RUT', () => {
+    // Si algún día el SII cambia el RUT genérico, la regla sigue valiendo.
+    const otroGenerico = doc({ contraparteRut: '66666666-6', contraparteTipoId: 'extranjero' });
+    expect(claveDeIdempotencia(otroGenerico)).toMatch(/\|nombre:/);
   });
 
   it('no exige razón social a una contraparte con RUT chileno', () => {
@@ -300,7 +330,11 @@ describe('conciliación al reingestar un período', () => {
   it('aparta los ambiguos sin frenar el resto del lote', () => {
     const r = conciliar(
       [
-        doc({ contraparteRut: RUT_CONTRAPARTE_EXTRANJERA, contraparteNombre: '' }),
+        doc({
+          contraparteRut: RUT_CONTRAPARTE_EXTRANJERA,
+          contraparteTipoId: 'extranjero',
+          contraparteNombre: '',
+        }),
         doc({ folio: '777' }),
       ],
       [],
@@ -308,6 +342,6 @@ describe('conciliación al reingestar un período', () => {
 
     expect(r.ambiguos).toHaveLength(1);
     expect(r.nuevos).toHaveLength(1);
-    expect(r.ambiguos[0]?.motivo).toMatch(/RUT genérico 55555555-5/);
+    expect(r.ambiguos[0]?.motivo).toMatch(/ni identificador extranjero ni razón social/);
   });
 });

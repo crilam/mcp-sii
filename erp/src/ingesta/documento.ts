@@ -17,6 +17,16 @@ export type Operacion = 'compra' | 'venta';
  */
 export const RUT_CONTRAPARTE_EXTRANJERA = '55555555-5';
 
+/**
+ * Si `contraparteRut` identifica a alguien.
+ *
+ * Es el mismo tipo que expone el scraper del RCV, y es el campo que hay que
+ * mirar antes de usar el RUT como identidad. Comparar contra la constante del
+ * RUT genérico funcionaría hoy, pero duplicaría en dos lugares una decisión que
+ * el SII ya nos entrega resuelta.
+ */
+export type TipoIdContraparte = 'rut_chileno' | 'extranjero';
+
 export interface DocumentoIngestado {
   readonly empresaRut: string;
   readonly operacion: Operacion;
@@ -25,6 +35,12 @@ export interface DocumentoIngestado {
   readonly folio: string;
   readonly fecha: FechaContable;
   readonly contraparteRut: string;
+  readonly contraparteTipoId: TipoIdContraparte;
+  /**
+   * Identificador en su país (RUC, VAT, tax id). El SII sólo lo informa en
+   * exportaciones; fuera de ahí viene `null` y no se inventa.
+   */
+  readonly contraparteIdExtranjero?: string | null;
   readonly contraparteNombre: string;
   readonly montoNeto: Pesos;
   readonly montoExento: Pesos;
@@ -69,8 +85,12 @@ export class DocumentoAmbiguo extends Error {
  * **Salvo con contrapartes extranjeras.** Ahí el SII entrega a todas el mismo
  * RUT genérico, de modo que dos proveedores distintos pueden traer el folio 1
  * del mismo tipo y la clave los fusionaría — perdiendo un documento sin que
- * nada lo delate. Para esos casos la razón social entra en la clave, y si
- * tampoco viene, el documento se marca ambiguo en vez de arriesgar la fusión.
+ * nada lo delate.
+ *
+ * Para esos casos se busca un discriminador, en orden de confiabilidad: el
+ * identificador extranjero que el SII informa en exportaciones, y si no viene,
+ * la razón social normalizada. Si tampoco hay razón social, el documento se
+ * aparta como ambiguo en vez de arriesgar la fusión.
  */
 export function claveDeIdempotencia(documento: DocumentoIngestado): string {
   const base = [
@@ -81,18 +101,23 @@ export function claveDeIdempotencia(documento: DocumentoIngestado): string {
     documento.contraparteRut,
   ].join('|');
 
-  if (documento.contraparteRut !== RUT_CONTRAPARTE_EXTRANJERA) return base;
+  // Se mira el tipo, no el valor del RUT: es el campo que el SII nos entrega
+  // resuelto, y comparar contra la constante duplicaría la decisión.
+  if (documento.contraparteTipoId === 'rut_chileno') return base;
+
+  const idExtranjero = documento.contraparteIdExtranjero?.trim() ?? '';
+  if (idExtranjero !== '') return `${base}|id:${normalizar(idExtranjero)}`;
 
   const nombre = documento.contraparteNombre.trim();
   if (nombre === '') {
     throw new DocumentoAmbiguo(
       documento,
-      `la contraparte trae el RUT genérico ${RUT_CONTRAPARTE_EXTRANJERA}, que comparten todas ` +
-        'las contrapartes extranjeras, y no viene razón social para distinguirla',
+      `la contraparte es extranjera, así que su RUT (${documento.contraparteRut}) es el genérico ` +
+        'que comparten todas, y no viene ni identificador extranjero ni razón social para distinguirla',
     );
   }
 
-  return `${base}|${normalizar(nombre)}`;
+  return `${base}|nombre:${normalizar(nombre)}`;
 }
 
 /** Sin acentos, sin dobles espacios y en minúsculas, para que la clave no dependa del tipeo. */
