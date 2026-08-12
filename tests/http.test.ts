@@ -253,9 +253,31 @@ describe('SiiHttpClient.postForm', () => {
     });
 
     const args = mockExec.mock.calls[0][1] as string[];
-    expect(args).toContain('-d');
+    // `--data-binary` en vez de `-d`: el cuerpo ya viene percent-encodeado y no
+    // debe ser reinterpretado. El Content-Type va explícito porque el POST de
+    // emisión del portal mipyme lo exige.
+    expect(args).toContain('--data-binary');
+    expect(args).toContain('Content-Type: application/x-www-form-urlencoded');
     expect(args.some(arg => arg.includes('rut_arrastre=11111111'))).toBe(true);
     expect(args.some(arg => arg.includes('cbmesinformemensual=03'))).toBe(true);
+  });
+
+  it('codifica en ISO-8859-1 cuando se lo piden, no en UTF-8', async () => {
+    mockExec.mockReturnValue('<html>ok</html>' as never);
+    const { client } = makeClient();
+
+    await client.postForm(
+      'https://www1.sii.cl/cgi-bin/Portal001/mipeDisplayPreView.cgi',
+      { EFXP_RZN_SOC: 'ASESORÍAS SPA' },
+      { charset: 'latin1' }
+    );
+
+    // La `Í` es 0xCD en latin1 y 0xC3 0x8D en UTF-8. El CGI lee latin1: con el
+    // encoding por defecto emitiría el DTE con la razón social del emisor
+    // corrupta, y eso no lo avisa ningún error.
+    const args = mockExec.mock.calls[0][1] as string[];
+    expect(args.some(arg => arg.includes('ASESOR%CDAS%20SPA') || arg.includes('ASESOR%CDAS+SPA'))).toBe(true);
+    expect(args.some(arg => arg.includes('%C3%8D'))).toBe(false);
   });
 
   it('escapa los valores con caracteres especiales', async () => {

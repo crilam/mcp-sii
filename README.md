@@ -33,7 +33,22 @@ SII_CERT_PASSWORD=passwordDelCert
 
 # RUT de la empresa a operar (requerido si la persona opera múltiples empresas)
 SII_EMPRESA_RUT=22222222
+
+# Sólo para EMITIR DTE en el portal mipyme: la clave del certificado digital que
+# el contribuyente tiene cargado EN EL SII (el "certificado centralizado"), con
+# la que el SII firma el documento del lado servidor.
+SII_CERT_CLAVE_SII=claveDelCertCargadoEnElSii
 ```
+
+`SII_CERT_CLAVE_SII` **no** se deriva de `SII_CERT_PASSWORD`, aunque parezca lo
+mismo. El certificado cargado en el SII puede ser otro archivo, o el mismo
+cargado con otra clave — y en ese segundo caso comparar los certificados diría
+"coinciden" mientras la clave sigue sin servir. Si en tu caso son la misma
+clave, configurá las dos variables con el mismo valor: queda explícito y no
+depende de una suposición del código.
+
+Sin esta variable, emitir falla pidiéndola; todo lo demás (consultas y la
+previsualización de un DTE) funciona igual.
 
 ## Validar certificado digital
 

@@ -1,0 +1,685 @@
+<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.1//EN' 'http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd'>
+<html>    
+    <head> 
+        <title>EFXP Documento Tributario Electr&oacute;nico</title>
+        <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1"/>
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <meta name="description" content="">
+        <meta name="author" content="">
+        <meta http-equiv="Expires" content="0" />
+        <meta http-equiv="Pragma" content="no-cache" />
+        <script type="text/javascript" src="https://zeusr.sii.cl/admin/responsive_barranav.js"></script>
+        <script type="text/javascript" src="/Portal001/JS/overlib.js"></script>
+        <script type="text/javascript" src="/Portal001/JS/validaUtil.js?version=20190827"></script>
+        <script type="text/javascript" src="/Portal001/JS/despliegaRut.js"></script>
+        <script type="text/javascript" src="/Portal001/JS/validaPOP.js"></script>
+        <script type="text/javascript" src="/Portal001/JS/validaNC_ND_blanco.js?version=20190827"></script>
+        <script type="text/javascript" src="/Portal001/JS/mipe.js"></script>
+        <link href="/css/factura.css" rel="stylesheet" type="text/css" />
+        
+               
+
+        <script type="text/javascript">
+            var pctdoc = "61";
+              
+                var message="";
+                function clickIE() {
+                    if (document.all) {
+                        (message);
+                        return false;
+                    }
+                }
+            function clickNS() {
+                return false;
+                if (document.layers||(document.getElementById&&!document.all)) {
+                    if (e.which==2||e.which==3) {
+                        (message); return false;
+                    }
+                }
+            }
+
+
+
+            if (document.layers) {
+                document.captureEvents(Event.MOUSEDOWN);
+                document.onmousedown=clickNS;
+            } else {
+                document.onmouseup=clickNS;
+                document.oncontextmenu=clickIE;
+            }
+            document.oncontextmenu= new Function("return false");
+
+
+
+            function ocultaFonoEmailGuiaDesp()
+            {
+                var valorOculto = document.forms["VIEW_EFXP"].elements["valorDiv"].value;
+                
+                if(valorOculto==1)
+                {
+                    //guardar valores de  mail y teléfono emisor.
+                    mailGD = document.forms["VIEW_EFXP"].elements["EFXP_EMAIL_EMISOR"].value;       
+                    fonoGD = document.forms["VIEW_EFXP"].elements["EFXP_FONO_EMISOR"].value;
+                    
+                    //ocultar mail y teléfono emisor. 
+                    var padre = document.getElementById('espacioDinamico');
+                    var hijo = document.getElementById('divOcultarMailFono');
+                    padre.removeChild(hijo);
+                    
+                    //cambiar valor para manejar re insercion de campos
+                    document.forms["VIEW_EFXP"].elements["valorDiv"].value=0;
+                }
+                else
+                {
+                    $("#espacioDinamico").html("<input id='valorDiv' type='hidden' value='1'>Ocultar Mail y Teléfono <INPUT type='checkbox' onclick='ocultaFonoEmailGuiaDesp()' name=FONO_SI_NO value='SiChecked'><br><div class='row' id='divOcultarMailFono'><div class='col-sm-6'><div class='input-group input-group-sm'><label class='input-group-addon' for='EFXP_EMAIL_EMISOR'>Email</label><input type='email' class='form-control' tabindex='7' onfocus='blur()' maxLength='30' size='30'  value='"+mailGD+"' name='EFXP_EMAIL_EMISOR'></div></div><div class='col-sm-6'><div class='input-group input-group-sm'><label class='input-group-addon' for='EFXP_FONO_EMISOR'>Tel&eacute;fono</label><input type='text' class='form-control' tabindex='8' onfocus='blur()' maxLength='14' size='12'  value='"+fonoGD+"' name='EFXP_FONO_EMISOR'></div></div></div>");
+                }   
+            }
+            
+            
+          
+            
+        </script>
+
+
+        <script type="text/javascript">
+            var emisorDir      = [["CALLE FICTICIA 100          ","COMUNA UNO","","11111111"," "],["0","0","0","0","0"]];
+            var emisorActEco   = [["702000","ACTIVIDADES DE CONSULTORIA DE GESTION"],["681011","ALQUILER DE BIENES INMUEBLES AMOBLADOS O CON EQUIPOS Y MAQUINARIAS"],["0","0"]];
+            var recptorDir     = [["0","0","0"]];
+            var recptoActEco   = [["0","0"]];
+
+            var arrFecha       = ["2026","08","11"];
+            var arrFechaAut    = ["2025","07","02"];
+
+
+            var codChecked = '';
+            var otroImpChecked = '';
+            var empMenorTamanoChecked = '';
+            datosArray = new Array();
+
+            var indName = 0;
+            var indValue = 1;
+
+            var cantTotCol = 10;
+
+            datosArray[0] = [ [ 'EFXP_TPO_COD_01', ''],
+            [ 'EFXP_COD_01', ''],
+            [ 'EFXP_NMB_01', ''],
+            [ 'DESCRIP_01',  ''],
+            [ 'EFXP_QTY_01', ''],
+            [ 'EFXP_UNMD_01',''],
+            [ 'EFXP_PRC_01', ''],
+            [ 'EFXP_OTRO_IMP_01',''],
+            [ 'EFXP_PCTD_01',''],
+            [ 'EFXP_SUBT_01',''],
+            [ 'EFXP_DSC_ITEM_01',''],
+            [ 'VIS', 'NO_VIS']
+            ];
+            datosArray[1] = [ [ 'EFXP_TPO_COD_02', ''],
+            [ 'EFXP_COD_02', ''],
+            [ 'EFXP_NMB_02', ''],
+            [ 'DESCRIP_02',  ''],
+            [ 'EFXP_QTY_02', ''],
+            [ 'EFXP_UNMD_02',''],
+            [ 'EFXP_PRC_02', ''],
+            [ 'EFXP_OTRO_IMP_02',''],
+            [ 'EFXP_PCTD_02',''],
+            [ 'EFXP_SUBT_02',''],
+            [ 'EFXP_DSC_ITEM_02',''],
+            [ 'VIS', 'NO_VIS']
+            ];
+            datosArray[2] = [ [ 'EFXP_TPO_COD_03', ''],
+            [ 'EFXP_COD_03', ''],
+            [ 'EFXP_NMB_03', ''],
+            [ 'DESCRIP_03',  ''],
+            [ 'EFXP_QTY_03', ''],
+            [ 'EFXP_UNMD_03',''],
+            [ 'EFXP_PRC_03', ''],
+            [ 'EFXP_OTRO_IMP_03',''],
+            [ 'EFXP_PCTD_03',''],
+            [ 'EFXP_SUBT_03',''],
+            [ 'EFXP_DSC_ITEM_03',''],
+            [ 'VIS', 'NO_VIS']
+            ];
+            datosArray[3] = [ [ 'EFXP_TPO_COD_04', ''],
+            [ 'EFXP_COD_04', ''],
+            [ 'EFXP_NMB_04', ''],
+            [ 'DESCRIP_04',  ''],
+            [ 'EFXP_QTY_04', ''],
+            [ 'EFXP_UNMD_04',''],
+            [ 'EFXP_PRC_04', ''],
+            [ 'EFXP_OTRO_IMP_04',''],
+            [ 'EFXP_PCTD_04',''],
+            [ 'EFXP_SUBT_04',''],
+            [ 'EFXP_DSC_ITEM_04',''],
+            [ 'NO_VIS', 'NO_VIS']
+            ];
+            datosArray[4] = [ [ 'EFXP_TPO_COD_05', ''],
+            [ 'EFXP_COD_05', ''],
+            [ 'EFXP_NMB_05', ''],
+            [ 'DESCRIP_05',  ''],
+            [ 'EFXP_QTY_05', ''],
+            [ 'EFXP_UNMD_05',''],
+            [ 'EFXP_PRC_05', ''],
+            [ 'EFXP_OTRO_IMP_05',''],
+            [ 'EFXP_PCTD_05',''],
+            [ 'EFXP_SUBT_05',''],
+            [ 'EFXP_DSC_ITEM_05',''],
+            [ 'NO_VIS', 'NO_VIS']
+            ];
+            datosArray[5] = [ [ 'EFXP_TPO_COD_06', ''],
+            [ 'EFXP_COD_06', ''],
+            [ 'EFXP_NMB_06', ''],
+            [ 'DESCRIP_06',  ''],
+            [ 'EFXP_QTY_06', ''],
+            [ 'EFXP_UNMD_06',''],
+            [ 'EFXP_PRC_06', ''],
+            [ 'EFXP_OTRO_IMP_06',''],
+            [ 'EFXP_PCTD_06',''],
+            [ 'EFXP_SUBT_06',''],
+            [ 'EFXP_DSC_ITEM_06',''],
+            [ 'NO_VIS', 'NO_VIS']
+            ];
+            datosArray[6] = [ [ 'EFXP_TPO_COD_07', ''],
+            [ 'EFXP_COD_07', ''],
+            [ 'EFXP_NMB_07', ''],
+            [ 'DESCRIP_07',  ''],
+            [ 'EFXP_QTY_07', ''],
+            [ 'EFXP_UNMD_07',''],
+            [ 'EFXP_PRC_07', ''],
+            [ 'EFXP_OTRO_IMP_07',''],
+            [ 'EFXP_PCTD_07',''],
+            [ 'EFXP_SUBT_07',''],
+            [ 'EFXP_DSC_ITEM_07',''],
+            [ 'NO_VIS', 'NO_VIS']
+            ];
+            datosArray[7] = [ [ 'EFXP_TPO_COD_08', ''],
+            [ 'EFXP_COD_08', ''],
+            [ 'EFXP_NMB_08', ''],
+            [ 'DESCRIP_08',  ''],
+            [ 'EFXP_QTY_08', ''],
+            [ 'EFXP_UNMD_08',''],
+            [ 'EFXP_PRC_08', ''],
+            [ 'EFXP_OTRO_IMP_08',''],
+            [ 'EFXP_PCTD_08',''],
+            [ 'EFXP_SUBT_08',''],
+            [ 'EFXP_DSC_ITEM_08',''],
+            [ 'NO_VIS', 'NO_VIS']
+            ];
+            datosArray[8] = [ [ 'EFXP_TPO_COD_09', ''],
+            [ 'EFXP_COD_09', ''],
+            [ 'EFXP_NMB_09', ''],
+            [ 'DESCRIP_09',  ''],
+            [ 'EFXP_QTY_09', ''],
+            [ 'EFXP_UNMD_09',''],
+            [ 'EFXP_PRC_09', ''],
+            [ 'EFXP_OTRO_IMP_09',''],
+            [ 'EFXP_PCTD_09',''],
+            [ 'EFXP_SUBT_09',''],
+            [ 'EFXP_DSC_ITEM_09',''],
+            [ 'NO_VIS', 'NO_VIS']
+            ];
+            datosArray[9] = [ [ 'EFXP_TPO_COD_10', ''],
+            [ 'EFXP_COD_10', ''],
+            [ 'EFXP_NMB_10', ''],
+            [ 'DESCRIP_10',  ''],
+            [ 'EFXP_QTY_10', ''],
+            [ 'EFXP_UNMD_10',''],
+            [ 'EFXP_PRC_10', ''],
+            [ 'EFXP_OTRO_IMP_10',''],
+            [ 'EFXP_PCTD_10',''],
+            [ 'EFXP_SUBT_10',''],
+            [ 'EFXP_DSC_ITEM_10',''],
+            [ 'NO_VIS', 'NO_VIS']
+            ];
+
+            var arrReferencias = [ ['','','','','',''],
+            ['','','','','',''],
+            ['','','','','',''],
+            ];
+
+            var RefeneciasChecked = '';
+
+
+            var arrPagos = [ ['','',''],
+            ['','',''],
+            ['','',''],
+            ];      
+            var PagoChecked = '';
+
+            var eExpo = ('FALSE'=='TRUE');
+            var arrFExpo = ['', '', '', ''];
+
+        </script>
+    </head>
+    <body onload="cierraVentana('CGI');">
+        <div id="my-wrapper"> 
+            <script type="text/javascript">
+                mostrar("|Factura Electrónica");
+            </script>
+           
+            <div class="web-sii cuerpo">
+                <div class="container">                          
+                    <div class="row hidden-xs">
+                        <div class="col-sm-6">
+                            Empresa: <b><script type="text/javascript">muestraCMP();</script></b></td>
+                        </div>
+                    </div>
+                    <!--INICIO FORMULARIO-->
+                    <form class="form-horizontal" name="VIEW_EFXP" id="VIEW_EFXP" action="/cgi-bin/Portal001/mipeDisplayPreView.cgi" method="post">
+                        <div id="invoice" class="well shadow">                                         
+                            <input type="hidden" value="FALSE" name="esCRED_EC" id="esCRED_EC"> 
+                            <input type="hidden" value="NC_BLANCO" name="TIPO_PLANTILLA" id="TIPO_PLANTILLA"> 
+                            <input type="hidden" value="61" name="PTDC_CODIGO" id="PTDC_CODIGO"> 
+                            <input type="hidden" value="" name="CANT_DET" id="CANT_DET">
+                            <input type="hidden" value="" id="EFXP_CDG_SII_SUCUR" name="EFXP_CDG_SII_SUCUR">
+                            <br/>
+                            <br/>
+                            <div class="row">
+                                <div class="col-xs-4 col-sm-3 nopadding text-center">
+                                    <img class="img-responsive" style="margin: 0 auto;" src="/cgi-bin/Portal001/genLogo?RUT=11111111-1" alt="Logo de Empresa" width="150">
+                                </div>
+                                <div class="col-xs-8 col-sm-5 col-sm-push-4 text-center">
+                                    <div class="well well-sm">
+                                        <strong>Rut 11111111-1</strong><br/>
+                                        <strong>NOTA DE CR&#201;DITO ELECTR&#211;NICA</strong><br/>
+                                        <strong>N&deg; folio no asignado</strong><br/>
+                                    </div>
+                                    Empresa Menor Tama&ntilde;o 
+                                    <input type="checkbox" name='EMP_MENOR_TAMANO' tabindex="5" value="SiChecked"/>
+                                    <br>
+                                </div>
+                            </div>
+                            <br>
+                           <div class="row">
+                                                <div class="col-sm-5 col-sm-push-7 text-center">
+                                                            <div class="input-group input-group-sm">
+                                                                <label class="input-group-addon" for="EFXP_FCH_EMIS">Fecha Emisi&oacute;n</label>
+                                                                    <input type="date"  tabindex="11" maxLength='10' size='10' value="" name='EFXP_FCH_EMIS' 
+                                                                        class="form-control" placeholder="AAAA-MM-DD" min="2016-01-01" max="2018-01-01">
+                                                                    <script type="text/javascript">despFecEmi()</script>
+                                                            </div>
+                                                    </div>                                                   
+                                               </div>
+                                                                 
+                            <div class="panel panel-default">    
+                                <div class="panel-heading" role="tab" id="headingEMISOR" title='Utilice esta secci&oacute;n de la p&aacute;gina para ingresar una o m&aacute;s condiciones que le permitiran seleccionar/buscar en los documentos emitidos. Cuando esté listo(a) presione el bot&oacute;n [Buscar Documentos], para recuperar los documentos que cumplen las condiciones ingresadas'>
+                                    <h5 class="panel-title">
+                                        <a role="button" data-toggle="collapse" data-parent="#accordion" href="#collapseEMISOR" class="arrow-click" 
+                                            aria-expanded="true" aria-controls="collapseEMISOR">
+                                            DATOS EMISOR 
+                                            <span class="glyphicon glyphicon-menu-down pull-right" aria-hidden="true"></span>
+                                        </a>
+                                    </h5>
+                                </div>
+                                <!-- inicio EMISOR -->              
+                                <div id="collapseEMISOR" class="panel-collapse collapse in" role="tabpanel" aria-labelledby="headingEMISOR">
+                                    <div class="panel-body">                                               
+                                        <div class="row">   
+                                            <div class="col-sm-12">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="EFXP_RZN_SOC" id="sizing-addon1">Raz&oacute;n Social</label>
+                                                    <input type="text" class="form-control" aria-describedby="sizing-addon1"  tabindex="1" onfocus="blur()" maxLength='100' ize='50' value="COMERCIAL&#205;A FICTICIA SPA" name='EFXP_RZN_SOC'>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="row">   
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="EFXP_RZN_SOC">Direcci&oacute;n</label>
+                                                    <input class="form-control" type="hidden"  name='EFXP_DIR_ORIGEN_DEFUALT' tabindex="2" value="">
+                                                    <script type="text/javascript">printEmisorDir();</script>
+                                                </div>
+                                            </div>
+                                            <div class="col-sm-3">
+                                                <div class="input-group input-group-sm">
+                                                        <label class="input-group-addon" for="EFXP_CMNA_ORIGEN">Comuna</label>
+                                                        <input type="text" class="form-control" onfocus="blur()" tabindex="3" maxLength='20' 
+                                                                value="" name="EFXP_CMNA_ORIGEN" >
+                                                </div>
+                                            </div>
+                                            <div class="col-sm-3">
+                                                <div class="input-group input-group-sm">
+                                                        <label class="input-group-addon" for="EFXP_CIUDAD_ORIGEN">Ciudad</label>
+                                                        <input type="text" class="form-control" maxLength='15' style="width='50%'" size='15' tabindex="4" value="" 
+                                                                name="EFXP_CIUDAD_ORIGEN">
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div id='espacioDinamico'>
+                                            <input id='valorDiv' type="hidden" value="1">                                                   
+                                            Ocultar Mail y Teléfono 
+                                            <INPUT type="checkbox" onclick="ocultaFonoEmailGuiaDesp()" name=FONO_SI_NO value="SiChecked"><br>
+                                            <div class="row" id='divOcultarMailFono'>
+                                                <div class="col-sm-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <label class="input-group-addon" for="EFXP_EMAIL_EMISOR">Email</label>
+                                                        <input type="email" class="form-control" tabindex="7" onfocus="blur()" maxLength='30' size='30'  value="emisor&#64;ejemplo.cl" name="EFXP_EMAIL_EMISOR">
+                                                    </div>
+                                                </div>
+                                                <div class="col-sm-6">
+                                                    <div class="input-group input-group-sm">
+                                                        <label class="input-group-addon" for="EFXP_FONO_EMISOR">Tel&eacute;fono</label>
+                                                        <input type="text" class="form-control" tabindex="8" onfocus="blur()" maxLength="14" size='12'  value="" name='EFXP_FONO_EMISOR'>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="row">
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="GIRO_EDIT">Giro:</label>                                                                                                                                                                                                            
+                                                    <input type="text"  class="form-control" tabindex="9" onfocus="blur()"  class="form-control" maxLength='70' size='60'  value="GIRO DE PRUEBA SIN DATOS REALES" name="EFXP_GIRO_EMIS">
+                                                </div>
+                                            </div>                                                          
+                                                
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="EFXP_ACTECO">Act. Econo.:</label>
+                                                    <input type="hidden"  tabindex="10" maxLength='6' size='6' value="" name='EFXP_ACTECO'>
+                                                    <script type="text/javascript">printEmisorActEco();</script>
+                                                </div>
+                                            </div>                                                          
+                                                                        
+                                            
+                                        </div> <!-- fin row-->
+                                    </div>   <!-- panel body -->                                        
+                                </div>  <!-- collapsed emisor -->                   
+                                <!-- fin EMISOR -->             
+                            </div> <!-- panel panel-default -->
+                                                        
+                            <div class="panel panel-default">
+                                <div class="panel-heading" role="tab" id="headingRECEPTOR" title='Utilice esta secci&oacute;n de la p&aacute;gina para ingresar una o m&aacute;s condiciones que le permitiran seleccionar/buscar en los documentos emitidos. Cuando esté listo(a) presione el bot&oacute;n [Buscar Documentos], para recuperar los documentos que cumplen las condiciones ingresadas'>
+                                    <h5 class="panel-title">
+                                        <a role="button" data-toggle="collapse" data-parent="#accordion" href="#collapseRECEPTOR" class="arrow-click" 
+                                            aria-expanded="true" aria-controls="collapseRECEPTOR">
+                                            DATOS RECEPTOR 
+                                            <span class="glyphicon glyphicon-menu-up pull-right" aria-hidden="true"></span>
+                                        </a>
+                                    </h5>
+                                </div>
+                                <!-- inicio RECEPTOR -->                
+                                <div id="collapseRECEPTOR" class="panel-collapse collapse in" role="tabpanel" aria-labelledby="headingRECEPTOR">
+                                    <div class="panel-body">
+                                        
+                                        <div class="row">                    
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm text-nowrap">
+                                                    <label class="input-group-addon" for="EFXP_RUT_RECEP">Rut</label>
+                                                    <div class="row rut-dv">
+                                                        <div class="col-xs-8">
+                                                            <input type="text" class="form-control" style="text-align: right"  tabindex="12" name="EFXP_RUT_RECEP" value="" maxlength="8" size="8" min="1" max="99999999" class="input" pattern="\d*">
+                                                        </div>
+                                                        <div class="col-xs-2">
+                                                            <input class="form-control" maxlength="1" size="1"  tabindex="13" onchange="enviaCGI(this)" value="" name="EFXP_DV_RECEP"  class="input">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>                                                                              
+                                        
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="EFXP_RZN_SOC_RECEP">Raz&oacute;n Social:</label>
+                                                    <input class="form-control" maxLength="100" tabindex="14" size="50" style="width:100%;" value="" name="EFXP_RZN_SOC_RECEP"/>
+                                                </div>
+                                            </div>
+                                     
+                                    
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="EFXP_DIR_RECEP_DEFUALT">Direccion:</label>
+                                                    <input class="form-control" type="hidden"  tabindex="15"  style="width='100%'" name="EFXP_DIR_RECEP_DEFUALT" value=""/>
+                                                    <script type="text/javascript">printRecptorDir();</script>
+                                                </div>
+                                            </div>
+                                    
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="EFXP_CMNA_RECEP%>">Comuna:</label>
+                                                    <input class="form-control" maxLength="20"  tabindex="16"  value="" onfocus="if (recptorDir[0][0] != '0') blur()" name="EFXP_CMNA_RECEP">
+                                                </div>
+                                            </div>
+                                     
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="EFXP_CIUDAD_RECEP%>">Ciudad / Localidad:</label>
+                                                    <input class="form-control" maxLength=15 value="" size=15 name="EFXP_CIUDAD_RECEP">
+                                                </div>
+                                            </div>
+                                                               
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="EFXP_GIRO_RECEP_DEFUALT">Giro:</label>
+                                                    <input type="hidden" name="EFXP_GIRO_RECEP_DEFUALT" value="">
+                                                    <script type="text/javascript">printReceptorActEco()</script>                                           
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm">
+                                                    <label class="input-group-addon" for="EFXP_CONTACTO">Contacto:</label>
+                                                    <input class="form-control" maxLength="80" size="30" name="EFXP_CONTACTO" value="" style="width:100%;">
+                                                </div>
+                                            </div>
+
+                                            <div class="col-sm-6">
+                                                <div class="input-group input-group-sm text-nowrap">
+                                                    <label class="input-group-addon" for="EFXP_RUT_SOLICITA">&nbsp;Rut persona que solicita factura:&nbsp;</label>
+                                                    <div class="row rut-dv">
+                                                        <div class="col-xs-8">
+                                                           <input type="text" class="form-control" maxLength=8 size=8 value="" name="EFXP_RUT_SOLICITA">
+                                                        </div>                                              
+                                                        <div class="col-xs-2">
+                                                           <input type="text" class="form-control" maxLength="1" size="1" onchange="valRutSolicita(this)" value="" name="EFXP_DV_SOLICITA">
+                                                        </div>
+                                                    </div> 
+                                                </div>
+                                            </div>
+                                            
+                                            
+                                                     
+                                        </div> <!--  fin de row -->                  
+                                    </div> <!-- fin class="panel-body" -->
+                                </div>  <!-- Fin collapseRECEPTOR -->               
+                                <!-- fin RECEPTOR -->   
+                            </div> <!-- panel panel-default -->
+                                                  
+                            <div class="row">
+                                <div class="col-xs-6 text-left"
+                                    title='Codificaci&oacute;n opcional del producto.'>
+                                    <label for="EFXP_CIUDAD_RECEP">Cod Producto</label>
+                                    <input type="checkbox" onclick = "javascript:dibujaDetalles();" name= "COD_SI_NO" value= "SiChecked"/>
+                                </div>
+                              
+                                <script>
+                                    if ("61" == "56" || "61" == "61") {
+                                        document.write(
+                                            '<div class="col-xs-6 text-left" ' +
+                                            '   title="Puede seleccionar Impuesto Adicional. La tasa varia dependiendo del tipo de impuesto seleccionado, el cual se verá reflejado en el campo de Impuesto Adicional de los Totalizadores.">' +
+                                            '<label for="OTRO_IMP_SI_NO">Impuestos Adic.</label>' +
+                                            '<input type="checkbox" onclick="dibujaDetalles()" name="OTRO_IMP_SI_NO" value="SiChecked"></th> ' +
+                                            '</div>'
+                                        );
+                                    }
+                                </script>
+                                
+                            </div>       
+                                                           
+                            <div id="no-more-tables"> 
+                                <table id="myTable" class="table table-bordered table-striped table-hover small table-condensed cf">
+                                    <tr id="rowDet_Encabezado" class="rowDet_Encabezado">
+                                        <th align="center"
+                                            title='Nombre del producto de hasta 25 caracteres'>Nombre Producto</th>
+                                        <th align="center"
+                                            title='Opcional. S&oacute;lo si desea ingresar una descripci&oacute;n extendida del producto haga clic sobre el cuadro.'
+                                            >Descrip.</th>
+                                        <th align="center"
+                                            title='Cantidad del producto o servicio si es con decimales separado por punto.'
+                                            >Cantidad</th>
+                                        <th align="center"
+                                            title='Opcional. Unidad de medida del producto.'
+                                            onmouseout="return nd();"
+                                            >Unidad</th>
+                                        <th align="center"
+                                            title='Monto neto en pesos chilenos, si es con decimales separado por punto.'
+                                            >Precio</th>
+                                        <th align="center"
+                                            title='Porcentaje de descuento en el Precio del Producto, si es con decimales separado por punto.'
+                                             >% Desc.</th>
+                                        <th align="center"
+                                            title='Subtotal de la l&iacute;nea calculado como Cantidad por Precio menos % Desc.'
+                                             >SubTotal</th>
+                                    </tr>
+                                </table>
+                                <br/>
+                                <table  id="tblRefPago" class="table table-condensed table-striped table-hover small">
+                                    <tr class="item-row"> 
+                                        <th colspan="3"
+                                            title='Opcional. S&oacute;lo si el documento que est&aacute; generando hace referencia a otro documento ya generado, haga clic sobre el cuadro.'>
+                                            Referencias : Si/No <input type="checkbox"  onclick="return false;"  name="REF_SI_NO" value="SiChecked">
+                                        </th>
+
+                                        <th colspan="2" align="right"
+                                            title='Opcional. S&oacute;lo si desea agregar información sobre el pago de la factura, haga clic sobre el cuadro.'>
+                                            Info. Pago : Si/No <input type="checkbox" onclick="printReferencias()" name="PAGO_SI_NO" value="SiChecked">
+                                        </th>
+                                    </tr>
+                                </table>  
+                            </div> <!-- no more tables -->
+                                                    
+                            </br>
+                            </br>
+                                                                
+                            <div class="row">                                           
+                                <div class="col-sm-6 col-sm-offset-6">
+                                    <div class="input-group input-group-sm">
+                                        <label class="input-group-addon" for="EFXP_SUBTOTAL">Sub Total</label>
+                                        <input onfocus="blur()" class="form-control" style="color: #666666;text-align: right" maxLength="12"  size="10" value="" name="EFXP_SUBTOTAL"/>
+                                    </div>
+                                </div>
+
+                                <div class="col-sm-6 col-sm-offset-6">
+                                        <div class="input-group input-group-sm">
+                                            <label class="input-group-addon" for="EFXP_PCT_DESC">Descuento Global</label>
+                                            <input type="text" class="form-control" style="text-align: right" onblur="calculaRelacionadoFacEx(this)" maxLength="5"  size="5" value="" name="EFXP_PCT_DESC"/>  
+                                            <label class="input-group-addon"  for="porcentaje">&nbsp%&nbsp</label>&nbsp;&nbsp;
+                                                                                
+                                            <label class="input-group-addon" for="EFXP_IVA">Monto</label>
+                                            <input onblur="calculaRelacionadoFacEx(this)" class="form-control" maxLength=12  size=10 value="" name="EFXP_MNT_DESC"  style="text-align: right"  />
+                                            <input type="hidden" value="" name="IVA_TEMP"/>
+                                            <input type="hidden" value="" name="MNT_NETO_TEMP"/>
+                                        </div>
+                                </div>            
+                                <div class="col-sm-6 col-sm-offset-6">
+                                        <div class="input-group input-group-sm">                                        
+                                            <script type='text/javascript'>
+                                                if (document.forms['VIEW_EFXP'].elements['PTDC_CODIGO'].value == 33){
+                                                    document.write('<label class="input-group-addon" for="VIEW_EFXP">Monto Neto</label>');
+                                                }else{
+                                                    document.write('<label class="input-group-addon" for="VIEW_EFXP">Monto Exento</label>');                                                                                            
+                                                }
+                                            </script>
+                                            <input style="color: #666666;text-align: right" onfocus="blur()" class="form-control" maxLength="12"  size="10" name="EFXP_MNT_NETO"/>
+                                        </div>
+                                </div>
+                                <div class="col-sm-6 col-sm-offset-6">
+                                    <div class="input-group input-group-sm">
+                                     
+                                        <label class="input-group-addon" for="EFXP_MNT_NETO">
+                                            <script type='text/javascript'>
+                                                document.forms['VIEW_EFXP'].elements['EFXP_MNT_NETO'].value = document.forms['VIEW_EFXP'].elements['MNT_NETO_TEMP'].value;
+                                                var tipoDocRefer = null;
+                                                if(''!='') {
+                                                    tipoDocRefer = ;
+                                                }
+
+                                                if (tipoDocRefer!=null && (tipoDocRefer==32 || tipoDocRefer==34 || tipoDocRefer==38 || tipoDocRefer==41))
+                                                    document.write('&nbsp;');
+                                                else
+                                                    document.write('IVA');
+                                            </script>                   
+                                        
+                                           <script type='text/javascript'>
+                                            var tipoDocRefer = null;
+                                             if(''!='') {
+                                                    tipoDocRefer = ;
+                                                }
+                                                if (tipoDocRefer!=null && (tipoDocRefer==32 || tipoDocRefer==34 || tipoDocRefer==38 || tipoDocRefer==41))
+                                                    document.write('&nbsp;');
+                                                else 
+                                                    document.write('&nbsp;19&nbsp;%<input type="hidden" class="form-control" maxLength=5  size="5" value="19" name="EFXP_TASA_IVA"/>');
+                                            </script>
+                                        </label>
+                                        
+                                        <label class="input-group-addon" for="EFXP_MNT_NETO">
+                                             <script type='text/javascript'>
+                                              var tipoDocRefer = null;
+                                               if(''!='') {
+                                                    tipoDocRefer = ;
+                                                }
+                                                    if (tipoDocRefer!=null && (tipoDocRefer==32 || tipoDocRefer==34 || tipoDocRefer==38 || tipoDocRefer==41))
+                                                    document.write('&nbsp;');
+                                                else
+                                                    document.write('Total IVA');
+                                             </script>
+                                         </label>
+                                         
+                                        <script type="text/javascript">
+                                          var tipoDocRefer = null;
+                                           if(''!='') {
+                                                    tipoDocRefer = ;
+                                                }
+                                                 if (tipoDocRefer!=null && (tipoDocRefer==32 || tipoDocRefer==34 || tipoDocRefer==38 || tipoDocRefer==41))
+                                                     document.write('&nbsp;');
+                                                 else
+                                                  
+                                                     document.write('<input style="color: #666666;text-align: right" onfocus="blur()" class="form-control" maxLength="12"  size="10" value="'+document.forms["VIEW_EFXP"].elements["IVA_TEMP"].value+'" name="EFXP_IVA">');
+                                                     
+                                         </script>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-sm-6 col-sm-offset-6" id="rowOtrosImp" style="display: none">
+                                    <div class="input-group input-group-sm">
+                                        <label class="input-group-addon" for="EFXP_OTRO_IMP_TOTAL">Impuesto Adicional</label>
+                                        <INPUT class="form-control" onfocus="blur()" style="COLOR: #666666; text-align: right" class="form-control" maxLength=12  size=10 name="EFXP_OTRO_IMP_TOTAL" disabled>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-sm-6 col-sm-offset-6">
+                                    <div class="input-group input-group-sm">
+                                        <label class="input-group-addon" for="EFXP_MNT_TOTAL">Total</label>
+                                        
+                                        <input onfocus="blur()"class="form-control"  maxLength=12  style="color: #666666;text-align: right"  size=10 value="" name=EFXP_MNT_TOTAL>
+                                    </div>
+                                </div>              
+                            </div>             
+                       
+
+                            <p class="text-center">
+                                <button type="button" class="btn btn-default" onclick="if (validaFacEx(this)) VIEW_EFXP.submit();"name="Button_Update">Validar y visualizar</button> 
+                                <button type="button" class="btn btn-default" onclick="limpiaDatos(this)" value="Limpiar" name="limpiar">Limpiar</button>
+                                <button type="button" class="btn btn-default" onclick='javascript:opcionClose();' value="Volver" name="Botton_Borrar">Volver</button>
+                                
+                                
+                            </p>   
+                                                    
+                            <script type="text/javascript">
+                                
+                                
+                                
+                            </script>
+                        </div>
+                    </form><!-- FIN FORMULARIO-->
+                </div> <!-- fin container -->           
+                <script type="text/javascript">mostrarPie()</script> <script type="text/javascript"> printReferencias(); </script>
+                <script type="text/javascript">
+                    
+                    
+                </script>
+            </div>  <!-- fin web-sii cuerpo -->
+        </div> <!-- FIN MY WRAPPER -->
+    </body>
+</html>

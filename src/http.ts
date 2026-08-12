@@ -103,8 +103,24 @@ export class SiiHttpClient {
     return this.curl([`${url}${query}`]);
   }
 
-  async postForm(url: string, campos: Record<string, string>): Promise<string> {
-    return this.curl(['-d', this.encodeParams(campos), url]);
+  // `charset` decide cómo se percent-encodean los valores. El default UTF-8
+  // sirve para las aplicaciones modernas; los CGI legacy de Portal001 esperan
+  // ISO-8859-1 y hay que decírselo explícitamente.
+  //
+  // No es cosmético: el POST de emisión reenvía la razón social del emisor tal
+  // como el portal la entregó ("ASESORÍAS ..."). Con UTF-8, la `Í` viaja como
+  // %C3%8D, que el CGI lee como dos caracteres latin1 y emite un documento
+  // tributario con el nombre del contribuyente corrupto. Medido contra
+  // mipeDisplayPreView.cgi: con latin1 la razón social vuelve intacta.
+  async postForm(
+    url: string,
+    campos: Record<string, string>,
+    opciones?: { charset?: 'utf-8' | 'latin1' }
+  ): Promise<string> {
+    const cuerpo = this.encodeParams(campos, opciones?.charset ?? 'utf-8');
+    // `--data-binary` y no `-d`: `-d` descarta saltos de línea, y acá el cuerpo
+    // ya viene percent-encodeado y no debe tocarse.
+    return this.curl(['--data-binary', cuerpo, '-H', 'Content-Type: application/x-www-form-urlencoded', url]);
   }
 
   // Las aplicaciones modernas del portal (las de www4.sii.cl/<app>ui/) no
@@ -201,9 +217,33 @@ export class SiiHttpClient {
     return decodificarRespuesta(cuerpo, contentType);
   }
 
-  private encodeParams(params: Record<string, string>): string {
+  private encodeParams(params: Record<string, string>, charset: 'utf-8' | 'latin1' = 'utf-8'): string {
+    const encode = charset === 'latin1' ? encodeLatin1 : encodeURIComponent;
     return Object.entries(params)
-      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .map(([k, v]) => `${encode(k)}=${encode(v)}`)
       .join('&');
   }
+}
+
+// `encodeURIComponent` siempre percent-encodea en UTF-8 y no se le puede pedir
+// otro charset, así que la codificación latin1 se hace a mano: se convierte el
+// texto a bytes ISO-8859-1 y se escapa byte a byte. El conjunto sin escapar es
+// el de `encodeURIComponent` (alfanuméricos y `-_.!~*'()`), que es lo que
+// esperan estos CGI.
+//
+// Un carácter que no existe en latin1 (una `ü` está, un emoji no) se convierte
+// en `?` al pasar por el Buffer. No se intenta arreglar: son campos de un
+// documento tributario, y un reemplazo silencioso es preferible a inventar
+// bytes, pero quien los llena debería mandar texto latin1.
+const SIN_ESCAPAR = /[A-Za-z0-9\-_.!~*'()]/;
+
+function encodeLatin1(texto: string): string {
+  let salida = '';
+  for (const byte of Buffer.from(texto, 'latin1')) {
+    const caracter = String.fromCharCode(byte);
+    salida += SIN_ESCAPAR.test(caracter)
+      ? caracter
+      : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+  }
+  return salida;
 }
