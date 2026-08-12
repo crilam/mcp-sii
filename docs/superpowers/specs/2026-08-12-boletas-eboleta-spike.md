@@ -1,7 +1,7 @@
 # Boletas electrónicas (39/41): no es el mismo SII
 
 Fecha: 2026-08-12
-Estado: **spike inicial de lectura.** Ningún documento emitido, ninguna escritura. La pregunta que decide la viabilidad quedó identificada y sin responder.
+Estado: **pregunta de viabilidad RESUELTA.** Se observó un login real con captura de red (HAR): el intercambio del login del SII a credenciales de Cognito es una **cadena de POST replicable, sin navegador en runtime**. Ningún documento emitido, ninguna escritura. El gateway es viable y más simple que el de facturas.
 
 Spike para el gateway de boletas de Parkingapp, que es la meta real detrás de la
 migración del portal mipyme. Continúa el [contrato de emisión de mipyme](2026-08-03-mipyme-http-contratos.md).
@@ -85,45 +85,104 @@ Consecuencia para el gateway: **el cookie jar del SII no sirve acá**. Hace falt
 2. convertir eso en una sesión de Cognito (user pool `us-east-1_6cKII12uo`), y
 3. obtener credenciales AWS del identity pool para firmar SigV4.
 
-## La pregunta abierta, que es la única que importa
+## La respuesta: cadena de POST replicable (relevada en vivo con HAR)
 
-**¿Cómo se pasa del login del SII a las credenciales de Cognito?** Hay una API
-llamada `apiAuthSII` que casi con seguridad hace ese intercambio, pero su
-contrato no se relevó.
+Se capturó el tráfico de un login real (RUT + clave tributaria) el 2026-08-12. El
+intercambio del login del SII a credenciales de AWS es **cuatro pasos, todos
+POST, sin navegador ni PKCE con estado en el cliente**. Es la rama buena.
 
-De la respuesta salen las dos ramas posibles:
+```
+1. LOGIN (OAuth code)
+   POST https://clave.w.sii.cl/oauthsii-v1-ms/authorization/v1/authorize
+   Content-Type: application/json
+   { "response_type":"code", "client_id":"e0378e96-4014-4a47-b852-9d9246797f5c",
+     "redirect_uri":"https://eboleta.sii.cl/emitir/", "scope":"user_info",
+     "state":"<uuid>", "user":"<rut sin dv>", "password":"<clave tributaria>",
+     "token_captcha":"0", "action_captcha":"login" }
+   → el `code` (un uuid) vuelve para redirigir a redirect_uri?code=<uuid>&state=<state>.
+     (Clave mala → 200 {"success":false,"code":612,"message":"password incorrecto"}.)
 
-- **Si el intercambio es un POST replicable** (código OAuth o token del SII →
-  tokens de Cognito), el gateway es viable y además *más simple* que el de
-  facturas: API JSON, sin HTML, sin firma con certificado, con un endpoint
-  `documentos/generar` explícito.
-- **Si exige el flujo interactivo del navegador** (redirects, PKCE con estado en
-  el cliente), el gateway necesita un navegador headless para obtener la sesión
-  y renovarla, y eso cambia la arquitectura y el costo operativo.
+2. SIGN-IN (code → token OpenID de Cognito)
+   POST https://x78kr8nqx5.execute-api.us-east-1.amazonaws.com/prod/sign-in
+   { "rut":"", "opts":{ "code":"<uuid>", "state":"<state>", "authMethod":"clave-tributaria" } }
+   → { "openId": { "IdentityId":"us-east-1:...", "Token":"<JWT>" } }
+   Este endpoint se llama SIN credenciales AWS (Amplify lo firma con Credential=undefined):
+   es efectivamente público. El Lambda detrás valida el code contra el SII y hace
+   GetOpenIdTokenForDeveloperIdentity del lado servidor.
 
-Se responde observando el tráfico de un login real en el navegador —qué se
-postea a `apiAuthSII` y qué devuelve—, que es lectura y no emite nada.
+3. CREDENCIALES AWS TEMPORALES (token → AccessKey/Secret/SessionToken)
+   POST https://cognito-identity.us-east-1.amazonaws.com/
+   X-Amz-Target: AWSCognitoIdentityService.GetCredentialsForIdentity
+   { "IdentityId":"us-east-1:...", "Logins":{ "cognito-identity.amazonaws.com":"<JWT del paso 2>" } }
+   → { "Credentials":{ "AccessKeyId":"ASIA...", "SecretKey":"...",
+                       "SessionToken":"...", "Expiration":<epoch> } }
+
+4. LLAMADAS A LA API — firmadas con SigV4 usando esas credenciales temporales,
+   contra los endpoints de API Gateway y contra Lambda directo
+   (`lambda.us-east-1.amazonaws.com/.../functions/<fn>/invocations`).
+```
+
+Es el patrón **Cognito Developer Authenticated Identities**. El JWT del paso 2
+trae en sus claims `amr: ["authenticated","sii.login","sii.login:<pool>:<rut-dv>"]`,
+`iss: https://cognito-identity.amazonaws.com`, y expira ~12 h (`exp - iat`). Las
+credenciales del paso 3 son temporales de STS (empiezan en `ASIA`), con su propia
+expiración más corta: hay que renovarlas repitiendo el paso 3 con el mismo token,
+y rehacer 1-2 cuando el token expira.
+
+Hay **dos identity pools** en juego: `e154b392-…` (el del bundle; un intento de
+`GetId` sin autenticar contra él devuelve *"Unauthenticated access is not
+supported"*) y `337509f2-…` (el `aud` del token, el que efectivamente entrega las
+credenciales). El que importa es el segundo.
+
+### Qué significa para el gateway
+
+- **No hace falta navegador en runtime.** Cuatro POST con `curl`/SDK y quedás con
+  credenciales AWS temporales. Mucho más simple que los seis pasos de HTML +
+  firma con certificado de las facturas.
+- **La credencial del cliente es RUT + clave tributaria**, no certificado. Distinto
+  del portal CGI (que va por certificado). Para el gateway multi-tenant, el
+  secreto por RUT acá es la clave tributaria.
+- **El SII firma del lado servidor**: no aparece ningún plugin de firma. Confirmar
+  al emitir, pero el indicio es fuerte.
+
+## Config del emisor (relevada de los Lambda)
+
+Tras autenticar, la SPA llama Lambdas de configuración. Útil para el gateway:
+
+- `eboleta-configuracionesEmision-prod` → reglas de emisión: sobre cierto monto
+  (`MONTO_MAYOR_QUE`) la boleta `REQUIERE_MEDIO_PAGO`, y en efectivo además
+  `REQUIERE_RECEPTOR` y `REQUIERE_DETALLE`. O sea: **la boleta chica no exige
+  receptor** —el caso de Parkingapp—.
+- `eboleta_getConfigPorContribuyente` → `{ contribuyente:<rut empresa>,
+  username:"<rut-dv persona>", env:"prod" }` → topico de notificaciones (IoT MQTT
+  sobre WebSocket). El `contribuyente` (empresa) y el `username` (persona) van
+  separados, igual que en el portal CGI.
 
 ## Lo que falta
 
-1. **El intercambio OAuth → Cognito** (arriba). Bloquea todo lo demás.
-2. El contrato de `POST /api/dte/documentos/generar`: forma del cuerpo y si hay
-   un paso de previsualización como en las facturas.
-3. Si la emisión de boleta también exige firma con certificado. En el portal
-   mipyme sí; acá el bundle no muestra ningún plugin de firma, lo que sugiere
-   que **el SII firma del lado servidor** — sería una diferencia grande a favor.
-4. Confirmar el alta de TRUFUL para boleta gratuita. El 2026-08-11 la app
-   respondía "NO SE ENCONTRÓ LA PÁGINA" tras el redirect; el 2026-08-12
-   `GET https://eboleta.sii.cl/` responde 200 con el HTML de la SPA. Eso sugiere
-   que el alta se activó, pero **no lo prueba**: 200 en el HTML de una SPA no
-   dice nada de los permisos, que viven detrás de las APIs.
+1. ~~El intercambio OAuth → Cognito.~~ **Resuelto (arriba).**
+2. **Confirmar el campo exacto que trae el `code`** en la respuesta del paso 1: el
+   HAR registró el `authorize` exitoso con body vacío (limitación de captura del
+   XHR), pero el `code` llega a `eboleta.sii.cl/emitir/?code=…`, así que la
+   respuesta del `authorize` lo trae. Detalle de build, no de arquitectura.
+3. **El captcha.** El login mandó `token_captcha:"0"`, o sea que en este flujo el
+   captcha estaba deshabilitado/omitido. Verificar si siempre es así o si bajo
+   ciertas condiciones el SII exige resolver un captcha —eso sí complicaría el
+   runtime headless—.
+4. **El contrato de `POST /api/dte/documentos/generar`**: forma del cuerpo y si
+   hay previsualización. Se releva emitiendo una boleta de prueba (con el mismo
+   criterio que las facturas: lectura sí, emitir sólo con OK explícito).
+5. **Renovación**: medir la vigencia real de las credenciales STS del paso 3 y del
+   token del paso 2, para diseñar el refresh del gateway.
 
 ## Recomendación
 
-Tratarlo como un proyecto separado del scraper de mipyme, con su propio
-transporte (SigV4 + Amplify o SDK de AWS) y su propia sesión. Reusar de este
-repo `SessionManager` para el login del SII y nada más.
+Proyecto separado del scraper de mipyme, con transporte propio (SigV4 vía SDK de
+AWS o firma manual). Del login sólo se reusa el concepto; el mecanismo es otro
+(clave tributaria + OAuth, no certificado). El **núcleo multi-tenant de este repo
+(cola por RUT, registro por credencial, proveedor de credenciales) sí se reusa
+tal cual**: la clave tributaria por RUT encaja en `ProveedorCredenciales` igual
+que la config del CGI.
 
-No empezar a escribir código hasta responder el punto 1: la arquitectura del
-gateway depende de esa respuesta, y escribir el cliente antes obliga a
-reescribirlo si la respuesta es la rama interactiva.
+Ya se puede empezar a escribir el cliente de auth: los cuatro pasos están
+relevados. Emitir queda detrás de relevar el punto 4.
