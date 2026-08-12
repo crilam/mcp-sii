@@ -146,6 +146,13 @@ clientes externos ──┘       ├─ cola por RUT   ← serializa mismo RUT,
    Falta sólo el **cableado del servidor**: `server.ts` sigue creando un
    `SessionManager` único (mono-credencial). El registro es la vía multi-tenant
    nueva, en paralelo; el MCP actual no se rompe.
+
+   **Pendiente para servicio de larga vida (no bloquea):** los mapas de
+   `RegistroSesiones` y `ColaPorClave` crecen por RUT sin evicción ni TTL.
+   Acotado por la cantidad de clientes, así que hoy no importa; pero una sesión
+   del SII caduca del lado servidor y acá queda cacheada hasta que una operación
+   la vea expirar. Cuando el servicio corra permanentemente, sumar TTL/evicción
+   por RUT.
 2. **Antes de vender — Secrets Manager + adaptador REST.** Un secreto por RUT
    (ver sección de infra abajo); el REST expone las mismas operaciones que hoy da
    el MCP, ruteando por `registro.ejecutar(rut, …)`, para RDTE y Parkingapp. El

@@ -280,6 +280,23 @@ describe('SiiHttpClient.postForm', () => {
     expect(args.some(arg => arg.includes('%C3%8D'))).toBe(false);
   });
 
+  it('falla ante un carácter que no existe en latin1, en vez de corromperlo en silencio', async () => {
+    // Buffer.from(x, 'latin1') trunca al byte bajo: un carácter fuera de latin1
+    // (€, un emoji) saldría convertido en otro byte, sin error, y emitiría un
+    // documento tributario con el dato equivocado. Estos valores vienen de
+    // parámetros de la tool, así que el borde es alcanzable. Mejor un error
+    // claro que un DTE corrupto.
+    const { client } = makeClient();
+
+    await expect(
+      client.postForm(
+        'https://www1.sii.cl/cgi-bin/Portal001/mipeDisplayPreView.cgi',
+        { EFXP_RZN_SOC: 'CAFÉ €URO' },
+        { charset: 'latin1' }
+      )
+    ).rejects.toThrow(/latin1|ISO-8859-1/i);
+  });
+
   it('escapa los valores con caracteres especiales', async () => {
     mockExec.mockReturnValue('<html>ok</html>' as never);
     const { client } = makeClient();

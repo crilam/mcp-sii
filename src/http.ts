@@ -239,11 +239,22 @@ const SIN_ESCAPAR = /[A-Za-z0-9\-_.!~*'()]/;
 
 function encodeLatin1(texto: string): string {
   let salida = '';
-  for (const byte of Buffer.from(texto, 'latin1')) {
-    const caracter = String.fromCharCode(byte);
+  for (const caracter of texto) {
+    const codigo = caracter.codePointAt(0)!;
+    // Fuera del rango latin1 (0–255) no hay byte que represente el carácter:
+    // `Buffer.from(x, 'latin1')` lo truncaría al byte bajo en silencio y el CGI
+    // recibiría otro carácter. En un documento tributario eso es corrupción muda,
+    // así que se corta con un error que nombra el valor ofensor.
+    if (codigo > 0xff) {
+      throw new Error(
+        `El valor "${texto}" tiene un carácter ("${caracter}") que no existe en ` +
+        'ISO-8859-1 (latin1), el encoding que exigen los CGI del portal. ' +
+        'Revisá el dato: el SII no acepta caracteres fuera de latin1 en un DTE.'
+      );
+    }
     salida += SIN_ESCAPAR.test(caracter)
       ? caracter
-      : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+      : `%${codigo.toString(16).toUpperCase().padStart(2, '0')}`;
   }
   return salida;
 }

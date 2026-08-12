@@ -134,6 +134,27 @@ describe('registerMipymeTools', () => {
     expect(result.content[0].text).toContain('1234');
   });
 
+  it('sii_mipyme_emitir_dte avisa que el folio emitido está pendiente de verificación', async () => {
+    // El folio sale de la página de firma (el propuesto): la respuesta de
+    // mipeSendXML no está relevada, así que no se puede afirmar que ese sea el
+    // folio asignado. Reportarlo sin salvedad es el falso positivo del "folio
+    // 21". La tool tiene que decir que hay que confirmarlo contra el historial.
+    const { http, tools } = armar();
+    (http.emitirDte as jest.Mock).mockResolvedValue({
+      emitido: true,
+      folio: 1234,
+      resumen: { neto: 100000, iva: 19000, total: 119000 },
+    });
+
+    const result = await tools['sii_mipyme_emitir_dte'].handler({
+      ...emisionMinima,
+      confirmar: true,
+    });
+
+    expect(result.content[0].text).toMatch(/verificar|pendiente|confirmar/i);
+    expect(result.content[0].text).toContain('sii_mipyme_list_dte_emitidos');
+  });
+
   it('sii_mipyme_emitir_dte traduce los nombres de los campos al contrato del scraper', async () => {
     const { http, tools } = armar();
     (http.emitirDte as jest.Mock).mockResolvedValue({

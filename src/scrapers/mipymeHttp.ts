@@ -497,6 +497,12 @@ export class MipymeHttpScraper {
     );
 
     this.assertEnvioAceptado(envio);
+    // Se devuelve el folio PROPUESTO (el de la página de firma), no el asignado:
+    // la respuesta de mipeSendXML.cgi no está relevada, así que no se puede leer
+    // el folio real de ahí. La tool marca esta salvedad y manda a verificar
+    // contra el historial. No afirmar el folio con certeza evita repetir el
+    // falso positivo del "folio 21". Cuando se releve el envío, leer el folio de
+    // `envio` en vez de reusar el propuesto.
     return folio;
   }
 

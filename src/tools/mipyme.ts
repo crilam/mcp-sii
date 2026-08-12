@@ -141,7 +141,18 @@ export function registerMipymeTools(server: McpServer, http: MipymeHttpScraper):
       // Los 243 campos del documento no le sirven a nadie leyéndolo y tapan el
       // resumen, que es lo que hay que revisar antes de confirmar.
       const salida = resultado.emitido
-        ? resultado
+        ? {
+            emitido: true,
+            folio: resultado.folio,
+            resumen: resultado.resumen,
+            // El folio sale de la página de firma (el propuesto por el portal).
+            // La respuesta de mipeSendXML.cgi no está relevada, así que no se
+            // puede afirmar que sea el folio asignado: hay que confirmarlo. Es
+            // la salvedad que evita repetir el falso positivo del "folio 21".
+            aviso: `Documento emitido. El folio ${resultado.folio} es el que propuso el ` +
+              'portal; hay que verificar que quedó asignado consultando ' +
+              'sii_mipyme_list_dte_emitidos (la respuesta del envío aún no está relevada).',
+          }
         : {
             emitido: false,
             resumen: resultado.resumen,

@@ -5,6 +5,7 @@ import {
   parseCamposFormulario,
   parseEmisorDesdeFormulario,
   calcularTotales,
+  decodificarEntidades,
   EmitirDteParams,
 } from '../../src/scrapers/mipymeHttp';
 import { SiiHttpClient } from '../../src/http';
@@ -196,9 +197,6 @@ describe('MipymeHttpScraper.emitirDte', () => {
 
     const resultado = await scraper.emitirDte(params());
 
-    expect(urlsPosteadas(http)).not.toContain(
-      expect.stringContaining('mipeGenXMLFirma')
-    );
     expect(urlsPosteadas(http).some(u => u.includes('mipeGenXMLFirma'))).toBe(false);
     expect(urlsPosteadas(http).some(u => u.includes('mipeDisplayPreView'))).toBe(true);
     expect(resultado.emitido).toBe(false);
@@ -568,5 +566,22 @@ describe('MipymeHttpScraper.verificarFirma', () => {
       expect.stringContaining('mipeGenXMLFirma'),
       expect.stringContaining('postFirmaDigital'),
     ]);
+  });
+});
+
+describe('decodificarEntidades', () => {
+  it('decodifica entidades numéricas y nombradas', () => {
+    expect(decodificarEntidades('COMERCIAL&#205;A')).toBe('COMERCIALÍA');
+    expect(decodificarEntidades('a&aacute;o')).toBe('aáo');
+    expect(decodificarEntidades('correo&#64;ejemplo.cl')).toBe('correo@ejemplo.cl');
+  });
+
+  it('no decodifica dos veces: &amp; se resuelve ÚLTIMO', () => {
+    // El SII escapa un `&` literal como `&amp;`. Si `&amp;` se resolviera antes
+    // que las entidades, un `&amp;#205;` escrito así por el portal quedaría como
+    // `&#205;` y la pasada siguiente lo convertiría en `Í` — decodificando dos
+    // veces un dato que el SII mandó escapado a propósito. El orden lo evita.
+    expect(decodificarEntidades('AT&amp;T')).toBe('AT&T');
+    expect(decodificarEntidades('AT&amp;#205;T')).toBe('AT&#205;T');
   });
 });
