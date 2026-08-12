@@ -1,6 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { MipymeScraper } from '../scrapers/mipyme';
 import { MipymeHttpScraper } from '../scrapers/mipymeHttp';
 import { getConfig } from '../env';
 
@@ -15,11 +14,7 @@ function empresaPedida(empresaRut?: string): string | undefined {
   return empresaRut ?? getConfig().empresaRut;
 }
 
-export function registerMipymeTools(
-  server: McpServer,
-  http: MipymeHttpScraper,
-  navegador: MipymeScraper
-): void {
+export function registerMipymeTools(server: McpServer, http: MipymeHttpScraper): void {
   server.tool(
     'sii_mipyme_list_empresas',
     'Lista las empresas que la persona autenticada puede operar en el Sistema de Facturación ' +
@@ -71,36 +66,102 @@ export function registerMipymeTools(
 
   server.tool(
     'sii_mipyme_emitir_dte',
-    'Emite un DTE (factura, nota de crédito, guía de despacho, etc.) en el Sistema de ' +
-    'Facturación Gratuito del SII (mipyme.sii.cl). ADVERTENCIA: emitir es un acto tributario ' +
-    'real e irreversible que notifica al receptor. ADEMÁS, hoy esta tool está probablemente ' +
-    'inoperativa: el CGI al que apunta (mipeDocAlta.cgi) responde 404, medido el 2026-08-03. ' +
-    'Requiere RUT y DV del receptor separados. Devuelve el folio asignado.',
+    'Emite una factura (33), factura exenta (34) o nota de crédito (61) en el Sistema de ' +
+    'Facturación Gratuito del SII (mipyme.sii.cl). POR DEFECTO NO EMITE: devuelve la ' +
+    'previsualización con los montos que calculó el propio SII, para revisarlos. Sólo con ' +
+    'confirmar=true firma y envía el documento, y eso es un acto tributario REAL E ' +
+    'IRREVERSIBLE que notifica al receptor y sólo se deshace con una nota de crédito: pedí ' +
+    'autorización explícita del usuario antes de mandar confirmar=true, nunca lo uses para ' +
+    'probar. Firmar requiere que el contribuyente tenga su certificado digital cargado en el ' +
+    'SII y la clave en SII_CERT_CLAVE_SII (o SII_CERT_PASSWORD). En una factura afecta el IVA ' +
+    'se redondea, así que el neto mínimo emisible es 3: con 1 ó 2 el IVA da 0 y el portal la ' +
+    'rechaza.',
     {
       empresa_rut: z.string().optional().describe('RUT empresa. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si la persona opera una única empresa.'),
-      tipo_dte: z.number().int().describe('Tipo DTE: 33=factura, 34=exenta, 61=N.crédito, 56=N.débito, 52=guía, 46=F.compra'),
+      tipo_dte: z.number().int().describe('33=factura, 34=factura exenta, 61=nota de crédito'),
       receptor_rut: z.string().describe('RUT del receptor sin DV (ej: "33333333")'),
       receptor_dv: z.string().describe('DV del receptor (ej: "1" o "K")'),
+      receptor_razon_social: z.string().describe('Razón social del receptor'),
+      receptor_giro: z.string().describe('Giro del receptor'),
+      receptor_direccion: z.string().describe('Dirección del receptor'),
+      receptor_comuna: z.string().describe('Comuna del receptor'),
+      receptor_ciudad: z.string().describe('Ciudad del receptor'),
       lineas: z.array(z.object({
-        descripcion: z.string().describe('Descripción del ítem'),
+        descripcion: z.string().max(25).describe('Descripción del ítem (máximo 25 caracteres: es el límite del portal)'),
         cantidad: z.number().describe('Cantidad'),
         precio_unitario: z.number().int().describe('Precio unitario sin IVA'),
+        unidad: z.string().optional().describe('Unidad de medida (máximo 4 caracteres)'),
       })).min(1).describe('Líneas de detalle del documento'),
+      forma_pago: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional().describe('1=contado, 2=crédito (default), 3=sin costo'),
+      ciudad_emisor: z.string().optional().describe('Ciudad del emisor. El portal la exige y no la trae cargada; si se omite se usa su comuna.'),
+      fecha_emision: FechaSchema.describe('Fecha de emisión YYYY-MM-DD. Si se omite, la del día que trae el portal.'),
+      referencias: z.array(z.object({
+        tipo_doc: z.number().int().describe('Tipo del documento referenciado: 33, 34, 39, 61, 56, 801...'),
+        folio: z.number().int().describe('Folio del documento referenciado'),
+        fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('Fecha del documento referenciado, YYYY-MM-DD'),
+        razon: z.string().max(90).optional().describe('Razón de la referencia'),
+        codigo: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional().describe('1=anula, 2=corrige texto, 3=corrige montos. Obligatorio en nota de crédito.'),
+      })).max(3).optional().describe('Hasta 3 referencias. Una nota de crédito exige al menos una.'),
+      confirmar: z.boolean().default(false).describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento, acto real e irreversible.'),
     },
-    async ({ empresa_rut, tipo_dte, receptor_rut, receptor_dv, lineas }) => {
-      const result = await navegador.emitirDte({
-        empresaRut: empresa_rut,
-        tipoDte: tipo_dte,
-        receptorRut: receptor_rut,
-        receptorDv: receptor_dv,
-        lineas: lineas.map(l => ({
-          descripcion: l.descripcion,
-          cantidad: l.cantidad,
-          precioUnitario: l.precio_unitario,
-        })),
-      });
+    async (args) => {
+      const resultado = await http.emitirDte(
+        {
+          empresaRut: empresaPedida(args.empresa_rut),
+          tipoDte: args.tipo_dte,
+          receptor: {
+            rut: args.receptor_rut,
+            dv: args.receptor_dv,
+            razonSocial: args.receptor_razon_social,
+            giro: args.receptor_giro,
+            direccion: args.receptor_direccion,
+            comuna: args.receptor_comuna,
+            ciudad: args.receptor_ciudad,
+          },
+          lineas: args.lineas.map(l => ({
+            nombre: l.descripcion,
+            cantidad: l.cantidad,
+            precioUnitario: l.precio_unitario,
+            unidad: l.unidad,
+          })),
+          formaPago: args.forma_pago,
+          ciudadEmisor: args.ciudad_emisor,
+          fechaEmision: args.fecha_emision,
+          referencias: args.referencias?.map(r => ({
+            tipoDoc: r.tipo_doc,
+            folio: r.folio,
+            fecha: r.fecha,
+            razon: r.razon,
+            codigo: r.codigo,
+          })),
+        },
+        args.confirmar
+      );
+
+      // Los 243 campos del documento no le sirven a nadie leyéndolo y tapan el
+      // resumen, que es lo que hay que revisar antes de confirmar.
+      const salida = resultado.emitido
+        ? {
+            emitido: true,
+            folio: resultado.folio,
+            resumen: resultado.resumen,
+            // El folio sale de la página de firma (el propuesto por el portal).
+            // La respuesta de mipeSendXML.cgi no está relevada, así que no se
+            // puede afirmar que sea el folio asignado: hay que confirmarlo. Es
+            // la salvedad que evita repetir el falso positivo del "folio 21".
+            aviso: `Documento emitido. El folio ${resultado.folio} es el que propuso el ` +
+              'portal; hay que verificar que quedó asignado consultando ' +
+              'sii_mipyme_list_dte_emitidos (la respuesta del envío aún no está relevada).',
+          }
+        : {
+            emitido: false,
+            resumen: resultado.resumen,
+            aviso: 'Documento NO emitido: esto es sólo la previsualización. Para emitirlo de ' +
+              'verdad hay que llamar de nuevo con confirmar=true, y eso es irreversible.',
+          };
+
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(salida, null, 2) }],
       };
     }
   );

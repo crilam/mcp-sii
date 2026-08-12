@@ -8,3 +8,6 @@ dist/
 # de trabajo. Este repositorio es público y ahí se escribe sin filtro para
 # diagnosticar, así que nada de eso puede viajar versionado.
 .superpowers/
+
+# Scripts de verificación en vivo con RUTs reales (no versionar)
+verificar-*.ts

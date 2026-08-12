@@ -21,8 +21,11 @@ const configCert: SiiConfig = {
   certPassword: 'clave-pfx',
 };
 
-const KEY_PEM = path.join(os.tmpdir(), 'sii_key.pem');
-const CERT_PEM = path.join(os.tmpdir(), 'sii_cert.pem');
+// Los PEM temporales ahora son por credencial (llevan el RUT saneado), para
+// que dos logins concurrentes de RUTs distintos no se pisen el material de
+// clave. Para el RUT de este test (12345678) el sufijo es "12345678".
+const KEY_PEM = path.join(os.tmpdir(), 'sii_key_12345678');
+const CERT_PEM = path.join(os.tmpdir(), 'sii_cert_12345678');
 
 // Respuesta del CGI cuando la autenticación fue aceptada.
 const RESPUESTA_OK = "<script>location.replace('https://mipyme.sii.cl/')</script>";

@@ -2,7 +2,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Browser } from './browser';
 import { SessionManager } from './session';
 import { SiiHttpClient } from './http';
-import { MipymeScraper } from './scrapers/mipyme';
 import { MipymeHttpScraper } from './scrapers/mipymeHttp';
 import { BienesRaicesScraper } from './scrapers/bienesRaices';
 import { BheScraper } from './scrapers/bhe';
@@ -21,7 +20,6 @@ export function createServer(): McpServer {
   const config = getConfig();
   const browser = new Browser();
   const session = new SessionManager(config, browser);
-  const scraper = new MipymeScraper(browser, session);
   const bienesRaicesScraper = new BienesRaicesScraper(browser, session);
   // Mismo `session` que el resto de los scrapers: una sola sesión por proceso,
   // dos sesiones simultáneas contra el mismo RUT disparan el bloqueo del SII.
@@ -30,13 +28,12 @@ export function createServer(): McpServer {
   const rentaScraper = new RentaScraper(http, session);
   const rcvScraper = new RcvScraper(http, session);
   // Consultas DTE ya no usa el navegador: la empresa es un parámetro de cada
-  // consulta, así que no hay estado compartido que aislar. `MipymeScraper`
-  // sigue existiendo para las tools `sii_mipyme_*`, que sí lo necesitan.
+  // consulta, así que no hay estado compartido que aislar.
   const dteScraper = new DteScraper(http, session);
-  // Las dos consultas del portal mipyme (empresas e historial de emitidos) ya no
-  // usan el navegador: son CGI legacy que responden HTML por HTTP. `scraper`
-  // sigue existiendo sólo por `sii_mipyme_emitir_dte`, cuyo formulario no está
-  // relevado — y que además apunta a un CGI que responde 404.
+  // El portal mipyme entero —empresas, historial de emitidos y desde el
+  // 2026-08-11 también la emisión— va por HTTP: son CGI legacy que responden
+  // HTML. `MipymeScraper`, el scraper de navegador, se borró al migrar la
+  // emisión: era su último método vivo.
   const mipymeHttpScraper = new MipymeHttpScraper(http, session);
 
   const server = new McpServer({
@@ -44,7 +41,7 @@ export function createServer(): McpServer {
     version: '0.1.0',
   });
 
-  registerMipymeTools(server, mipymeHttpScraper, scraper);
+  registerMipymeTools(server, mipymeHttpScraper);
   registerDteTools(server, dteScraper);
   registerBienesRaicesTools(server, bienesRaicesScraper);
   registerSesionTools(server, session);

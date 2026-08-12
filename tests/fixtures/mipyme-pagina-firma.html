@@ -1,0 +1,33 @@
+<html>
+<head><title>Firma de Documento Electronico</title></head>
+<body>
+<!--
+  Recorte de la respuesta real de mipeGenXMLFirma.cgi (2026-08-11), anonimizado.
+  Lo que importa del original: NO es un documento emitido, es la página que pide
+  la clave del certificado para firmar, y trae el folio YA RESERVADO. El resto
+  de la página (244 hidden y el XML completo del DTE en un textarea) se recorta
+  porque este parser no lo mira.
+-->
+<div id="divFirma">
+  <p>En esta p&aacute;gina se firma digitalmente el Documento Tributario Electr&oacute;nico que Ud. acaba de generar.</p>
+  <label for="myPass">Ingrese la clave de su certificado</label>
+  <input type="password" class="form-control" id="myPass"/>
+</div>
+<form name="frmSign" method="post" id="frmSign" action="/cgi-bin/Portal001/mipeSendXML.cgi">
+  <input type="hidden" name="TMST_SIGN" id="TMST_SIGN" value="2026-08-11T20:59:42">
+  <input type="hidden" name="PTDC_CODIGO" value="33">
+  <input type="hidden" name="EFXP_FOLIO" value="22">
+  <input type="hidden" name="EFXP_RUT_RUT_EMP" value="11111111-1">
+  <textarea class="hidden" readonly cols="1" rows="1" name="txtPlainText" id="txtPlainText"><?xml version="1.0" encoding="ISO-8859-1"?>
+<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <Documento ID="MiPE11111111-1672">
+    <Encabezado>
+      <IdDoc><TipoDTE>33</TipoDTE><Folio>22</Folio><FchEmis>2026-08-11</FchEmis></IdDoc>
+    </Encabezado>
+  </Documento>
+</DTE></textarea>
+  <textarea class="hidden" cols="1" rows="1" name="txtSignText" id="txtSignText"></textarea>
+  <input type="button" value="Firmar" id="btnSign">
+</form>
+</body>
+</html>

@@ -16,7 +16,9 @@ const config: SiiConfig = {
   certPassword: 'clave-pfx',
 };
 
-const COOKIE_JAR = path.join(os.tmpdir(), 'sii_cookies.txt');
+// El cookie jar ahora es por credencial: lleva el RUT saneado a [A-Za-z0-9].
+// Para el RUT de este test (11111111-1) eso es "111111111".
+const COOKIE_JAR = path.join(os.tmpdir(), 'sii_cookies_111111111');
 
 function escribirCookieJar(lineas: string[]): void {
   fs.writeFileSync(

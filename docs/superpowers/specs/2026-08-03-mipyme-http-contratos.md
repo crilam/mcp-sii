@@ -146,7 +146,7 @@ No se ejercitó `mipeLaunchPage.cgi` en esta spike para no acumular sesiones abi
 ## Lo que falta
 
 1. ~~Confirmar el estado de `sii_mipyme_emitir_dte`.~~ **Confirmado el 2026-08-03: la tool está rota.** `mipeDocAlta.cgi` responde 404; `mipeLaunchPage.cgi?OPCION=33&TIPO=4` vive y responde un "Launcher" que abre `mipeGenFacEx.cgi?PTDC_CODIGO=33`. La URL NO se corrigió: apuntarla al CGI correcto sin relevar el formulario convertiría un fallo visible en un camino que emite con parámetros adivinados. Queda advertido en la descripción de la tool y en el README.
-2. **El formulario de emisión**: campos, obligatoriedad, formato, y si hay un paso de previsualización como en las boletas. Sin eso, migrar `emitirDte` sería reescribir a ciegas un camino que además emite.
+2. ~~**El formulario de emisión**: campos, obligatoriedad, formato, y si hay un paso de previsualización.~~ **Relevado el 2026-08-11: ver [el contrato de emisión](2026-08-11-mipyme-emision-contrato.md).** El flujo real tiene **seis** pasos, no tres, y `mipeGenXMLFirma.cgi` —el que parecía emitir— no emite.
 3. **El detalle de líneas de un documento emitido**, si se lo quiere: no está en `mipeGesDocEmi.cgi`.
 4. **Qué devuelve el historial cuando la empresa no tiene documentos.** El código actual espera el texto "No existen documentos"; no se pudo verificar porque la empresa probada tiene 184.
 5. **Los valores de `ESTADO` y `ORDEN`**, que se mandan vacíos y funcionan, pero cuyo dominio no se relevó.

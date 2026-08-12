@@ -1,11 +1,10 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import { Browser } from './browser';
 import { AuthStrategy, SiiConfig } from './env';
 import { partirRut } from './rut';
+import { rutaTemporalSii } from './rutaTemporalSii';
 
 export interface Empresa {
   rut: string;
@@ -60,7 +59,6 @@ const OPENSSL_CANDIDATES = [
 
 // Ruta del cookie jar en formato Netscape que curl genera y que el cliente HTTP
 // puede consumir con -b para reusar la sesión sin autenticar por su cuenta.
-const COOKIE_JAR = path.join(os.tmpdir(), 'sii_cookies.txt');
 
 let opensslBin: string | null = null;
 
@@ -133,6 +131,15 @@ export class SessionManager {
     private config: SiiConfig,
     private browser: Browser
   ) {}
+
+  // Cookie jar propio de esta credencial. Antes era una constante global, que
+  // servía para un proceso de una sola credencial pero colisiona apenas hay
+  // varias: dos sesiones escribiendo el mismo archivo se pisan las cookies y las
+  // consultas salen con la sesión equivocada, sin error. Con el RUT en el nombre
+  // cada credencial tiene el suyo. Ver rutaTemporalSii.
+  private get cookieJar(): string {
+    return rutaTemporalSii('cookies', this.config.rut);
+  }
 
   // Serializa una operación COMPLETA que depende de la empresa seleccionada:
   // selección más las lecturas posteriores. El candado tiene que abarcar todo
@@ -276,7 +283,7 @@ export class SessionManager {
   async rutaCookieJar(): Promise<string> {
     this.assertPuedeEntregarCookieJar();
     await this.authenticate();
-    return COOKIE_JAR;
+    return this.cookieJar;
   }
 
   // El `conversationId` que exigen las APIs modernas del portal (el sobre SDI)
@@ -288,7 +295,7 @@ export class SessionManager {
   // conversationId vacío devuelve "Acceso no autorizado!", un mensaje que
   // manda a revisar permisos cuando el problema es que no hay sesión.
   conversationId(): string {
-    const token = this.parseCookieFile(COOKIE_JAR)['TOKEN'];
+    const token = this.parseCookieFile(this.cookieJar)['TOKEN'];
     if (!token) {
       throw new Error(
         'No se encontró la cookie TOKEN de la sesión del SII, necesaria para consultar ' +
@@ -334,6 +341,15 @@ export class SessionManager {
     return partirRut(this.config.rut, 'SII_RUT');
   }
 
+  // La clave del certificado que el contribuyente tiene cargado en el SII, con
+  // la que el portal mipyme firma los DTE del lado servidor. Se expone desde acá
+  // —dueña de la configuración sensible— para que el scraper no lea el entorno
+  // por su cuenta, y sobre todo para que la clave NO sea un parámetro de la
+  // tool: así el modelo nunca la ve.
+  claveCertificadoSii(): string | undefined {
+    return this.config.claveCertificadoSii;
+  }
+
   // Autentica con certificado digital vía curl (TLS mutual auth), luego inyecta
   // las cookies de sesión en agent-browser navegando a un dominio .sii.cl.
   private async loginWithCert(): Promise<void> {
@@ -342,10 +358,11 @@ export class SessionManager {
       throw new Error('loginWithCert requiere SII_CERT_PATH y SII_CERT_PASSWORD');
     }
 
-    const tmpDir = os.tmpdir();
-    const certPem = path.join(tmpDir, 'sii_cert.pem');
-    const keyPem = path.join(tmpDir, 'sii_key.pem');
-    const cookiesFile = COOKIE_JAR;
+    // También por credencial: dos logins concurrentes de RUTs distintos escriben
+    // sus PEM a la vez, y con rutas fijas se pisarían el material de clave.
+    const certPem = rutaTemporalSii('cert', this.config.rut);
+    const keyPem = rutaTemporalSii('key', this.config.rut);
+    const cookiesFile = this.cookieJar;
 
     // La clave privada se extrae con -nodes, o sea sin cifrar, a un directorio
     // compartido. El `finally` no es decorativo: sin él, cualquier salida por

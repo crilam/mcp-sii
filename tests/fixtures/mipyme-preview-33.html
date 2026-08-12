@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Facturaci&oacute;n Electr&oacute;nica - Pre-View de Documento</title>
+	<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1"/>
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+	<meta name="description" content="">
+	<meta name="author" content="">
+
+	<script type="text/javascript" src="https://zeusr.sii.cl/admin/responsive_barranav.js"></script>
+        <script type="text/javascript" src="/Portal001/JS/jquery.min.js"></script>
+	
+
+<script type="text/javascript">
+    
+    function showEspera() {
+        var myModal = document.getElementById("myModal");
+         if (myModal) {
+                myModal.style.top = ((window.innerHeight/2) - (myModal.offsetHeight/2))+'px';
+                $('#myModal').show();
+        }
+    }
+
+function goSignDTE(btn) {
+  btn.disabled=true; 
+ var btnCorregir= document.getElementById('btnCorregir')
+ if (btnCorregir) btnCorregir.disabled=true;
+  showEspera();
+  document.forms["PreViewDTE"].action = "/cgi-bin/Portal001/mipeGenXMLFirma.cgi";
+ document.forms["PreViewDTE"].submit();
+}
+</script>
+<script type="text/javascript" src="/Portal001/JS/validaUtil.js" ></script>
+<script type="text/javascript" src="/Portal001/JS/despliegaRut.js" ></script>
+<script type="text/javascript" src="/Portal001/JS/validaPOP.js" ></script>
+<script type="text/javascript" src="/Portal001/JS/overlib.js"></script> 
+<script type="text/javascript" src="/Portal001/JS/mipe.js"></script>
+
+<script type="text/javascript">
+	window.history.forward();
+	function noBack()
+	{	
+		window.history.forward();
+	}
+</script>
+    
+</head>
+
+<body onload="noBack();" onpageshow="if (event.persisted) noBack();" onunload="">
+
+    <!-- MODAL -->
+    <div aria-labelledby="myModalLabel"  role="dialog" tabindex="-1"  class="modal  "  id="myModal">
+        <div role="document" class="modal-dialog">
+            <div class="modal-content">
+		        <div class="text-center">
+		            <h4>Espere</h4>
+		            <img src="/img/ajax-loader.gif"  lass="loading-img-big"  lass="img-responsive center-block">
+		          </div>
+            </div>
+        </div>
+    </div>
+
+
+	<div id="my-wrapper"> 
+
+			<div id="barra_sup">
+        
+				<!-- Div donde se muestra barra superior, menú y rastro--> 
+				<script type="text/javascript">
+					mostrar("|Factura electrónica");
+				</script>
+				<!-- Fin Div Cabecera -->
+        
+			</div>
+
+		<!-- CUERPO -->
+		<div class="web-sii cuerpo">
+			<div class="container">
+
+			<!-- Div Principal -->
+
+				<div class="row">
+					<div class="col-sm-9">
+						<h5 class="title">REVISIÓN DE DOCUMENTO TRIBUTARIO ELECTR&Oacute;NICO</h5>
+					</div>
+					<div class="col-sm-3 text-right">
+							Empresa: <b><script type="text/javascript">muestraCMP();</script> </b>
+					</div>
+				</div>
+				<p class="small">	
+					
+						Este es el Documento Tributario Electr&oacute;nico que se ha
+						generado con la informaci&oacute;n que Ud. ha ingresado hasta ahora. 
+						<b>
+						Rev&iacute;selo cuidadosamente para verificar que contiene todos los
+						datos que Ud. desea incorporar en el documento. </b>
+					
+					
+				</p>
+    
+    
+   
+
+  <div id="wrapPdf">
+  <iframe id="framePdf"
+    src="/Portal001/PreViewFrame.html"
+    width="100%" eight="100%" height="500px">
+  </iframe>
+  </div>
+
+   
+
+  
+  
+  <br>
+					
+          Si est&aacute; de acuerdo con el documento desplegado y quiere
+          emitir este documento,
+          presione el bot&oacute;n <strong>Firmar</strong>.
+          <br/><br/>
+          Si quiere volver al documento para realizar correciones o agregar
+          informaci&oacute;n, presione el bot&oacute;n <strong>Corregir</strong>.
+					
+					
+  <br><br>
+
+
+  <form name="PreViewDTE" method="post" action="/cgi-bin/Portal001/mipeGenFacEx.cgi">
+  <p class="text-center">
+        <INPUT type="button" class="btn btn-default" value="Firmar" name="btnSign"
+               onclick='goSignDTE(this);'>
+
+
+
+        <INPUT type="button" class="btn btn-default" value="Corregir" name="btnCorregir"  id="btnCorregir"  onclick='submit();'>
+
+</p>
+  
+<!--   Campos Ocultos para indicar si se esta ejecutando cgi PreView por 1era o 2a vez  -->
+  <input type="hidden" name="INDICA_PRIMERA_EJECUCION" value="1" >
+
+<!--   Campos Ocultos para Corregir DTE          -->
+  <input type="hidden" name="ES_BORR" value="FALSE" >
+  <input type="hidden" name="EHDR_CODIGO" value="" >
+  <input type="hidden" name="AGENTE_RETENEDOR" value="" >
+  <input type="hidden" name="PTES_ESTADO" value="">
+  <input type="hidden" name="TIPO_PLANTILLA" value="">
+  <input type="hidden" name="MNT_TOTAL_ORI" value="">
+  <input type="hidden" name="PTDC_CODIGO" value="33">
+  <input type="hidden" name="EFXP_FMA_PAGO" value="2">
+
+
+  <input type="hidden" name="EFXP_FCH_PAGO_001" value="">
+  <input type="hidden" name="EFXP_FCH_PAGO_002" value="">
+  <input type="hidden" name="EFXP_FCH_PAGO_003" value="">
+  <input type="hidden" name="EFXP_MNT_PAGO_001" value="">
+  <input type="hidden" name="EFXP_MNT_PAGO_002" value="">
+  <input type="hidden" name="EFXP_MNT_PAGO_003" value="">
+  <input type="hidden" name="EFXP_GLOSA_PAGOS_001" value="">
+  <input type="hidden" name="EFXP_GLOSA_PAGOS_002" value="">
+  <input type="hidden" name="EFXP_GLOSA_PAGOS_003" value="">
+
+
+  <input type="hidden" name="EFXP_FCH_VENC" value="">
+  <input type="hidden" name="EFXP_IND_VENTA" value="">
+  <input type="hidden" name="EFXP_RZN_SOC" value="COMERCIALÍA FICTICIA SPA" maxlength="110" size="50" >
+  <input type="hidden" name="EFXP_GIRO_EMIS" value="GIRO DE PRUEBA SIN DATOS REALES" maxlength="80" size="50" >
+  <input type="hidden" name="EFXP_ACTECO" value="702000" maxlength="6" size="6">
+  <input type="hidden" name="EFXP_CDG_SII_SUCUR" value="11111111" maxlength="9" size="9">
+  <input type="hidden" name="EFXP_DIR_ORIGEN" value="CALLE FICTICIA 100      " maxlength="70" size="50" >
+  <input type="hidden" name="EFXP_CMNA_ORIGEN" value="COMUNA UNO" maxlength="20" >
+  <input type="hidden" name="EFXP_CIUDAD_ORIGEN" value="SANTIAGO" maxlength="15" size="15" >
+  
+	  <input type="hidden" name="EFXP_TIPOVENTA_SELECT" value="1">
+	  <input type="hidden" name="EFXP_TIPOCOMPRA_SELECT" value="1">
+	  <input type="hidden" name="EFXP_DOC_REF_RAIZ" value="">
+
+  <input type="hidden" name="EFXP_COMUNA_ROL_ORIGEN" value="">
+  <input type="hidden" name="EFXP_MAN_ROL_ORIGEN"    value="">
+  <input type="hidden" name="EFXP_PRED_ROL_ORIGEN"   value="">
+  <input type="hidden" name="EFXP_SIST_REF_GEO"      value="">
+  <input type="hidden" name="EFXP_LAT_ORIG_MADERA"   value="">
+  <input type="hidden" name="EFXP_LONG_ORIG_MADERA"  value="">
+  <input type="hidden" name="EFXP_COD_PLAN_CONAF"    value="">
+  <input type="hidden" name="UBIC_MADERA_SI_NO"      value="">
+
+  <input type="hidden" name="EFXP_EMAIL_EMISOR" value="emisor@ejemplo.cl"  >
+  <input type="hidden" name="EFXP_FONO_EMISOR" value=""  >
+  <input type="hidden" name="EFXP_RUT_RECEP" value="22222222" maxlength="8" size="8" >
+  <input type="hidden" name="EFXP_DV_RECEP" value="2" maxlength="1" size="1">
+  <input type="hidden" name="EFXP_FCH_EMIS" value="2026-08-11" maxlength="10" size="10">
+  <input type="hidden" name="EFXP_RZN_SOC_RECEP" value="RECEPTORA FICTICIA S.A." maxlength="110" size="50" >
+  <input type="hidden" name="EFXP_GIRO_RECEP" value="SERVICIOS" maxlength="50" size="50">
+  <input type="hidden" name="EFXP_DIR_RECEP" value="CALLE FICTICIA 200" maxlength="70" size="50" >
+  <input type="hidden" name="EFXP_CIUDAD_RECEP" value="SANTIAGO" maxlength="15" size="15" >
+  <input type="hidden" name="EFXP_CMNA_RECEP" value="PROVIDENCIA" maxlength="20" >
+  <input type="hidden" name="EFXP_CONTACTO" value="" maxlength="80" >
+  <input type="hidden" name="EFXP_RUT_SOLICITA" value="" maxlength="12" size="12" >
+  <input type="hidden" maxlength="1" size="1" value="" name="EFXP_DV_SOLICITA">
+
+  <input type="hidden" name="EFXP_TPO_COD_01" value="" >
+  <input type="hidden" name="EFXP_COD_01" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_01" value="SERVICIO DE PRUEBA HTTP" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_01" value="1" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_01" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_01" value="3" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_01" value="" >
+  <input type="hidden" name="EFXP_PCTD_01" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_01" value="3" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_01" value="" maxlength="12" size="12">
+
+  <input type="hidden" name="EFXP_TPO_COD_02" value="" >
+  <input type="hidden" name="EFXP_COD_02" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_02" value="" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_02" value="" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_02" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_02" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_02" value="" >
+  <input type="hidden" name="EFXP_PCTD_02" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_02" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_02" value="" maxlength="12" size="12">
+  
+  <input type="hidden" name="EFXP_TPO_COD_03" value="" >
+  <input type="hidden" name="EFXP_COD_03" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_03" value="" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_03" value="" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_03" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_03" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_03" value="" >
+  <input type="hidden" name="EFXP_PCTD_03" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_03" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_03" value="" maxlength="12" size="12">
+
+  <input type="hidden" name="EFXP_TPO_COD_04" value="" >
+  <input type="hidden" name="EFXP_COD_04" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_04" value="" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_04" value="" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_04" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_04" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_04" value="" >
+  <input type="hidden" name="EFXP_PCTD_04" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_04" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_04" value="" maxlength="12" size="12">
+
+  <input type="hidden" name="EFXP_TPO_COD_05" value="" >
+  <input type="hidden" name="EFXP_COD_05" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_05" value="" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_05" value="" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_05" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_05" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_05" value="" >
+  <input type="hidden" name="EFXP_PCTD_05" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_05" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_05" value="" maxlength="12" size="12">
+
+  <input type="hidden" name="EFXP_TPO_COD_06" value="" >
+  <input type="hidden" name="EFXP_COD_06" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_06" value="" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_06" value="" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_06" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_06" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_06" value="" >
+  <input type="hidden" name="EFXP_PCTD_06" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_06" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_06" value="" maxlength="12" size="12">
+
+  <input type="hidden" name="EFXP_TPO_COD_07" value="" >
+  <input type="hidden" name="EFXP_COD_07" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_07" value="" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_07" value="" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_07" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_07" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_07" value="" >
+  <input type="hidden" name="EFXP_PCTD_07" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_07" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_07" value="" maxlength="12" size="12">
+
+  <input type="hidden" name="EFXP_TPO_COD_08" value="" >
+  <input type="hidden" name="EFXP_COD_08" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_08" value="" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_08" value="" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_08" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_08" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_08" value="" >
+  <input type="hidden" name="EFXP_PCTD_08" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_08" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_08" value="" maxlength="12" size="12">
+
+  <input type="hidden" name="EFXP_TPO_COD_09" value="" >
+  <input type="hidden" name="EFXP_COD_09" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_09" value="" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_09" value="" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_09" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_09" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_09" value="" >
+  <input type="hidden" name="EFXP_PCTD_09" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_09" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_09" value="" maxlength="12" size="12">
+
+  <input type="hidden" name="EFXP_TPO_COD_10" value="" >
+  <input type="hidden" name="EFXP_COD_10" value="" maxlength="35" size="10">
+  <input type="hidden" name="EFXP_NMB_10" value="" maxlength="85" size="30">
+  <input type="hidden" name="EFXP_QTY_10" value="" maxlength="12" size="6">
+  <input type="hidden" name="EFXP_UNMD_10" value="" maxlength="4" size="5">
+  <input type="hidden" name="EFXP_PRC_10" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_OTRO_IMP_10" value="" >
+  <input type="hidden" name="EFXP_PCTD_10" value="" maxlength="12" size="5">
+  <input type="hidden" name="EFXP_SUBT_10" value="" maxlength="12" size="12">
+  <input type="hidden" name="EFXP_DSC_ITEM_10" value="" maxlength="12" size="12">
+  
+  <input type="hidden" value="3" name="EFXP_SUBTOTAL" maxlength="12" size="12">
+  <input type="hidden" maxlength="5" size="5" value="0" name="EFXP_PCT_DESC">
+  <input type="hidden" value="0" name="EFXP_MNT_DESC" maxlength="12" size="12">
+  <input type="hidden" maxlength="12" size="12" value="3" name="EFXP_MNT_NETO">
+  <input type="hidden" maxlength="5" size="5" value="19" name="EFXP_TASA_IVA">
+  <input type="hidden" maxlength="12" size="12" value="1" name="EFXP_IVA">
+  <input type="hidden" maxlength="12" size="12" value="4" name="EFXP_MNT_TOTAL">
+  <input type="hidden" value="" name="EFXP_OTRO_IMP_TOTAL">
+
+  <input type="hidden" value="" name="EFXP_TPO_DOC_REF_001">
+  <input type="hidden" value="" name="EFXP_IND_GLOBAL_001">
+  <input type="hidden" value="" name="EFXP_FOLIO_REF_001">
+  <input type="hidden" value="" name="EFXP_FCH_REF_001">
+  <input type="hidden" value="" name="EFXP_CODIGO_REF_001">
+  <input type="hidden" value="" name="EFXP_RAZON_REF_001">
+
+  <input type="hidden" value="" name="EFXP_TPO_DOC_REF_002">
+  <input type="hidden" value="" name="EFXP_IND_GLOBAL_002">
+  <input type="hidden" value="" name="EFXP_FOLIO_REF_002">
+  <input type="hidden" value="" name="EFXP_FCH_REF_002">
+  <input type="hidden" value="" name="EFXP_CODIGO_REF_002">
+  <input type="hidden" value="" name="EFXP_RAZON_REF_002">
+
+  <input type="hidden" value="" name="EFXP_TPO_DOC_REF_003">
+  <input type="hidden" value="" name="EFXP_IND_GLOBAL_003">
+  <input type="hidden" value="" name="EFXP_FOLIO_REF_003">
+  <input type="hidden" value="" name="EFXP_FCH_REF_003">
+  <input type="hidden" value="" name="EFXP_CODIGO_REF_003">
+  <input type="hidden" value="" name="EFXP_RAZON_REF_003">
+  <input type="hidden" value="" name="EMP_MENOR_TAMANO">
+
+	<input type="hidden" value="" name="EDL_PRC_EXE_01">
+	<input type="hidden" value="" name="EDL_PRC_EXE_02">
+	<input type="hidden" value="" name="EDL_PRC_EXE_03">
+	<input type="hidden" value="" name="EDL_PRC_EXE_04">
+	<input type="hidden" value="" name="EDL_PRC_EXE_05">
+	<input type="hidden" value="" name="EDL_PRC_EXE_06">
+	<input type="hidden" value="" name="EDL_PRC_EXE_07">
+	<input type="hidden" value="" name="EDL_PRC_EXE_08">
+	<input type="hidden" value="" name="EDL_PRC_EXE_09">
+	<input type="hidden" value="" name="EDL_PRC_EXE_10">
+
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_01">
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_02">
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_03">
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_04">
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_05">
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_06">
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_07">
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_08">
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_09">
+	<input type="hidden" value="" name="EDL_TPO_DOC_LIQ_10">
+	
+	<input type="hidden" value="" name="EDL_MNT_NET_TRAN">
+	<input type="hidden" value="" name="EDL_MNT_EXE_TRAN">
+	
+	<input type="hidden" value="" name="EDL_TASA_IVA_TRAN">
+	<input type="hidden" value="" name="EDL_IVA_TRAN">
+	<input type="hidden" value="" name="EDL_SUBTOTAL_TRAN">
+	
+	<input type="hidden" value="" name="EDL_COM_TIP_MOV_01">
+	<input type="hidden" value="" name="EDL_COM_GLOSA_01">
+	<input type="hidden" value="" name="EDL_COM_ITM_EXENTO_01">
+	<input type="hidden" value="" name="EDL_COM_VAL_01">
+	   
+	<input type="hidden" value="" name="EDL_COM_TIP_MOV_02">
+	<input type="hidden" value="" name="EDL_COM_GLOSA_02">
+	<input type="hidden" value="" name="EDL_COM_ITM_EXENTO_02">
+	<input type="hidden" value="" name="EDL_COM_VAL_02">
+	
+	<input type="hidden" value="" name="EDL_COM_TIP_MOV_03">
+	<input type="hidden" value="" name="EDL_COM_GLOSA_03">
+	<input type="hidden" value="" name="EDL_COM_ITM_EXENTO_03">
+	<input type="hidden" value="" name="EDL_COM_VAL_03">
+	
+	<input type="hidden" value="" name="EDL_MNT_NET_COM">
+	<input type="hidden" value="" name="EDL_MNT_EXE_COM">
+	<input type="hidden" value="" name="EDL_TASA_IVA_COM">
+	<input type="hidden" value="" name="EDL_IVA_COM">
+	<input type="hidden" value="" name="EDL_SUBTOTAL_COM">
+	<input type="hidden" value="" name="EFXP_CRED_EC">
+	<input type="hidden" value="FALSE" name="esCRED_EC">
+	<input type="hidden" value="FALSE" name="esFACT_TUR">
+	<input type="hidden" value="" name="EFXP_TPO_DOC_TURISTA">
+	<input type="hidden" value="" name="EFXP_NUM_ID">
+	<input type="hidden" value="" name="EFXP_NACIONALIDAD">
+
+	<input type="hidden" value="" name="EDFE_PAIS_DEST">
+	<input type="hidden" value="" name="EDFE_TPO_MON">
+	<input type="hidden" value="" name="EDFE_PTO_EMBAR">
+	<input type="hidden" value="" name="EDFE_PTO_DESEM">
+	<input type="hidden" value="" name="EDFE_TOT_BOLT">
+	<input type="hidden" value="" name="EDFE_MOD_VTA">
+
+	<input type="hidden" value="" name="EDFE_TPO_EXPO">
+	<input type="hidden" value="" name="EDFE_PTO_EMBAR_TXT">
+	<input type="hidden" value="" name="EDFE_PTO_DESEM_TXT">
+	<input type="hidden" value="" name="EDFE_TAX_ID">
+	
+	<input type="hidden" value="" name="EDFE_TPO_CAMBIO">
+	
+    <input type="hidden" value=""  name="EFXP_RUT_TRANSPORTE">
+    <input type="hidden" value=""  name="EFXP_DV_TRANSPORTE">
+    <input type="hidden" value=""  name="EFXP_PATENTE">
+    <input type="hidden" value=""  name="EFXP_RUT_CHOFER">
+    <input type="hidden" value=""  name="EFXP_DV_CHOFER">
+    <input type="hidden" value=""  name="EFXP_NOMBRE_CHOFER">
+	
+	</form>
+  <br><br>
+
+	</div>  <!-- FIN container  -->
+		</div>
+    
+		<!-- FIN CUERPO --> 
+    
+		<!-- Inicio Div Pie de Pagina ty crga de framework--> 
+		<script type="text/javascript">
+		Pie()</script> 
+		<!-- Fin Div Pie de Pagina --> 
+    
+	</div>
+	
+
+
+</body>
+</html>
+<!-- Fin -->
