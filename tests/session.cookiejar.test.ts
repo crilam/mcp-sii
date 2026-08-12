@@ -32,12 +32,24 @@ beforeEach(() => {
 });
 
 describe('SessionManager.rutaCookieJar', () => {
-  it('devuelve la ruta del cookie jar de la sesión', async () => {
+  it('devuelve un cookie jar propio de la credencial, no uno global', async () => {
+    // El jar lleva el RUT: dos credenciales no pueden compartir archivo, o la
+    // segunda pisaría la sesión de la primera (multi-tenant).
     const mgr = new SessionManager(configCert, new MockBrowser());
 
     const ruta = await mgr.rutaCookieJar();
 
-    expect(ruta).toBe(path.join(os.tmpdir(), 'sii_cookies.txt'));
+    expect(ruta).toBe(path.join(os.tmpdir(), 'sii_cookies_12345678'));
+  });
+
+  it('dos credenciales distintas no comparten cookie jar', async () => {
+    const otra = new SessionManager(
+      { ...configCert, rut: '99999999-9' },
+      new MockBrowser()
+    );
+    const mgr = new SessionManager(configCert, new MockBrowser());
+
+    expect(await mgr.rutaCookieJar()).not.toBe(await otra.rutaCookieJar());
   });
 
   // Si el cliente HTTP autenticara por su cuenta, el proceso abriría dos
