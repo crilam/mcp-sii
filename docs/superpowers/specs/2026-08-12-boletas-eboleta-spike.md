@@ -248,6 +248,42 @@ Preguntas abiertas para construir el cliente de emisión:
   longitude: 0}`. El gateway queda verificado en vivo: auth → info_emisor → firma
   SigV4 → emisión con PDF.
 
+## Nota de crédito / anulación de boletas: no es autoservicio por lo relevado
+
+Investigado el 2026-08-13 tras emitir dos boletas de prueba (folio 2 y 3). El
+objetivo era anularlas con una nota de crédito. Conclusión: **no se pudo por
+ninguno de los caminos alcanzables**, y no por un bug propio. El mapa del terreno:
+
+1. **eboleta no emite NC.** Su modelo de documento valida `tipoDte ∈ {39, 41}` y
+   lanza error con cualquier otro; su frontend no tiene "anular". El gateway que
+   construimos, por lo tanto, tampoco puede emitir NC de boletas.
+2. **La URL "obvia" era la equivocada.** `mipeSelEmpresaBol.cgi` (el link de
+   "Emitir nota de crédito" del portal de facturación) **rebota al login aun
+   autenticado** (con certificado y con clave), y por certificado su combo de
+   empresas viene vacío. No es la vía.
+3. **Las entradas reales de NC del portal** (de `EmiNotaCredito.html`) son
+   `mipeLaunchPage.cgi?OPCION=2` (NC para documentos emitidos por el portal) y
+   `OPCION=61` (NC "en blanco" para documentos no emitidos por el portal).
+4. **Pero las boletas de eboleta no están en el ledger del portal mipyme.**
+   Filtrando el historial (`mipeAdminDocsEmi.cgi`) por `TPO_DOC=39` y `41` da
+   **0 filas**; el portal sólo muestra las 21 facturas. O sea que `OPCION=2` no
+   puede seleccionarlas: son dos sistemas separados (boletas gratuitas en
+   eboleta vs. facturas en el CGI mipyme).
+
+**Hipótesis sin validar (no se intentó, emite un documento real):** la NC "en
+blanco" (`OPCION=61` → `mipeGenFacEx PTDC_CODIGO=61`) permite referenciar
+cualquier documento por folio, y en sus tipos de referencia figura `39::Boleta
+elec.`. Eso es exactamente el `emitirDte` tipo 61 + `referencia` que ya está
+codeado en `MipymeHttpScraper`. Podría ser la vía para anular una boleta por
+folio, pero **no se verificó que sea válido para una boleta del sistema
+gratuito**, y emitir a ciegas una NC inválida es un documento tributario real.
+Antes de intentarlo: confirmar con documentación del SII (o su mesa de ayuda,
+2-2395-1115) que una NC electrónica del portal mipyme puede anular una boleta
+emitida en eboleta.
+
+Las dos boletas de prueba (folio 2 y 3, $50 c/u) quedan **sin anular**. Sin
+urgencia: son de prueba y de monto mínimo.
+
 ## Recomendación
 
 Proyecto separado del scraper de mipyme, con transporte propio (SigV4 vía SDK de
