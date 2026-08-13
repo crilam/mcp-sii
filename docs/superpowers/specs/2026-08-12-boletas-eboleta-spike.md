@@ -172,8 +172,17 @@ Tras autenticar, la SPA llama Lambdas de configuración. Útil para el gateway:
 4. **El contrato de `POST /api/dte/documentos/generar`**: forma del cuerpo y si
    hay previsualización. Se releva emitiendo una boleta de prueba (con el mismo
    criterio que las facturas: lectura sí, emitir sólo con OK explícito).
-5. **Renovación**: medir la vigencia real de las credenciales STS del paso 3 y del
-   token del paso 2, para diseñar el refresh del gateway.
+5. ~~**Renovación**: medir la vigencia.~~ **Medido el 2026-08-13:** las
+   credenciales STS del paso 3 caducan en **~1 h**; el token OpenID del paso 2
+   dura **~12 h** (`exp - iat`). Refresh del gateway: re-correr el paso 3 con el
+   mismo token mientras viva (~12 h), y recién entonces rehacer login (1-2).
+
+## El cliente de auth funciona en vivo
+
+El cliente (`src/boletas/auth.ts`, `BoletaAuth`) se verificó de punta a punta
+contra el SII real el 2026-08-13: `autenticar(user, clave)` devolvió credenciales
+STS válidas (`AccessKeyId` ASIA…, `SessionToken`, `Expiration` ~1 h). Los tres
+pasos del contrato quedan confirmados por ejecución, no sólo por captura.
 
 ## Recomendación
 
