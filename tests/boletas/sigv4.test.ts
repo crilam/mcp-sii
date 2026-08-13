@@ -34,6 +34,42 @@ describe('firmarSigV4', () => {
     );
   });
 
+  it('percent-encodea cada segmento del path, sin tocar las barras', () => {
+    // AWS firma el canonical URI con cada segmento percent-encodeado (salvo S3).
+    // Un nombre de función calificado con ":" (ARN) o un carácter reservado, sin
+    // encodear, rompe la firma con un error genérico. Las barras separadoras NO
+    // se encodean.
+    const conDosPuntos = firmarSigV4(
+      { method: 'POST', url: 'https://ex.amazonaws.com/fn:PROD/x', headers: {}, body: '' },
+      CRED_EJEMPLO,
+      { region: 'us-east-1', service: 'lambda', fecha: new Date('2026-08-13T00:00:00Z') }
+    );
+    const sinDosPuntos = firmarSigV4(
+      { method: 'POST', url: 'https://ex.amazonaws.com/fn%3APROD/x', headers: {}, body: '' },
+      CRED_EJEMPLO,
+      { region: 'us-east-1', service: 'lambda', fecha: new Date('2026-08-13T00:00:00Z') }
+    );
+    // Los dos representan el mismo path canónico, así que firman igual.
+    expect(conDosPuntos['Authorization']).toBe(sinDosPuntos['Authorization']);
+  });
+
+  it('el body participa en la firma: dos cuerpos distintos firman distinto', () => {
+    // El camino caliente real es POST con body. Si el hashedPayload no entrara
+    // en la firma, dos requests idénticos salvo el cuerpo firmarían igual y AWS
+    // los aceptaría indistintamente —o los rechazaría a los dos—.
+    const base = {
+      method: 'POST',
+      url: 'https://ex.amazonaws.com/x',
+      headers: { 'Content-Type': 'application/json' },
+    };
+    const opts = { region: 'us-east-1', service: 'lambda', fecha: new Date('2026-08-13T00:00:00Z') };
+
+    const a = firmarSigV4({ ...base, body: '{"a":1}' }, CRED_EJEMPLO, opts);
+    const b = firmarSigV4({ ...base, body: '{"a":2}' }, CRED_EJEMPLO, opts);
+
+    expect(a['Authorization']).not.toBe(b['Authorization']);
+  });
+
   it('incluye X-Amz-Security-Token cuando la credencial es temporal (STS)', () => {
     // Las credenciales de Cognito son temporales y traen session token: va como
     // header Y firmado. Omitirlo hace que AWS rechace con firma inválida.

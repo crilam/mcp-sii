@@ -20,12 +20,14 @@ describe('BoletaApi.invocarLambda', () => {
     const api = new BoletaApi(http, CRED, () => new Date('2026-08-13T00:00:00Z'));
 
     const r = await api.invocarLambda('eboleta_getConfigPorContribuyente', {
-      contribuyente: 76061763,
-      username: '17270613-4',
+      contribuyente: 22222222,
+      username: '11111111-1',
       env: 'prod',
     });
 
-    // Devuelve el body de la respuesta del Lambda.
+    // Devuelve el sobre completo del Lambda { error, body }; el llamador toma
+    // `.body`. No se extrae acá porque algunas respuestas traen metadatos fuera
+    // de `body` que el llamador puede necesitar.
     expect(r).toEqual({ error: null, body: { config: { ok: true } } });
 
     const llamada = llamadas[0];
@@ -38,8 +40,8 @@ describe('BoletaApi.invocarLambda', () => {
     expect(llamada.headers['X-Amz-Security-Token']).toBe('tok');
     // El payload es el JSON de entrada del Lambda.
     expect(JSON.parse(llamada.body)).toEqual({
-      contribuyente: 76061763,
-      username: '17270613-4',
+      contribuyente: 22222222,
+      username: '11111111-1',
       env: 'prod',
     });
   });

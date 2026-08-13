@@ -71,7 +71,7 @@ export function firmarSigV4(
   const hashedPayload = sha256Hex(peticion.body ?? '');
   const canonicalRequest = [
     peticion.method.toUpperCase(),
-    url.pathname || '/',
+    canonicalUri(url.pathname),
     canonicalQueryString(url.searchParams),
     canonicalHeaders,
     signedHeaders,
@@ -101,6 +101,30 @@ export function firmarSigV4(
   };
   if (cred.sessionToken) salida['X-Amz-Security-Token'] = cred.sessionToken;
   return salida;
+}
+
+// Canonical URI: cada segmento del path percent-encodeado según RFC 3986, las
+// barras separadoras intactas. Se normaliza (decode y re-encode) para que dos
+// formas del mismo path —`/fn:PROD` y `/fn%3APROD`— firmen igual, y para que un
+// carácter reservado sin encodear (un ARN calificado con ":") no rompa la firma.
+// Un path de sólo alfanuméricos, "-", "_" queda idéntico, así que las rutas de
+// Lambda actuales no cambian.
+function canonicalUri(pathname: string): string {
+  const path = pathname || '/';
+  return path
+    .split('/')
+    .map(seg => encodeRfc3986(decodeSeguro(seg)))
+    .join('/');
+}
+
+function decodeSeguro(seg: string): string {
+  try {
+    return decodeURIComponent(seg);
+  } catch {
+    // Segmento con percent-encoding malformado: se deja como vino en vez de
+    // romper la firma entera.
+    return seg;
+  }
 }
 
 // Query string canónica: parámetros ordenados por nombre, cada nombre y valor

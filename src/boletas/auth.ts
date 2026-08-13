@@ -57,6 +57,20 @@ export interface CredencialesAws {
 // que el llamador lo trate distinto de una clave incorrecta.
 export class RequiereChallenge extends Error {}
 
+// Resumen de una respuesta para meter en un mensaje de error SIN filtrar
+// secretos. Los mensajes van a logs, y una respuesta parcial del SII o de
+// Cognito puede traer el token OpenID, la SecretKey o el SessionToken: se
+// redactan por nombre antes de serializar. Se conserva el resto (códigos,
+// mensajes) que es lo que sirve para diagnosticar.
+const CLAVES_SENSIBLES = /^(token|secretkey|sessiontoken|accesskeyid|password|clave)$/i;
+
+function resumenSeguro(valor: unknown): string {
+  const redactado = JSON.stringify(valor, (clave, v) =>
+    CLAVES_SENSIBLES.test(clave) ? '[REDACTADO]' : v
+  );
+  return (redactado ?? String(valor)).slice(0, 150);
+}
+
 export class BoletaAuth {
   constructor(private http: HttpBoletas) {}
 
@@ -123,7 +137,7 @@ export class BoletaAuth {
     if (!openId?.Token || !openId?.IdentityId) {
       throw new Error(
         'El sign-in del SII no devolvió el token de Cognito. El code pudo vencer o ser ' +
-        `inválido. Respuesta: ${JSON.stringify(respuesta).slice(0, 150)}.`
+        `inválido. Respuesta: ${resumenSeguro(respuesta)}.`
       );
     }
     return { identityId: openId.IdentityId, token: openId.Token };
@@ -149,7 +163,7 @@ export class BoletaAuth {
     if (!c?.AccessKeyId || !c?.SecretKey || !c?.SessionToken) {
       throw new Error(
         'Cognito no devolvió credenciales temporales. El token pudo vencer o el identity ' +
-        `pool rechazó el login. Respuesta: ${JSON.stringify(respuesta).slice(0, 150)}.`
+        `pool rechazó el login. Respuesta: ${resumenSeguro(respuesta)}.`
       );
     }
     return {

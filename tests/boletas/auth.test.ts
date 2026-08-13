@@ -57,6 +57,19 @@ describe('BoletaAuth.login', () => {
     await expect(auth.login('17270613', 'mala', 'st-1')).rejects.toThrow(/612|password|clave/i);
   });
 
+  it('propaga otros códigos de error del login (611: debe obtener clave)', async () => {
+    // No sólo el 612: cualquier código de rechazo del SII tiene que fallar con
+    // el código a la vista, no caer en el camino de éxito por no ser 612.
+    const { http } = transporteFalso({
+      '/authorization/v1/authorize': {
+        body: JSON.stringify({ success: false, code: 611, message: 'debe obtener clave' }),
+      },
+    });
+    const auth = new BoletaAuth(http);
+
+    await expect(auth.login('17270613', 'x', 'st-1')).rejects.toThrow(/611/);
+  });
+
   it('avisa cuando el SII exige un challenge por email (dispositivo nuevo)', async () => {
     // Rama CHLNG del SPA: el login pide verificar identidad por correo. Un
     // gateway headless no puede resolverlo solo, así que hay que reportarlo
@@ -166,5 +179,37 @@ describe('BoletaAuth.autenticar (orquesta los 3 pasos)', () => {
 
     expect(cred.accessKeyId).toBe('ASIA1');
     expect(cred.sessionToken).toBe('st-tok');
+  });
+});
+
+describe('BoletaAuth — los errores no filtran secretos', () => {
+  it('signIn: un error no vuelca el token si vino parcial', async () => {
+    // Un mensaje de error que serializa la respuesta cruda puede terminar en
+    // logs con el token OpenID adentro. Se redacta.
+    const { http } = transporteFalso({
+      '/prod/sign-in': {
+        body: JSON.stringify({ openId: { Token: 'TOKEN-SECRETO-1234567890' } }), // sin IdentityId → falla
+      },
+    });
+    const auth = new BoletaAuth(http);
+
+    await expect(auth.signIn('c', 's')).rejects.toThrow(
+      expect.objectContaining({ message: expect.not.stringContaining('TOKEN-SECRETO-1234567890') })
+    );
+  });
+
+  it('getCredentials: un error no vuelca SecretKey', async () => {
+    // Respuesta a la que le falta SessionToken → falla la validación. El mensaje
+    // no debe contener la SecretKey que sí vino.
+    const { http } = transporteFalso({
+      'cognito-identity.us-east-1.amazonaws.com': {
+        body: JSON.stringify({ Credentials: { AccessKeyId: 'ASIA1', SecretKey: 'SECRETO-XYZ' } }),
+      },
+    });
+    const auth = new BoletaAuth(http);
+
+    await expect(auth.getCredentials('id', 'tok')).rejects.toThrow(
+      expect.objectContaining({ message: expect.not.stringContaining('SECRETO-XYZ') })
+    );
   });
 });
