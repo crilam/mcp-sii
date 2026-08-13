@@ -242,8 +242,11 @@ Preguntas abiertas para construir el cliente de emisión:
   - `info-emisor-usuario/{rutEmpresaSinDv}/{rutUsuarioConDv}` → el blob que va como
     `info_emisor`. El orden importa: empresa sin DV, después usuario con DV; las
     otras combinaciones devuelven "No hay datos registrados para el contribuyente".
-- **`geolocalizacion`**: el navegador mandó coordenadas reales. Probar si el
-  servidor acepta `0,0`/omitido en un runtime headless.
+- ~~**`geolocalizacion`**: probar si acepta `0,0`.~~ **Confirmado el 2026-08-13:
+  el servidor acepta `0,0`.** El cliente `emitir` de `BoletaApi` emitió una
+  boleta real de punta a punta (folio 3) con `geolocalizacion: {latitude: 0,
+  longitude: 0}`. El gateway queda verificado en vivo: auth → info_emisor → firma
+  SigV4 → emisión con PDF.
 
 ## Recomendación
 
