@@ -160,3 +160,61 @@ describe('BoletaApi.emitir', () => {
     });
   });
 });
+
+describe('BoletaApi.emitir — selección de sucursal', () => {
+  const base = {
+    vendedor: '22222222-2', empresaRut: '11111111-1',
+    tipoDte: 39 as const, medioPago: 1,
+    lineas: [{ nombre: 'x', cantidad: 1, precio: 50 }],
+  };
+  function armar() {
+    const { http, llamadas } = transporteFalso({
+      body: JSON.stringify({ folio: 1, dte: {}, pdf_public_url: 'u', b64encoded_pdf: 'x' }),
+    });
+    return { api: new BoletaApi(http, CRED, () => new Date('2026-08-13T00:00:00Z')), llamadas };
+  }
+
+  it('usa la única sucursal cuando hay una sola', async () => {
+    const { api, llamadas } = armar();
+    await api.emitir({ ...base, infoEmisor: { sucursales: [{ codigo: 92059768 }] } });
+    const body = JSON.parse(llamadas.find(l => l.url.includes('generar'))!.body);
+    expect(body.Encabezado.Emisor.CdgSIISucur).toBe(92059768);
+  });
+
+  it('exige elegir sucursal cuando hay varias, en vez de tomar la primera', async () => {
+    // Emitir con la sucursal equivocada es un acto tributario irreversible. Con
+    // varias, hay que elegir explícito.
+    const { api } = armar();
+    await expect(
+      api.emitir({
+        ...base,
+        infoEmisor: { sucursales: [{ codigo: 111 }, { codigo: 222 }] },
+      })
+    ).rejects.toThrow(/varias sucursales|elegir|codigoSucursal/i);
+  });
+
+  it('usa la sucursal explícita cuando se pasa, aunque haya varias', async () => {
+    const { api, llamadas } = armar();
+    await api.emitir({
+      ...base,
+      infoEmisor: { sucursales: [{ codigo: 111 }, { codigo: 222 }] },
+      codigoSucursal: 222,
+    });
+    const body = JSON.parse(llamadas.find(l => l.url.includes('generar'))!.body);
+    expect(body.Encabezado.Emisor.CdgSIISucur).toBe(222);
+  });
+
+  it('rechaza una sucursal explícita que no existe en el info_emisor', async () => {
+    const { api } = armar();
+    await expect(
+      api.emitir({ ...base, infoEmisor: { sucursales: [{ codigo: 111 }] }, codigoSucursal: 999 })
+    ).rejects.toThrow(/999|no.*sucursal/i);
+  });
+
+  it('falla si el info_emisor no trae sucursales', async () => {
+    const { api } = armar();
+    await expect(
+      api.emitir({ ...base, infoEmisor: { sucursales: [] } })
+    ).rejects.toThrow(/sucursal/i);
+  });
+});
