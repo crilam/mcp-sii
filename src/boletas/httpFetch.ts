@@ -8,7 +8,11 @@ import { HttpBoletas } from './auth';
 // `fetch` se inyecta para poder testear sin red; por defecto usa el global.
 export function crearHttpFetch(fetchImpl: typeof fetch = fetch): HttpBoletas {
   return async ({ url, method, headers, body }) => {
-    const respuesta = await fetchImpl(url, { method, headers, body });
+    // fetch lanza "Request with GET/HEAD method cannot have body" si se le pasa
+    // body, aunque sea ''. Un GET firmado va sin body.
+    const init: RequestInit = { method, headers };
+    if (body !== '') init.body = body;
+    const respuesta = await fetchImpl(url, init);
     return { status: respuesta.status, body: await respuesta.text() };
   };
 }
