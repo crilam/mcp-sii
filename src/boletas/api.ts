@@ -11,6 +11,57 @@ import { firmarSigV4 } from './sigv4';
 
 const REGION = 'us-east-1';
 const LAMBDA_HOST = `https://lambda.${REGION}.amazonaws.com`;
+// API Gateway de la app de boletas (el mismo host de documentos/generar). Las
+// consultas /api/info-contribuyente/* y la emisión viven acá.
+const API_HOST = `https://cn68i6qm0g.execute-api.${REGION}.amazonaws.com/prod`;
+
+// Receptor genérico del SII para una boleta SIN receptor identificado —el caso
+// de Parkingapp—. Relevado del request real.
+const RECEPTOR_GENERICO = { RUTRecep: '66666666-6', RznSocRecep: 'SII Boleta', DirRecep: 'Santiago' };
+
+export interface LineaBoleta {
+  nombre: string;
+  cantidad: number;
+  // Precio total del ítem. En boleta afecta el IVA va incluido en el precio.
+  precio: number;
+}
+
+export interface ReceptorBoleta {
+  rut: string;
+  razonSocial: string;
+  direccion: string;
+}
+
+// El passthrough de info-emisor-usuario. Se tipa lo que este cliente usa
+// (sucursales); el resto viaja igual como Meta.info_emisor.
+export interface InfoEmisor {
+  sucursales?: Array<{ codigo: number; direccion?: string }>;
+  [k: string]: unknown;
+}
+
+export interface EmitirBoletaParams {
+  vendedor: string;          // RUT-DV de la persona que emite
+  empresaRut: string;        // RUT-DV del emisor
+  infoEmisor: InfoEmisor;    // passthrough de info-emisor-usuario (Meta.info_emisor)
+  tipoDte: 39 | 41;          // 39 afecta, 41 exenta
+  medioPago: number;         // id_sii del medio de pago (1 efectivo, ...)
+  lineas: LineaBoleta[];
+  receptor?: ReceptorBoleta; // omitido → boleta sin receptor (genérico SII)
+  // Código de sucursal (CdgSIISucur). Obligatorio si el emisor tiene VARIAS
+  // sucursales; con una sola se resuelve solo. Elegir la sucursal equivocada es
+  // un error tributario irreversible, así que no se adivina.
+  codigoSucursal?: number;
+  // El navegador manda coordenadas reales; en runtime headless se mandan las que
+  // pase el llamador o 0,0. Falta confirmar que el servidor acepte 0,0.
+  geolocalizacion?: { latitude: number; longitude: number };
+}
+
+export interface BoletaEmitida {
+  folio: number;
+  dte: any;
+  pdfUrl: string;
+  pdfBase64: string;
+}
 
 export class BoletaApi {
   // `ahora` se inyecta para tests deterministas; en producción es `() => new
@@ -55,5 +106,152 @@ export class BoletaApi {
       throw new Error(`El Lambda ${nombreFuncion} respondió con error: ${sobre.error}`);
     }
     return sobre;
+  }
+
+  // Consulta de /api/info-contribuyente/* (GET firmado a API Gateway). `ruta` es
+  // la parte después de /api/info-contribuyente/, por ejemplo
+  // "info-emisor-usuario/<rutEmpresa>/<rutUsuario>" o "emisores-usuario/<rut>".
+  // El resultado de info-emisor-usuario se reenvía tal cual como Meta.info_emisor
+  // al emitir: es un passthrough, no se arma a mano.
+  async getInfoContribuyente(ruta: string): Promise<any> {
+    const url = `${API_HOST}/api/info-contribuyente/${ruta}`;
+    const firma = firmarSigV4(
+      { method: 'GET', url, headers: {}, body: '' },
+      this.cred,
+      { region: REGION, service: 'execute-api', fecha: this.ahora() }
+    );
+
+    const respuesta = await this.http({ url, method: 'GET', headers: firma, body: '' });
+    // Se chequea el status antes de parsear: un 403 (sesión/firma) o un 5xx
+    // devuelven HTML o texto, y "no es JSON" ocultaría el código real.
+    if (respuesta.status < 200 || respuesta.status >= 300) {
+      throw new Error(
+        `El endpoint ${ruta} respondió status ${respuesta.status}: ` +
+        `${respuesta.body.slice(0, 120)}. La sesión o la firma pudo vencer.`
+      );
+    }
+    try {
+      return JSON.parse(respuesta.body);
+    } catch {
+      throw new Error(`El endpoint ${ruta} devolvió una respuesta que no es JSON: ${respuesta.body.slice(0, 120)}.`);
+    }
+  }
+
+  // Emite una boleta electrónica (POST firmado a documentos/generar). Es un acto
+  // tributario REAL E IRREVERSIBLE: emite en un solo paso, sin previsualización.
+  // El folio real lo asigna y devuelve el servidor (a diferencia del portal CGI,
+  // acá viene limpio en la respuesta).
+  //
+  // `info_emisor` es el passthrough de getInfoContribuyente('info-emisor-usuario/
+  // <empresaSinDv>/<usuario-dv>'); la sucursal (CdgSIISucur) sale de ahí.
+  async emitir(params: EmitirBoletaParams): Promise<BoletaEmitida> {
+    const sucursal = this.resolverSucursal(params);
+
+    const receptor = params.receptor
+      ? {
+          RUTRecep: params.receptor.rut,
+          RznSocRecep: params.receptor.razonSocial,
+          DirRecep: params.receptor.direccion,
+        }
+      : RECEPTOR_GENERICO;
+
+    const cuerpo = {
+      vendedor: params.vendedor,
+      Encabezado: {
+        // El Folio del request es un placeholder: el servidor asigna el real y
+        // lo devuelve en la respuesta.
+        IdDoc: { TipoDTE: params.tipoDte, Folio: 1, MedioPago: params.medioPago },
+        Emisor: { RUTEmisor: params.empresaRut, CdgSIISucur: sucursal },
+        Receptor: receptor,
+      },
+      Detalle: params.lineas.map(l => ({
+        NmbItem: l.nombre,
+        QtyItem: l.cantidad,
+        PrcItem: l.precio,
+      })),
+      Meta: {
+        info_emisor: params.infoEmisor,
+        geolocalizacion: params.geolocalizacion ?? { latitude: 0, longitude: 0 },
+        plataforma: 'eboleta_web',
+      },
+    };
+
+    const url = `${API_HOST}/api/dte/documentos/generar`;
+    const body = JSON.stringify(cuerpo);
+    // El content-type NO se firma (se pasa headers:{} a firmarSigV4): el browser
+    // firma sólo host, x-amz-date y x-amz-security-token. El content-type va sólo
+    // en el cable. Firmarlo daría una firma válida pero distinta de la del
+    // portal, en un camino que no está verificado en vivo.
+    const firma = firmarSigV4(
+      { method: 'POST', url, headers: {}, body },
+      this.cred,
+      { region: REGION, service: 'execute-api', fecha: this.ahora() }
+    );
+
+    // Cualquier fallo del POST (red, timeout, respuesta rara) es peligroso: el
+    // documento pudo emitirse igual. El error avisa que no se reintente a ciegas
+    // y que se verifique el historial, para no emitir una boleta duplicada.
+    let respuesta;
+    try {
+      respuesta = await this.http({
+        url,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...firma },
+        body,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Falló el POST de emisión (${msg}). NO se sabe si la boleta se emitió: ` +
+        'verificá el historial antes de reintentar, para no emitir una duplicada.'
+      );
+    }
+
+    let r: any;
+    try {
+      r = JSON.parse(respuesta.body);
+    } catch {
+      throw new Error(
+        `documentos/generar no devolvió JSON (status ${respuesta.status}): ` +
+        `${respuesta.body.slice(0, 150)}. NO se sabe si se emitió: verificá el historial ` +
+        'antes de reintentar.'
+      );
+    }
+    if (!r || typeof r.folio !== 'number') {
+      throw new Error(
+        `documentos/generar no devolvió un folio. Respuesta: ${JSON.stringify(r).slice(0, 150)}. ` +
+        'NO se sabe si se emitió: verificá el historial antes de reintentar.'
+      );
+    }
+    return { folio: r.folio, dte: r.dte, pdfUrl: r.pdf_public_url, pdfBase64: r.b64encoded_pdf };
+  }
+
+  // Elige la sucursal para CdgSIISucur. Con una sola, se resuelve solo; con
+  // varias, se exige `codigoSucursal` (emitir con la equivocada es irreversible).
+  private resolverSucursal(params: EmitirBoletaParams): number {
+    const sucursales = params.infoEmisor?.sucursales ?? [];
+    if (sucursales.length === 0) {
+      throw new Error(
+        'info_emisor no trae sucursales: no se puede determinar CdgSIISucur. ' +
+        'Verificá que venga de info-emisor-usuario del emisor correcto.'
+      );
+    }
+    if (params.codigoSucursal !== undefined) {
+      if (!sucursales.some(s => s.codigo === params.codigoSucursal)) {
+        throw new Error(
+          `La sucursal ${params.codigoSucursal} no está entre las del emisor: ` +
+          `${sucursales.map(s => s.codigo).join(', ')}.`
+        );
+      }
+      return params.codigoSucursal;
+    }
+    if (sucursales.length > 1) {
+      throw new Error(
+        `El emisor tiene varias sucursales (${sucursales.map(s => s.codigo).join(', ')}): ` +
+        'pasá codigoSucursal para elegir cuál. No se toma una por defecto porque emitir ' +
+        'con la sucursal equivocada es irreversible.'
+      );
+    }
+    return sucursales[0].codigo;
   }
 }
