@@ -169,9 +169,9 @@ Tras autenticar, la SPA llama Lambdas de configuración. Útil para el gateway:
    captcha estaba deshabilitado/omitido. Verificar si siempre es así o si bajo
    ciertas condiciones el SII exige resolver un captcha —eso sí complicaría el
    runtime headless—.
-4. **El contrato de `POST /api/dte/documentos/generar`**: forma del cuerpo y si
-   hay previsualización. Se releva emitiendo una boleta de prueba (con el mismo
-   criterio que las facturas: lectura sí, emitir sólo con OK explícito).
+4. ~~**El contrato de `POST /api/dte/documentos/generar`**.~~ **Relevado el
+   2026-08-13 emitiendo una boleta real (folio 2, $50, TRUFUL). Ver sección
+   abajo.**
 5. ~~**Renovación**: medir la vigencia.~~ **Medido el 2026-08-13:** las
    credenciales STS del paso 3 caducan en **~1 h**; el token OpenID del paso 2
    dura **~12 h** (`exp - iat`). Refresh del gateway: re-correr el paso 3 con el
@@ -183,6 +183,67 @@ El cliente (`src/boletas/auth.ts`, `BoletaAuth`) se verificó de punta a punta
 contra el SII real el 2026-08-13: `autenticar(user, clave)` devolvió credenciales
 STS válidas (`AccessKeyId` ASIA…, `SessionToken`, `Expiration` ~1 h). Los tres
 pasos del contrato quedan confirmados por ejecución, no sólo por captura.
+
+## Emisión: contrato de `documentos/generar` (relevado emitiendo)
+
+Se emitió una boleta afecta real (TipoDTE 39, $50, TRUFUL) el 2026-08-13 y se
+capturó el request. Es **un solo POST firmado SigV4, sin previsualización y sin
+firma con certificado** (el SII firma del lado servidor). Mucho más simple que
+los seis pasos de las facturas.
+
+```
+POST https://cn68i6qm0g.execute-api.us-east-1.amazonaws.com/prod/api/dte/documentos/generar
+  SigV4 service=execute-api, SignedHeaders: host;x-amz-date;x-amz-security-token
+  Content-Type: application/x-www-form-urlencoded  (el body igual es JSON;
+    el content-type NO se firma, así que la incongruencia no afecta la firma)
+
+  body (JSON):
+  {
+    "vendedor": "22222222-2",              // RUT-DV de la persona logueada
+    "Encabezado": {
+      "IdDoc":   { "TipoDTE": 39, "Folio": 1, "MedioPago": 1 },
+      "Emisor":  { "RUTEmisor": "11111111-1", "CdgSIISucur": 92059768 },
+      "Receptor":{ "RUTRecep": "66666666-6", "RznSocRecep": "SII Boleta", "DirRecep": "Santiago" }
+    },
+    "Detalle": [ { "NmbItem": "Monto Total", "QtyItem": 1, "PrcItem": 50 } ],
+    "Meta": {
+      "info_emisor": { ...razonSocial, giro, numeroResolucion, fechaResolucion,
+                       tiposDte, sucursales, esRepresentanteLegal... },
+      "geolocalizacion": { "latitude": -33.42, "longitude": -70.56 },
+      "plataforma": "eboleta_web"
+    }
+  }
+
+  respuesta (JSON): { "folio": 2, "dte": {...}, "pdf_public_url": "...", "b64encoded_pdf": "data:application/pdf;base64,..." }
+```
+
+Puntos que importan:
+
+- **El folio real vuelve en `respuesta.folio`**, limpio. Nada del falso positivo
+  del "folio propuesto" del portal CGI: acá el servidor asigna y devuelve. El
+  request manda `Folio: 1` como placeholder y el servidor lo ignora (la boleta
+  salió con folio 2).
+- **`Receptor` con el RUT genérico `66666666-6` "SII Boleta"** es la boleta sin
+  receptor identificado —el caso de Parkingapp—. Con receptor real iría el RUT
+  del cliente. `MedioPago: 1` (efectivo).
+- **La respuesta trae el PDF** (URL S3 firmada + base64 inline), útil para
+  entregar comprobante.
+
+Preguntas abiertas para construir el cliente de emisión:
+
+- ~~**De dónde sale `Meta.info_emisor`.**~~ **Resuelto leyendo el bundle:** en el
+  código de emisión `f.meta = {info_emisor: t.datosEmisor}`, o sea que
+  `info_emisor` es **el passthrough del endpoint** `GET
+  /api/info-contribuyente/info-emisor-usuario/{a}/{b}` (`datosEmisor` en el
+  store). No se arma a mano: se pide y se reenvía. **Confirmado en vivo el
+  2026-08-13** (host `cn68i6qm0g`, GET firmado SigV4):
+  - `emisores-usuario/{rut-dv}` → empresas del usuario `[{rut, dv, razon_social}]`
+    (exige el DV; sin DV devuelve `[]`).
+  - `info-emisor-usuario/{rutEmpresaSinDv}/{rutUsuarioConDv}` → el blob que va como
+    `info_emisor`. El orden importa: empresa sin DV, después usuario con DV; las
+    otras combinaciones devuelven "No hay datos registrados para el contribuyente".
+- **`geolocalizacion`**: el navegador mandó coordenadas reales. Probar si el
+  servidor acepta `0,0`/omitido en un runtime headless.
 
 ## Recomendación
 
