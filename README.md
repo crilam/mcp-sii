@@ -16,22 +16,54 @@ npm install
 npm run build
 ```
 
+## Autenticación: sesión por RUT
+
+Ya no hay una única credencial fija por proceso. Antes de llamar cualquier
+tool de consulta hay que abrir sesión para el RUT que se va a usar:
+
+1. `sii_iniciar_sesion(rut, clave)` — autentica al SII con el RUT y la clave
+   tributaria de esa persona. La credencial vive sólo en memoria del proceso
+   (no se persiste a disco) y queda asociada a ese `rut`. Repetir la llamada
+   con el mismo RUT no abre una sesión nueva mientras la anterior siga
+   vigente (dentro de 2 horas) — abrir sesiones de más agota el límite del
+   SII para ese RUT.
+2. Cualquier otra tool (`sii_bhe_resumen`, `sii_dte_list_documentos_emitidos`,
+   `sii_rcv_resumen`, etc.) recibe `rut` como su **primer parámetro
+   obligatorio** y opera sobre la sesión que abrió el paso anterior. Si no
+   hay sesión iniciada para ese RUT, la tool devuelve
+   `{ "ok": false, "error": "SESION_NO_INICIADA" }` en vez de autenticar
+   sola — no hay auto-login implícito.
+3. `sii_cerrar_sesion(rut)` — cierra la sesión en el SII **y olvida la
+   credencial** de ese RUT. Conviene llamarla siempre al terminar: el SII
+   limita cuántas sesiones simultáneas puede tener un RUT y las bloquea al
+   superarlas (error `01.01.190.500.720.27`).
+
+Esto permite operar varios RUT en paralelo desde el mismo proceso, cada uno
+con su propia credencial y su propia sesión (cookie jar independiente).
+
+**Limitación actual:** `sii_iniciar_sesion` sólo acepta `rut` + `clave`
+(autenticación por clave tributaria, que corre por navegador). No hay hoy
+forma de autenticar con certificado digital por esta vía. Las tools que
+consultan por HTTP en vez de navegador (`sii_bhe_*`, `sii_rcv_*`,
+`sii_dte_*`, `sii_renta_*`, `sii_mipyme_list_*`) necesitan el archivo de
+cookies que **sólo produce** la autenticación con certificado — una sesión
+abierta con clave vía `sii_iniciar_sesion` no lo genera, y esas tools van a
+fallar (`RequiereCertificado`) para un RUT autenticado así. Hoy funcionan sin
+problema con `sii_iniciar_sesion` las tools que operan por navegador:
+`sii_persona_list_bienes_raices` y `sii_mipyme_emitir_dte`.
+
 ## Configuración
 
 Variables de entorno (crear `.env` o configurar en Claude Desktop):
 
 ```bash
-# RUT de la persona natural autorizada (no el RUT de la empresa)
+# RUT de la persona natural autorizada (no el RUT de la empresa). Requerida
+# para que el proceso arranque, aunque ya no se usa para autenticar tools:
+# la autenticación de tools pasa por sii_iniciar_sesion(rut, clave).
 SII_RUT=12345678
 
-# Opción 1: RUT + Clave de la persona autorizada
-SII_CLAVE=mipassword
-
-# Opción 2: Certificado digital (tiene precedencia sobre clave)
-SII_CERT_PATH=/ruta/al/certificado.pfx
-SII_CERT_PASSWORD=passwordDelCert
-
-# RUT de la empresa a operar (requerido si la persona opera múltiples empresas)
+# RUT de la empresa a operar (requerido si la persona opera múltiples empresas).
+# Se sigue usando como fallback cuando la tool no recibe empresaRut.
 SII_EMPRESA_RUT=22222222
 
 # Sólo para EMITIR DTE en el portal mipyme: la clave del certificado digital que
@@ -49,6 +81,22 @@ depende de una suposición del código.
 
 Sin esta variable, emitir falla pidiéndola; todo lo demás (consultas y la
 previsualización de un DTE) funciona igual.
+
+### Legado: `SII_CLAVE` / `SII_CERT_PATH` (una sola credencial por proceso)
+
+```bash
+SII_CLAVE=mipassword
+# o, con precedencia sobre la clave:
+SII_CERT_PATH=/ruta/al/certificado.pfx
+SII_CERT_PASSWORD=passwordDelCert
+```
+
+Estas variables ya **no** son la forma de autenticar las tools: el código
+que las lee (`getConfig()`/`validateEnv()`) sigue existiendo, pero ninguna
+tool de consulta pasa por ahí — todas usan la credencial que dejó
+`sii_iniciar_sesion` para el `rut` de la llamada. Quedan documentadas acá
+sólo porque `npm run validate-cert` (más abajo) las sigue leyendo para
+validar el `.pfx` fuera del flujo de sesión.
 
 ## Validar certificado digital
 
@@ -75,7 +123,6 @@ Agregar en `claude_desktop_config.json`:
       "args": ["/ruta/a/mcp-sii/dist/src/index.js"],
       "env": {
         "SII_RUT": "12345678",
-        "SII_CLAVE": "mipassword",
         "SII_EMPRESA_RUT": "22222222"
       }
     }
@@ -83,9 +130,23 @@ Agregar en `claude_desktop_config.json`:
 }
 ```
 
+`SII_RUT` sigue siendo requerida para que el proceso arranque, pero ya no
+autentica nada por sí sola. Una vez conectado, autenticá cada RUT con el que
+vayas a operar llamando `sii_iniciar_sesion(rut, clave)` desde el chat antes
+de pedir cualquier consulta.
+
 ## Tools disponibles
 
 Todas las consultas son de **solo lectura**, con una única excepción marcada como tal.
+Todas reciben `rut` como primer parámetro — ver
+[Autenticación: sesión por RUT](#autenticación-sesión-por-rut).
+
+### Sesión
+
+| Tool | Descripción |
+|---|---|
+| `sii_iniciar_sesion` | Autentica un RUT con su clave tributaria. Necesaria antes de llamar cualquier otra tool con ese RUT |
+| `sii_cerrar_sesion` | Cierra la sesión en el SII para ese RUT y olvida su credencial (conviene al terminar) |
 
 ### Portal mipyme — Sistema de Facturación Gratuito
 
@@ -121,10 +182,15 @@ Todas las consultas son de **solo lectura**, con una única excepción marcada c
 | `sii_bhe_list_recibidas` | Boletas de honorarios recibidas |
 | `sii_bhe_resumen` | Resumen anual de boletas |
 | `sii_persona_list_bienes_raices` | Bienes raíces de la persona |
-| `sii_cerrar_sesion` | Cierra la sesión en el SII (conviene al terminar) |
 
-Todas requieren **certificado digital**, salvo la emisión de DTE, que corre por navegador
-y acepta clave tributaria.
+`sii_persona_list_bienes_raices` funciona hoy con la sesión que abre
+`sii_iniciar_sesion` (clave, por navegador). Las demás de esta sección y las
+de las secciones anteriores (Consultas DTE, Impuestos y registros, y las dos
+tools de listado de mipyme) consultan por HTTP y hoy necesitan certificado
+digital para tener el cookie jar que esa vía requiere — ver la limitación
+anotada en
+[Autenticación: sesión por RUT](#autenticación-sesión-por-rut).
+`sii_mipyme_emitir_dte` sigue corriendo por navegador y acepta clave.
 
 ### Cambios recientes que rompen contrato
 
