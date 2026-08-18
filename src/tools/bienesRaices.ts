@@ -5,7 +5,7 @@ import { Browser } from '../browser';
 import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
-import { crearConScraper } from '../erroresSesion';
+import { crearConScraper, clasificarErrorCredenciales } from '../erroresSesion';
 
 const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 
@@ -29,10 +29,7 @@ export function registerSesionTools(
         await registro.ejecutar(rut, sesion => sesion.authenticateOnly());
       } catch (e) {
         credenciales.borrar(rut);
-        const mensaje = e instanceof Error ? e.message : String(e);
-        const error = mensaje.includes('El SII rechazó la autenticación')
-          ? 'CREDENCIALES_INVALIDAS'
-          : 'ERROR';
+        const error = clasificarErrorCredenciales(e);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }] };
       }
       return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: true, rut }) }] };
