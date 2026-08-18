@@ -1,4 +1,5 @@
-import { validarClave } from '../src/httpServer';
+import * as http from 'http';
+import { crearServidorHttp, validarClave } from '../src/httpServer';
 import { ProveedorCredencialesRuntime } from '../src/credencialesRuntime';
 import { RegistroSesiones } from '../src/registroSesiones';
 
@@ -64,5 +65,96 @@ describe('validarClave', () => {
     await validarClave('11.111.111-1', 'x', registro, credenciales);
 
     expect(orden).toEqual(['authenticateOnly', 'logout']);
+  });
+});
+
+function request(
+  port: number,
+  opts: { method?: string; path?: string; headers?: Record<string, string>; body?: string }
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { hostname: '127.0.0.1', port, method: opts.method ?? 'POST', path: opts.path ?? '/validar-clave', headers: opts.headers },
+      res => {
+        let data = '';
+        res.on('data', chunk => { data += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
+      }
+    );
+    req.on('error', reject);
+    if (opts.body) req.write(opts.body);
+    req.end();
+  });
+}
+
+describe('crearServidorHttp', () => {
+  const API_KEY = 'clave-del-servicio';
+  let server: http.Server;
+  let port: number;
+
+  function armarRegistroOk() {
+    return {
+      ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly: jest.fn().mockResolvedValue(undefined), logout: jest.fn().mockResolvedValue(undefined) }),
+    } as any;
+  }
+
+  beforeEach(done => {
+    const registro = armarRegistroOk();
+    const credenciales = new ProveedorCredencialesRuntime();
+    server = crearServidorHttp(registro, credenciales, API_KEY);
+    server.listen(0, () => {
+      port = (server.address() as any).port;
+      done();
+    });
+  });
+
+  afterEach(done => {
+    server.close(done);
+  });
+
+  it('clave correcta con auth válida responde 200 {ok:true}', async () => {
+    const res = await request(port, {
+      headers: { Authorization: `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rut: '11.111.111-1', clave: 'secreta' }),
+    });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ ok: true });
+  });
+
+  it('sin Authorization responde 401', async () => {
+    const res = await request(port, { body: JSON.stringify({ rut: '1', clave: '2' }) });
+    expect(res.status).toBe(401);
+  });
+
+  it('con API key incorrecta responde 401', async () => {
+    const res = await request(port, {
+      headers: { Authorization: 'Bearer clave-equivocada' },
+      body: JSON.stringify({ rut: '1', clave: '2' }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('body sin clave responde 400', async () => {
+    const res = await request(port, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+      body: JSON.stringify({ rut: '1' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('body no-JSON responde 400', async () => {
+    const res = await request(port, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+      body: 'esto no es json',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('ruta desconocida responde 404', async () => {
+    const res = await request(port, {
+      path: '/otra-cosa',
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    });
+    expect(res.status).toBe(404);
   });
 });
