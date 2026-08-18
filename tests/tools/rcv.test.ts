@@ -1,48 +1,75 @@
 import { registerRcvTools } from '../../src/tools/rcv';
 import { RcvScraper } from '../../src/scrapers/rcv';
+import { RegistroSesiones } from '../../src/registroSesiones';
 
 jest.mock('../../src/scrapers/rcv');
 
 const MockScraper = RcvScraper as jest.MockedClass<typeof RcvScraper>;
 
-function registrar() {
+function registrar(rutRegistrado?: string) {
   const tools: Record<string, { descripcion: string; schema: any; handler: Function }> = {};
   const server = {
     tool: (nombre: string, descripcion: string, schema: any, handler: Function) => {
       tools[nombre] = { descripcion, schema, handler };
     },
   };
-  const scraper = new MockScraper({} as any, {} as any);
-  registerRcvTools(server as any, scraper);
-  return { tools, scraper };
+  const registro = {
+    ejecutar: (rut: string, fn: any) => {
+      if (rutRegistrado !== undefined && rut !== rutRegistrado) {
+        return Promise.reject(new Error(`No hay sesión iniciada para el RUT ${rut}. Llamá sii_iniciar_sesion primero.`));
+      }
+      return fn({});
+    },
+  } as unknown as RegistroSesiones<any>;
+  registerRcvTools(server as any, registro);
+  return { tools };
 }
 
 describe('registerRcvTools', () => {
+  afterEach(() => jest.clearAllMocks());
+
   it('registra sii_rcv_resumen y sii_rcv_detalle', () => {
     const { tools } = registrar();
 
     expect(Object.keys(tools)).toEqual(['sii_rcv_resumen', 'sii_rcv_detalle']);
   });
 
-  it('pasa período, operación y empresa al scraper', async () => {
-    const { tools, scraper } = registrar();
-    (scraper.resumen as jest.Mock).mockResolvedValue({ filas: [] });
+  it('exige el rut de la sesión en el schema de las dos tools', () => {
+    const { tools } = registrar();
 
-    await tools['sii_rcv_resumen'].handler({
-      periodo: '202607', operacion: 'VENTA', empresa_rut: '22222222-2',
+    expect(tools['sii_rcv_resumen'].schema.rut.isOptional()).toBe(false);
+    expect(tools['sii_rcv_detalle'].schema.rut.isOptional()).toBe(false);
+  });
+
+  it('sin sesión iniciada devuelve SESION_NO_INICIADA', async () => {
+    const { tools } = registrar('22.222.222-2');
+
+    const res = await tools['sii_rcv_resumen'].handler({
+      rut: '11.111.111-1', periodo: '202607', operacion: 'VENTA',
     });
 
-    expect(scraper.resumen).toHaveBeenCalledWith('202607', 'VENTA', '22222222-2');
+    expect(JSON.parse(res.content[0].text)).toEqual({ ok: false, error: 'SESION_NO_INICIADA' });
+  });
+
+  it('pasa período, operación y empresa al scraper', async () => {
+    (MockScraper.prototype.resumen as jest.Mock).mockResolvedValue({ filas: [] });
+    const { tools } = registrar();
+
+    await tools['sii_rcv_resumen'].handler({
+      rut: '11.111.111-1', periodo: '202607', operacion: 'VENTA', empresa_rut: '22222222-2',
+    });
+
+    expect(MockScraper.prototype.resumen).toHaveBeenCalledWith('202607', 'VENTA', '22222222-2');
   });
 
   // La empresa es un parámetro de la llamada, no un estado de la sesión.
   it('acepta la consulta sin empresa_rut', async () => {
-    const { tools, scraper } = registrar();
-    (scraper.resumen as jest.Mock).mockResolvedValue({ filas: [] });
+    (MockScraper.prototype.resumen as jest.Mock).mockResolvedValue({ filas: [] });
+    const { tools } = registrar();
 
-    await tools['sii_rcv_resumen'].handler({ periodo: '202607', operacion: 'COMPRA' });
+    await tools['sii_rcv_resumen'].handler({ rut: '11.111.111-1', periodo: '202607', operacion: 'COMPRA' });
 
-    expect(scraper.resumen).toHaveBeenCalledWith('202607', 'COMPRA', undefined);
+    expect(MockScraper.prototype.resumen).toHaveBeenCalledWith('202607', 'COMPRA', undefined);
     expect(tools['sii_rcv_resumen'].schema.empresa_rut.isOptional()).toBe(true);
   });
 
@@ -72,11 +99,11 @@ describe('registerRcvTools', () => {
   });
 
   it('devuelve el resumen como JSON', async () => {
-    const { tools, scraper } = registrar();
-    (scraper.resumen as jest.Mock).mockResolvedValue({ periodo: '202607', filas: [] });
+    (MockScraper.prototype.resumen as jest.Mock).mockResolvedValue({ periodo: '202607', filas: [] });
+    const { tools } = registrar();
 
     const res = await tools['sii_rcv_resumen'].handler({
-      periodo: '202607', operacion: 'VENTA',
+      rut: '11.111.111-1', periodo: '202607', operacion: 'VENTA',
     });
 
     expect(JSON.parse(res.content[0].text).periodo).toBe('202607');
@@ -84,26 +111,28 @@ describe('registerRcvTools', () => {
 });
 
 describe('sii_rcv_detalle', () => {
+  afterEach(() => jest.clearAllMocks());
+
   it('pasa período, operación, tipo de documento y empresa al scraper', async () => {
-    const { tools, scraper } = registrar();
-    (scraper.detalle as jest.Mock).mockResolvedValue({ documentos: [] });
+    (MockScraper.prototype.detalle as jest.Mock).mockResolvedValue({ documentos: [] });
+    const { tools } = registrar();
 
     await tools['sii_rcv_detalle'].handler({
-      periodo: '202606', operacion: 'COMPRA', tipo_doc: 61, empresa_rut: '22222222-2',
+      rut: '11.111.111-1', periodo: '202606', operacion: 'COMPRA', tipo_doc: 61, empresa_rut: '22222222-2',
     });
 
-    expect(scraper.detalle).toHaveBeenCalledWith('202606', 'COMPRA', 61, '22222222-2');
+    expect(MockScraper.prototype.detalle).toHaveBeenCalledWith('202606', 'COMPRA', 61, '22222222-2');
   });
 
   it('acepta la consulta sin empresa_rut', async () => {
-    const { tools, scraper } = registrar();
-    (scraper.detalle as jest.Mock).mockResolvedValue({ documentos: [] });
+    (MockScraper.prototype.detalle as jest.Mock).mockResolvedValue({ documentos: [] });
+    const { tools } = registrar();
 
     await tools['sii_rcv_detalle'].handler({
-      periodo: '202607', operacion: 'VENTA', tipo_doc: 33,
+      rut: '11.111.111-1', periodo: '202607', operacion: 'VENTA', tipo_doc: 33,
     });
 
-    expect(scraper.detalle).toHaveBeenCalledWith('202607', 'VENTA', 33, undefined);
+    expect(MockScraper.prototype.detalle).toHaveBeenCalledWith('202607', 'VENTA', 33, undefined);
     expect(tools['sii_rcv_detalle'].schema.empresa_rut.isOptional()).toBe(true);
   });
 
@@ -176,11 +205,11 @@ describe('sii_rcv_detalle', () => {
   });
 
   it('devuelve el detalle como JSON', async () => {
-    const { tools, scraper } = registrar();
-    (scraper.detalle as jest.Mock).mockResolvedValue({ periodo: '202606', documentos: [] });
+    (MockScraper.prototype.detalle as jest.Mock).mockResolvedValue({ periodo: '202606', documentos: [] });
+    const { tools } = registrar();
 
     const res = await tools['sii_rcv_detalle'].handler({
-      periodo: '202606', operacion: 'COMPRA', tipo_doc: 61,
+      rut: '11.111.111-1', periodo: '202606', operacion: 'COMPRA', tipo_doc: 61,
     });
 
     expect(JSON.parse(res.content[0].text).periodo).toBe('202606');

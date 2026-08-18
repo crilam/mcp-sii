@@ -14,7 +14,7 @@ export interface ProveedorCredenciales {
 // "11.111.111-1", "11111111-1" y "111111111" indexen la misma credencial. Es el
 // mismo criterio de "un RUT es un RUT" que ya aplica rutaTemporalSii al nombrar
 // archivos; acá se usa como clave de búsqueda.
-function normalizar(rut: string): string {
+export function normalizar(rut: string): string {
   return rut.replace(/[^0-9kK]/g, '').toUpperCase();
 }
 

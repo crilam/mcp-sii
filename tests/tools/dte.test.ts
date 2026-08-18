@@ -1,22 +1,32 @@
 import { registerDteTools } from '../../src/tools/dte';
 import { DteScraper } from '../../src/scrapers/dte';
+import { RegistroSesiones } from '../../src/registroSesiones';
 
 jest.mock('../../src/scrapers/dte');
 const MockScraper = DteScraper as jest.MockedClass<typeof DteScraper>;
 
-function setup() {
+function setup(rutRegistrado?: string) {
   const tools: Record<string, { descripcion: string; schema: any; handler: Function }> = {};
   const server = {
     tool: (nombre: string, descripcion: string, schema: any, handler: Function) => {
       tools[nombre] = { descripcion, schema, handler };
     },
   };
-  const scraper = new MockScraper({} as any, {} as any);
-  registerDteTools(server as any, scraper);
-  return { scraper, tools };
+  const registro = {
+    ejecutar: (rut: string, fn: any) => {
+      if (rutRegistrado !== undefined && rut !== rutRegistrado) {
+        return Promise.reject(new Error(`No hay sesión iniciada para el RUT ${rut}. Llamá sii_iniciar_sesion primero.`));
+      }
+      return fn({});
+    },
+  } as unknown as RegistroSesiones<any>;
+  registerDteTools(server as any, registro);
+  return { tools };
 }
 
 describe('registerDteTools', () => {
+  afterEach(() => jest.clearAllMocks());
+
   it('registra las 4 tools de Consultas DTE', () => {
     const { tools } = setup();
     expect(tools['sii_dte_list_documentos_emitidos']).toBeDefined();
@@ -45,11 +55,31 @@ describe('registerDteTools', () => {
     }
   });
 
+  it('rut es obligatorio en las cuatro tools', () => {
+    const { tools } = setup();
+    for (const nombre of Object.keys(tools)) {
+      expect(tools[nombre].schema.rut.isOptional()).toBe(false);
+    }
+  });
+
+  it('sin sesión iniciada devuelve SESION_NO_INICIADA', async () => {
+    const { tools } = setup('22.222.222-2');
+
+    const resultado = await tools['sii_dte_list_documentos_emitidos'].handler({
+      rut: '11.111.111-1',
+      periodo: '202607',
+      incluir_detalle: false,
+    });
+
+    expect(JSON.parse(resultado.content[0].text)).toEqual({ ok: false, error: 'SESION_NO_INICIADA' });
+  });
+
   it('el listado de emitidos llama al scraper con la operación EMITIDOS', async () => {
-    const { scraper, tools } = setup();
-    (scraper.listar as jest.Mock).mockResolvedValue({ documentos: [] });
+    (MockScraper.prototype.listar as jest.Mock).mockResolvedValue({ documentos: [] });
+    const { tools } = setup();
 
     await tools['sii_dte_list_documentos_emitidos'].handler({
+      rut: '11.111.111-1',
       periodo: '202607',
       empresa_rut: '22222222-2',
       tipo_doc: 33,
@@ -58,7 +88,7 @@ describe('registerDteTools', () => {
       incluir_detalle: true,
     });
 
-    expect(scraper.listar).toHaveBeenCalledWith('202607', 'EMITIDOS', {
+    expect(MockScraper.prototype.listar).toHaveBeenCalledWith('202607', 'EMITIDOS', {
       empresaRut: '22222222-2',
       tipoDocCodigo: 33,
       seccion: undefined,
@@ -69,15 +99,16 @@ describe('registerDteTools', () => {
   });
 
   it('el listado de recibidos llama al scraper con la operación RECIBIDOS', async () => {
-    const { scraper, tools } = setup();
-    (scraper.listar as jest.Mock).mockResolvedValue({ documentos: [] });
+    (MockScraper.prototype.listar as jest.Mock).mockResolvedValue({ documentos: [] });
+    const { tools } = setup();
 
     await tools['sii_dte_list_documentos_recibidos'].handler({
+      rut: '11.111.111-1',
       periodo: '202607',
       incluir_detalle: false,
     });
 
-    expect(scraper.listar).toHaveBeenCalledWith('202607', 'RECIBIDOS', {
+    expect(MockScraper.prototype.listar).toHaveBeenCalledWith('202607', 'RECIBIDOS', {
       empresaRut: undefined,
       tipoDocCodigo: undefined,
       seccion: undefined,
@@ -115,11 +146,12 @@ describe('registerDteTools', () => {
   // Los filtros del cliente exigen el detalle, y el que decide es el scraper:
   // acá se verifica que la tool le pase el pedido tal cual, sin apagar el error.
   it('propaga el error del scraper cuando se filtra sin detalle', async () => {
-    const { scraper, tools } = setup();
-    (scraper.listar as jest.Mock).mockRejectedValue(new Error('requieren incluirDetalle=true'));
+    (MockScraper.prototype.listar as jest.Mock).mockRejectedValue(new Error('requieren incluirDetalle=true'));
+    const { tools } = setup();
 
     await expect(
       tools['sii_dte_list_documentos_emitidos'].handler({
+        rut: '11.111.111-1',
         periodo: '202607',
         contraparte_rut: '33333333-3',
         incluir_detalle: false,
@@ -145,17 +177,18 @@ describe('registerDteTools', () => {
   });
 
   it('el documento puntual pasa tipo, folio y operación', async () => {
-    const { scraper, tools } = setup();
-    (scraper.getDocumento as jest.Mock).mockResolvedValue({ encontrado: false });
+    (MockScraper.prototype.getDocumento as jest.Mock).mockResolvedValue({ encontrado: false });
+    const { tools } = setup();
 
     await tools['sii_dte_get_documento_recibido'].handler({
+      rut: '11.111.111-1',
       periodo: '202607',
       tipo_doc: 61,
       folio: 1001,
       empresa_rut: '22222222-2',
     });
 
-    expect(scraper.getDocumento).toHaveBeenCalledWith(
+    expect(MockScraper.prototype.getDocumento).toHaveBeenCalledWith(
       '202607', 'RECIBIDOS', 61, 1001, '22222222-2'
     );
   });

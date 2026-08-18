@@ -1,5 +1,6 @@
 import { registerRentaTools } from '../../src/tools/renta';
 import { RentaScraper } from '../../src/scrapers/renta';
+import { RegistroSesiones } from '../../src/registroSesiones';
 
 jest.mock('../../src/scrapers/renta');
 
@@ -15,14 +16,23 @@ function makeServer() {
   return { server, tools };
 }
 
-function registrar() {
+function registrar(rutRegistrado?: string) {
   const { server, tools } = makeServer();
-  const scraper = new MockScraper({} as any, {} as any);
-  registerRentaTools(server as any, scraper);
-  return { tools, scraper };
+  const registro = {
+    ejecutar: (rut: string, fn: any) => {
+      if (rutRegistrado !== undefined && rut !== rutRegistrado) {
+        return Promise.reject(new Error(`No hay sesión iniciada para el RUT ${rut}. Llamá sii_iniciar_sesion primero.`));
+      }
+      return fn({});
+    },
+  } as unknown as RegistroSesiones<any>;
+  registerRentaTools(server as any, registro);
+  return { tools };
 }
 
 describe('registerRentaTools', () => {
+  afterEach(() => jest.clearAllMocks());
+
   it('registra las dos tools de renta', () => {
     const { tools } = registrar();
 
@@ -38,15 +48,30 @@ describe('registerRentaTools', () => {
     expect(tools['sii_renta_get_f22'].descripcion).toMatch(/SII_EMPRESA_RUT/);
   });
 
+  it('exige el rut de la sesión en el schema de las dos tools', () => {
+    const { tools } = registrar();
+
+    expect(tools['sii_renta_estado_declaracion'].schema.rut.isOptional()).toBe(false);
+    expect(tools['sii_renta_get_f22'].schema.rut.isOptional()).toBe(false);
+  });
+
+  it('sin sesión iniciada devuelve SESION_NO_INICIADA', async () => {
+    const { tools } = registrar('22.222.222-2');
+
+    const res = await tools['sii_renta_estado_declaracion'].handler({ rut: '11.111.111-1', anio: 2025 });
+
+    expect(JSON.parse(res.content[0].text)).toEqual({ ok: false, error: 'SESION_NO_INICIADA' });
+  });
+
   it('devuelve el estado de la declaración como JSON', async () => {
-    const { tools, scraper } = registrar();
-    (scraper.estadoDeclaracion as jest.Mock).mockResolvedValue({
+    (MockScraper.prototype.estadoDeclaracion as jest.Mock).mockResolvedValue({
       anio: '2025', sinDatos: false, declaraciones: [], glosas: [],
     });
+    const { tools } = registrar();
 
-    const res = await tools['sii_renta_estado_declaracion'].handler({ anio: 2025 });
+    const res = await tools['sii_renta_estado_declaracion'].handler({ rut: '11.111.111-1', anio: 2025 });
 
-    expect(scraper.estadoDeclaracion).toHaveBeenCalledWith(2025);
+    expect(MockScraper.prototype.estadoDeclaracion).toHaveBeenCalledWith(2025);
     expect(JSON.parse(res.content[0].text).anio).toBe('2025');
   });
 
@@ -60,13 +85,13 @@ describe('registerRentaTools', () => {
   });
 
   it('pasa el folio al scraper cuando viene, y undefined cuando no', async () => {
-    const { tools, scraper } = registrar();
-    (scraper.f22Completo as jest.Mock).mockResolvedValue({ lineas: [] });
+    (MockScraper.prototype.f22Completo as jest.Mock).mockResolvedValue({ lineas: [] });
+    const { tools } = registrar();
 
-    await tools['sii_renta_get_f22'].handler({ anio: 2025, folio: 900000001 });
-    await tools['sii_renta_get_f22'].handler({ anio: 2025 });
+    await tools['sii_renta_get_f22'].handler({ rut: '11.111.111-1', anio: 2025, folio: 900000001 });
+    await tools['sii_renta_get_f22'].handler({ rut: '11.111.111-1', anio: 2025 });
 
-    expect((scraper.f22Completo as jest.Mock).mock.calls)
+    expect((MockScraper.prototype.f22Completo as jest.Mock).mock.calls)
       .toEqual([[2025, 900000001], [2025, undefined]]);
   });
 });

@@ -70,6 +70,8 @@ describe('crearRegistroSesionesSii', () => {
       new MockBrowser()
     );
 
-    await expect(registro.ejecutar('99999999-9', async s => s)).rejects.toThrow(/99999999-9/);
+    // El registro normaliza el RUT antes de pedir la credencial, así que el
+    // mensaje de error llega con el formato normalizado (sin puntos ni guión).
+    await expect(registro.ejecutar('99999999-9', async s => s)).rejects.toThrow(/999999999/);
   });
 });
