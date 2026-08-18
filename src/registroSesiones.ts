@@ -1,4 +1,5 @@
 import { ColaPorClave } from './colaPorClave';
+import { normalizar } from './credenciales';
 
 // Registro de sesiones del SII por credencial (RUT de la persona autenticada).
 //
@@ -22,7 +23,11 @@ export class RegistroSesiones<T> {
   constructor(private crear: (rut: string) => T | Promise<T>) {}
 
   async ejecutar<R>(rut: string, fn: (sesion: T) => Promise<R>): Promise<R> {
-    return this.cola.ejecutar(rut, async () => fn(await this.sesionDe(rut)));
+    // Se normaliza acá, en el único punto de entrada al registro y a la cola:
+    // así "12.345.678-9" y "123456789" indexan la misma sesión y se serializan
+    // entre sí, sin depender de que cada tool normalice antes de llamar.
+    const clave = normalizar(rut);
+    return this.cola.ejecutar(clave, async () => fn(await this.sesionDe(clave)));
   }
 
   private async sesionDe(rut: string): Promise<T> {

@@ -18,12 +18,14 @@ describe('RegistroSesiones', () => {
   it('crea sesiones distintas para RUTs distintos', async () => {
     const registro = new RegistroSesiones((rut: string) => ({ rut }));
 
-    const a = await registro.ejecutar('rut-1', async s => s);
-    const b = await registro.ejecutar('rut-2', async s => s);
+    const a = await registro.ejecutar('11111111-1', async s => s);
+    const b = await registro.ejecutar('22222222-2', async s => s);
 
     expect(a).not.toBe(b);
-    expect(a.rut).toBe('rut-1');
-    expect(b.rut).toBe('rut-2');
+    // La factory recibe el RUT ya normalizado: es la clave con la que se
+    // cachea y se serializa, la misma para cualquier formato de entrada.
+    expect(a.rut).toBe('111111111');
+    expect(b.rut).toBe('222222222');
   });
 
   // El orden de entrada/salida de cada operación, para ver si se solaparon.
@@ -73,9 +75,9 @@ describe('RegistroSesiones', () => {
 
     // fn recibe la sesión YA RESUELTA, no una promesa: si el registro cacheara
     // la promesa sin esperarla, `sesion.rut` sería undefined acá.
-    const rutVisto = await registro.ejecutar('rut-1', async sesion => sesion.rut);
+    const rutVisto = await registro.ejecutar('11111111-1', async sesion => sesion.rut);
 
-    expect(rutVisto).toBe('rut-1');
+    expect(rutVisto).toBe('111111111');
   });
 
   it('con factory asíncrona y llamadas concurrentes del mismo RUT, crea UNA sola sesión', async () => {
@@ -93,6 +95,21 @@ describe('RegistroSesiones', () => {
       registro.ejecutar('rut-1', async s => s),
       registro.ejecutar('rut-1', async s => s),
     ]);
+
+    expect(creadas).toBe(1);
+    expect(a).toBe(b);
+  });
+
+  it('normaliza el RUT: mismo RUT en distinto formato resuelve la MISMA sesión', async () => {
+    // Bug real: sin normalizar, "12.345.678-9" y "123456789" indexan claves
+    // distintas y el registro crea una SEGUNDA sesión (segundo login) para la
+    // misma persona —justo el escenario de sesiones simultáneas que el diseño
+    // de RegistroSesiones existe para evitar.
+    let creadas = 0;
+    const registro = new RegistroSesiones((rut: string) => ({ rut, id: ++creadas }));
+
+    const a = await registro.ejecutar('12.345.678-9', async s => s);
+    const b = await registro.ejecutar('123456789', async s => s);
 
     expect(creadas).toBe(1);
     expect(a).toBe(b);
