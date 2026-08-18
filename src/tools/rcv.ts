@@ -1,8 +1,41 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { OperacionRcv, RcvScraper } from '../scrapers/rcv';
+import { SiiHttpClient } from '../http';
+import { SessionManager } from '../session';
+import { RegistroSesiones } from '../registroSesiones';
+import { conErroresDeSesion, SesionNoIniciada } from '../erroresSesion';
 
-export function registerRcvTools(server: McpServer, scraper: RcvScraper): void {
+const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
+
+async function conScraper<R>(
+  registro: RegistroSesiones<SessionManager>,
+  rut: string,
+  fn: (scraper: RcvScraper) => Promise<R>
+): Promise<{ content: [{ type: 'text'; text: string }] }> {
+  const resultado = await conErroresDeSesion(() =>
+    registro.ejecutar(rut, async sesion => {
+      const scraper = new RcvScraper(new SiiHttpClient(sesion), sesion);
+      return fn(scraper);
+    })
+  ).catch(e => {
+    if (e instanceof SesionNoIniciada) {
+      return { __error: 'SESION_NO_INICIADA' as const };
+    }
+    throw e;
+  });
+
+  if (resultado && typeof resultado === 'object' && '__error' in resultado) {
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ ok: false, error: resultado.__error }) }],
+    };
+  }
+  return {
+    content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }],
+  };
+}
+
+export function registerRcvTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
     'sii_rcv_resumen',
     'Resumen del Registro de Compras y Ventas de un período tributario: los totales por tipo de documento ' +
@@ -19,6 +52,7 @@ export function registerRcvTools(server: McpServer, scraper: RcvScraper): void {
     'cada llamada, sin seleccionar empresa; si se omite, se consulta el RUT autenticado. ' +
     'Es solo lectura: no acepta ni reclama documentos.',
     {
+      rut: z.string().describe(RUT_DESC),
       periodo: z.string().regex(/^\d{6}$/)
         .describe('Período tributario en formato AAAAMM (por ejemplo 202607)'),
       operacion: z.enum(['COMPRA', 'VENTA'])
@@ -26,16 +60,12 @@ export function registerRcvTools(server: McpServer, scraper: RcvScraper): void {
       empresa_rut: z.string().optional()
         .describe('RUT de la empresa a consultar, con dígito verificador (22222222-2). Si se omite, se usa el RUT autenticado.'),
     },
-    async ({ periodo, operacion, empresa_rut }: {
+    async ({ rut, periodo, operacion, empresa_rut }: {
+      rut: string;
       periodo: string;
       operacion: OperacionRcv;
       empresa_rut?: string;
-    }) => ({
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(await scraper.resumen(periodo, operacion, empresa_rut), null, 2),
-      }],
-    })
+    }) => conScraper(registro, rut, scraper => scraper.resumen(periodo, operacion, empresa_rut))
   );
 
   server.tool(
@@ -71,6 +101,7 @@ export function registerRcvTools(server: McpServer, scraper: RcvScraper): void {
     'cada llamada; si se omite, se consulta el RUT autenticado. ' +
     'Es solo lectura: no acepta ni reclama documentos.',
     {
+      rut: z.string().describe(RUT_DESC),
       periodo: z.string().regex(/^\d{6}$/)
         .describe('Período tributario en formato AAAAMM (por ejemplo 202607)'),
       operacion: z.enum(['COMPRA', 'VENTA'])
@@ -80,20 +111,12 @@ export function registerRcvTools(server: McpServer, scraper: RcvScraper): void {
       empresa_rut: z.string().optional()
         .describe('RUT de la empresa a consultar, con dígito verificador (22222222-2). Si se omite, se usa el RUT autenticado.'),
     },
-    async ({ periodo, operacion, tipo_doc, empresa_rut }: {
+    async ({ rut, periodo, operacion, tipo_doc, empresa_rut }: {
+      rut: string;
       periodo: string;
       operacion: OperacionRcv;
       tipo_doc: number;
       empresa_rut?: string;
-    }) => ({
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(
-          await scraper.detalle(periodo, operacion, tipo_doc, empresa_rut),
-          null,
-          2
-        ),
-      }],
-    })
+    }) => conScraper(registro, rut, scraper => scraper.detalle(periodo, operacion, tipo_doc, empresa_rut))
   );
 }

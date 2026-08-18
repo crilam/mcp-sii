@@ -1,6 +1,39 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { DteScraper, OperacionDte } from '../scrapers/dte';
+import { SiiHttpClient } from '../http';
+import { SessionManager } from '../session';
+import { RegistroSesiones } from '../registroSesiones';
+import { conErroresDeSesion, SesionNoIniciada } from '../erroresSesion';
+
+const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
+
+async function conScraper<R>(
+  registro: RegistroSesiones<SessionManager>,
+  rut: string,
+  fn: (scraper: DteScraper) => Promise<R>
+): Promise<{ content: [{ type: 'text'; text: string }] }> {
+  const resultado = await conErroresDeSesion(() =>
+    registro.ejecutar(rut, async sesion => {
+      const scraper = new DteScraper(new SiiHttpClient(sesion), sesion);
+      return fn(scraper);
+    })
+  ).catch(e => {
+    if (e instanceof SesionNoIniciada) {
+      return { __error: 'SESION_NO_INICIADA' as const };
+    }
+    throw e;
+  });
+
+  if (resultado && typeof resultado === 'object' && '__error' in resultado) {
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ ok: false, error: resultado.__error }) }],
+    };
+  }
+  return {
+    content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }],
+  };
+}
 
 // Advertencia compartida por las cuatro tools. Va en las descripciones —no sólo
 // en un comentario— porque el destinatario es un modelo que puede tener las dos
@@ -77,10 +110,11 @@ const EMPRESA_RUT_DESC =
 
 const PERIODO_DESC = 'Período tributario en formato AAAAMM (por ejemplo 202607)';
 
-export function registerDteTools(server: McpServer, scraper: DteScraper): void {
+export function registerDteTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   // Las dos tools de listado toman exactamente los mismos parámetros: sólo
   // cambia la operación, que va en el nombre de la tool y no en el esquema.
   const schemaListado = () => ({
+    rut: z.string().describe(RUT_DESC),
     periodo: z.string().regex(/^\d{6}$/).describe(PERIODO_DESC),
     empresa_rut: z.string().optional().describe(EMPRESA_RUT_DESC),
     tipo_doc: z.number().int().positive().optional()
@@ -112,7 +146,8 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
   });
 
   const handler = (operacion: OperacionDte) =>
-    async ({ periodo, empresa_rut, tipo_doc, seccion, contraparte_rut, limit, incluir_detalle }: {
+    async ({ rut, periodo, empresa_rut, tipo_doc, seccion, contraparte_rut, limit, incluir_detalle }: {
+      rut: string;
       periodo: string;
       empresa_rut?: string;
       tipo_doc?: number;
@@ -120,23 +155,17 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
       contraparte_rut?: string;
       limit?: number;
       incluir_detalle: boolean;
-    }) => ({
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(
-          await scraper.listar(periodo, operacion, {
-            empresaRut: empresa_rut,
-            tipoDocCodigo: tipo_doc,
-            seccion,
-            contraparteRut: contraparte_rut,
-            limit,
-            incluirDetalle: incluir_detalle,
-          }),
-          null,
-          2
-        ),
-      }],
-    });
+    }) =>
+      conScraper(registro, rut, scraper =>
+        scraper.listar(periodo, operacion, {
+          empresaRut: empresa_rut,
+          tipoDocCodigo: tipo_doc,
+          seccion,
+          contraparteRut: contraparte_rut,
+          limit,
+          incluirDetalle: incluir_detalle,
+        })
+      );
 
   server.tool(
     'sii_dte_list_documentos_emitidos',
@@ -165,6 +194,7 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
   );
 
   const schemaDocumento = {
+    rut: z.string().describe(RUT_DESC),
     periodo: z.string().regex(/^\d{6}$/).describe(PERIODO_DESC),
     tipo_doc: z.number().int().positive()
       .describe('Código del tipo de documento (33 factura electrónica, 34 exenta, 61 nota de crédito, ' +
@@ -174,21 +204,16 @@ export function registerDteTools(server: McpServer, scraper: DteScraper): void {
   };
 
   const handlerDocumento = (operacion: OperacionDte) =>
-    async ({ periodo, tipo_doc, folio, empresa_rut }: {
+    async ({ rut, periodo, tipo_doc, folio, empresa_rut }: {
+      rut: string;
       periodo: string;
       tipo_doc: number;
       folio: number;
       empresa_rut?: string;
-    }) => ({
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(
-          await scraper.getDocumento(periodo, operacion, tipo_doc, folio, empresa_rut),
-          null,
-          2
-        ),
-      }],
-    });
+    }) =>
+      conScraper(registro, rut, scraper =>
+        scraper.getDocumento(periodo, operacion, tipo_doc, folio, empresa_rut)
+      );
 
   server.tool(
     'sii_dte_get_documento_emitido',

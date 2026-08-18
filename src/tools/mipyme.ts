@@ -2,6 +2,43 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { MipymeHttpScraper } from '../scrapers/mipymeHttp';
 import { getConfig } from '../env';
+import { SiiHttpClient } from '../http';
+import { SessionManager } from '../session';
+import { RegistroSesiones } from '../registroSesiones';
+import { conErroresDeSesion, SesionNoIniciada } from '../erroresSesion';
+
+const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
+
+// Corre `fn` con el scraper armado para la sesión del `rut` pedido y devuelve
+// ya el `content` de la tool: si no hay sesión iniciada para ese RUT, en vez
+// de propagar la excepción responde { ok: false, error: 'SESION_NO_INICIADA' },
+// que es el contrato que puede leer un modelo sin que la tool explote.
+async function conScraper<R>(
+  registro: RegistroSesiones<SessionManager>,
+  rut: string,
+  fn: (http: MipymeHttpScraper) => Promise<R>
+): Promise<{ content: [{ type: 'text'; text: string }] }> {
+  const resultado = await conErroresDeSesion(() =>
+    registro.ejecutar(rut, async sesion => {
+      const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
+      return fn(http);
+    })
+  ).catch(e => {
+    if (e instanceof SesionNoIniciada) {
+      return { __error: 'SESION_NO_INICIADA' as const };
+    }
+    throw e;
+  });
+
+  if (resultado && typeof resultado === 'object' && '__error' in resultado) {
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ ok: false, error: resultado.__error }) }],
+    };
+  }
+  return {
+    content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }],
+  };
+}
 
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
 
@@ -14,7 +51,7 @@ function empresaPedida(empresaRut?: string): string | undefined {
   return empresaRut ?? getConfig().empresaRut;
 }
 
-export function registerMipymeTools(server: McpServer, http: MipymeHttpScraper): void {
+export function registerMipymeTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
     'sii_mipyme_list_empresas',
     'Lista las empresas que la persona autenticada puede operar en el Sistema de Facturación ' +
@@ -22,13 +59,10 @@ export function registerMipymeTools(server: McpServer, http: MipymeHttpScraper):
     'configurado. OJO: esta lista es la del portal mipyme y NO coincide con la de otras ' +
     'aplicaciones del SII — el Registro de Compras y Ventas y Consultas DTE habilitan su propio ' +
     'conjunto de empresas, que puede ser más amplio.',
-    {},
-    async () => {
-      const empresas = await http.listEmpresas();
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(empresas, null, 2) }],
-      };
-    }
+    {
+      rut: z.string().describe(RUT_DESC),
+    },
+    async ({ rut }) => conScraper(registro, rut, http => http.listEmpresas())
   );
 
   server.tool(
@@ -40,6 +74,7 @@ export function registerMipymeTools(server: McpServer, http: MipymeHttpScraper):
     'portal, así que puede no coincidir con sii_dte_list_documentos_emitidos ni con sii_rcv_*, ' +
     'que consultan otros registros del SII.',
     {
+      rut: z.string().describe(RUT_DESC),
       empresa_rut: z.string().optional().describe('RUT de la empresa con dígito verificador. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si este RUT opera una única empresa en el portal.'),
       tipo_dte: z.number().int().optional().describe('Filtrar por tipo: 33=factura, 34=exenta, 61=N.crédito, 56=N.débito, 52=guía, 46=F.compra'),
       fecha_desde: FechaSchema,
@@ -48,8 +83,8 @@ export function registerMipymeTools(server: McpServer, http: MipymeHttpScraper):
       folio: z.number().int().optional().describe('Filtrar por folio exacto'),
       pagina: z.number().int().min(1).default(1).describe('Página del historial (100 documentos por página)'),
     },
-    async ({ empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, folio, pagina }) => {
-      const resultado = await http.listDteEmitidos({
+    async ({ rut, empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, folio, pagina }) =>
+      conScraper(registro, rut, http => http.listDteEmitidos({
         empresaRut: empresaPedida(empresa_rut),
         tipoDte: tipo_dte,
         fechaDesde: fecha_desde,
@@ -57,11 +92,7 @@ export function registerMipymeTools(server: McpServer, http: MipymeHttpScraper):
         receptorRut: receptor_rut,
         folio,
         pagina,
-      });
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(resultado, null, 2) }],
-      };
-    }
+      }))
   );
 
   server.tool(
@@ -77,6 +108,7 @@ export function registerMipymeTools(server: McpServer, http: MipymeHttpScraper):
     'se redondea, así que el neto mínimo emisible es 3: con 1 ó 2 el IVA da 0 y el portal la ' +
     'rechaza.',
     {
+      rut: z.string().describe(RUT_DESC),
       empresa_rut: z.string().optional().describe('RUT empresa. Si se omite, usa SII_EMPRESA_RUT, o se resuelve solo si la persona opera una única empresa.'),
       tipo_dte: z.number().int().describe('33=factura, 34=factura exenta, 61=nota de crédito'),
       receptor_rut: z.string().describe('RUT del receptor sin DV (ej: "33333333")'),
@@ -104,65 +136,62 @@ export function registerMipymeTools(server: McpServer, http: MipymeHttpScraper):
       })).max(3).optional().describe('Hasta 3 referencias. Una nota de crédito exige al menos una.'),
       confirmar: z.boolean().default(false).describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento, acto real e irreversible.'),
     },
-    async (args) => {
-      const resultado = await http.emitirDte(
-        {
-          empresaRut: empresaPedida(args.empresa_rut),
-          tipoDte: args.tipo_dte,
-          receptor: {
-            rut: args.receptor_rut,
-            dv: args.receptor_dv,
-            razonSocial: args.receptor_razon_social,
-            giro: args.receptor_giro,
-            direccion: args.receptor_direccion,
-            comuna: args.receptor_comuna,
-            ciudad: args.receptor_ciudad,
+    async (args) =>
+      conScraper(registro, args.rut, async http => {
+        const resultado = await http.emitirDte(
+          {
+            empresaRut: empresaPedida(args.empresa_rut),
+            tipoDte: args.tipo_dte,
+            receptor: {
+              rut: args.receptor_rut,
+              dv: args.receptor_dv,
+              razonSocial: args.receptor_razon_social,
+              giro: args.receptor_giro,
+              direccion: args.receptor_direccion,
+              comuna: args.receptor_comuna,
+              ciudad: args.receptor_ciudad,
+            },
+            lineas: args.lineas.map(l => ({
+              nombre: l.descripcion,
+              cantidad: l.cantidad,
+              precioUnitario: l.precio_unitario,
+              unidad: l.unidad,
+            })),
+            formaPago: args.forma_pago,
+            ciudadEmisor: args.ciudad_emisor,
+            fechaEmision: args.fecha_emision,
+            referencias: args.referencias?.map(r => ({
+              tipoDoc: r.tipo_doc,
+              folio: r.folio,
+              fecha: r.fecha,
+              razon: r.razon,
+              codigo: r.codigo,
+            })),
           },
-          lineas: args.lineas.map(l => ({
-            nombre: l.descripcion,
-            cantidad: l.cantidad,
-            precioUnitario: l.precio_unitario,
-            unidad: l.unidad,
-          })),
-          formaPago: args.forma_pago,
-          ciudadEmisor: args.ciudad_emisor,
-          fechaEmision: args.fecha_emision,
-          referencias: args.referencias?.map(r => ({
-            tipoDoc: r.tipo_doc,
-            folio: r.folio,
-            fecha: r.fecha,
-            razon: r.razon,
-            codigo: r.codigo,
-          })),
-        },
-        args.confirmar
-      );
+          args.confirmar
+        );
 
-      // Los 243 campos del documento no le sirven a nadie leyéndolo y tapan el
-      // resumen, que es lo que hay que revisar antes de confirmar.
-      const salida = resultado.emitido
-        ? {
-            emitido: true,
-            folio: resultado.folio,
-            resumen: resultado.resumen,
-            // El folio sale de la página de firma (el propuesto por el portal).
-            // La respuesta de mipeSendXML.cgi no está relevada, así que no se
-            // puede afirmar que sea el folio asignado: hay que confirmarlo. Es
-            // la salvedad que evita repetir el falso positivo del "folio 21".
-            aviso: `Documento emitido. El folio ${resultado.folio} es el que propuso el ` +
-              'portal; hay que verificar que quedó asignado consultando ' +
-              'sii_mipyme_list_dte_emitidos (la respuesta del envío aún no está relevada).',
-          }
-        : {
-            emitido: false,
-            resumen: resultado.resumen,
-            aviso: 'Documento NO emitido: esto es sólo la previsualización. Para emitirlo de ' +
-              'verdad hay que llamar de nuevo con confirmar=true, y eso es irreversible.',
-          };
-
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(salida, null, 2) }],
-      };
-    }
+        // Los 243 campos del documento no le sirven a nadie leyéndolo y tapan el
+        // resumen, que es lo que hay que revisar antes de confirmar.
+        return resultado.emitido
+          ? {
+              emitido: true,
+              folio: resultado.folio,
+              resumen: resultado.resumen,
+              // El folio sale de la página de firma (el propuesto por el portal).
+              // La respuesta de mipeSendXML.cgi no está relevada, así que no se
+              // puede afirmar que sea el folio asignado: hay que confirmarlo. Es
+              // la salvedad que evita repetir el falso positivo del "folio 21".
+              aviso: `Documento emitido. El folio ${resultado.folio} es el que propuso el ` +
+                'portal; hay que verificar que quedó asignado consultando ' +
+                'sii_mipyme_list_dte_emitidos (la respuesta del envío aún no está relevada).',
+            }
+          : {
+              emitido: false,
+              resumen: resultado.resumen,
+              aviso: 'Documento NO emitido: esto es sólo la previsualización. Para emitirlo de ' +
+                'verdad hay que llamar de nuevo con confirmar=true, y eso es irreversible.',
+            };
+      })
   );
 }
