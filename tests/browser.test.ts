@@ -63,4 +63,20 @@ describe('Browser', () => {
     browser.close();
     expect(mockExec).toHaveBeenCalledWith('agent-browser close', expect.any(Object));
   });
+
+  it('con sessionId, antepone --session a cada comando', () => {
+    const browser2 = new Browser('11111111-1');
+    mockExec.mockReturnValue(Buffer.from(''));
+    browser2.open('https://example.com');
+    expect(mockExec).toHaveBeenCalledWith(
+      'agent-browser --session 11111111-1 open https://example.com',
+      expect.any(Object)
+    );
+  });
+
+  it('sin sessionId, no antepone --session (comportamiento actual intacto)', () => {
+    mockExec.mockReturnValue(Buffer.from(''));
+    browser.snapshot();
+    expect(mockExec).toHaveBeenCalledWith('agent-browser snapshot', expect.any(Object));
+  });
 });
