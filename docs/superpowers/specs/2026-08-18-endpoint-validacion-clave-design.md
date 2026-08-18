@@ -101,9 +101,18 @@ Content-Type: application/json
   coincide.
 - `400 Bad Request`: body inválido (falta `rut` o `clave`, o no son string).
 
-**Timeout:** 30 segundos totales por request. Si se cumple, responde
-`{ ok: false, error: 'ERROR' }` y cierra igual la sesión que haya quedado a
-medio abrir (mismo camino que un fallo cualquiera — ver Arquitectura).
+**Timeout:** no hay un `Promise.race` externo cortando el request a los 30s.
+`Browser.run()` ya usa `execSync` con `timeout: 30_000` *por comando*
+(`src/browser.ts:3`), así que cada paso individual de `authenticateOnly()`
+(cada `agent-browser open/snapshot/click/...`) se corta solo a los 30s si
+cuelga. El tope total del request es la suma de esos pasos (finito y acotado
+por la cantidad de comandos que hace `authenticateOnly`, no un número fijo).
+Un `Promise.race` que corte la *respuesta* sin cortar la operación real sería
+peor que no tenerlo: el turno de la cola por RUT (`ColaPorClave`, ver
+Arquitectura) seguiría ocupado por la operación colgada, y el cleanup —si se
+lanza como una llamada a `registro.ejecutar` separada— quedaría encolado
+detrás de ella, violando la garantía de "la sesión no sobrevive a la
+respuesta". Por eso el cleanup no es un paso aparte: ver Arquitectura.
 
 ## Arquitectura
 
@@ -119,16 +128,21 @@ que sigue siendo el entrypoint del MCP stdio). Al arrancar:
    uno — usar `http` nativo de Node o, si ya hay una dependencia liviana
    preferida por el equipo, esa) escuchando `POST /validar-clave`.
 4. El handler de `/validar-clave`:
-   - Valida el header `Authorization` contra `API_KEY` (env var nueva,
-     `VALIDACION_API_KEY` o similar — nombre exacto a definir en el plan).
+   - Valida el header `Authorization` contra `API_KEY` con comparación en
+     tiempo constante (`crypto.timingSafeEqual`, no `===` sobre los strings
+     crudos — evita filtrar por timing cuánto prefijo coincide).
    - Valida el body (`rut`, `clave` presentes y string).
    - `credenciales.guardar(rut, clave)`.
-   - `await registro.ejecutar(rut, sesion => sesion.authenticateOnly())`
-     dentro de un timeout de 30s (`Promise.race` o equivalente).
-   - Pase lo que pase (éxito, `CREDENCIALES_INVALIDAS`, `ERROR`, timeout):
-     `await registro.ejecutar(rut, sesion => sesion.logout())` y
-     `credenciales.borrar(rut)` antes de responder — la sesión no debe
-     sobrevivir a la respuesta bajo ningún camino.
+   - Un único `registro.ejecutar(rut, async sesion => { ... })`: adentro,
+     `authenticateOnly()` y el `logout()` de cleanup corren en el mismo turno
+     de cola, con `try/finally` — el `finally` corre `logout()` sea cual sea
+     el resultado (éxito, `CREDENCIALES_INVALIDAS`, o una excepción de
+     infraestructura). **No** se hace un segundo `registro.ejecutar` aparte
+     para el cleanup: eso lo pondría en una cola distinta, detrás de
+     cualquier otra operación que haya entrado para ese mismo RUT mientras
+     tanto (ver "Timeout" más arriba).
+   - `credenciales.borrar(rut)` corre después de que el `ejecutar` completa
+     (éxito o excepción) — fuera de la cola, no hace falta serializarlo.
    - Responde `{ ok: true }` o `{ ok: false, error }` según corresponda.
 
 El `Browser` de este proceso debe pasar `--session <rutNormalizado>` a cada
@@ -149,12 +163,19 @@ desarrollo local) y salida de red hacia el SII.
 - Handler de `/validar-clave`: mockear `RegistroSesiones`/`SessionManager`
   (patrón ya usado en `tests/tools/sesion.test.ts`) para probar: éxito,
   `CREDENCIALES_INVALIDAS`, `ERROR` de infraestructura, y que en los tres
-  casos se llama `logout()` y `credenciales.borrar(rut)` antes de responder.
-- Auth: request sin `Authorization` → 401; con API key incorrecta → 401.
+  casos se llama `logout()` (dentro del mismo `ejecutar`, vía `finally`) y
+  `credenciales.borrar(rut)` antes de responder.
+- Confirmar que `logout()` corre incluso si `authenticateOnly()` lanza una
+  excepción (no sólo en el camino feliz) — es el caso que un `try/finally`
+  cubre y un `.then()` sin `finally` no.
+- Auth: request sin `Authorization` → 401; con API key incorrecta → 401;
+  confirmar que la comparación usa `crypto.timingSafeEqual` (o que al menos
+  no hace `===` directo sobre los strings).
 - Body inválido (falta `rut` o `clave`) → 400.
-- Timeout: simular una promesa que nunca resuelve y confirmar que a los 30s
-  responde `{ ok: false, error: 'ERROR' }` (usar timers falsos de Jest, no
-  esperar 30s reales).
+- Comando de `agent-browser` colgado: simular que un paso individual dispara
+  el timeout de `execSync` (`src/browser.ts:3`) y confirmar que igual se
+  responde `{ ok: false, error: 'ERROR' }` y corre el cleanup — sin depender
+  de timers falsos de Jest para un `Promise.race` que ya no existe.
 - `Browser` con `--session`: test unitario confirmando que cada método
   (`open`, `snapshot`, `click`, etc.) incluye `--session <id>` en el comando
   construido, dado un `Browser` instanciado con un identificador de sesión.
