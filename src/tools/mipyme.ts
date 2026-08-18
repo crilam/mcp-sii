@@ -5,40 +5,11 @@ import { getConfig } from '../env';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
-import { conErroresDeSesion, SesionNoIniciada } from '../erroresSesion';
+import { crearConScraper } from '../erroresSesion';
 
 const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 
-// Corre `fn` con el scraper armado para la sesión del `rut` pedido y devuelve
-// ya el `content` de la tool: si no hay sesión iniciada para ese RUT, en vez
-// de propagar la excepción responde { ok: false, error: 'SESION_NO_INICIADA' },
-// que es el contrato que puede leer un modelo sin que la tool explote.
-async function conScraper<R>(
-  registro: RegistroSesiones<SessionManager>,
-  rut: string,
-  fn: (http: MipymeHttpScraper) => Promise<R>
-): Promise<{ content: [{ type: 'text'; text: string }] }> {
-  const resultado = await conErroresDeSesion(() =>
-    registro.ejecutar(rut, async sesion => {
-      const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
-      return fn(http);
-    })
-  ).catch(e => {
-    if (e instanceof SesionNoIniciada) {
-      return { __error: 'SESION_NO_INICIADA' as const };
-    }
-    throw e;
-  });
-
-  if (resultado && typeof resultado === 'object' && '__error' in resultado) {
-    return {
-      content: [{ type: 'text', text: JSON.stringify({ ok: false, error: resultado.__error }) }],
-    };
-  }
-  return {
-    content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }],
-  };
-}
+const conScraper = crearConScraper(sesion => new MipymeHttpScraper(new SiiHttpClient(sesion), sesion));
 
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
 

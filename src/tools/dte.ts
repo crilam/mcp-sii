@@ -4,36 +4,11 @@ import { DteScraper, OperacionDte } from '../scrapers/dte';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
-import { conErroresDeSesion, SesionNoIniciada } from '../erroresSesion';
+import { crearConScraper } from '../erroresSesion';
 
 const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 
-async function conScraper<R>(
-  registro: RegistroSesiones<SessionManager>,
-  rut: string,
-  fn: (scraper: DteScraper) => Promise<R>
-): Promise<{ content: [{ type: 'text'; text: string }] }> {
-  const resultado = await conErroresDeSesion(() =>
-    registro.ejecutar(rut, async sesion => {
-      const scraper = new DteScraper(new SiiHttpClient(sesion), sesion);
-      return fn(scraper);
-    })
-  ).catch(e => {
-    if (e instanceof SesionNoIniciada) {
-      return { __error: 'SESION_NO_INICIADA' as const };
-    }
-    throw e;
-  });
-
-  if (resultado && typeof resultado === 'object' && '__error' in resultado) {
-    return {
-      content: [{ type: 'text', text: JSON.stringify({ ok: false, error: resultado.__error }) }],
-    };
-  }
-  return {
-    content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }],
-  };
-}
+const conScraper = crearConScraper(sesion => new DteScraper(new SiiHttpClient(sesion), sesion));
 
 // Advertencia compartida por las cuatro tools. Va en las descripciones —no sólo
 // en un comentario— porque el destinatario es un modelo que puede tener las dos

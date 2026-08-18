@@ -1,9 +1,5 @@
 import { AuthStrategy, SiiConfig } from './env';
-import { ProveedorCredenciales } from './credenciales';
-
-function normalizar(rut: string): string {
-  return rut.replace(/[^0-9kK]/g, '').toUpperCase();
-}
+import { ProveedorCredenciales, normalizar } from './credenciales';
 
 // Credenciales que llegan en tiempo de ejecución vía sii_iniciar_sesion, no de
 // env. Vive sólo en memoria del proceso: nunca se persiste a disco. A

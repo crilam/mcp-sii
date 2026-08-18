@@ -5,7 +5,7 @@ import { Browser } from '../browser';
 import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
-import { conErroresDeSesion, SesionNoIniciada } from '../erroresSesion';
+import { crearConScraper } from '../erroresSesion';
 
 const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 
@@ -62,36 +62,14 @@ export function registerBienesRaicesTools(
   registro: RegistroSesiones<SessionManager>,
   browser: Browser
 ): void {
+  const conScraper = crearConScraper(sesion => new BienesRaicesScraper(browser, sesion));
+
   server.tool(
     'sii_persona_list_bienes_raices',
     'Lista los bienes raíces (propiedades) del RUT persona autenticado en el SII, con comuna, ROL, dirección, destino, datos de inscripción, porcentaje de derechos y avalúo fiscal. Incluye un resumen con total de propiedades, solicitudes, notificaciones, afectación a sobretasa y beneficio de adulto mayor. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
     {
       rut: z.string().describe(RUT_DESC),
     },
-    async ({ rut }) => {
-      const resultado = await conErroresDeSesion(() =>
-        registro.ejecutar(rut, async sesion => {
-          const scraper = new BienesRaicesScraper(browser, sesion);
-          return scraper.listBienesRaices();
-        })
-      ).catch(e => {
-        if (e instanceof SesionNoIniciada) {
-          return { __error: 'SESION_NO_INICIADA' as const };
-        }
-        throw e;
-      });
-
-      if (resultado && typeof resultado === 'object' && '__error' in resultado) {
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error: resultado.__error }) }],
-        };
-      }
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify(resultado, null, 2),
-        }],
-      };
-    }
+    async ({ rut }) => conScraper(registro, rut, scraper => scraper.listBienesRaices())
   );
 }
