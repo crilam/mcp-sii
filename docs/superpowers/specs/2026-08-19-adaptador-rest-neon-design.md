@@ -66,11 +66,11 @@ por tenant.
   contra el límite — preferible degradar el rate-limit a tirar el servicio
   entero por un problema de un contador. La escritura en `auditoria` nunca
   bloquea ni falla el request (ver sección "Auditoría").
-- **Los rechazos de auth también se auditan, y se limitan por IP.** Con el
-  flujo tal cual (auth → rate-limit por tenant → validación de body), un
-  request con API key inválida nunca llega a chequear rate-limit —no hay
-  tenant resuelto todavía— ni deja rastro en ningún lado: un intento de fuerza
-  bruta contra las API keys sería invisible y sin freno. Dos cambios: (1) todo
+- **Los rechazos de auth también se auditan, y se limitan por IP.** Si sólo
+  se auditara el camino exitoso, un request con API key inválida no llegaría a
+  chequear rate-limit por tenant —no hay tenant resuelto todavía— ni dejaría
+  rastro en ningún lado: un intento de fuerza bruta contra las API keys sería
+  invisible y sin freno. Dos cambios: (1) todo
   intento con `Authorization` ausente/inválido deja una fila en `auditoria`
   con `tenant_id NULL` y la IP de origen (columna nueva, ver esquema); (2) un
   límite **por IP**, previo a resolver tenant, sobre intentos de auth
@@ -203,6 +203,7 @@ src/restServer.ts  (proceso HTTP nuevo — reemplaza a httpServerIndex.ts,
         ├─ autenticarTenant(apiKey)  → hash contra Neon; falla → audita (tenant_id NULL) + incrementa
         │                              auth_fallida_contador + 401
         ├─ chequearRateLimit(tenant) → contador por minuto en Neon; supera → audita + 429
+        ├─ lee body con tope de tamaño → supera 4KB → audita + 413
         ├─ valida body (zod, por ruta) → inválido → audita + 400
         ├─ llama al core de la operación (mismo core que usan las tools MCP)
         ├─ registra en auditoria (Neon) — todo camino pasa por acá, éxito o rechazo
@@ -293,7 +294,7 @@ CREATE TABLE auditoria (
   rut         text,                         -- NULL en rechazos de transporte (401/429/400)
   ruta        text NOT NULL,
   status      int NOT NULL,
-  error       text,                       -- 'CREDENCIALES_INVALIDAS' | 'ERROR' | 'UNAUTHORIZED' | 'RATE_LIMITED' | 'BAD_REQUEST' | null
+  error       text,                       -- 'CREDENCIALES_INVALIDAS' | 'ERROR' | 'UNAUTHORIZED' | 'RATE_LIMITED' | 'BAD_REQUEST' | 'PAYLOAD_TOO_LARGE' | null
   creado_en   timestamptz NOT NULL DEFAULT now()
 );
 ```
