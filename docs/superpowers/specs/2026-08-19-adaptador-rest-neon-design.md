@@ -66,6 +66,18 @@ por tenant.
   contra el límite — preferible degradar el rate-limit a tirar el servicio
   entero por un problema de un contador. La escritura en `auditoria` nunca
   bloquea ni falla el request (ver sección "Auditoría").
+- **Los rechazos de auth también se auditan, y se limitan por IP.** Con el
+  flujo tal cual (auth → rate-limit por tenant → validación de body), un
+  request con API key inválida nunca llega a chequear rate-limit —no hay
+  tenant resuelto todavía— ni deja rastro en ningún lado: un intento de fuerza
+  bruta contra las API keys sería invisible y sin freno. Dos cambios: (1) todo
+  intento con `Authorization` ausente/inválido deja una fila en `auditoria`
+  con `tenant_id NULL` y la IP de origen (columna nueva, ver esquema); (2) un
+  límite **por IP**, previo a resolver tenant, sobre intentos de auth
+  fallidos (ej. máximo 20 por minuto) — si se supera, `429` aunque la
+  siguiente key que llegue de esa IP sea válida. Es la única pieza de este
+  diseño que protege el perímetro de fuerza bruta; el rate-limit por tenant ya
+  existente sigue igual, para requests que sí autenticaron.
 - **Formato de API key:** `sk_<nombre-tenant>_<32 bytes aleatorios en
   base64url>`, generados con `crypto.randomBytes(32)` en el script CLI de alta
   (nunca `Math.random`). Se muestra una única vez al crear el tenant/key —
@@ -187,11 +199,13 @@ RDTE / AgenticERP / Parkingapp / terceros
         ▼
 src/restServer.ts  (proceso HTTP nuevo — reemplaza a httpServerIndex.ts,
         │           que se retira: validar-clave pasa a vivir acá)
-        ├─ autenticarTenant(apiKey)  → hash contra Neon, resuelve tenant
-        ├─ chequearRateLimit(tenant) → contador por minuto en Neon
-        ├─ valida body (zod, por ruta)
+        ├─ chequearRateLimitPorIp() → auth_fallida_contador; ya supera límite → audita + 429
+        ├─ autenticarTenant(apiKey)  → hash contra Neon; falla → audita (tenant_id NULL) + incrementa
+        │                              auth_fallida_contador + 401
+        ├─ chequearRateLimit(tenant) → contador por minuto en Neon; supera → audita + 429
+        ├─ valida body (zod, por ruta) → inválido → audita + 400
         ├─ llama al core de la operación (mismo core que usan las tools MCP)
-        ├─ registra en auditoria (Neon)
+        ├─ registra en auditoria (Neon) — todo camino pasa por acá, éxito o rechazo
         └─ responde JSON
         │
         ▼
@@ -262,13 +276,24 @@ CREATE TABLE rate_limit_contador (
   PRIMARY KEY (tenant_id, ventana_inicio)
 );
 
+-- Intentos de auth fallidos, por IP, previo a resolver tenant. Separada de
+-- rate_limit_contador porque su clave es la IP de origen, no un tenant_id
+-- (todavía no hay uno resuelto en este punto del flujo).
+CREATE TABLE auth_fallida_contador (
+  ip             inet NOT NULL,
+  ventana_inicio timestamptz NOT NULL,    -- truncado al minuto
+  contador       int NOT NULL DEFAULT 0,
+  PRIMARY KEY (ip, ventana_inicio)
+);
+
 CREATE TABLE auditoria (
   id          bigserial PRIMARY KEY,
-  tenant_id   uuid NOT NULL REFERENCES tenants(id),
-  rut         text NOT NULL,
+  tenant_id   uuid REFERENCES tenants(id),  -- NULL si el request nunca autenticó
+  ip          inet NOT NULL,
+  rut         text,                         -- NULL en rechazos de transporte (401/429/400)
   ruta        text NOT NULL,
   status      int NOT NULL,
-  error       text,                       -- 'CREDENCIALES_INVALIDAS' | 'ERROR' | null
+  error       text,                       -- 'CREDENCIALES_INVALIDAS' | 'ERROR' | 'UNAUTHORIZED' | 'RATE_LIMITED' | 'BAD_REQUEST' | null
   creado_en   timestamptz NOT NULL DEFAULT now()
 );
 ```
@@ -313,11 +338,14 @@ zod de la tool MCP equivalente en `src/tools/*.ts`).
 
 ## Auditoría
 
-Cada request, exitoso o no, deja una fila en `auditoria` con `tenant_id`,
-`rut`, `ruta`, `status`, `error` (si lo hay) — nunca `clave`. Se escribe
-después de responder al cliente (no debe poder atrasar ni romper la respuesta
-si la escritura a Neon falla; un fallo de auditoría se loguea a stderr, no se
-propaga como error del request).
+**Todo request deja una fila en `auditoria`, incluidos los rechazados en
+auth/rate-limit/body** (`tenant_id NULL` si nunca autenticó, `rut NULL` si el
+rechazo fue antes de leer el body) — ver "Decisiones de diseño" sobre por qué
+un rechazo silencioso deja invisible un intento de fuerza bruta. Nunca se
+guarda `clave` ni el valor de la API key recibida, sólo si la auth pasó o no.
+Se escribe después de responder al cliente (no debe poder atrasar ni romper la
+respuesta si la escritura a Neon falla; un fallo de auditoría se loguea a
+stderr, no se propaga como error del request).
 
 ## Fuera de alcance de este documento
 
@@ -350,7 +378,11 @@ propaga como error del request).
   contador vuelve a 0 y el siguiente request no es 429.
 - **Auditoría**: cada request de prueba deja exactamente una fila esperada en
   `auditoria`, y esa fila nunca contiene el valor de `clave` usado en el
-  request.
+  request. Incluye el camino de rechazo: un request con API key inválida deja
+  una fila con `tenant_id NULL` y la IP, no queda sin rastro.
+- **Rate limit por IP en auth fallida**: N intentos con API key inválida desde
+  la misma IP dentro de la ventana → los primeros 401, el N+1 → 429, aunque el
+  request N+1 traiga una API key válida.
 - **`/mipyme/emitir-dte`**: test que confirma que `confirmar=true` es
   rechazado o ignorado en v1 (según se decida en el plan) mientras el
   certificado multi-tenant no esté resuelto — no debe ser posible emitir un
