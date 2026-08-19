@@ -3,9 +3,13 @@
 # chequeo es lo único que separa un dato personal de quedar publicado. Corre en
 # cada push y cada pull request.
 #
-# Los tests no usan credenciales ni red: todo va contra fixtures y mocks. Lo
-# único que necesitan del sistema es `openssl` (tests/validateCert.test.ts
-# genera un certificado de prueba), que ubuntu-latest ya trae en 3.x.
+# La mayoría de los tests no usan credenciales ni red: todo va contra
+# fixtures y mocks. Lo único que necesitan del sistema es `openssl`
+# (tests/validateCert.test.ts genera un certificado de prueba), que
+# ubuntu-latest ya trae en 3.x. Los tests de infra REST/Neon (tests/db,
+# tests/rest, tests/scripts, tests/restServer.test.ts) sí necesitan un
+# Postgres real — no se mockea esa lógica porque vive en SQL — por eso el
+# service de abajo y TEST_DATABASE_URL.
 name: CI
 
 on:
@@ -15,6 +19,24 @@ on:
 jobs:
   verificar:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mcp_sii
+          POSTGRES_PASSWORD: mcp_sii
+          POSTGRES_DB: mcp_sii_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgres://mcp_sii:mcp_sii@localhost:55432/mcp_sii_test
 
     strategy:
       fail-fast: false

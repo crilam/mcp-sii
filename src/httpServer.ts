@@ -4,6 +4,7 @@ import { SessionManager } from './session';
 import { ProveedorCredencialesRuntime } from './credencialesRuntime';
 import { clasificarErrorCredenciales } from './erroresSesion';
 import { compararApiKey } from './apiKey';
+import { leerBody, responderJson, BodyDemasiadoGrande } from './rest/http';
 
 export type ResultadoValidacion =
   | { ok: true }
@@ -13,78 +14,52 @@ export type ResultadoValidacion =
 // confirma el resultado y cierra todo antes de devolver la respuesta — a
 // diferencia de sii_iniciar_sesion, no deja nada operable.
 //
-// authenticateOnly() y logout() corren en el MISMO turno de la cola por RUT
-// (dentro del mismo registro.ejecutar), con try/finally. Un logout() como una
-// llamada a registro.ejecutar aparte quedaría encolado detrás de cualquier
-// operación que haya entrado para ese RUT mientras tanto — ver la sección
-// "Timeout" del spec.
+// authenticateOnly() y logout() corren en el MISMO turno de la cola por RUT,
+// con try/finally. Un logout() como una llamada a registro.ejecutar aparte
+// quedaría encolado detrás de cualquier operación que haya entrado para ese
+// RUT mientras tanto — ver la sección "Timeout" del spec.
 //
 // logout() va en su propio try/catch que descarta el error: si lanzara sin
 // atajarlo, la semántica de `finally` en JS pisaría el resultado de
 // authenticateOnly() — una clave CORRECTA terminaría reportada como ERROR
 // sólo porque el logout posterior falló (red, sesión ya cerrada, etc). El
 // propósito de este endpoint es clasificar la clave, no el logout.
+//
+// guardar/crear-sesión/authenticateOnly+logout/borrar corren TODOS dentro de
+// registro.ejecutarPassThrough, como una sola unidad atómica encolada por
+// RUT — no como guardar()-luego-ejecutar()-luego-borrar() sueltos. Dos
+// llamadas concurrentes a este endpoint para el MISMO rut con clave DISTINTA
+// (dos tenants consultando el mismo RUT, o un reintento) podían pisarse la
+// credencial entre sí con los pasos sueltos: la primera terminaba
+// autenticando con la clave de la segunda, y el borrar() de la que termina
+// primero podía borrarle la credencial a la que todavía esperaba turno.
 export async function validarClave(
   rut: string,
   clave: string,
   registro: RegistroSesiones<SessionManager>,
   credenciales: ProveedorCredencialesRuntime
 ): Promise<ResultadoValidacion> {
-  credenciales.guardar(rut, clave);
   try {
-    await registro.ejecutar(rut, async sesion => {
-      try {
-        await sesion.authenticateOnly();
-      } finally {
+    await registro.ejecutarPassThrough(
+      rut,
+      () => credenciales.guardar(rut, clave),
+      () => credenciales.borrar(rut),
+      async sesion => {
         try {
-          await sesion.logout();
-        } catch {
-          // No contamina el resultado de authenticateOnly (ver comentario arriba).
+          await sesion.authenticateOnly();
+        } finally {
+          try {
+            await sesion.logout();
+          } catch {
+            // No contamina el resultado de authenticateOnly (ver comentario arriba).
+          }
         }
       }
-    });
+    );
     return { ok: true };
   } catch (e) {
     return { ok: false, error: clasificarErrorCredenciales(e) };
-  } finally {
-    credenciales.borrar(rut);
   }
-}
-
-const BODY_MAX_BYTES = 4_096; // rut+clave nunca necesitan más que esto.
-
-class BodyDemasiadoGrande extends Error {}
-
-function leerBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let datos = '';
-    let bytes = 0;
-    let demasiadoGrande = false;
-    req.on('data', chunk => {
-      bytes += chunk.length;
-      // Deja de acumular (evita el gasto de memoria) pero no corta el socket:
-      // cortarlo a mitad de stream rompe la conexión antes de poder responder
-      // 413 — mejor drenar el resto y responder recién en 'end'.
-      if (bytes > BODY_MAX_BYTES) {
-        demasiadoGrande = true;
-        return;
-      }
-      datos += chunk;
-    });
-    req.on('end', () => {
-      if (demasiadoGrande) {
-        reject(new BodyDemasiadoGrande());
-        return;
-      }
-      resolve(datos);
-    });
-    req.on('error', reject);
-  });
-}
-
-function responderJson(res: http.ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(body));
 }
 
 // Servidor HTTP mínimo, sin framework: un solo endpoint. Cada request abre y

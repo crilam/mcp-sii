@@ -5,7 +5,14 @@ import { RegistroSesiones } from '../src/registroSesiones';
 
 function armarRegistro(sesion: { authenticateOnly: jest.Mock; logout: jest.Mock }) {
   return {
-    ejecutar: (_rut: string, fn: any) => fn(sesion),
+    ejecutarPassThrough: async (_rut: string, preparar: () => void, finalizar: () => void, fn: any) => {
+      preparar();
+      try {
+        return await fn(sesion);
+      } finally {
+        finalizar();
+      }
+    },
   } as unknown as RegistroSesiones<any>;
 }
 
@@ -90,6 +97,21 @@ describe('validarClave', () => {
 
     expect(resultado).toEqual({ ok: false, error: 'CREDENCIALES_INVALIDAS' });
   });
+
+  it('guarda y borra la credencial dentro del mismo ejecutarPassThrough (atómico por RUT, no pasos sueltos)', async () => {
+    const authenticateOnly = jest.fn().mockImplementation(async () => {
+      // Mientras authenticateOnly corre, la credencial ya debe estar guardada.
+      await expect(credenciales.para('11.111.111-1')).resolves.toMatchObject({ clave: 'secreta' });
+    });
+    const logout = jest.fn().mockResolvedValue(undefined);
+    const registro = armarRegistro({ authenticateOnly, logout });
+    const credenciales = new ProveedorCredencialesRuntime();
+
+    await validarClave('11.111.111-1', 'secreta', registro, credenciales);
+
+    // Y después de terminar, no queda nada guardado.
+    await expect(credenciales.para('11.111.111-1')).rejects.toThrow();
+  });
 });
 
 function request(
@@ -118,7 +140,14 @@ describe('crearServidorHttp', () => {
 
   function armarRegistroOk() {
     return {
-      ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly: jest.fn().mockResolvedValue(undefined), logout: jest.fn().mockResolvedValue(undefined) }),
+      ejecutarPassThrough: async (_rut: string, preparar: () => void, finalizar: () => void, fn: any) => {
+        preparar();
+        try {
+          return await fn({ authenticateOnly: jest.fn().mockResolvedValue(undefined), logout: jest.fn().mockResolvedValue(undefined) });
+        } finally {
+          finalizar();
+        }
+      },
     } as any;
   }
 
