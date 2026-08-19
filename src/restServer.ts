@@ -12,18 +12,25 @@ import { registrarRutasRcv, RutaHandler } from './rest/rutas/rcv';
 const LIMITE_AUTH_FALLIDA_POR_IP = 20;
 
 // El despliegue decidido (spec 2026-08-12) pone este proceso detrás de un
-// ALB, nunca expuesto directo a Internet — el ALB agrega X-Forwarded-For con
-// la IP real del cliente antes del propio ALB. Sin esto, `remoteAddress`
-// sería siempre la IP interna del ALB para TODO tráfico: el límite de fallos
-// de auth por IP colapsaría a todos los tenants en una sola IP compartida, y
-// cualquiera podría banear a todos los demás con intentos fallidos propios.
-// Se confía en el primer valor de X-Forwarded-For porque sólo el ALB puede
-// llegar a este proceso (no hay ruta directa desde afuera de la VPC).
+// ALB, nunca expuesto directo a Internet. Sin esto, `remoteAddress` sería
+// siempre la IP interna del ALB para TODO tráfico: el límite de fallos de
+// auth por IP colapsaría a todos los tenants en una sola IP compartida.
+//
+// Se toma el ÚLTIMO valor de X-Forwarded-For, no el primero. Cada proxy que
+// reenvía un request AGREGA su IP de origen al FINAL de la lista existente
+// (formato `cliente, proxy1, proxy2`) — el ALB, que es el único hop que puede
+// llegar hasta acá, agrega la IP real vista por él como último elemento. Un
+// caller malicioso puede mandar su propio X-Forwarded-For de entrada con
+// cualquier IP inventada, pero eso sólo le agrega un valor ADELANTE del que
+// el ALB va a appendear después — tomar el primero sería confiar en ese
+// valor falsificado por el propio cliente, justo lo que este chequeo existe
+// para impedir.
 function ipDe(req: http.IncomingMessage): string {
   const forwardedFor = req.headers['x-forwarded-for'];
-  const primero = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor;
-  const ipDelHeader = primero?.split(',')[0]?.trim();
-  return ipDelHeader || req.socket.remoteAddress || '0.0.0.0';
+  const valor = Array.isArray(forwardedFor) ? forwardedFor[forwardedFor.length - 1] : forwardedFor;
+  const partes = valor?.split(',') ?? [];
+  const ultimo = partes[partes.length - 1]?.trim();
+  return ultimo || req.socket.remoteAddress || '0.0.0.0';
 }
 
 export function crearRestServer(
@@ -128,7 +135,11 @@ async function manejarRequest(
   const permitidoPorTenant = await chequearRateLimitTenant(pool, tenant.tenantId, tenant.limitePorMinuto)
     .catch(() => true); // fail-open: no tirar el servicio por un problema del contador.
   if (!permitidoPorTenant) {
-    await registrarAuditoria(pool, { tenantId: tenant.tenantId, ip, rut: null, ruta, status: 429, error: 'RATE_LIMITED' });
+    // El body ya parseó acá arriba, así que sí se puede extraer `rut` (si
+    // vino como string) para esta auditoría, igual que en el camino final.
+    const rutCrudo = (body as any)?.rut;
+    const rut = typeof rutCrudo === 'string' ? rutCrudo : null;
+    await registrarAuditoria(pool, { tenantId: tenant.tenantId, ip, rut, ruta, status: 429, error: 'RATE_LIMITED' });
     responderJson(res, 429, { error: 'RATE_LIMITED' });
     return;
   }

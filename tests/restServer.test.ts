@@ -162,6 +162,25 @@ describe('restServer', () => {
     expect(rows[0].contador).toBe(1);
   });
 
+  it('con múltiples IPs en X-Forwarded-For, usa la ÚLTIMA (la que agregó el proxy real), no la primera (spoofeable por el cliente)', async () => {
+    const ipFalsa = proximaIpDeTest();
+    const ipReal = proximaIpDeTest();
+    await request(port, {
+      path: '/v1/rcv/resumen',
+      headers: { 'X-Forwarded-For': `${ipFalsa}, ${ipReal}` },
+      body: '{}',
+    });
+
+    const { rows: filasReal } = await pool.query(
+      `SELECT contador FROM auth_fallida_contador WHERE ip = $1`, [ipReal]
+    );
+    const { rows: filasFalsa } = await pool.query(
+      `SELECT contador FROM auth_fallida_contador WHERE ip = $1`, [ipFalsa]
+    );
+    expect(filasReal).toHaveLength(1);
+    expect(filasFalsa).toHaveLength(0);
+  });
+
   it('circuito completo: N fallos de auth desde la misma IP terminan en 429', async () => {
     const ip = proximaIpDeTest();
 

@@ -3,6 +3,10 @@ import { randomBytes, createHash } from 'crypto';
 // Formato sk_<tenant>_<random>: el prefijo con el nombre del tenant ayuda a
 // identificar de un vistazo de qué consumidor es una key en logs de acceso o
 // paneles, sin exponer nada sensible (la key entera sigue siendo el secreto).
+// Precisamente porque el prefijo es legible, el header Authorization
+// completo NUNCA debe llegar a un log — no sólo por el secreto en sí, sino
+// porque el prefijo ya identifica de qué tenant es (ver el catch de
+// manejarRequest en restServer.ts, que loguea sólo el mensaje del error).
 export function generarApiKey(nombreTenant: string): string {
   const random = randomBytes(32).toString('base64url');
   return `sk_${nombreTenant}_${random}`;
