@@ -43,8 +43,8 @@ export function registrarRutasRcv(
     // registro.olvidar(rut) es imprescindible acá: sin él, una sesión ya
     // cacheada de un request anterior con el MISMO rut se reusaría sin volver
     // a autenticar, ignorando esta clave por completo (ver PR #33 review).
-    credenciales.guardar(rut, clave);
     try {
+      credenciales.guardar(rut, clave);
       return await ejecutar(() => core.resumen(registro, rut, periodo, operacion, empresa_rut));
     } finally {
       registro.olvidar(rut);
@@ -57,8 +57,8 @@ export function registrarRutasRcv(
     if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
     const { rut, clave, periodo, operacion, tipo_doc, empresa_rut } = parseo.data;
 
-    credenciales.guardar(rut, clave);
     try {
+      credenciales.guardar(rut, clave);
       return await ejecutar(() => core.detalle(registro, rut, periodo, operacion, tipo_doc, empresa_rut));
     } finally {
       registro.olvidar(rut);

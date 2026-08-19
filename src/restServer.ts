@@ -96,7 +96,11 @@ export function crearRestServer(
     }
 
     const { status, body: respBody } = await handler(body);
-    const rut = (body as any)?.rut ?? null;
+    // El body todavía no pasó por el zod de la ruta acá afuera (eso lo hace
+    // `handler`) — sólo se audita `rut` si efectivamente vino como string, para
+    // no meter en la auditoría lo que un caller mande de basura en ese campo.
+    const rutCrudo = (body as any)?.rut;
+    const rut = typeof rutCrudo === 'string' ? rutCrudo : null;
     const error = (respBody as any)?.error ?? null;
     await registrarAuditoria(pool, { tenantId: tenant.tenantId, ip, rut, ruta, status, error });
     responderJson(res, status, respBody);

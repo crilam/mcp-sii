@@ -1,18 +1,12 @@
 import 'dotenv/config';
-import { Pool } from 'pg';
 import { Browser } from './browser';
 import { RegistroSesiones } from './registroSesiones';
 import { SessionManager } from './session';
 import { ProveedorCredencialesRuntime } from './credencialesRuntime';
 import { crearRestServer } from './restServer';
+import { getPool } from './db';
 
-function requireEnv(nombre: string): string {
-  const valor = process.env[nombre];
-  if (!valor) throw new Error(`Variable de entorno requerida no encontrada: ${nombre}`);
-  return valor;
-}
-
-const pool = new Pool({ connectionString: requireEnv('DATABASE_URL'), max: 10 });
+const pool = getPool();
 const port = Number(process.env.PORT ?? 8790);
 
 const credenciales = new ProveedorCredencialesRuntime();

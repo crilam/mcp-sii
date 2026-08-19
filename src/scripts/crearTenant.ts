@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { generarApiKey, hashApiKey } from '../rest/apiKeyFormato';
+import { getPool } from '../db';
 
 export async function crearTenant(
   pool: Pool,
@@ -27,7 +28,7 @@ if (require.main === module) {
     console.error('Uso: npm run crear-tenant -- --nombre <nombre>');
     process.exit(1);
   }
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const pool = getPool();
   crearTenant(pool, nombre)
     .then(({ tenantId, apiKey }) => {
       console.log(`Tenant creado: ${tenantId}`);

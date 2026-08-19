@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Pool } from 'pg';
+import { getPool } from '../db';
 
 const DIR_MIGRACIONES = path.join(__dirname, '..', '..', 'db', 'migraciones');
 
@@ -48,7 +49,7 @@ export async function aplicarMigraciones(pool: Pool): Promise<void> {
 }
 
 if (require.main === module) {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const pool = getPool();
   aplicarMigraciones(pool)
     .then(() => { console.log('Migraciones aplicadas.'); return pool.end(); })
     .catch(err => { console.error(err); process.exit(1); });

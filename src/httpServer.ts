@@ -31,8 +31,8 @@ export async function validarClave(
   registro: RegistroSesiones<SessionManager>,
   credenciales: ProveedorCredencialesRuntime
 ): Promise<ResultadoValidacion> {
-  credenciales.guardar(rut, clave);
   try {
+    credenciales.guardar(rut, clave);
     await registro.ejecutar(rut, async sesion => {
       try {
         await sesion.authenticateOnly();
