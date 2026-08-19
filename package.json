@@ -6,7 +6,6 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/src/index.js",
-    "start:validar-clave": "node dist/src/httpServerIndex.js",
     "start:rest": "node dist/src/restServerIndex.js",
     "dev": "ts-node src/index.ts",
     "db:migrar": "ts-node src/scripts/migrar.ts",
