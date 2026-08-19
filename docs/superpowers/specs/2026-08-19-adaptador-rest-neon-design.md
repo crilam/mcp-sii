@@ -92,32 +92,67 @@ por tenant.
   browser. No se agrega manejo de CORS; si algún día hiciera falta, es una
   señal de que cambió el modelo de consumo y hay que revisar el diseño, no
   sólo agregar un header.
+- **Todas las rutas bajo prefijo `/v1`.** `POST /v1/rcv/resumen`, etc. Sin
+  versión en la URL, el primer cambio incompatible en el contrato de una ruta
+  rompe a todos los consumidores sin aviso — barato de poner ahora, caro de
+  meter después de que terceros ya integraron. `/v2` conviviría con `/v1` el
+  tiempo que haga falta migrar consumidores, no un reemplazo instantáneo.
+- **`GET /health` sin autenticar**, responde `200` si el proceso puede
+  responder y `503` si no puede conectar a Neon (mismo criterio fail-closed
+  que auth). Es el target del health check del load balancer (ALB) — sin él,
+  el ALB no tiene forma de saber si una instancia está viva.
+- **El header `Authorization` nunca llega a un log de aplicación.** Mismo
+  criterio ya vigente para la clave tributaria ("la clave nunca se loguea"),
+  extendido a la API key del tenant: cualquier logger de request/error debe
+  omitir explícitamente el header `Authorization` (no loguear `req.headers`
+  completo tal cual, ni volcar el objeto de error si pudiera arrastrar
+  headers). Un error no controlado que serialice el request entero filtraría
+  la key.
+- **Idempotencia: fuera de alcance para v1, con una nota para cuando se
+  habilite la firma real.** Ninguna operación de v1 escribe nada irreversible
+  en el SII (`/mipyme/emitir-dte` está limitado a previsualización, ver
+  limitación abajo), así que un reintento de un consumidor ante un timeout de
+  red no tiene costo real hoy — como mucho, dos previsualizaciones o dos filas
+  de auditoría. **Antes de habilitar la firma real** en `/mipyme/emitir-dte`
+  hay que resolver esto: un reintento de un POST que ya se procesó del lado
+  del SII no debe volver a emitir el documento. La solución típica (una
+  `Idempotency-Key` por request, deduplicada contra `auditoria` o una tabla
+  nueva) se diseña en ese momento, no ahora — dejarlo anotado para que no se
+  pierda de vista.
 
 ## Alcance: las 16 operaciones + validar-clave
 
-Cada tool MCP existente se mapea 1:1 a una ruta REST, con el mismo cuerpo de
-parámetros que ya define su schema zod hoy (en `src/tools/*.ts`), sumando
-siempre `rut` + `clave` en vez de depender de una sesión ya iniciada:
+Cada tool MCP existente se mapea 1:1 a una ruta REST bajo `/v1`, con el mismo
+cuerpo de parámetros que ya define su schema zod hoy (en `src/tools/*.ts`),
+sumando siempre `rut` + `clave` en vez de depender de una sesión ya iniciada.
+**El schema zod de cada operación se define una sola vez** — junto al core en
+`src/core/<dominio>.ts` o en un archivo de schemas por dominio — y lo importan
+tanto `tools/<dominio>.ts` (para el `server.tool(...)`) como
+`rest/rutas/<dominio>.ts` (para validar el body del request). Definirlo dos
+veces sería la misma duplicación que ya se corrigió con `crearConScraper` y
+`clasificarErrorCredenciales` en el PR #31: diverge la primera vez que alguien
+agregue un campo opcional en un lado y se olvide del otro.
 
 | Tool MCP | Ruta REST |
 |---|---|
 | `sii_iniciar_sesion` / `sii_cerrar_sesion` | no se exponen — el REST no deja sesión viva entre requests (ver "Sin Secrets Manager") |
-| `sii_bhe_resumen` | `POST /bhe/resumen` |
-| `sii_bhe_list_emitidas` | `POST /bhe/list-emitidas` |
-| `sii_bhe_list_recibidas` | `POST /bhe/list-recibidas` |
-| `sii_rcv_resumen` | `POST /rcv/resumen` |
-| `sii_rcv_detalle` | `POST /rcv/detalle` |
-| `sii_renta_estado_declaracion` | `POST /renta/estado-declaracion` |
-| `sii_renta_get_f22` | `POST /renta/f22` |
-| `sii_dte_list_documentos_emitidos` | `POST /dte/list-documentos-emitidos` |
-| `sii_dte_list_documentos_recibidos` | `POST /dte/list-documentos-recibidos` |
-| `sii_dte_get_documento_emitido` | `POST /dte/get-documento-emitido` |
-| `sii_dte_get_documento_recibido` | `POST /dte/get-documento-recibido` |
-| `sii_mipyme_list_empresas` | `POST /mipyme/list-empresas` |
-| `sii_mipyme_list_dte_emitidos` | `POST /mipyme/list-dte-emitidos` |
-| `sii_mipyme_emitir_dte` | `POST /mipyme/emitir-dte` (ver limitación abajo) |
-| `sii_persona_list_bienes_raices` | `POST /persona/bienes-raices` |
-| — (nuevo, PR #32) | `POST /sesion/validar-clave` |
+| `sii_bhe_resumen` | `POST /v1/bhe/resumen` |
+| `sii_bhe_list_emitidas` | `POST /v1/bhe/list-emitidas` |
+| `sii_bhe_list_recibidas` | `POST /v1/bhe/list-recibidas` |
+| `sii_rcv_resumen` | `POST /v1/rcv/resumen` |
+| `sii_rcv_detalle` | `POST /v1/rcv/detalle` |
+| `sii_renta_estado_declaracion` | `POST /v1/renta/estado-declaracion` |
+| `sii_renta_get_f22` | `POST /v1/renta/f22` |
+| `sii_dte_list_documentos_emitidos` | `POST /v1/dte/list-documentos-emitidos` |
+| `sii_dte_list_documentos_recibidos` | `POST /v1/dte/list-documentos-recibidos` |
+| `sii_dte_get_documento_emitido` | `POST /v1/dte/get-documento-emitido` |
+| `sii_dte_get_documento_recibido` | `POST /v1/dte/get-documento-recibido` |
+| `sii_mipyme_list_empresas` | `POST /v1/mipyme/list-empresas` |
+| `sii_mipyme_list_dte_emitidos` | `POST /v1/mipyme/list-dte-emitidos` |
+| `sii_mipyme_emitir_dte` | `POST /v1/mipyme/emitir-dte` (ver limitación abajo) |
+| `sii_persona_list_bienes_raices` | `POST /v1/persona/bienes-raices` |
+| — (nuevo, PR #32) | `POST /v1/sesion/validar-clave` |
+| — (nuevo) | `GET /health` (sin `/v1`, sin auth — ver "Decisiones de diseño") |
 
 **Limitación conocida — resolución de `empresa_rut`:** `sii_mipyme_list_dte_emitidos`
 y `sii_mipyme_emitir_dte` hoy resuelven la empresa en tres escalones: parámetro
@@ -147,7 +182,7 @@ credencial por request, igual que hoy se soporta `clave`).
 
 ```
 RDTE / AgenticERP / Parkingapp / terceros
-        │  POST /rcv/resumen, /sesion/validar-clave, ... (17 rutas)
+        │  POST /v1/rcv/resumen, /v1/sesion/validar-clave, ... (17 rutas + /health)
         │  Authorization: Bearer <api-key-del-tenant>
         ▼
 src/restServer.ts  (proceso HTTP nuevo — reemplaza a httpServerIndex.ts,
@@ -320,3 +355,8 @@ propaga como error del request).
   rechazado o ignorado en v1 (según se decida en el plan) mientras el
   certificado multi-tenant no esté resuelto — no debe ser posible emitir un
   documento real por esta vía todavía.
+- **`GET /health`**: responde `200` sin necesitar `Authorization`; con Neon
+  inalcanzable (mockeado en el test) responde `503`.
+- **Logging**: test que confirma que un request con `Authorization` inválido
+  no deja ese header en ningún log/salida capturable (ni en el mensaje de
+  error que arma el 401).
