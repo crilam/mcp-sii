@@ -202,4 +202,9 @@ describe('restServer', () => {
     });
     expect(bloqueado.status).toBe(429);
   });
+
+  it('setea requestTimeout/headersTimeout contra slowloris (se había perdido al absorber validar-clave)', () => {
+    expect(server.requestTimeout).toBe(35_000);
+    expect(server.headersTimeout).toBe(10_000);
+  });
 });

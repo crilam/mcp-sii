@@ -31,7 +31,7 @@ describe('registrarRutasMipyme', () => {
     (core.listEmpresas as jest.Mock).mockResolvedValue([]);
     const rutas = armarRouter();
     const respuesta = await rutas.get('POST /v1/mipyme/list-empresas')!({ rut: '11.111.111-1', clave: 'x' });
-    expect(respuesta).toEqual({ status: 200, body: { ok: true } });
+    expect(respuesta).toEqual({ status: 200, body: { ok: true, datos: [] } });
   });
 
   it('emitir-dte con confirmar=false (default) llama al core en modo previsualización', async () => {

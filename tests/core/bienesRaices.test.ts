@@ -19,5 +19,6 @@ describe('core/bienesRaices', () => {
     const resultado = await listBienesRaices(registro, '11.111.111-1');
 
     expect(resultado).toEqual({ propiedades: [] });
+    expect(MockScraper).toHaveBeenCalledWith(browser, expect.anything());
   });
 });

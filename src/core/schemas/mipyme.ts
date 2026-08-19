@@ -4,11 +4,11 @@ export const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
 
 export const schemaListEmpresas = {
-  rut: z.string().describe(RUT_DESC),
+  rut: z.string().min(1).describe(RUT_DESC),
 };
 
 export const schemaListDteEmitidos = {
-  rut: z.string().describe(RUT_DESC),
+  rut: z.string().min(1).describe(RUT_DESC),
   empresa_rut: z.string().optional()
     .describe('RUT de la empresa con dígito verificador. Si se omite, se resuelve solo si este RUT opera una única empresa en el portal.'),
   tipo_dte: z.number().int().optional().describe('Filtrar por tipo: 33=factura, 34=exenta, 61=N.crédito, 56=N.débito, 52=guía, 46=F.compra'),
@@ -20,7 +20,7 @@ export const schemaListDteEmitidos = {
 };
 
 export const schemaEmitirDte = {
-  rut: z.string().describe(RUT_DESC),
+  rut: z.string().min(1).describe(RUT_DESC),
   empresa_rut: z.string().optional()
     .describe('RUT empresa. Si se omite, se resuelve solo si la persona opera una única empresa.'),
   tipo_dte: z.number().int().describe('33=factura, 34=factura exenta, 61=nota de crédito'),

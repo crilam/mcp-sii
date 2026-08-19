@@ -5,21 +5,11 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/dte';
 import { schemaListado, schemaDocumento } from '../../core/schemas/dte';
-import { clasificarErrorCredenciales } from '../../erroresSesion';
 import { ejecutorPassThroughDe } from '../ejecutorPassThrough';
-import { RutaHandler } from './rcv';
+import { RutaHandler, ejecutar } from './comun';
 
 const zodListado = z.object(schemaListado()).extend({ clave: z.string().min(1) });
 const zodDocumento = z.object(schemaDocumento).extend({ clave: z.string().min(1) });
-
-async function ejecutar<R>(fn: () => Promise<R>) {
-  try {
-    const resultado = await fn();
-    return { status: 200, body: { ok: true, ...(resultado as object) } };
-  } catch (e) {
-    return { status: 200, body: { ok: false, error: clasificarErrorCredenciales(e) } };
-  }
-}
 
 export function registrarRutasDte(
   rutas: Map<string, RutaHandler>,

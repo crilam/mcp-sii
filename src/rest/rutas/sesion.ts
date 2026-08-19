@@ -3,9 +3,9 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { RutaHandler } from './rcv';
+import { RutaHandler } from './comun';
 
-const zodValidarClave = z.object({ rut: z.string(), clave: z.string().min(1) });
+const zodValidarClave = z.object({ rut: z.string().min(1), clave: z.string().min(1) });
 
 export type ResultadoValidacion =
   | { ok: true }

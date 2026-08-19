@@ -81,7 +81,7 @@ export const PERIODO_DESC = 'Período tributario en formato AAAAMM (por ejemplo 
 // cambia la operación, que va en el nombre de la tool y no en el esquema.
 export function schemaListado() {
   return {
-    rut: z.string().describe(RUT_DESC),
+    rut: z.string().min(1).describe(RUT_DESC),
     periodo: z.string().regex(/^\d{6}$/).describe(PERIODO_DESC),
     empresa_rut: z.string().optional().describe(EMPRESA_RUT_DESC),
     tipo_doc: z.number().int().positive().optional()
@@ -114,7 +114,7 @@ export function schemaListado() {
 }
 
 export const schemaDocumento = {
-  rut: z.string().describe(RUT_DESC),
+  rut: z.string().min(1).describe(RUT_DESC),
   periodo: z.string().regex(/^\d{6}$/).describe(PERIODO_DESC),
   tipo_doc: z.number().int().positive()
     .describe('Código del tipo de documento (33 factura electrónica, 34 exenta, 61 nota de crédito, ' +

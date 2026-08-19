@@ -12,12 +12,12 @@ const camposComunes = {
 };
 
 export const schemaResumen = {
-  rut: z.string().describe(RUT_DESC),
+  rut: z.string().min(1).describe(RUT_DESC),
   ...camposComunes,
 };
 
 export const schemaDetalle = {
-  rut: z.string().describe(RUT_DESC),
+  rut: z.string().min(1).describe(RUT_DESC),
   ...camposComunes,
   tipo_doc: z.number().int().positive()
     .describe('Código del tipo de documento, obligatorio. Se obtiene de sii_rcv_resumen en filas[].tipoDocCodigo (33 factura electrónica, 61 nota de crédito, 46 factura de compra, 34 exenta, 110 exportación, 914 DIN, 56 nota de débito)'),

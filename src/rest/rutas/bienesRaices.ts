@@ -4,20 +4,10 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/bienesRaices';
 import { schemaListBienesRaices } from '../../core/schemas/bienesRaices';
-import { clasificarErrorCredenciales } from '../../erroresSesion';
 import { ejecutorPassThroughDe } from '../ejecutorPassThrough';
-import { RutaHandler } from './rcv';
+import { RutaHandler, ejecutar } from './comun';
 
 const zodListBienesRaices = z.object(schemaListBienesRaices).extend({ clave: z.string().min(1) });
-
-async function ejecutar<R>(fn: () => Promise<R>) {
-  try {
-    const resultado = await fn();
-    return { status: 200, body: { ok: true, ...(resultado as object) } };
-  } catch (e) {
-    return { status: 200, body: { ok: false, error: clasificarErrorCredenciales(e) } };
-  }
-}
 
 export function registrarRutasBienesRaices(
   rutas: Map<string, RutaHandler>,

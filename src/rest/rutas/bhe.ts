@@ -4,21 +4,11 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/bhe';
 import { schemaResumen, schemaMes } from '../../core/schemas/bhe';
-import { clasificarErrorCredenciales } from '../../erroresSesion';
 import { ejecutorPassThroughDe } from '../ejecutorPassThrough';
-import { RutaHandler } from './rcv';
+import { RutaHandler, ejecutar } from './comun';
 
 const zodResumen = z.object(schemaResumen).extend({ clave: z.string().min(1) });
 const zodMes = z.object(schemaMes).extend({ clave: z.string().min(1) });
-
-async function ejecutar<R>(fn: () => Promise<R>) {
-  try {
-    const resultado = await fn();
-    return { status: 200, body: { ok: true, ...(resultado as object) } };
-  } catch (e) {
-    return { status: 200, body: { ok: false, error: clasificarErrorCredenciales(e) } };
-  }
-}
 
 export function registrarRutasBhe(
   rutas: Map<string, RutaHandler>,

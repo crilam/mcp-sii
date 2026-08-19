@@ -4,22 +4,12 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
 import { schemaListEmpresas, schemaListDteEmitidos, schemaEmitirDte } from '../../core/schemas/mipyme';
-import { clasificarErrorCredenciales } from '../../erroresSesion';
 import { ejecutorPassThroughDe } from '../ejecutorPassThrough';
-import { RutaHandler } from './rcv';
+import { RutaHandler, ejecutar } from './comun';
 
 const zodListEmpresas = z.object(schemaListEmpresas).extend({ clave: z.string().min(1) });
 const zodListDteEmitidos = z.object(schemaListDteEmitidos).extend({ clave: z.string().min(1) });
 const zodEmitirDte = z.object(schemaEmitirDte).extend({ clave: z.string().min(1) });
-
-async function ejecutar<R>(fn: () => Promise<R>) {
-  try {
-    const resultado = await fn();
-    return { status: 200, body: { ok: true, ...(resultado as object) } };
-  } catch (e) {
-    return { status: 200, body: { ok: false, error: clasificarErrorCredenciales(e) } };
-  }
-}
 
 export function registrarRutasMipyme(
   rutas: Map<string, RutaHandler>,
