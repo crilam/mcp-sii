@@ -1,4 +1,5 @@
 import * as http from 'http';
+import { EventEmitter } from 'events';
 import { leerBody, responderJson, BodyDemasiadoGrande } from '../../src/rest/http';
 
 function requestConBody(server: http.Server, body: string): Promise<{ status: number; body: string }> {
@@ -39,5 +40,28 @@ describe('leerBody', () => {
     });
     const { status } = await requestConBody(server, 'x'.repeat(1000));
     expect(status).toBe(413);
+  });
+
+  it('no corrompe un carácter multibyte partido justo en el borde entre dos chunks', async () => {
+    // 'ñ' en UTF-8 son los bytes [0xC3, 0xB1]. Si cada chunk se decodificara
+    // por separado (en vez de acumular Buffers y decodificar recién al
+    // final), cada mitad del carácter se leería como bytes UTF-8 inválidos.
+    const texto = '{"rut":"11.111.111-1","empresa":"Peña"}';
+    const bytesCompletos = Buffer.from(texto, 'utf-8');
+    // Corta justo después del primer byte de los 2 que forman 'ñ' en UTF-8.
+    const prefijo = texto.slice(0, texto.indexOf('ñ'));
+    const indicePartido = Buffer.byteLength(prefijo, 'utf-8') + 1;
+
+    const fakeReq = new EventEmitter();
+    const promesa = leerBody(fakeReq as any, 4_096);
+
+    // Corta el buffer completo justo a la mitad del carácter multibyte de "ñ".
+    fakeReq.emit('data', bytesCompletos.subarray(0, indicePartido));
+    fakeReq.emit('data', bytesCompletos.subarray(indicePartido));
+    fakeReq.emit('end');
+
+    const resultado = await promesa;
+    expect(resultado).toBe(texto);
+    expect(JSON.parse(resultado).empresa).toBe('Peña');
   });
 });

@@ -32,7 +32,16 @@ describe('restServer', () => {
     await aplicarMigraciones(pool);
     ({ apiKey } = await crearTenant(pool, 'test-tenant-restserver', 3));
 
-    const registro = { ejecutar: (_rut: string, fn: any) => fn({}), olvidar: jest.fn() } as unknown as RegistroSesiones<any>;
+    const registro = {
+      ejecutarPassThrough: async (_rut: string, preparar: () => void, finalizar: () => void, fn: any) => {
+        preparar();
+        try {
+          return await fn({});
+        } finally {
+          finalizar();
+        }
+      },
+    } as unknown as RegistroSesiones<any>;
     const credenciales = new ProveedorCredencialesRuntime();
     server = crearRestServer(pool, registro, credenciales);
     await new Promise<void>(resolve => server.listen(0, () => { port = (server.address() as any).port; resolve(); }));
@@ -99,5 +108,32 @@ describe('restServer', () => {
     if (rows.length > 0) {
       expect(rows[0].contador).toBe(1);
     }
+  });
+
+  it('body malformado (400) no gasta cupo del rate-limit del tenant', async () => {
+    const contadorAntes = async () => {
+      const { rows } = await pool.query(
+        `SELECT contador FROM rate_limit_contador rc
+         JOIN tenants t ON t.id = rc.tenant_id
+         WHERE t.nombre = $1`,
+        ['test-tenant-restserver']
+      );
+      return rows[0]?.contador ?? 0;
+    };
+
+    const antes = await contadorAntes();
+
+    // Varios requests malformados seguidos — si contaran contra el límite
+    // (3/min para este tenant), ya lo habrían agotado.
+    for (let i = 0; i < 5; i++) {
+      const res = await request(port, {
+        path: '/v1/rcv/resumen',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        body: 'esto no es json',
+      });
+      expect(res.status).toBe(400);
+    }
+
+    expect(await contadorAntes()).toBe(antes);
   });
 });

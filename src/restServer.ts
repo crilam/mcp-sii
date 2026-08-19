@@ -67,14 +67,11 @@ export function crearRestServer(
       return;
     }
 
-    const permitidoPorTenant = await chequearRateLimitTenant(pool, tenant.tenantId, tenant.limitePorMinuto)
-      .catch(() => true); // fail-open: no tirar el servicio por un problema del contador.
-    if (!permitidoPorTenant) {
-      await registrarAuditoria(pool, { tenantId: tenant.tenantId, ip, rut: null, ruta, status: 429, error: 'RATE_LIMITED' });
-      responderJson(res, 429, { error: 'RATE_LIMITED' });
-      return;
-    }
-
+    // El rate-limit del tenant se chequea DESPUÉS de leer/parsear el body, no
+    // antes: un body malformado o demasiado grande nunca llega a tocar el SII
+    // (falla acá mismo, en la capa de transporte), así que no debería gastar
+    // cupo del tenant. Contarlo igual que un request real penalizaría a un
+    // cliente por un typo suyo con el mismo peso que una consulta real al SII.
     let bodyTexto: string;
     try {
       bodyTexto = await leerBody(req);
@@ -92,6 +89,14 @@ export function crearRestServer(
     } catch {
       await registrarAuditoria(pool, { tenantId: tenant.tenantId, ip, rut: null, ruta, status: 400, error: 'BAD_REQUEST' });
       responderJson(res, 400, { error: 'BAD_REQUEST' });
+      return;
+    }
+
+    const permitidoPorTenant = await chequearRateLimitTenant(pool, tenant.tenantId, tenant.limitePorMinuto)
+      .catch(() => true); // fail-open: no tirar el servicio por un problema del contador.
+    if (!permitidoPorTenant) {
+      await registrarAuditoria(pool, { tenantId: tenant.tenantId, ip, rut: null, ruta, status: 429, error: 'RATE_LIMITED' });
+      responderJson(res, 429, { error: 'RATE_LIMITED' });
       return;
     }
 
