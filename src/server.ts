@@ -26,7 +26,7 @@ export function createServer(): McpServer {
 
   registerMipymeTools(server, registro);
   registerDteTools(server, registro);
-  registerBienesRaicesTools(server, registro, browser);
+  registerBienesRaicesTools(server, registro);
   registerSesionTools(server, registro, credenciales);
   registerBheTools(server, registro);
   registerRentaTools(server, registro);

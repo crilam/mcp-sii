@@ -1,17 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import { RentaScraper } from '../scrapers/renta';
-import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
-import { crearConScraper } from '../erroresSesion';
-
-const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
-
-const anio = z.number().int().min(2000).max(2100)
-  .describe('Año tributario a consultar (el año en que se declaró, no el año de los ingresos)');
-
-const conScraper = crearConScraper(sesion => new RentaScraper(new SiiHttpClient(sesion), sesion));
+import { envolverParaMcp } from '../erroresSesion';
+import * as core from '../core/renta';
+import { schemaEstadoDeclaracion, schemaF22 } from '../core/schemas/renta';
 
 export function registerRentaTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
@@ -22,9 +14,8 @@ export function registerRentaTools(server: McpServer, registro: RegistroSesiones
     'estado —si hubo devolución y por cuánto, o qué inconsistencia se detectó—, que es lo más útil de la ' +
     'respuesta. Si el año no tiene declaración, responde sinDatos=true con las listas vacías: es un vacío ' +
     'legítimo, no un error. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
-    { rut: z.string().describe(RUT_DESC), anio },
-    async ({ rut, anio }: { rut: string; anio: number }) =>
-      conScraper(registro, rut, scraper => scraper.estadoDeclaracion(anio))
+    schemaEstadoDeclaracion,
+    async ({ rut, anio }) => envolverParaMcp(() => core.estadoDeclaracion(registro, rut, anio))
   );
 
   server.tool(
@@ -34,13 +25,7 @@ export function registerRentaTools(server: McpServer, registro: RegistroSesiones
     'declaración vigente del año (una consulta extra al SII); si ese año no tiene una declaración vigente, ' +
     'falla pidiendo el folio explícito en vez de devolver un formulario vacío. ' +
     'No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
-    {
-      rut: z.string().describe(RUT_DESC),
-      anio,
-      folio: z.number().int().positive().optional()
-        .describe('Folio de la declaración. Si se omite, se usa el de la declaración vigente del año.'),
-    },
-    async ({ rut, anio, folio }: { rut: string; anio: number; folio?: number }) =>
-      conScraper(registro, rut, scraper => scraper.f22Completo(anio, folio))
+    schemaF22,
+    async ({ rut, anio, folio }) => envolverParaMcp(() => core.f22Completo(registro, rut, anio, folio))
   );
 }

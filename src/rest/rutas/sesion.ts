@@ -1,10 +1,11 @@
-import * as http from 'http';
-import { RegistroSesiones } from './registroSesiones';
-import { SessionManager } from './session';
-import { ProveedorCredencialesRuntime } from './credencialesRuntime';
-import { clasificarErrorCredenciales } from './erroresSesion';
-import { compararApiKey } from './apiKey';
-import { leerBody, responderJson, BodyDemasiadoGrande } from './rest/http';
+import { z } from 'zod';
+import { RegistroSesiones } from '../../registroSesiones';
+import { SessionManager } from '../../session';
+import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
+import { clasificarErrorCredenciales } from '../../erroresSesion';
+import { RutaHandler } from './comun';
+
+const zodValidarClave = z.object({ rut: z.string().min(1), clave: z.string().min(1) });
 
 export type ResultadoValidacion =
   | { ok: true }
@@ -62,56 +63,16 @@ export async function validarClave(
   }
 }
 
-// Servidor HTTP mínimo, sin framework: un solo endpoint. Cada request abre y
-// cierra su propia sesión SII (ver validarClave) — no hay estado entre
-// requests más que lo que ya vive en `registro`/`credenciales`.
-export function crearServidorHttp(
+export function registrarRutasSesion(
+  rutas: Map<string, RutaHandler>,
   registro: RegistroSesiones<SessionManager>,
-  credenciales: ProveedorCredencialesRuntime,
-  apiKey: string
-): http.Server {
-  const server = http.createServer(async (req, res) => {
-    if (req.method !== 'POST' || req.url !== '/validar-clave') {
-      res.writeHead(404).end();
-      return;
-    }
-
-    const authHeader = req.headers.authorization;
-    const recibida = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
-      ? authHeader.slice('Bearer '.length)
-      : '';
-
-    if (!compararApiKey(recibida, apiKey)) {
-      responderJson(res, 401, { error: 'UNAUTHORIZED' });
-      return;
-    }
-
-    let body: unknown;
-    try {
-      body = JSON.parse(await leerBody(req));
-    } catch (e) {
-      if (e instanceof BodyDemasiadoGrande) {
-        responderJson(res, 413, { error: 'PAYLOAD_TOO_LARGE' });
-        return;
-      }
-      responderJson(res, 400, { error: 'BAD_REQUEST' });
-      return;
-    }
-
-    const { rut, clave } = (body ?? {}) as { rut?: unknown; clave?: unknown };
-    if (typeof rut !== 'string' || typeof clave !== 'string') {
-      responderJson(res, 400, { error: 'BAD_REQUEST' });
-      return;
-    }
-
+  credenciales: ProveedorCredencialesRuntime
+): void {
+  rutas.set('POST /v1/sesion/validar-clave', async body => {
+    const parseo = zodValidarClave.safeParse(body);
+    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
+    const { rut, clave } = parseo.data;
     const resultado = await validarClave(rut, clave, registro, credenciales);
-    responderJson(res, 200, resultado);
+    return { status: 200, body: resultado };
   });
-
-  // Sin esto, una conexión que manda headers/body a paso de tortuga (slowloris)
-  // queda colgada indefinidamente en vez de cortarse.
-  server.requestTimeout = 35_000;
-  server.headersTimeout = 10_000;
-
-  return server;
 }

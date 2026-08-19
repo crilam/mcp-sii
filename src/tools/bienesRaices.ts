@@ -1,13 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { BienesRaicesScraper } from '../scrapers/bienesRaices';
-import { Browser } from '../browser';
 import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
-import { crearConScraper, clasificarErrorCredenciales } from '../erroresSesion';
-
-const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
+import { clasificarErrorCredenciales, envolverParaMcp } from '../erroresSesion';
+import * as core from '../core/bienesRaices';
+import { schemaListBienesRaices } from '../core/schemas/bienesRaices';
 
 export function registerSesionTools(
   server: McpServer,
@@ -56,17 +54,12 @@ export function registerSesionTools(
 
 export function registerBienesRaicesTools(
   server: McpServer,
-  registro: RegistroSesiones<SessionManager>,
-  browser: Browser
+  registro: RegistroSesiones<SessionManager>
 ): void {
-  const conScraper = crearConScraper(sesion => new BienesRaicesScraper(browser, sesion));
-
   server.tool(
     'sii_persona_list_bienes_raices',
     'Lista los bienes raíces (propiedades) del RUT persona autenticado en el SII, con comuna, ROL, dirección, destino, datos de inscripción, porcentaje de derechos y avalúo fiscal. Incluye un resumen con total de propiedades, solicitudes, notificaciones, afectación a sobretasa y beneficio de adulto mayor. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
-    {
-      rut: z.string().describe(RUT_DESC),
-    },
-    async ({ rut }) => conScraper(registro, rut, scraper => scraper.listBienesRaices())
+    schemaListBienesRaices,
+    async ({ rut }) => envolverParaMcp(() => core.listBienesRaices(registro, rut))
   );
 }

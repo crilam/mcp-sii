@@ -1,20 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
-import { conErroresDeSesion, SesionNoIniciada } from '../erroresSesion';
+import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/rcv';
 import { schemaResumen, schemaDetalle } from '../core/schemas/rcv';
-
-async function envolverParaMcp<R>(fn: () => Promise<R>): Promise<{ content: [{ type: 'text'; text: string }] }> {
-  const resultado = await conErroresDeSesion(fn).catch(e => {
-    if (e instanceof SesionNoIniciada) return { __error: 'SESION_NO_INICIADA' as const };
-    throw e;
-  });
-  if (resultado && typeof resultado === 'object' && '__error' in resultado) {
-    return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: resultado.__error }) }] };
-  }
-  return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
-}
 
 export function registerRcvTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(

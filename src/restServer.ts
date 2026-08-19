@@ -7,7 +7,14 @@ import { autenticarTenant } from './rest/auth';
 import { chequearRateLimitTenant, contadorFallosIp, registrarFalloIp } from './rest/rateLimit';
 import { registrarAuditoria } from './rest/auditoria';
 import { leerBody, responderJson, BodyDemasiadoGrande } from './rest/http';
-import { registrarRutasRcv, RutaHandler } from './rest/rutas/rcv';
+import { registrarRutasRcv } from './rest/rutas/rcv';
+import { RutaHandler } from './rest/rutas/comun';
+import { registrarRutasBhe } from './rest/rutas/bhe';
+import { registrarRutasRenta } from './rest/rutas/renta';
+import { registrarRutasBienesRaices } from './rest/rutas/bienesRaices';
+import { registrarRutasDte } from './rest/rutas/dte';
+import { registrarRutasMipyme } from './rest/rutas/mipyme';
+import { registrarRutasSesion } from './rest/rutas/sesion';
 
 const LIMITE_AUTH_FALLIDA_POR_IP = 20;
 
@@ -40,8 +47,14 @@ export function crearRestServer(
 ): http.Server {
   const rutas = new Map<string, RutaHandler>();
   registrarRutasRcv(rutas, registro, credenciales);
+  registrarRutasBhe(rutas, registro, credenciales);
+  registrarRutasRenta(rutas, registro, credenciales);
+  registrarRutasBienesRaices(rutas, registro, credenciales);
+  registrarRutasDte(rutas, registro, credenciales);
+  registrarRutasMipyme(rutas, registro, credenciales);
+  registrarRutasSesion(rutas, registro, credenciales);
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     try {
       await manejarRequest(req, res, pool, rutas);
     } catch (e) {
@@ -56,6 +69,14 @@ export function crearRestServer(
       }
     }
   });
+
+  // Sin esto, una conexión que manda headers/body a paso de tortuga (slowloris)
+  // queda colgada indefinidamente en vez de cortarse. Se perdió sin querer al
+  // absorber validar-clave (httpServer.ts sí los tenía) — repuesto acá.
+  server.requestTimeout = 35_000;
+  server.headersTimeout = 10_000;
+
+  return server;
 }
 
 async function manejarRequest(

@@ -1,4 +1,4 @@
-import { clasificarErrorCredenciales, conErroresDeSesion, SesionNoIniciada } from '../src/erroresSesion';
+import { clasificarErrorCredenciales, conErroresDeSesion, envolverParaMcp, SesionNoIniciada } from '../src/erroresSesion';
 
 describe('conErroresDeSesion', () => {
   it('traduce el rechazo de credenciales no encontradas a SesionNoIniciada', async () => {
@@ -31,5 +31,23 @@ describe('clasificarErrorCredenciales', () => {
 
   it('clasifica un valor que no es Error como ERROR', () => {
     expect(clasificarErrorCredenciales('algo raro')).toBe('ERROR');
+  });
+});
+
+describe('envolverParaMcp', () => {
+  it('envuelve el resultado exitoso en {content}', async () => {
+    const resultado = await envolverParaMcp(() => Promise.resolve({ filas: [1, 2] }));
+    expect(JSON.parse(resultado.content[0].text)).toEqual({ filas: [1, 2] });
+  });
+
+  it('traduce SesionNoIniciada a {ok:false, error:SESION_NO_INICIADA}', async () => {
+    const resultado = await envolverParaMcp(() =>
+      Promise.reject(new Error('No hay sesión iniciada para el RUT 1. Llamá sii_iniciar_sesion primero.'))
+    );
+    expect(JSON.parse(resultado.content[0].text)).toEqual({ ok: false, error: 'SESION_NO_INICIADA' });
+  });
+
+  it('deja pasar cualquier otro error sin traducirlo', async () => {
+    await expect(envolverParaMcp(() => Promise.reject(new Error('otro fallo')))).rejects.toThrow('otro fallo');
   });
 });
