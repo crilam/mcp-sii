@@ -9,6 +9,7 @@ import { registrarAuditoria } from './rest/auditoria';
 import { leerBody, responderJson, BodyDemasiadoGrande } from './rest/http';
 import { registrarRutasRcv, RutaHandler } from './rest/rutas/rcv';
 import { registrarRutasBhe } from './rest/rutas/bhe';
+import { registrarRutasRenta } from './rest/rutas/renta';
 
 const LIMITE_AUTH_FALLIDA_POR_IP = 20;
 
@@ -42,6 +43,7 @@ export function crearRestServer(
   const rutas = new Map<string, RutaHandler>();
   registrarRutasRcv(rutas, registro, credenciales);
   registrarRutasBhe(rutas, registro, credenciales);
+  registrarRutasRenta(rutas, registro, credenciales);
 
   return http.createServer(async (req, res) => {
     try {
