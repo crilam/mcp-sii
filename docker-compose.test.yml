@@ -1,0 +1,9 @@
+services:
+  postgres-test:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: mcp_sii
+      POSTGRES_PASSWORD: mcp_sii
+      POSTGRES_DB: mcp_sii_test
+    ports:
+      - '55432:5432'

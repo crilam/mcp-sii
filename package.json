@@ -8,6 +8,7 @@
     "start": "node dist/src/index.js",
     "start:validar-clave": "node dist/src/httpServerIndex.js",
     "dev": "ts-node src/index.ts",
+    "db:migrar": "ts-node src/scripts/migrar.ts",
     "validate-cert": "ts-node src/validateCert.ts",
     "test": "jest",
     "test:watch": "jest --watch"
