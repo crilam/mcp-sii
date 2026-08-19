@@ -23,6 +23,12 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
     const cuerpo = Array.isArray(resultado) ? { datos: resultado } : (resultado as object);
     return { status: 200, body: { ok: true, ...cuerpo } };
   } catch (e) {
-    return { status: 200, body: { ok: false, error: clasificarErrorCredenciales(e) } };
+    const error = clasificarErrorCredenciales(e);
+    // Un error que no es rechazo de credenciales es un bug (del scraper, de
+    // infraestructura) — sin este log, queda invisible detrás del status 200.
+    if (error === 'ERROR') {
+      console.error('Error no clasificado en ruta REST:', e instanceof Error ? e.message : e);
+    }
+    return { status: 200, body: { ok: false, error } };
   }
 }

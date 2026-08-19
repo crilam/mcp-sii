@@ -35,6 +35,17 @@ describe('registrarRutasRcv', () => {
     expect(respuesta).toEqual({ status: 200, body: { ok: true, filas: [] } });
   });
 
+  it('resumen: clave vacía devuelve 400 sin llamar al core', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/rcv/resumen')!(
+      { rut: '11.111.111-1', clave: '', periodo: '202607', operacion: 'VENTA' }
+    );
+
+    expect(respuesta).toEqual({ status: 400, body: { error: 'BAD_REQUEST' } });
+    expect(core.resumen).not.toHaveBeenCalled();
+  });
+
   it('resumen: body inválido devuelve 400 sin llamar al core', async () => {
     const rutas = armarRouter();
 

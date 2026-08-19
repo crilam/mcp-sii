@@ -9,7 +9,11 @@ import { RutaHandler, ejecutar } from './comun';
 
 const zodListEmpresas = z.object(schemaListEmpresas).extend({ clave: z.string().min(1) });
 const zodListDteEmitidos = z.object(schemaListDteEmitidos).extend({ clave: z.string().min(1) });
-const zodEmitirDte = z.object(schemaEmitirDte).extend({ clave: z.string().min(1) });
+const zodEmitirDte = z.object(schemaEmitirDte).extend({
+  clave: z.string().min(1),
+  confirmar: z.boolean().default(false)
+    .describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento — NO SOPORTADO vía REST todavía, ver limitación conocida de la spec.'),
+});
 
 export function registrarRutasMipyme(
   rutas: Map<string, RutaHandler>,

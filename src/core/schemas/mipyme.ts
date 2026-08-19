@@ -47,5 +47,5 @@ export const schemaEmitirDte = {
     razon: z.string().max(90).optional().describe('Razón de la referencia'),
     codigo: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional().describe('1=anula, 2=corrige texto, 3=corrige montos. Obligatorio en nota de crédito.'),
   })).max(3).optional().describe('Hasta 3 referencias. Una nota de crédito exige al menos una.'),
-  confirmar: z.boolean().default(false).describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento, acto real e irreversible. NO SOPORTADO vía REST todavía — ver limitación conocida de la spec.'),
+  confirmar: z.boolean().default(false).describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento, acto real e irreversible.'),
 };
