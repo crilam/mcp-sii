@@ -3,12 +3,15 @@ import { execSync } from 'child_process';
 const EXEC_OPTS = { encoding: 'utf-8' as const, timeout: 30_000 };
 
 export class Browser {
-  private run(cmd: string): string {
-    return execSync(cmd, EXEC_OPTS).toString().trim();
+  constructor(private sessionId?: string) {}
+
+  private run(args: string): string {
+    const prefijoSesion = this.sessionId ? `--session ${this.sessionId} ` : '';
+    return execSync(`agent-browser ${prefijoSesion}${args}`, EXEC_OPTS).toString().trim();
   }
 
   open(url: string): void {
-    this.run(`agent-browser open ${url}`);
+    this.run(`open ${url}`);
   }
 
   // Navega a una URL que puede mostrar un JS confirm dialog durante la carga.
@@ -16,7 +19,7 @@ export class Browser {
   // no en err.message) y lo deja pendiente para que el llamador resuelva con dialogAccept().
   openWithPendingDialog(url: string): void {
     try {
-      this.run(`agent-browser open ${url}`);
+      this.run(`open ${url}`);
     } catch (err: unknown) {
       const allText = [
         err instanceof Error ? err.message : String(err),
@@ -28,44 +31,44 @@ export class Browser {
   }
 
   snapshot(): string {
-    return this.run('agent-browser snapshot');
+    return this.run('snapshot');
   }
 
   click(ref: string): void {
-    this.run(`agent-browser click ${ref}`);
+    this.run(`click ${ref}`);
   }
 
   fill(ref: string, text: string): void {
-    this.run(`agent-browser fill ${ref} "${text}"`);
+    this.run(`fill ${ref} "${text}"`);
   }
 
   type(ref: string, text: string): void {
-    this.run(`agent-browser type ${ref} "${text}"`);
+    this.run(`type ${ref} "${text}"`);
   }
 
   getText(ref: string): string {
-    return this.run(`agent-browser get text ${ref}`);
+    return this.run(`get text ${ref}`);
   }
 
   select(ref: string, value: string): void {
-    this.run(`agent-browser select ${ref} "${value}"`);
+    this.run(`select ${ref} "${value}"`);
   }
 
   eval(js: string): string {
     const escaped = js.replace(/"/g, '\\"');
-    return this.run(`agent-browser eval "${escaped}"`);
+    return this.run(`eval "${escaped}"`);
   }
 
   press(key: string): void {
-    this.run(`agent-browser press ${key}`);
+    this.run(`press ${key}`);
   }
 
   dialogAccept(): void {
-    this.run('agent-browser dialog accept');
+    this.run('dialog accept');
   }
 
   dialogDismiss(): void {
-    this.run('agent-browser dialog dismiss');
+    this.run('dialog dismiss');
   }
 
   waitForAny(texts: string[], maxMs = 10_000): void {
@@ -92,6 +95,6 @@ export class Browser {
   }
 
   close(): void {
-    this.run('agent-browser close');
+    this.run('close');
   }
 }

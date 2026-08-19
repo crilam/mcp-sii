@@ -23,6 +23,16 @@ export async function conErroresDeSesion<T>(fn: () => Promise<T>): Promise<T> {
 // {ok:false, error} en vez de dejarla escapar como excepción. Antes esta misma
 // lógica de wrap estaba copiada en cada tool file (bhe/dte/rcv/renta/mipyme) y
 // una sexta vez, inline, en bienesRaices.
+// Distingue "el SII rechazó la clave/RUT" de cualquier otro fallo (timeout, red,
+// browser caído). Mismo criterio que ya usaba sii_iniciar_sesion inline; se
+// extrae acá porque el endpoint de validación de clave necesita la misma
+// clasificación y una segunda copia inline sería la misma duplicación que ya
+// se resolvió una vez para conScraper.
+export function clasificarErrorCredenciales(e: unknown): 'CREDENCIALES_INVALIDAS' | 'ERROR' {
+  const mensaje = e instanceof Error ? e.message : String(e);
+  return mensaje.includes('El SII rechazó la autenticación') ? 'CREDENCIALES_INVALIDAS' : 'ERROR';
+}
+
 export function crearConScraper<S>(crearScraper: (sesion: SessionManager) => S) {
   return async function conScraper<R>(
     registro: RegistroSesiones<SessionManager>,
