@@ -58,6 +58,40 @@ por tenant.
   clave rechazada por el SII o falla de infraestructura del SII responden
   `200 {ok:false, error}` — porque el caller ya está autenticado y autorizado,
   solo está preguntando algo que puede fallar del lado del SII.
+- **Neon caído — fail-closed en auth, fail-open en rate-limit.** Si no se
+  puede consultar `api_keys`, el request se rechaza (`401` o `503`, a definir
+  en el plan): nunca dejar pasar un request sin poder verificar la key sería
+  peor que una caída parcial del servicio. Si la key ya se validó pero
+  `rate_limit_contador` no responde, el request sigue adelante sin contar
+  contra el límite — preferible degradar el rate-limit a tirar el servicio
+  entero por un problema de un contador. La escritura en `auditoria` nunca
+  bloquea ni falla el request (ver sección "Auditoría").
+- **Formato de API key:** `sk_<nombre-tenant>_<32 bytes aleatorios en
+  base64url>`, generados con `crypto.randomBytes(32)` en el script CLI de alta
+  (nunca `Math.random`). Se muestra una única vez al crear el tenant/key —
+  sólo se guarda su `sha256` en `api_keys.key_hash`, igual que ya se hace con
+  la comparación de la API key de `validar-clave` hoy.
+- **Migraciones del esquema de Neon: SQL plano versionado, sin librería de
+  migraciones.** Coherente con "sin ORM": archivos numerados en
+  `db/migraciones/0001_inicial.sql`, `0002_...sql`, aplicados a mano (o con un
+  script mínimo que corre los que falten, a definir en el plan) contra la
+  base de Neon. No se introduce una herramienta como Prisma Migrate o
+  Flyway para 4 tablas.
+- **Connection pooling:** el proceso usa el *pooled connection string* de
+  Neon (vía PgBouncer, vive del lado de Neon) con un `pg.Pool` chico del lado
+  del cliente (`max` bajo, ej. 5-10) — Neon limita las conexiones directas y
+  un pool grande del lado Node las agota rápido. Se define el valor exacto de
+  `max` en el plan, según el tier de Neon elegido.
+- **TLS: lo termina el load balancer, no el proceso Node.** Igual que el
+  resto del despliegue en AWS (EC2/Fargate detrás de ALB, ya decidido para
+  `validar-clave`): el ALB atiende HTTPS hacia afuera y habla HTTP plano con
+  el proceso puertas adentro de la VPC. El proceso Node nunca maneja
+  certificados TLS directamente.
+- **Sin CORS.** El adaptador es server-to-server (RDTE, AgenticERP,
+  Parkingapp, terceros vía backend) — ningún consumidor llama desde un
+  browser. No se agrega manejo de CORS; si algún día hiciera falta, es una
+  señal de que cambió el modelo de consumo y hay que revisar el diseño, no
+  sólo agregar un header.
 
 ## Alcance: las 16 operaciones + validar-clave
 
@@ -84,6 +118,18 @@ siempre `rut` + `clave` en vez de depender de una sesión ya iniciada:
 | `sii_mipyme_emitir_dte` | `POST /mipyme/emitir-dte` (ver limitación abajo) |
 | `sii_persona_list_bienes_raices` | `POST /persona/bienes-raices` |
 | — (nuevo, PR #32) | `POST /sesion/validar-clave` |
+
+**Limitación conocida — resolución de `empresa_rut`:** `sii_mipyme_list_dte_emitidos`
+y `sii_mipyme_emitir_dte` hoy resuelven la empresa en tres escalones: parámetro
+explícito → `SII_EMPRESA_RUT` (env var del *proceso*) → autoresolución si la
+persona opera una única empresa en el portal. El segundo escalón no tiene
+sentido en REST multi-tenant — es una env var de un solo proceso, no hay
+"la empresa de este tenant" configurable ahí, y dejarlo tal cual arriesga que
+un request sin `empresa_rut` explícito use silenciosamente la empresa que haya
+quedado configurada para OTRO contribuyente. Las rutas REST de estas dos
+operaciones **eliminan el escalón de `SII_EMPRESA_RUT`**: sólo param explícito
+o autoresolución de empresa única; si ninguna aplica, responden `400` pidiendo
+`empresa_rut` explícito (en vez de fallar tarde contra el SII).
 
 **Limitación conocida, no resuelta en este spec:** `sii_mipyme_emitir_dte` con
 `confirmar=true` firma con certificado digital, cuya clave hoy sólo se
@@ -115,16 +161,17 @@ src/restServer.ts  (proceso HTTP nuevo — reemplaza a httpServerIndex.ts,
         │
         ▼
 src/core/*.ts — un archivo por dominio (bhe, dte, rcv, renta, bienesRaices,
-        │        mipyme), funciones puras extraídas de src/tools/*.ts
+        │        mipyme), funciones de dominio extraídas de src/tools/*.ts
         ▼
 RegistroSesiones + ColaPorClave + SessionManager (sin cambios)
 ```
 
 Hoy la lógica de cada operación vive mezclada adentro de `registerXTools()` en
 `src/tools/*.ts`, atada al formato `{content:[{type:'text',...}]}` que exige el
-SDK de MCP. Se extrae a `src/core/<dominio>.ts`: funciones `async` que reciben
-`(registro, rut, ...params)` y devuelven el dato crudo o lanzan — sin saber
-nada de HTTP ni de MCP. `src/tools/<dominio>.ts` pasa a ser un adaptador fino
+SDK de MCP. Se extrae a `src/core/<dominio>.ts`: funciones de dominio `async`
+(no puras — hacen I/O real contra el SII) que reciben `(registro, rut,
+...params)` y devuelven el dato crudo o lanzan, sin saber nada de HTTP ni de
+MCP. `src/tools/<dominio>.ts` pasa a ser un adaptador fino
 que llama al core y envuelve en `{content:...}`; `src/rest/rutas/<dominio>.ts`
 es el otro adaptador fino, que llama al mismo core y arma la respuesta HTTP.
 
@@ -203,6 +250,14 @@ supera el límite configurado para el tenant → `429`. El límite por tenant es
 una columna en `tenants` (a agregar: `limite_por_minuto int NOT NULL DEFAULT
 60`), no una constante global — tenants distintos pueden necesitar límites
 distintos.
+
+**Pendiente para servicio de larga vida (no bloquea v1):** `rate_limit_contador`
+y `auditoria` crecen sin límite ni evicción — mismo tipo de pendiente ya
+anotado para los mapas de `RegistroSesiones`/`ColaPorClave` en la spec del
+2026-08-12. `rate_limit_contador` sólo necesita las últimas ventanas (un job
+periódico que borre filas de más de un día alcanza); `auditoria` es un log de
+negocio que probablemente se quiera conservar más tiempo — definir política de
+retención cuando el volumen real lo exija, no de antemano.
 
 ## Contrato HTTP — tabla de errores
 
