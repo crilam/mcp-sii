@@ -12,6 +12,7 @@ import { registrarRutasBhe } from './rest/rutas/bhe';
 import { registrarRutasRenta } from './rest/rutas/renta';
 import { registrarRutasBienesRaices } from './rest/rutas/bienesRaices';
 import { registrarRutasDte } from './rest/rutas/dte';
+import { registrarRutasMipyme } from './rest/rutas/mipyme';
 
 const LIMITE_AUTH_FALLIDA_POR_IP = 20;
 
@@ -48,6 +49,7 @@ export function crearRestServer(
   registrarRutasRenta(rutas, registro, credenciales);
   registrarRutasBienesRaices(rutas, registro, credenciales);
   registrarRutasDte(rutas, registro, credenciales);
+  registrarRutasMipyme(rutas, registro, credenciales);
 
   return http.createServer(async (req, res) => {
     try {
