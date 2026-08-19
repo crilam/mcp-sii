@@ -1,14 +1,20 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import { OperacionRcv, RcvScraper } from '../scrapers/rcv';
-import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
-import { crearConScraper } from '../erroresSesion';
+import { conErroresDeSesion, SesionNoIniciada } from '../erroresSesion';
+import * as core from '../core/rcv';
+import { schemaResumen, schemaDetalle } from '../core/schemas/rcv';
 
-const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
-
-const conScraper = crearConScraper(sesion => new RcvScraper(new SiiHttpClient(sesion), sesion));
+async function envolverParaMcp<R>(fn: () => Promise<R>): Promise<{ content: [{ type: 'text'; text: string }] }> {
+  const resultado = await conErroresDeSesion(fn).catch(e => {
+    if (e instanceof SesionNoIniciada) return { __error: 'SESION_NO_INICIADA' as const };
+    throw e;
+  });
+  if (resultado && typeof resultado === 'object' && '__error' in resultado) {
+    return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: resultado.__error }) }] };
+  }
+  return { content: [{ type: 'text', text: JSON.stringify(resultado, null, 2) }] };
+}
 
 export function registerRcvTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
@@ -26,21 +32,9 @@ export function registerRcvTools(server: McpServer, registro: RegistroSesiones<S
     'La empresa es un parámetro de la consulta, no de la sesión: se puede pasar empresa_rut distinto en ' +
     'cada llamada, sin seleccionar empresa; si se omite, se consulta el RUT autenticado. ' +
     'Es solo lectura: no acepta ni reclama documentos.',
-    {
-      rut: z.string().describe(RUT_DESC),
-      periodo: z.string().regex(/^\d{6}$/)
-        .describe('Período tributario en formato AAAAMM (por ejemplo 202607)'),
-      operacion: z.enum(['COMPRA', 'VENTA'])
-        .describe('COMPRA para el registro de compras, VENTA para el de ventas'),
-      empresa_rut: z.string().optional()
-        .describe('RUT de la empresa a consultar, con dígito verificador (22222222-2). Si se omite, se usa el RUT autenticado.'),
-    },
-    async ({ rut, periodo, operacion, empresa_rut }: {
-      rut: string;
-      periodo: string;
-      operacion: OperacionRcv;
-      empresa_rut?: string;
-    }) => conScraper(registro, rut, scraper => scraper.resumen(periodo, operacion, empresa_rut))
+    schemaResumen,
+    async ({ rut, periodo, operacion, empresa_rut }) =>
+      envolverParaMcp(() => core.resumen(registro, rut, periodo, operacion, empresa_rut))
   );
 
   server.tool(
@@ -75,23 +69,8 @@ export function registerRcvTools(server: McpServer, registro: RegistroSesiones<S
     'La empresa es un parámetro de la consulta, no de la sesión: se puede pasar empresa_rut distinto en ' +
     'cada llamada; si se omite, se consulta el RUT autenticado. ' +
     'Es solo lectura: no acepta ni reclama documentos.',
-    {
-      rut: z.string().describe(RUT_DESC),
-      periodo: z.string().regex(/^\d{6}$/)
-        .describe('Período tributario en formato AAAAMM (por ejemplo 202607)'),
-      operacion: z.enum(['COMPRA', 'VENTA'])
-        .describe('COMPRA para el registro de compras, VENTA para el de ventas'),
-      tipo_doc: z.number().int().positive()
-        .describe('Código del tipo de documento, obligatorio. Se obtiene de sii_rcv_resumen en filas[].tipoDocCodigo (33 factura electrónica, 61 nota de crédito, 46 factura de compra, 34 exenta, 110 exportación, 914 DIN, 56 nota de débito)'),
-      empresa_rut: z.string().optional()
-        .describe('RUT de la empresa a consultar, con dígito verificador (22222222-2). Si se omite, se usa el RUT autenticado.'),
-    },
-    async ({ rut, periodo, operacion, tipo_doc, empresa_rut }: {
-      rut: string;
-      periodo: string;
-      operacion: OperacionRcv;
-      tipo_doc: number;
-      empresa_rut?: string;
-    }) => conScraper(registro, rut, scraper => scraper.detalle(periodo, operacion, tipo_doc, empresa_rut))
+    schemaDetalle,
+    async ({ rut, periodo, operacion, tipo_doc, empresa_rut }) =>
+      envolverParaMcp(() => core.detalle(registro, rut, periodo, operacion, tipo_doc, empresa_rut))
   );
 }
