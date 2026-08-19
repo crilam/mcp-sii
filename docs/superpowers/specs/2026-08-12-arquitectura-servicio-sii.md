@@ -1,7 +1,7 @@
 # mcp-sii como servicio externo: decisión de arquitectura
 
 Fecha: 2026-08-12
-Estado: **decisión tomada, sin implementar.** Registra el porqué y el orden de trabajo; ninguna de las piezas nuevas (cola por RUT, adaptador REST, Secrets Manager, egress IP) existe todavía.
+Estado (actualizado 2026-08-18): **decisión tomada, parcialmente implementada.** Registra el porqué y el orden de trabajo. De las piezas nuevas: **cola por RUT — hecha y cableada** (ver Orden recomendado, paso 1); adaptador REST, Secrets Manager, egress IP — no existen todavía.
 
 Pregunta que lo motiva: las capacidades de `mcp-sii` (consultas RCV/BHE/renta,
 emisión de DTE en el sistema gratuito, boletas a futuro) ¿se incorporan a **RDTE**
@@ -132,8 +132,10 @@ clientes externos ──┘       ├─ cola por RUT   ← serializa mismo RUT,
 
 ## Orden recomendado
 
-1. ~~**Cola por RUT.**~~ **Hecho (2026-08-12), con TDD.** El núcleo de
-   concurrencia multi-tenant está armado y probado en aislamiento:
+1. ~~**Cola por RUT.**~~ **Hecho, con TDD (2026-08-12 el núcleo, cableado a
+   `server.ts` en el PR #31 del 2026-08-18 — login por sesión).** El núcleo de
+   concurrencia multi-tenant está armado, probado en aislamiento, y **ya
+   cableado al servidor**:
    - `ColaPorClave` (`src/colaPorClave.ts`): serializa misma clave, paraleliza
      claves distintas.
    - `RegistroSesiones<T>` (`src/registroSesiones.ts`): una sesión por RUT,
@@ -143,9 +145,15 @@ clientes externos ──┘       ├─ cola por RUT   ← serializa mismo RUT,
    - `ProveedorCredenciales` + `CredencialesEnMemoria` (`src/credenciales.ts`).
    - `crearRegistroSesionesSii` (`src/registroSesionesSii.ts`): la factory real.
 
-   Falta sólo el **cableado del servidor**: `server.ts` sigue creando un
-   `SessionManager` único (mono-credencial). El registro es la vía multi-tenant
-   nueva, en paralelo; el MCP actual no se rompe.
+   `server.ts` (`createServer()`) ya arma el servidor exclusivamente vía
+   `crearRegistroSesionesSii(credenciales, browser)` — no queda ningún
+   `SessionManager` único mono-credencial cableado a las tools MCP. La
+   credencial hoy llega en runtime por `sii_iniciar_sesion`
+   (`ProveedorCredencialesRuntime`), no desde env vars fijas al proceso; eso
+   fue el login por sesión del PR #31, que de paso resolvió este pendiente.
+   `CredencialesEnMemoria` sigue existiendo pero no se instancia en el server
+   de producción (queda para tests, o para cuando se swap-ee a
+   `CredencialesSecretsManager` en el paso 2 de este documento).
 
    **Pendiente para servicio de larga vida (no bloquea):** los mapas de
    `RegistroSesiones` y `ColaPorClave` crecen por RUT sin evicción ni TTL.
