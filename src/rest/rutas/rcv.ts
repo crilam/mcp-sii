@@ -13,8 +13,11 @@ export interface RespuestaRuta {
 
 export type RutaHandler = (body: unknown) => Promise<RespuestaRuta>;
 
-const zodResumen = z.object(schemaResumen).extend({ clave: z.string() });
-const zodDetalle = z.object(schemaDetalle).extend({ clave: z.string() });
+// .min(1): una clave vacía nunca es válida contra el SII — rechazarla acá
+// evita gastar cupo del rate-limit del tenant en un request condenado a
+// fallar antes de siquiera intentar autenticar.
+const zodResumen = z.object(schemaResumen).extend({ clave: z.string().min(1) });
+const zodDetalle = z.object(schemaDetalle).extend({ clave: z.string().min(1) });
 
 // Traduce cualquier resultado de negocio del core al contrato {ok}. Una ruta
 // REST nunca debería ver SesionNoIniciada (cada request trae su propia

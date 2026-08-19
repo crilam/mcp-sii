@@ -39,8 +39,19 @@ export async function aplicarMigraciones(pool: Pool): Promise<void> {
       if (rows.length > 0) continue;
 
       const sql = fs.readFileSync(path.join(DIR_MIGRACIONES, archivo), 'utf-8');
-      await cliente.query(sql);
-      await cliente.query('INSERT INTO migraciones_aplicadas (nombre) VALUES ($1)', [archivo]);
+      // DDL + el INSERT de bookkeeping en una sola transacción: si el DDL
+      // corre pero el INSERT falla (o el proceso muere en el medio), sin
+      // esto la próxima corrida vuelve a ejecutar el mismo .sql y revienta
+      // con "relation already exists" en vez de detectarlo como aplicado.
+      await cliente.query('BEGIN');
+      try {
+        await cliente.query(sql);
+        await cliente.query('INSERT INTO migraciones_aplicadas (nombre) VALUES ($1)', [archivo]);
+        await cliente.query('COMMIT');
+      } catch (e) {
+        await cliente.query('ROLLBACK');
+        throw e;
+      }
     }
   } finally {
     await cliente.query('SELECT pg_advisory_unlock($1)', [LOCK_MIGRACIONES]);
