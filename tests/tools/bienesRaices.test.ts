@@ -7,17 +7,16 @@ jest.mock('../../src/scrapers/bienesRaices');
 const MockScraper = BienesRaicesScraper as jest.MockedClass<typeof BienesRaicesScraper>;
 
 function armar(rutRegistrado?: string) {
-  const browser = {} as any;
   const registro = {
     ejecutar: (rut: string, fn: any) => {
       if (rutRegistrado !== undefined && rut !== rutRegistrado) {
         return Promise.reject(new Error(`No hay sesión iniciada para el RUT ${rut}. Llamá sii_iniciar_sesion primero.`));
       }
-      return fn({});
+      return fn({ obtenerBrowser: () => ({}) });
     },
   } as unknown as RegistroSesiones<any>;
   const server = new McpServer({ name: 'test', version: '0.0.1' });
-  registerBienesRaicesTools(server, registro, browser);
+  registerBienesRaicesTools(server, registro);
   return { tools: (server as any)._registeredTools };
 }
 

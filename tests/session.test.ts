@@ -209,3 +209,11 @@ describe('SessionManager.getSession', () => {
     expect(loginOpensDespues).toBe(loginOpensAntes); // ninguna autenticación nueva
   });
 });
+
+describe('SessionManager.obtenerBrowser', () => {
+  it('devuelve el Browser con el que se construyó la sesión', () => {
+    const browser = new MockBrowser();
+    const mgr = new SessionManager(configClave, browser);
+    expect(mgr.obtenerBrowser()).toBe(browser);
+  });
+});

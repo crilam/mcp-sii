@@ -132,6 +132,15 @@ export class SessionManager {
     private browser: Browser
   ) {}
 
+  // Expone el Browser de esta sesión para scrapers que lo necesitan crudo
+  // (BienesRaicesScraper lee el DOM directo, a diferencia del resto que habla
+  // HTTP vía SiiHttpClient). El mismo Browser que ya autenticó esta sesión —
+  // no uno nuevo — porque el estado autenticado vive en el contexto de
+  // agent-browser que ese Browser referencia (--session <rut>).
+  obtenerBrowser(): Browser {
+    return this.browser;
+  }
+
   // Cookie jar propio de esta credencial. Antes era una constante global, que
   // servía para un proceso de una sola credencial pero colisiona apenas hay
   // varias: dos sesiones escribiendo el mismo archivo se pisan las cookies y las
