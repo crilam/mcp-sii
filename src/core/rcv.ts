@@ -1,10 +1,13 @@
 import { RcvScraper, OperacionRcv, ResumenRcv, DetalleRcv } from '../scrapers/rcv';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
-import { RegistroSesiones } from '../registroSesiones';
+import { EjecutorSesion } from '../registroSesiones';
 
+// Tipado contra la interfaz EjecutorSesion, no contra RegistroSesiones
+// concreto: así el adaptador REST puede pasar un ejecutor "de un solo uso"
+// (ver ejecutorPassThroughDe en rest/rutas/rcv.ts) sin que este core lo note.
 export async function resumen(
-  registro: RegistroSesiones<SessionManager>,
+  registro: EjecutorSesion<SessionManager>,
   rut: string,
   periodo: string,
   operacion: OperacionRcv,
@@ -17,7 +20,7 @@ export async function resumen(
 }
 
 export async function detalle(
-  registro: RegistroSesiones<SessionManager>,
+  registro: EjecutorSesion<SessionManager>,
   rut: string,
   periodo: string,
   operacion: OperacionRcv,

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RegistroSesiones } from '../../registroSesiones';
+import { RegistroSesiones, EjecutorSesion } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/rcv';
@@ -29,6 +29,30 @@ async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> {
   }
 }
 
+// Arma un EjecutorSesion de un solo uso para ESTE request: guardar la
+// credencial, crear la sesión, correr `fn` y borrar la credencial corren como
+// una sola unidad atómica encolada por RUT (ver
+// RegistroSesiones.ejecutarPassThrough). Sin esto, dos requests concurrentes
+// al mismo RUT con clave DISTINTA podían pisarse la credencial entre sí —
+// guardar/borrar sueltos alrededor de un registro.ejecutar() no alcanzaban,
+// porque el Map de credenciales vive fuera de la cola por RUT.
+function ejecutorPassThroughDe(
+  registro: RegistroSesiones<SessionManager>,
+  credenciales: ProveedorCredencialesRuntime,
+  rut: string,
+  clave: string
+): EjecutorSesion<SessionManager> {
+  return {
+    ejecutar: (rutInterno, fn) =>
+      registro.ejecutarPassThrough(
+        rutInterno,
+        () => credenciales.guardar(rut, clave),
+        () => credenciales.borrar(rut),
+        fn
+      ),
+  };
+}
+
 export function registrarRutasRcv(
   rutas: Map<string, RutaHandler>,
   registro: RegistroSesiones<SessionManager>,
@@ -39,17 +63,8 @@ export function registrarRutasRcv(
     if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
     const { rut, clave, periodo, operacion, empresa_rut } = parseo.data;
 
-    // Pass-through: la clave arma la sesión para este request y no se persiste.
-    // registro.olvidar(rut) es imprescindible acá: sin él, una sesión ya
-    // cacheada de un request anterior con el MISMO rut se reusaría sin volver
-    // a autenticar, ignorando esta clave por completo (ver PR #33 review).
-    try {
-      credenciales.guardar(rut, clave);
-      return await ejecutar(() => core.resumen(registro, rut, periodo, operacion, empresa_rut));
-    } finally {
-      registro.olvidar(rut);
-      credenciales.borrar(rut);
-    }
+    const ejecutor = ejecutorPassThroughDe(registro, credenciales, rut, clave);
+    return ejecutar(() => core.resumen(ejecutor, rut, periodo, operacion, empresa_rut));
   });
 
   rutas.set('POST /v1/rcv/detalle', async body => {
@@ -57,12 +72,7 @@ export function registrarRutasRcv(
     if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
     const { rut, clave, periodo, operacion, tipo_doc, empresa_rut } = parseo.data;
 
-    try {
-      credenciales.guardar(rut, clave);
-      return await ejecutar(() => core.detalle(registro, rut, periodo, operacion, tipo_doc, empresa_rut));
-    } finally {
-      registro.olvidar(rut);
-      credenciales.borrar(rut);
-    }
+    const ejecutor = ejecutorPassThroughDe(registro, credenciales, rut, clave);
+    return ejecutar(() => core.detalle(ejecutor, rut, periodo, operacion, tipo_doc, empresa_rut));
   });
 }

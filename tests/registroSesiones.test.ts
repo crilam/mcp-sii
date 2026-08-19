@@ -137,4 +137,73 @@ describe('RegistroSesiones', () => {
 
     expect(creadas).toBe(2);
   });
+
+  describe('ejecutarPassThrough', () => {
+    it('preparar/crear/fn/finalizar corren en el mismo turno: dos llamadas concurrentes al mismo RUT con credencial DISTINTA no se pisan', async () => {
+      // Simula el Map compartido de ProveedorCredencialesRuntime: es EXACTAMENTE
+      // el bug reportado — sin la atomicidad de ejecutarPassThrough, la
+      // segunda llamada podía pisar la credencial de la primera antes de que
+      // esta llegara a "crear" su sesión.
+      const credenciales = new Map<string, string>();
+      const registro = new RegistroSesiones<{ clave: string }>(async (rut: string) => {
+        // Se lee la credencial DENTRO de crear(), que corre dentro del turno.
+        await new Promise(r => setTimeout(r, 5)); // fuerza el entrelazado si no estuviera serializado
+        return { clave: credenciales.get(rut)! };
+      });
+
+      const vistos: string[] = [];
+      const [a, b] = await Promise.all([
+        registro.ejecutarPassThrough(
+          '111111111',
+          () => credenciales.set('111111111', 'claveA'),
+          () => credenciales.delete('111111111'),
+          async sesion => { vistos.push(sesion.clave); return sesion.clave; }
+        ),
+        registro.ejecutarPassThrough(
+          '111111111',
+          () => credenciales.set('111111111', 'claveB'),
+          () => credenciales.delete('111111111'),
+          async sesion => { vistos.push(sesion.clave); return sesion.clave; }
+        ),
+      ]);
+
+      expect(a).toBe(vistos[0]);
+      expect(b).toBe(vistos[1]);
+      expect(new Set(vistos)).toEqual(new Set(['claveA', 'claveB']));
+    });
+
+    it('no reusa una sesión cacheada por ejecutar(): siempre crea sesión nueva', async () => {
+      let creadas = 0;
+      const registro = new RegistroSesiones((rut: string) => ({ rut, id: ++creadas }));
+
+      await registro.ejecutar('rut-1', async s => s);
+      const b = await registro.ejecutarPassThrough(
+        'rut-1', () => {}, () => {}, async s => s
+      );
+
+      expect(creadas).toBe(2);
+      expect(b.id).toBe(2);
+    });
+
+    it('no deja la sesión cacheada después: una llamada a ejecutar() posterior crea una sesión nueva', async () => {
+      let creadas = 0;
+      const registro = new RegistroSesiones((rut: string) => ({ rut, id: ++creadas }));
+
+      await registro.ejecutarPassThrough('rut-1', () => {}, () => {}, async s => s);
+      await registro.ejecutar('rut-1', async s => s);
+
+      expect(creadas).toBe(2);
+    });
+
+    it('finalizar corre aunque fn lance', async () => {
+      const registro = new RegistroSesiones((rut: string) => ({ rut }));
+      const finalizar = jest.fn();
+
+      await expect(
+        registro.ejecutarPassThrough('rut-1', () => {}, finalizar, async () => { throw new Error('boom'); })
+      ).rejects.toThrow('boom');
+
+      expect(finalizar).toHaveBeenCalled();
+    });
+  });
 });

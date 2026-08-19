@@ -1,6 +1,15 @@
 import { ColaPorClave } from './colaPorClave';
 import { normalizar } from './credenciales';
 
+// Lo mínimo que un adaptador necesita de un registro de sesiones: correr algo
+// contra la sesión de un RUT. RegistroSesiones lo implementa; el adaptador
+// REST arma además un ejecutor "de un solo uso" por request (ver
+// ejecutarPassThrough) que también cumple esta interfaz, para que
+// src/core/*.ts pueda tratarlos igual sin saber cuál de los dos es.
+export interface EjecutorSesion<T> {
+  ejecutar<R>(rut: string, fn: (sesion: T) => Promise<R>): Promise<R>;
+}
+
 // Registro de sesiones del SII por credencial (RUT de la persona autenticada).
 //
 // Convierte el proceso de una sola credencial en uno multi-tenant: cada RUT
@@ -12,7 +21,7 @@ import { normalizar } from './credenciales';
 // La sesión se crea con una factory inyectada: el registro no sabe cómo se
 // arma una sesión ni de dónde salen las credenciales (env hoy, Secrets Manager
 // mañana). Sólo garantiza "una por RUT, serializada por RUT".
-export class RegistroSesiones<T> {
+export class RegistroSesiones<T> implements EjecutorSesion<T> {
   private instancias = new Map<string, T>();
   private cola = new ColaPorClave();
 
@@ -43,12 +52,47 @@ export class RegistroSesiones<T> {
 
   // Descarta la sesión cacheada de un RUT: la próxima llamada a ejecutar()
   // vuelve a pasar por `crear`, con la credencial que tenga el proveedor en
-  // ese momento. Necesario para flujos de una sola pasada (validar-clave, las
-  // rutas REST pass-through): sin esto, una sesión ya autenticada queda
-  // cacheada hasta 2 horas y una segunda llamada con una clave DISTINTA para
-  // el mismo RUT reusaría la sesión vieja sin volver a autenticar — ni
-  // siquiera comprobaría la clave nueva.
+  // ese momento.
   olvidar(rut: string): void {
     this.instancias.delete(normalizar(rut));
+  }
+
+  // Para flujos de una sola pasada con credencial por request (validar-clave,
+  // rutas REST pass-through): `preparar` (guardar la credencial), la creación
+  // de la sesión, `fn`, y `finalizar` (borrar la credencial) corren TODOS
+  // dentro del MISMO turno de la cola por RUT — no como pasos sueltos
+  // alrededor de `ejecutar()`.
+  //
+  // Es imprescindible que sea así: `credenciales.guardar()`/`.borrar()` tocan
+  // un Map compartido por fuera de la cola. Si dos requests concurrentes al
+  // mismo RUT con clave DISTINTA hicieran guardar()-luego-ejecutar() como
+  // pasos separados (como se hacía antes), la segunda `guardar()` podía pisar
+  // la credencial de la primera ANTES de que la primera llegara a autenticar
+  // — la primera terminaría autenticando con la clave de la segunda. Peor:
+  // el `borrar()` de la que termina primero podía borrarle la credencial a la
+  // que todavía espera turno en la cola. Encolar preparar+crear+fn+finalizar
+  // como una sola unidad elimina la ventana: mientras el turno de un RUT está
+  // en curso, ninguna otra llamada para ese mismo RUT puede leer ni tocar el
+  // Map de credenciales de por medio.
+  //
+  // Siempre crea sesión NUEVA (nunca reusa `instancias`): un pase único no
+  // debe heredar el cookie jar/estado de una sesión anterior de ese RUT.
+  async ejecutarPassThrough<R>(
+    rut: string,
+    preparar: () => void,
+    finalizar: () => void,
+    fn: (sesion: T) => Promise<R>
+  ): Promise<R> {
+    const clave = normalizar(rut);
+    return this.cola.ejecutar(clave, async () => {
+      preparar();
+      try {
+        const sesion = await this.crear(clave);
+        return await fn(sesion);
+      } finally {
+        this.instancias.delete(clave);
+        finalizar();
+      }
+    });
   }
 }
