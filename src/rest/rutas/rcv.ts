@@ -1,10 +1,11 @@
 import { z } from 'zod';
-import { RegistroSesiones, EjecutorSesion } from '../../registroSesiones';
+import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/rcv';
 import { schemaResumen, schemaDetalle } from '../../core/schemas/rcv';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
+import { ejecutorPassThroughDe } from '../ejecutorPassThrough';
 
 export interface RespuestaRuta {
   status: number;
@@ -30,30 +31,6 @@ async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> {
   } catch (e) {
     return { status: 200, body: { ok: false, error: clasificarErrorCredenciales(e) } };
   }
-}
-
-// Arma un EjecutorSesion de un solo uso para ESTE request: guardar la
-// credencial, crear la sesión, correr `fn` y borrar la credencial corren como
-// una sola unidad atómica encolada por RUT (ver
-// RegistroSesiones.ejecutarPassThrough). Sin esto, dos requests concurrentes
-// al mismo RUT con clave DISTINTA podían pisarse la credencial entre sí —
-// guardar/borrar sueltos alrededor de un registro.ejecutar() no alcanzaban,
-// porque el Map de credenciales vive fuera de la cola por RUT.
-function ejecutorPassThroughDe(
-  registro: RegistroSesiones<SessionManager>,
-  credenciales: ProveedorCredencialesRuntime,
-  rut: string,
-  clave: string
-): EjecutorSesion<SessionManager> {
-  return {
-    ejecutar: (rutInterno, fn) =>
-      registro.ejecutarPassThrough(
-        rutInterno,
-        () => credenciales.guardar(rut, clave),
-        () => credenciales.borrar(rut),
-        fn
-      ),
-  };
 }
 
 export function registrarRutasRcv(
