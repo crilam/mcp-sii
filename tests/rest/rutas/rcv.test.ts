@@ -5,9 +5,10 @@ import * as core from '../../../src/core/rcv';
 
 jest.mock('../../../src/core/rcv');
 
-function armarRouter() {
+function armarRouter(registro?: RegistroSesiones<any>) {
   const rutas = new Map<string, Function>();
-  registrarRutasRcv(rutas as any, {} as RegistroSesiones<any>, new ProveedorCredencialesRuntime());
+  const registroFinal = registro ?? ({ olvidar: jest.fn() } as unknown as RegistroSesiones<any>);
+  registrarRutasRcv(rutas as any, registroFinal, new ProveedorCredencialesRuntime());
   return rutas;
 }
 
@@ -50,5 +51,18 @@ describe('registrarRutasRcv', () => {
     );
 
     expect(respuesta).toEqual({ status: 200, body: { ok: false, error: 'ERROR' } });
+  });
+
+  it('descarta la sesión cacheada del RUT (registro.olvidar) para no reusarla con una clave distinta', async () => {
+    (core.resumen as jest.Mock).mockResolvedValue({ filas: [] });
+    const olvidar = jest.fn();
+    const registro = { olvidar } as unknown as RegistroSesiones<any>;
+    const rutas = armarRouter(registro);
+
+    await rutas.get('POST /v1/rcv/resumen')!(
+      { rut: '11.111.111-1', clave: 'x', periodo: '202607', operacion: 'VENTA' }
+    );
+
+    expect(olvidar).toHaveBeenCalledWith('11.111.111-1');
   });
 });

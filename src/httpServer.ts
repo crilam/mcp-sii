@@ -48,6 +48,11 @@ export async function validarClave(
   } catch (e) {
     return { ok: false, error: clasificarErrorCredenciales(e) };
   } finally {
+    // registro.olvidar(rut) es imprescindible acá: sin él, una segunda
+    // llamada a este endpoint para el MISMO rut con una clave DISTINTA
+    // reusaría la sesión ya autenticada (cacheada hasta 2h) sin volver a
+    // autenticar — validaría como correcta una clave que nunca se comprobó.
+    registro.olvidar(rut);
     credenciales.borrar(rut);
   }
 }

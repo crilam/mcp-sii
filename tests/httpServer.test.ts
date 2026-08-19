@@ -6,7 +6,8 @@ import { RegistroSesiones } from '../src/registroSesiones';
 function armarRegistro(sesion: { authenticateOnly: jest.Mock; logout: jest.Mock }) {
   return {
     ejecutar: (_rut: string, fn: any) => fn(sesion),
-  } as unknown as RegistroSesiones<any>;
+    olvidar: jest.fn(),
+  } as unknown as RegistroSesiones<any> & { olvidar: jest.Mock };
 }
 
 describe('validarClave', () => {
@@ -90,6 +91,17 @@ describe('validarClave', () => {
 
     expect(resultado).toEqual({ ok: false, error: 'CREDENCIALES_INVALIDAS' });
   });
+
+  it('descarta la sesión cacheada del RUT (registro.olvidar) para no reusarla en la próxima llamada', async () => {
+    const authenticateOnly = jest.fn().mockResolvedValue(undefined);
+    const logout = jest.fn().mockResolvedValue(undefined);
+    const registro = armarRegistro({ authenticateOnly, logout });
+    const credenciales = new ProveedorCredencialesRuntime();
+
+    await validarClave('11.111.111-1', 'secreta', registro, credenciales);
+
+    expect((registro as any).olvidar).toHaveBeenCalledWith('11.111.111-1');
+  });
 });
 
 function request(
@@ -119,6 +131,7 @@ describe('crearServidorHttp', () => {
   function armarRegistroOk() {
     return {
       ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly: jest.fn().mockResolvedValue(undefined), logout: jest.fn().mockResolvedValue(undefined) }),
+      olvidar: jest.fn(),
     } as any;
   }
 

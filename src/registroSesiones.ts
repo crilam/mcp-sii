@@ -40,4 +40,15 @@ export class RegistroSesiones<T> {
     }
     return sesion;
   }
+
+  // Descarta la sesión cacheada de un RUT: la próxima llamada a ejecutar()
+  // vuelve a pasar por `crear`, con la credencial que tenga el proveedor en
+  // ese momento. Necesario para flujos de una sola pasada (validar-clave, las
+  // rutas REST pass-through): sin esto, una sesión ya autenticada queda
+  // cacheada hasta 2 horas y una segunda llamada con una clave DISTINTA para
+  // el mismo RUT reusaría la sesión vieja sin volver a autenticar — ni
+  // siquiera comprobaría la clave nueva.
+  olvidar(rut: string): void {
+    this.instancias.delete(normalizar(rut));
+  }
 }

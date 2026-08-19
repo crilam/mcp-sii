@@ -32,7 +32,7 @@ describe('restServer', () => {
     await aplicarMigraciones(pool);
     ({ apiKey } = await crearTenant(pool, 'test-tenant-restserver', 3));
 
-    const registro = { ejecutar: (_rut: string, fn: any) => fn({}) } as unknown as RegistroSesiones<any>;
+    const registro = { ejecutar: (_rut: string, fn: any) => fn({}), olvidar: jest.fn() } as unknown as RegistroSesiones<any>;
     const credenciales = new ProveedorCredencialesRuntime();
     server = crearRestServer(pool, registro, credenciales);
     await new Promise<void>(resolve => server.listen(0, () => { port = (server.address() as any).port; resolve(); }));
@@ -76,5 +76,28 @@ describe('restServer', () => {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
     expect(res.status).toBe(404);
+  });
+
+  it('un request autenticado con éxito NO suma al contador de fallos de auth por IP', async () => {
+    // El tenant de este test ya usó parte de su límite propio en tests
+    // anteriores (limitePorMinuto=3) — uno más alcanza para probar el punto:
+    // que auth_fallida_contador no se toca en el camino de éxito, sin importar
+    // cuántos requests buenos entren.
+    await request(port, {
+      path: '/v1/rcv/resumen',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rut: '11.111.111-1', clave: 'x', periodo: '202607', operacion: 'VENTA' }),
+    });
+
+    const { rows } = await pool.query(
+      `SELECT contador FROM auth_fallida_contador WHERE ip = $1`,
+      ['127.0.0.1']
+    );
+    // Puede haber una fila de la request SIN auth de un test anterior (401),
+    // pero el valor no debe reflejar los requests exitosos también hechos
+    // desde la misma IP.
+    if (rows.length > 0) {
+      expect(rows[0].contador).toBe(1);
+    }
   });
 });

@@ -114,4 +114,27 @@ describe('RegistroSesiones', () => {
     expect(creadas).toBe(1);
     expect(a).toBe(b);
   });
+
+  it('olvidar() descarta la sesión cacheada: la próxima llamada crea una nueva', async () => {
+    let creadas = 0;
+    const registro = new RegistroSesiones((rut: string) => ({ rut, id: ++creadas }));
+
+    const a = await registro.ejecutar('rut-1', async s => s);
+    registro.olvidar('rut-1');
+    const b = await registro.ejecutar('rut-1', async s => s);
+
+    expect(creadas).toBe(2);
+    expect(a).not.toBe(b);
+  });
+
+  it('olvidar() normaliza el RUT igual que ejecutar()', async () => {
+    let creadas = 0;
+    const registro = new RegistroSesiones((rut: string) => ({ rut, id: ++creadas }));
+
+    await registro.ejecutar('12.345.678-9', async s => s);
+    registro.olvidar('123456789');
+    await registro.ejecutar('12.345.678-9', async s => s);
+
+    expect(creadas).toBe(2);
+  });
 });

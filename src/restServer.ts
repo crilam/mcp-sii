@@ -4,7 +4,7 @@ import { RegistroSesiones } from './registroSesiones';
 import { SessionManager } from './session';
 import { ProveedorCredencialesRuntime } from './credencialesRuntime';
 import { autenticarTenant } from './rest/auth';
-import { chequearRateLimitTenant, chequearRateLimitIp } from './rest/rateLimit';
+import { chequearRateLimitTenant, contadorFallosIp, registrarFalloIp } from './rest/rateLimit';
 import { registrarAuditoria } from './rest/auditoria';
 import { leerBody, responderJson, BodyDemasiadoGrande } from './rest/http';
 import { registrarRutasRcv, RutaHandler } from './rest/rutas/rcv';
@@ -43,10 +43,12 @@ export function crearRestServer(
       return;
     }
 
-    // Límite por IP sobre intentos de auth, antes de resolver tenant: sin
-    // esto, probar API keys al voleo no deja rastro ni tiene freno.
-    const permitidoPorIp = await chequearRateLimitIp(pool, ip, LIMITE_AUTH_FALLIDA_POR_IP).catch(() => true);
-    if (!permitidoPorIp) {
+    // Límite por IP sobre FALLOS de auth previos, antes de intentar autenticar
+    // de nuevo: sin esto, probar API keys al voleo no tiene freno. Es una
+    // lectura, no un incremento — un tenant legítimo detrás de esta IP nunca
+    // suma acá con tráfico bueno (ver registrarFalloIp más abajo).
+    const fallosPrevios = await contadorFallosIp(pool, ip).catch(() => 0);
+    if (fallosPrevios >= LIMITE_AUTH_FALLIDA_POR_IP) {
       await registrarAuditoria(pool, { tenantId: null, ip, rut: null, ruta, status: 429, error: 'RATE_LIMITED' });
       responderJson(res, 429, { error: 'RATE_LIMITED' });
       return;
@@ -59,6 +61,7 @@ export function crearRestServer(
 
     const tenant = await autenticarTenant(pool, apiKey).catch(() => null);
     if (!tenant) {
+      await registrarFalloIp(pool, ip).catch(() => {});
       await registrarAuditoria(pool, { tenantId: null, ip, rut: null, ruta, status: 401, error: 'UNAUTHORIZED' });
       responderJson(res, 401, { error: 'UNAUTHORIZED' });
       return;

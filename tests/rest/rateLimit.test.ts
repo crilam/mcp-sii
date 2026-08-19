@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { aplicarMigraciones } from '../../src/scripts/migrar';
 import { crearTenant } from '../../src/scripts/crearTenant';
-import { chequearRateLimitTenant, chequearRateLimitIp } from '../../src/rest/rateLimit';
+import { chequearRateLimitTenant, contadorFallosIp, registrarFalloIp } from '../../src/rest/rateLimit';
 
 describe('rate limit', () => {
   const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
@@ -23,14 +23,26 @@ describe('rate limit', () => {
     expect(await chequearRateLimitTenant(pool, tenantId, 2)).toBe(false);
   });
 
-  it('chequearRateLimitIp permite hasta el límite y bloquea el siguiente', async () => {
-    expect(await chequearRateLimitIp(pool, '10.0.0.1', 2)).toBe(true);
-    expect(await chequearRateLimitIp(pool, '10.0.0.1', 2)).toBe(true);
-    expect(await chequearRateLimitIp(pool, '10.0.0.1', 2)).toBe(false);
+  it('contadorFallosIp empieza en 0 y sube sólo con registrarFalloIp', async () => {
+    expect(await contadorFallosIp(pool, '10.0.0.1')).toBe(0);
+
+    await registrarFalloIp(pool, '10.0.0.1');
+    expect(await contadorFallosIp(pool, '10.0.0.1')).toBe(1);
+
+    await registrarFalloIp(pool, '10.0.0.1');
+    expect(await contadorFallosIp(pool, '10.0.0.1')).toBe(2);
+  });
+
+  it('contadorFallosIp es de sólo lectura: no incrementa por leerlo', async () => {
+    await registrarFalloIp(pool, '10.0.0.1');
+    await contadorFallosIp(pool, '10.0.0.1');
+    await contadorFallosIp(pool, '10.0.0.1');
+    expect(await contadorFallosIp(pool, '10.0.0.1')).toBe(1);
   });
 
   it('IPs distintas no comparten contador', async () => {
-    expect(await chequearRateLimitIp(pool, '10.0.0.1', 1)).toBe(true);
-    expect(await chequearRateLimitIp(pool, '10.0.0.2', 1)).toBe(true);
+    await registrarFalloIp(pool, '10.0.0.1');
+    expect(await contadorFallosIp(pool, '10.0.0.1')).toBe(1);
+    expect(await contadorFallosIp(pool, '10.0.0.2')).toBe(0);
   });
 });

@@ -40,10 +40,14 @@ export function registrarRutasRcv(
     const { rut, clave, periodo, operacion, empresa_rut } = parseo.data;
 
     // Pass-through: la clave arma la sesión para este request y no se persiste.
+    // registro.olvidar(rut) es imprescindible acá: sin él, una sesión ya
+    // cacheada de un request anterior con el MISMO rut se reusaría sin volver
+    // a autenticar, ignorando esta clave por completo (ver PR #33 review).
     credenciales.guardar(rut, clave);
     try {
       return await ejecutar(() => core.resumen(registro, rut, periodo, operacion, empresa_rut));
     } finally {
+      registro.olvidar(rut);
       credenciales.borrar(rut);
     }
   });
@@ -57,6 +61,7 @@ export function registrarRutasRcv(
     try {
       return await ejecutar(() => core.detalle(registro, rut, periodo, operacion, tipo_doc, empresa_rut));
     } finally {
+      registro.olvidar(rut);
       credenciales.borrar(rut);
     }
   });
