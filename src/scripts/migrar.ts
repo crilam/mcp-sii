@@ -4,30 +4,46 @@ import { Pool } from 'pg';
 
 const DIR_MIGRACIONES = path.join(__dirname, '..', '..', 'db', 'migraciones');
 
+// Clave arbitraria fija para el advisory lock de Postgres: sólo importa que
+// sea la misma en cada llamada, para serializar corridas concurrentes de
+// aplicarMigraciones() contra la misma base (en tests, cada archivo de test
+// llama esto en su beforeAll, y Jest los corre en paralelo).
+const LOCK_MIGRACIONES = 727_001;
+
 // Runner mínimo, sin librería: una tabla que registra qué migraciones ya
 // corrieron, y aplica en orden las que falten. Alcanza para un puñado de
 // archivos SQL versionados a mano — no hace falta Prisma Migrate ni Flyway
 // para 5 tablas.
 export async function aplicarMigraciones(pool: Pool): Promise<void> {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS migraciones_aplicadas (
-      nombre text PRIMARY KEY,
-      aplicada_en timestamptz NOT NULL DEFAULT now()
-    )
-  `);
+  const cliente = await pool.connect();
+  try {
+    // pg_advisory_lock bloquea hasta obtener el lock: evita que dos llamadas
+    // concurrentes intenten crear las mismas tablas a la vez.
+    await cliente.query('SELECT pg_advisory_lock($1)', [LOCK_MIGRACIONES]);
 
-  const archivos = fs.readdirSync(DIR_MIGRACIONES).filter(f => f.endsWith('.sql')).sort();
+    await cliente.query(`
+      CREATE TABLE IF NOT EXISTS migraciones_aplicadas (
+        nombre text PRIMARY KEY,
+        aplicada_en timestamptz NOT NULL DEFAULT now()
+      )
+    `);
 
-  for (const archivo of archivos) {
-    const { rows } = await pool.query(
-      'SELECT 1 FROM migraciones_aplicadas WHERE nombre = $1',
-      [archivo]
-    );
-    if (rows.length > 0) continue;
+    const archivos = fs.readdirSync(DIR_MIGRACIONES).filter(f => f.endsWith('.sql')).sort();
 
-    const sql = fs.readFileSync(path.join(DIR_MIGRACIONES, archivo), 'utf-8');
-    await pool.query(sql);
-    await pool.query('INSERT INTO migraciones_aplicadas (nombre) VALUES ($1)', [archivo]);
+    for (const archivo of archivos) {
+      const { rows } = await cliente.query(
+        'SELECT 1 FROM migraciones_aplicadas WHERE nombre = $1',
+        [archivo]
+      );
+      if (rows.length > 0) continue;
+
+      const sql = fs.readFileSync(path.join(DIR_MIGRACIONES, archivo), 'utf-8');
+      await cliente.query(sql);
+      await cliente.query('INSERT INTO migraciones_aplicadas (nombre) VALUES ($1)', [archivo]);
+    }
+  } finally {
+    await cliente.query('SELECT pg_advisory_unlock($1)', [LOCK_MIGRACIONES]);
+    cliente.release();
   }
 }
 

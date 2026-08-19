@@ -11,7 +11,7 @@ describe('crearTenant', () => {
   afterAll(async () => { await pool.end(); });
 
   it('crea el tenant y una api key activa, con el hash correcto en la tabla', async () => {
-    const { tenantId, apiKey } = await crearTenant(pool, 'rdte');
+    const { tenantId, apiKey } = await crearTenant(pool, 'rdte-crear');
 
     const { rows } = await pool.query(
       'SELECT tenant_id, key_hash, revocada_en FROM api_keys WHERE tenant_id = $1',
@@ -23,7 +23,7 @@ describe('crearTenant', () => {
   });
 
   it('usa el límite por minuto pasado, o 60 por defecto', async () => {
-    const { tenantId } = await crearTenant(pool, 'agenticerp', 120);
+    const { tenantId } = await crearTenant(pool, 'agenticerp-crear', 120);
     const { rows } = await pool.query('SELECT limite_por_minuto FROM tenants WHERE id = $1', [tenantId]);
     expect(rows[0].limite_por_minuto).toBe(120);
   });

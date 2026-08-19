@@ -12,9 +12,9 @@ describe('autenticarTenant', () => {
   afterAll(async () => { await pool.end(); });
 
   it('resuelve el tenant con una key válida', async () => {
-    const { tenantId, apiKey } = await crearTenant(pool, 'rdte');
+    const { tenantId, apiKey } = await crearTenant(pool, 'rdte-auth');
     const resultado = await autenticarTenant(pool, apiKey);
-    expect(resultado).toMatchObject({ tenantId, nombre: 'rdte' });
+    expect(resultado).toMatchObject({ tenantId, nombre: 'rdte-auth' });
   });
 
   it('null con key inexistente', async () => {
@@ -26,7 +26,7 @@ describe('autenticarTenant', () => {
   });
 
   it('null con key revocada', async () => {
-    const { apiKey } = await crearTenant(pool, 'rdte');
+    const { apiKey } = await crearTenant(pool, 'rdte-auth');
     await pool.query(
       `UPDATE api_keys SET revocada_en = now() WHERE key_hash = $1`,
       [hashApiKey(apiKey)]

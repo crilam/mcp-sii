@@ -16,7 +16,7 @@ describe('rate limit', () => {
   afterAll(async () => { await pool.end(); });
 
   it('chequearRateLimitTenant permite hasta el límite y bloquea el siguiente', async () => {
-    const { tenantId } = await crearTenant(pool, 'rdte', 2);
+    const { tenantId } = await crearTenant(pool, 'rdte-ratelimit', 2);
 
     expect(await chequearRateLimitTenant(pool, tenantId, 2)).toBe(true);
     expect(await chequearRateLimitTenant(pool, tenantId, 2)).toBe(true);

@@ -4,8 +4,10 @@ import { aplicarMigraciones } from '../../src/scripts/migrar';
 describe('aplicarMigraciones', () => {
   const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
 
+  // No se borran las tablas acá: la base de test es compartida entre todos los
+  // archivos de test de infra (Jest corre suites en paralelo), y un DROP en
+  // este afterAll competiría con el resto que las necesita viva al mismo tiempo.
   afterAll(async () => {
-    await pool.query('DROP TABLE IF EXISTS auditoria, auth_fallida_contador, rate_limit_contador, api_keys, tenants, migraciones_aplicadas CASCADE');
     await pool.end();
   });
 

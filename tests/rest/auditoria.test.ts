@@ -15,7 +15,7 @@ describe('registrarAuditoria', () => {
   afterAll(async () => { await pool.end(); });
 
   it('inserta una fila con los campos esperados', async () => {
-    const { tenantId } = await crearTenant(pool, 'rdte');
+    const { tenantId } = await crearTenant(pool, 'rdte-auditoria');
 
     await registrarAuditoria(pool, {
       tenantId, ip: '10.0.0.1', rut: '11.111.111-1', ruta: '/v1/rcv/resumen', status: 200, error: null,
