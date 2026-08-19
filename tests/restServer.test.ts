@@ -22,6 +22,15 @@ function request(port: number, opts: { path: string; headers?: Record<string, st
   });
 }
 
+let contadorIpDeTest = 0;
+// IP única por test, vía X-Forwarded-For — así cada test que ejercita el
+// límite por IP arranca desde 0, sin interferir con lo que ya acumularon
+// otros tests corriendo contra el mismo servidor real.
+function proximaIpDeTest(): string {
+  contadorIpDeTest += 1;
+  return `10.99.0.${contadorIpDeTest}`;
+}
+
 describe('restServer', () => {
   const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
   let server: http.Server;
@@ -135,5 +144,43 @@ describe('restServer', () => {
     }
 
     expect(await contadorAntes()).toBe(antes);
+  });
+
+  it('usa la IP de X-Forwarded-For, no la del socket (detrás de un proxy real)', async () => {
+    const ip = proximaIpDeTest();
+    await request(port, {
+      path: '/v1/rcv/resumen',
+      headers: { 'X-Forwarded-For': ip },
+      body: '{}',
+    });
+
+    const { rows } = await pool.query(
+      `SELECT contador FROM auth_fallida_contador WHERE ip = $1`,
+      [ip]
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].contador).toBe(1);
+  });
+
+  it('circuito completo: N fallos de auth desde la misma IP terminan en 429', async () => {
+    const ip = proximaIpDeTest();
+
+    // LIMITE_AUTH_FALLIDA_POR_IP = 20 en restServer.ts.
+    for (let i = 0; i < 20; i++) {
+      const res = await request(port, {
+        path: '/v1/rcv/resumen',
+        headers: { 'X-Forwarded-For': ip },
+        body: '{}',
+      });
+      expect(res.status).toBe(401);
+    }
+
+    // El intento 21 ya no debería ni intentar autenticar: 429 directo.
+    const bloqueado = await request(port, {
+      path: '/v1/rcv/resumen',
+      headers: { 'X-Forwarded-For': ip, Authorization: `Bearer ${apiKey}` }, // aunque la key sea válida
+      body: '{}',
+    });
+    expect(bloqueado.status).toBe(429);
   });
 });
