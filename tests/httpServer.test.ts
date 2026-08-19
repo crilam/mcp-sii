@@ -66,6 +66,30 @@ describe('validarClave', () => {
 
     expect(orden).toEqual(['authenticateOnly', 'logout']);
   });
+
+  it('clave correcta pero logout falla: sigue respondiendo ok:true (logout no pisa el resultado)', async () => {
+    const authenticateOnly = jest.fn().mockResolvedValue(undefined);
+    const logout = jest.fn().mockRejectedValue(new Error('ETIMEDOUT en logout'));
+    const registro = armarRegistro({ authenticateOnly, logout });
+    const credenciales = new ProveedorCredencialesRuntime();
+
+    const resultado = await validarClave('11.111.111-1', 'secreta', registro, credenciales);
+
+    expect(resultado).toEqual({ ok: true });
+  });
+
+  it('clave rechazada y logout también falla: conserva CREDENCIALES_INVALIDAS, no ERROR', async () => {
+    const authenticateOnly = jest.fn().mockRejectedValue(
+      new Error('El SII rechazó la autenticación: clave incorrecta')
+    );
+    const logout = jest.fn().mockRejectedValue(new Error('ETIMEDOUT en logout'));
+    const registro = armarRegistro({ authenticateOnly, logout });
+    const credenciales = new ProveedorCredencialesRuntime();
+
+    const resultado = await validarClave('11.111.111-1', 'mala', registro, credenciales);
+
+    expect(resultado).toEqual({ ok: false, error: 'CREDENCIALES_INVALIDAS' });
+  });
 });
 
 function request(
@@ -148,6 +172,14 @@ describe('crearServidorHttp', () => {
       body: 'esto no es json',
     });
     expect(res.status).toBe(400);
+  });
+
+  it('body demasiado grande responde 413', async () => {
+    const res = await request(port, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+      body: JSON.stringify({ rut: '1', clave: 'x'.repeat(5_000) }),
+    });
+    expect(res.status).toBe(413);
   });
 
   it('ruta desconocida responde 404', async () => {
