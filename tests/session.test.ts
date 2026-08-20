@@ -86,15 +86,28 @@ describe('SessionManager.login', () => {
   // por exitoso cualquier clave, y validarClave (endpoint de Tributy)
   // reportaba {ok:true} con credenciales inválidas.
   it('clave rechazada: sigue en la página de login tras el click, lanza error clasificable', async () => {
-    const browser = crearBrowserMock();
-    (browser.snapshot as jest.Mock).mockReturnValueOnce(loginSnapshot);
-    (browser.eval as jest.Mock).mockReturnValue(
-      'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html'
-    );
+    jest.useFakeTimers();
+    try {
+      const browser = crearBrowserMock();
+      (browser.snapshot as jest.Mock).mockReturnValueOnce(loginSnapshot);
+      (browser.eval as jest.Mock).mockReturnValue(
+        'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html'
+      );
 
-    const mgr = new SessionManager(configClave, browser);
+      const mgr = new SessionManager(configClave, browser);
 
-    await expect(mgr.login()).rejects.toThrow('El SII rechazó la autenticación');
+      // El assert se adjunta ANTES de avanzar el reloj: si no, el rechazo
+      // ocurre sin handler todavía adjunto durante advanceTimersByTimeAsync
+      // y Node lo marca como rejection no manejada.
+      const assertion = expect(mgr.login()).rejects.toThrow('El SII rechazó la autenticación');
+      // El polling espera hasta 5s reales entre cada chequeo — con fake
+      // timers se avanza el reloj en vez de dormir de verdad, así el test
+      // no paga esos segundos.
+      await jest.advanceTimersByTimeAsync(5_000);
+      await assertion;
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
