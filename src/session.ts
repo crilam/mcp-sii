@@ -517,15 +517,28 @@ export class SessionManager {
   // instantáneo. Devuelve true si el campo de clave SIGUE en el snapshot al
   // agotarse el tiempo (rechazo o timeout) — false apenas desaparece (login
   // avanzó). Un snapshot vacío/basura del CLI cuenta como "sigue" (fail-safe:
-  // nunca se interpreta la ausencia de datos como éxito). Sleep no
-  // bloqueante: este método corre dentro del proceso REST — un sleep
-  // síncrono (execSync) congelaría TODO el event loop, dejando de atender
-  // otros requests mientras dura el polling.
+  // nunca se interpreta la ausencia de datos como éxito).
+  //
+  // Exige DOS lecturas consecutivas sin el campo antes de dar por exitoso:
+  // el primer snapshot tras el click puede capturar el DOM a mitad de
+  // re-render (contenido parcial, sin el input todavía pero tampoco
+  // realmente logueado) — una sola lectura "limpia" ahí sería un falso
+  // positivo que el chequeo de dominio no detecta (sigue en sii.cl).
+  //
+  // Sleep no bloqueante: este método corre dentro del proceso REST — un
+  // sleep síncrono (execSync) congelaría TODO el event loop, dejando de
+  // atender otros requests mientras dura el polling.
   private async esperarSalirDelFormularioDeLogin(maxMs = 15_000, step = 1_000): Promise<boolean> {
     let elapsed = 0;
+    let lecturasLimpiasSeguidas = 0;
     while (elapsed < maxMs) {
       const s = this.browser.snapshot();
-      if (!(!s || this.campoDeClavePresente(s))) return false;
+      if (s && !this.campoDeClavePresente(s)) {
+        lecturasLimpiasSeguidas++;
+        if (lecturasLimpiasSeguidas >= 2) return false;
+      } else {
+        lecturasLimpiasSeguidas = 0;
+      }
       await new Promise(resolve => setTimeout(resolve, step));
       elapsed += step;
     }
