@@ -24,14 +24,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g agent-browser && agent-browser install
+RUN npm install -g agent-browser@0.34.0
 
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 
+# Corre como `node` (no root): Chromium headless como root necesitaría
+# --no-sandbox y ampliaría el impacto de cualquier RCE en el proceso web.
+# El browser se instala DESPUÉS del chown para que quede en el $HOME de
+# `node`, no en el de root.
+RUN chown -R node:node /app
+USER node
+RUN agent-browser install
+
 ENV NODE_ENV=production
 ENV PORT=8790
 EXPOSE 8790
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:8790/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
 CMD ["node", "dist/src/restServerIndex.js"]
