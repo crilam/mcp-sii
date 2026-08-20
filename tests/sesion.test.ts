@@ -21,6 +21,10 @@ const loginSnapshot = [
 function makeSession() {
   const browser = new MockBrowser();
   (browser.snapshot as jest.Mock).mockReturnValue(loginSnapshot);
+  // Login exitoso: fillClaveForm verifica la URL tras el click (ver
+  // src/session.ts) — sin esto, cualquier autenticación acá fallaría con
+  // "El SII rechazó la autenticación".
+  (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
   return { browser, session: new SessionManager(config, browser) };
 }
 
@@ -61,6 +65,7 @@ describe('SessionManager.listEmpresasDisponibles', () => {
     (browser.snapshot as jest.Mock).mockReturnValue(
       '- option "EMPRESA UNO SPA 11111111-1" [ref=e11]'
     );
+    (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
     const session = new SessionManager(config, browser);
 
     await session.listEmpresasDisponibles();
@@ -76,6 +81,7 @@ describe('SessionManager: página de empresas que no rinde', () => {
   it('falla explícitamente en vez de reportar cero empresas', async () => {
     const browser = new MockBrowser();
     (browser.snapshot as jest.Mock).mockReturnValue('- generic\n  - StaticText "Cargando"');
+    (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
     const session = new SessionManager(config, browser);
 
     await expect(session.listEmpresasDisponibles()).rejects.toThrow(/no terminó de cargar/);

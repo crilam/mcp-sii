@@ -472,6 +472,14 @@ export class SessionManager {
     return map;
   }
 
+  // El SII no manda ningún error con clave incorrecta acá (a diferencia del
+  // CGI de certificado, ver assertAutenticacionExitosa): sólo re-renderiza la
+  // MISMA página de login. Sin este chequeo, cualquier clave "pasaba" y
+  // validarClave (src/rest/rutas/sesion.ts) reportaba {ok:true} con
+  // credenciales inválidas. Criterio: tras el click hay que dejar de estar en
+  // IngresoRutClave.html Y terminar en un dominio del SII — evita que una
+  // URL vacía/basura del CLI o una redirección a página de error propia del
+  // SII cuente como éxito.
   private async fillClaveForm(snapshot: string): Promise<void> {
     const rutRef = this.findRef(snapshot, /rut|run/i) ?? '@e1';
     const claveRef = this.findRef(snapshot, /clave|contraseña|password/i) ?? '@e2';
@@ -480,6 +488,39 @@ export class SessionManager {
     this.browser.fill(rutRef, this.config.rut);
     this.browser.fill(claveRef, this.config.clave!);
     this.browser.click(btnRef);
+
+    const urlTrasClick = await this.esperarNavegacionFueraDeLogin();
+    if (urlTrasClick.includes('IngresoRutClave')) {
+      // 15s es generoso a propósito: un falso "clave incorrecta" por
+      // latencia real del SII es peor que tardar un poco más en detectar un
+      // rechazo genuino — a Tributy le llega como CREDENCIALES_INVALIDAS y
+      // se lo muestra tal cual al usuario final.
+      throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+    }
+    if (!/^https:\/\/([^/]+\.)?sii\.cl\//.test(urlTrasClick)) {
+      throw new Error('El SII rechazó la autenticación: destino inesperado tras el login.');
+    }
+  }
+
+  // Polling corto: el click dispara la navegación pero no es instantánea.
+  // Devuelve la URL una vez que deja de ser la página de login, o la última
+  // observada si el tiempo se agota (ahí sigue siendo el login → rechazo).
+  // Sleep no bloqueante: este método corre dentro del proceso REST — un
+  // sleep síncrono (execSync) congelaría TODO el event loop, dejando de
+  // atender otros requests mientras dura el polling.
+  private async esperarNavegacionFueraDeLogin(maxMs = 15_000, step = 1_000): Promise<string> {
+    let elapsed = 0;
+    let url = this.leerUrlActual();
+    while (url.includes('IngresoRutClave') && elapsed < maxMs) {
+      await new Promise(resolve => setTimeout(resolve, step));
+      elapsed += step;
+      url = this.leerUrlActual();
+    }
+    return url;
+  }
+
+  private leerUrlActual(): string {
+    return this.browser.eval('document.location.href');
   }
 
   // empresaRutParam es la empresa pedida en la llamada (mayor prioridad).
