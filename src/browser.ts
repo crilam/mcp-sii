@@ -1,6 +1,8 @@
 import { execFileSync, execSync } from 'child_process';
 
-const EXEC_OPTS = { encoding: 'utf-8' as const, timeout: 30_000 };
+// maxBuffer explícito: el default de Node (1 MB) lo revienta un snapshot
+// grande del árbol de accesibilidad de una página con muchos elementos.
+const EXEC_OPTS = { encoding: 'utf-8' as const, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 };
 
 export class Browser {
   constructor(private sessionId?: string) {}

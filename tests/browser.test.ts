@@ -101,6 +101,23 @@ describe('Browser', () => {
     );
   });
 
+  // Verificado a mano contra el binario real: `agent-browser fill @e3 "--session"`
+  // NO reinterpreta el valor como flag — resuelve <selector>/<text> por
+  // posición para un subcomando de aridad fija, no escaneando tokens con
+  // guión entre los argumentos. Se documenta acá para que quede como
+  // regresión: si `run()` alguna vez cambia a pasar los argumentos por otro
+  // medio (por ejemplo, uniéndolos de nuevo en un string), este test lo
+  // detecta.
+  it('un valor que empieza con guión (aunque parezca un flag) viaja como argumento posicional, no como flag', () => {
+    mockExec.mockReturnValue(Buffer.from(''));
+    browser.fill('@e2', '--session');
+    expect(mockExec).toHaveBeenCalledWith(
+      'agent-browser',
+      ['fill', '@e2', '--session'],
+      expect.any(Object)
+    );
+  });
+
   it('eval ya no necesita escapar comillas manualmente (van como argumento propio)', () => {
     mockExec.mockReturnValue(Buffer.from(''));
     browser.eval('document.title === "algo"');
