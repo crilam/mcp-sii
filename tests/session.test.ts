@@ -36,7 +36,8 @@ const dosEmpresasSnapshot = [
 ].join('\n');
 
 // Tras el login, fillClaveForm vuelve a leer el snapshot para confirmar que
-// el campo de clave desapareció (ver comentario en src/session.ts). Con
+// el campo de clave desapareció, y la URL para confirmar que el destino es
+// un dominio de sii.cl (ver comentario en src/session.ts). Con
 // `mockReturnValueOnce(loginSnapshot).mockReturnValue(snapshotFinal)`, la
 // primera lectura sigue siendo el form de login y TODAS las lecturas
 // posteriores (el chequeo post-click, más las de selección de empresa) usan
@@ -46,6 +47,7 @@ function mockearLoginExitoso(browser: Browser, snapshotFinal: string): void {
   (browser.snapshot as jest.Mock)
     .mockReturnValueOnce(loginSnapshot)
     .mockReturnValue(snapshotFinal);
+  (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
 }
 
 describe('SessionManager.login', () => {
@@ -137,12 +139,56 @@ describe('SessionManager.login', () => {
       jest.useRealTimers();
     }
   });
+
+  // Login lento pero exitoso: el campo de clave sigue presente en los
+  // primeros chequeos (el SII todavía está procesando el submit) y recién
+  // desaparece más adelante, dentro del margen de 15s. No debe clasificarse
+  // como rechazo sólo porque no desapareció en el primer poll.
+  it('clave válida con login lento: el campo desaparece recién en un poll posterior, no rechaza', async () => {
+    jest.useFakeTimers();
+    try {
+      const browser = crearBrowserMock();
+      (browser.snapshot as jest.Mock)
+        .mockReturnValueOnce(loginSnapshot) // lectura inicial del form
+        .mockReturnValueOnce(loginSnapshot) // 1er poll: SII todavía procesando
+        .mockReturnValueOnce(loginSnapshot) // 2do poll: sigue procesando
+        .mockReturnValue(empresaUnicaSnapshot); // 3er poll en adelante: ya avanzó
+      (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+
+      const mgr = new SessionManager(configClave, browser);
+
+      const login = mgr.login();
+      await jest.advanceTimersByTimeAsync(3_000); // alcanza para los 2 polls que fallan + el que confirma
+      const session = await login;
+
+      expect(session.empresaRut).toBe('11111111-1');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  // Cubre el caso que este mismo fix podía reintroducir: el campo de clave
+  // desaparece (login "avanzó"), pero el destino no es un dominio de sii.cl
+  // — una página de error o mantención ajena. Sin este chequeo, cualquier
+  // interstitial sin form volvería a reportar éxito con credenciales
+  // inválidas.
+  it('el campo de clave desaparece pero el destino no es sii.cl: rechaza igual', async () => {
+    const browser = crearBrowserMock();
+    (browser.snapshot as jest.Mock)
+      .mockReturnValueOnce(loginSnapshot)
+      .mockReturnValue('- generic\n  - StaticText "Página no disponible"');
+    (browser.eval as jest.Mock).mockReturnValue('https://error-generico.example.com/');
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(mgr.login()).rejects.toThrow('El SII rechazó la autenticación');
+  });
 });
 
 describe('SessionManager.getSession', () => {
   it('reutiliza la sesion cacheada sin hacer login nuevamente', async () => {
     const browser = crearBrowserMock();
-    (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
+    mockearLoginExitoso(browser, empresaUnicaSnapshot);
 
     const mgr = new SessionManager(configClave, browser);
     await mgr.getSession();

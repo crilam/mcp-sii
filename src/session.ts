@@ -479,14 +479,17 @@ export class SessionManager {
   // credenciales inválidas.
   //
   // Se detecta por CONTENIDO (¿sigue el campo de clave en el snapshot?), no
-  // por URL: un primer intento verificaba document.location.href, pero un
+  // por URL: una primera versión verificaba document.location.href, pero un
   // login con clave VÁLIDA confirmada por el usuario también quedó atrapado
-  // — el SII no navega a otra URL en este flujo, re-renderiza sobre la misma
-  // (el timing lo confirmó: el rechazo tardó los 15s completos del timeout,
-  // no los ~9s de un rechazo genuino). El campo de clave desaparece del DOM
-  // cuando el login efectivamente avanza, tanto si cae en selección de
-  // empresa como en cualquier otra página post-login — no hace falta conocer
-  // ni la URL ni el texto exacto de error del SII.
+  // — el SII no navega a otra URL en este flujo, re-renderiza sobre la misma.
+  // El campo de clave desaparece del DOM cuando el login efectivamente
+  // avanza, tanto si cae en selección de empresa como en cualquier otra
+  // página post-login. La URL sigue chequeándose, pero sólo COMO CONFIRMACIÓN
+  // final (no como condición de cambio): si el campo desaparece pero el
+  // destino no es un dominio de sii.cl, no es un login exitoso — es una
+  // página de error/mantención ajena, y sin este chequeo cualquier
+  // interstitial sin form volvería a reportar {ok:true} con credenciales
+  // inválidas (el mismo bug que cerró el PR #36, por otra vía).
   private async fillClaveForm(snapshot: string): Promise<void> {
     const rutRef = this.findRef(snapshot, /rut|run/i) ?? '@e1';
     const claveRef = this.findRef(snapshot, /clave|contraseña|password/i) ?? '@e2';
@@ -496,14 +499,17 @@ export class SessionManager {
     this.browser.fill(claveRef, this.config.clave!);
     this.browser.click(btnRef);
 
+    // 15s es generoso a propósito: un falso "clave incorrecta" por latencia
+    // real del SII es peor que tardar un poco más en detectar un rechazo
+    // genuino — a Tributy le llega como CREDENCIALES_INVALIDAS y se lo
+    // muestra tal cual al usuario final.
     const siguioEnFormularioDeLogin = await this.esperarSalirDelFormularioDeLogin();
     if (siguioEnFormularioDeLogin) {
-      // 15s es generoso a propósito: un falso "clave incorrecta" por
-      // latencia real del SII es peor que tardar un poco más en detectar un
-      // rechazo genuino — a Tributy le llega como CREDENCIALES_INVALIDAS y
-      // se lo muestra tal cual al usuario final.
-      console.error('Login SII: el campo de clave sigue presente tras el click (posible clave incorrecta o timeout).');
       throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+    }
+    const urlFinal = this.leerUrlActual();
+    if (!/^https:\/\/([^/?]+\.)?sii\.cl(\/|\?|$)/.test(urlFinal)) {
+      throw new Error('El SII rechazó la autenticación: destino inesperado tras el login.');
     }
   }
 
@@ -519,12 +525,28 @@ export class SessionManager {
     let elapsed = 0;
     while (elapsed < maxMs) {
       const s = this.browser.snapshot();
-      const sigueElCampoDeClave = !s || this.findRef(s, /clave|contraseña|password/i) !== null;
-      if (!sigueElCampoDeClave) return false;
+      if (!(!s || this.campoDeClavePresente(s))) return false;
       await new Promise(resolve => setTimeout(resolve, step));
       elapsed += step;
     }
     return true;
+  }
+
+  // A diferencia de findRef genérico (usado para UBICAR el campo antes de
+  // llenarlo), acá exige que la línea sea un campo de INPUT (textbox o
+  // password) — no cualquier elemento que mencione "clave". Sin esta
+  // restricción, un link o botón post-login como "Cambiar clave" (existe en
+  // el menú de MiSII) haría que el chequeo crea que el form de login sigue
+  // presente, y reportaría el mismo falso CREDENCIALES_INVALIDAS que este
+  // fix corrige, por otra vía.
+  private campoDeClavePresente(snapshot: string): boolean {
+    return snapshot.split('\n').some(
+      line => /textbox|password/i.test(line) && /clave|contraseña|password/i.test(line)
+    );
+  }
+
+  private leerUrlActual(): string {
+    return this.browser.eval('document.location.href');
   }
 
   // empresaRutParam es la empresa pedida en la llamada (mayor prioridad).
