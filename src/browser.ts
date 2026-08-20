@@ -1,25 +1,33 @@
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 
-const EXEC_OPTS = { encoding: 'utf-8' as const, timeout: 30_000 };
+// maxBuffer explícito: el default de Node (1 MB) lo revienta un snapshot
+// grande del árbol de accesibilidad de una página con muchos elementos.
+const EXEC_OPTS = { encoding: 'utf-8' as const, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 };
 
 export class Browser {
   constructor(private sessionId?: string) {}
 
-  private run(args: string): string {
-    const prefijoSesion = this.sessionId ? `--session ${this.sessionId} ` : '';
-    return execSync(`agent-browser ${prefijoSesion}${args}`, EXEC_OPTS).toString().trim();
+  // execFileSync, NO execSync: los args van directo al proceso (argv), sin
+  // pasar por un shell. Con execSync + interpolación de string, una clave
+  // tributaria con comillas/`$`/backtick/`\` rompía el comando (error de
+  // sintaxis) o, peor, podía inyectar comandos arbitrarios en el contenedor —
+  // la clave llega del body de /v1/sesion/validar-clave, que es input de un
+  // tenant externo, no confiable.
+  private run(args: string[]): string {
+    const prefijoSesion = this.sessionId ? ['--session', this.sessionId] : [];
+    return execFileSync('agent-browser', [...prefijoSesion, ...args], EXEC_OPTS).toString().trim();
   }
 
   open(url: string): void {
-    this.run(`open ${url}`);
+    this.run(['open', url]);
   }
 
   // Navega a una URL que puede mostrar un JS confirm dialog durante la carga.
-  // Captura el error provocado por el dialog (execSync pone el output en err.stderr/stdout,
+  // Captura el error provocado por el dialog (execFileSync pone el output en err.stderr/stdout,
   // no en err.message) y lo deja pendiente para que el llamador resuelva con dialogAccept().
   openWithPendingDialog(url: string): void {
     try {
-      this.run(`open ${url}`);
+      this.run(['open', url]);
     } catch (err: unknown) {
       const allText = [
         err instanceof Error ? err.message : String(err),
@@ -31,44 +39,43 @@ export class Browser {
   }
 
   snapshot(): string {
-    return this.run('snapshot');
+    return this.run(['snapshot']);
   }
 
   click(ref: string): void {
-    this.run(`click ${ref}`);
+    this.run(['click', ref]);
   }
 
   fill(ref: string, text: string): void {
-    this.run(`fill ${ref} "${text}"`);
+    this.run(['fill', ref, text]);
   }
 
   type(ref: string, text: string): void {
-    this.run(`type ${ref} "${text}"`);
+    this.run(['type', ref, text]);
   }
 
   getText(ref: string): string {
-    return this.run(`get text ${ref}`);
+    return this.run(['get', 'text', ref]);
   }
 
   select(ref: string, value: string): void {
-    this.run(`select ${ref} "${value}"`);
+    this.run(['select', ref, value]);
   }
 
   eval(js: string): string {
-    const escaped = js.replace(/"/g, '\\"');
-    return this.run(`eval "${escaped}"`);
+    return this.run(['eval', js]);
   }
 
   press(key: string): void {
-    this.run(`press ${key}`);
+    this.run(['press', key]);
   }
 
   dialogAccept(): void {
-    this.run('dialog accept');
+    this.run(['dialog', 'accept']);
   }
 
   dialogDismiss(): void {
-    this.run('dialog dismiss');
+    this.run(['dialog', 'dismiss']);
   }
 
   waitForAny(texts: string[], maxMs = 10_000): void {
@@ -95,6 +102,6 @@ export class Browser {
   }
 
   close(): void {
-    this.run('close');
+    this.run(['close']);
   }
 }

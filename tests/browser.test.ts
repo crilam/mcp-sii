@@ -1,8 +1,8 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { Browser } from '../src/browser';
 
-jest.mock('child_process', () => ({ execSync: jest.fn() }));
-const mockExec = execSync as jest.MockedFunction<typeof execSync>;
+jest.mock('child_process', () => ({ execFileSync: jest.fn(), execSync: jest.fn() }));
+const mockExec = execFileSync as jest.MockedFunction<typeof execFileSync>;
 
 describe('Browser', () => {
   let browser: Browser;
@@ -16,7 +16,8 @@ describe('Browser', () => {
     mockExec.mockReturnValue(Buffer.from(''));
     browser.open('https://example.com');
     expect(mockExec).toHaveBeenCalledWith(
-      'agent-browser open https://example.com',
+      'agent-browser',
+      ['open', 'https://example.com'],
       expect.any(Object)
     );
   });
@@ -25,20 +26,21 @@ describe('Browser', () => {
     const tree = '[button @e1 "Ingresar"]';
     mockExec.mockReturnValue(Buffer.from(tree));
     expect(browser.snapshot()).toBe(tree);
-    expect(mockExec).toHaveBeenCalledWith('agent-browser snapshot', expect.any(Object));
+    expect(mockExec).toHaveBeenCalledWith('agent-browser', ['snapshot'], expect.any(Object));
   });
 
   it('click ejecuta click sobre el ref', () => {
     mockExec.mockReturnValue(Buffer.from(''));
     browser.click('@e1');
-    expect(mockExec).toHaveBeenCalledWith('agent-browser click @e1', expect.any(Object));
+    expect(mockExec).toHaveBeenCalledWith('agent-browser', ['click', '@e1'], expect.any(Object));
   });
 
   it('fill limpia y rellena el campo', () => {
     mockExec.mockReturnValue(Buffer.from(''));
     browser.fill('@e2', 'texto de prueba');
     expect(mockExec).toHaveBeenCalledWith(
-      'agent-browser fill @e2 "texto de prueba"',
+      'agent-browser',
+      ['fill', '@e2', 'texto de prueba'],
       expect.any(Object)
     );
   });
@@ -46,14 +48,15 @@ describe('Browser', () => {
   it('getText retorna el texto del elemento', () => {
     mockExec.mockReturnValue(Buffer.from('Texto del elemento'));
     expect(browser.getText('@e3')).toBe('Texto del elemento');
-    expect(mockExec).toHaveBeenCalledWith('agent-browser get text @e3', expect.any(Object));
+    expect(mockExec).toHaveBeenCalledWith('agent-browser', ['get', 'text', '@e3'], expect.any(Object));
   });
 
   it('select elige una opcion del dropdown', () => {
     mockExec.mockReturnValue(Buffer.from(''));
     browser.select('@e4', '11111111');
     expect(mockExec).toHaveBeenCalledWith(
-      'agent-browser select @e4 "11111111"',
+      'agent-browser',
+      ['select', '@e4', '11111111'],
       expect.any(Object)
     );
   });
@@ -61,7 +64,7 @@ describe('Browser', () => {
   it('close cierra el browser', () => {
     mockExec.mockReturnValue(Buffer.from(''));
     browser.close();
-    expect(mockExec).toHaveBeenCalledWith('agent-browser close', expect.any(Object));
+    expect(mockExec).toHaveBeenCalledWith('agent-browser', ['close'], expect.any(Object));
   });
 
   it('con sessionId, antepone --session a cada comando', () => {
@@ -69,7 +72,8 @@ describe('Browser', () => {
     mockExec.mockReturnValue(Buffer.from(''));
     browser2.open('https://example.com');
     expect(mockExec).toHaveBeenCalledWith(
-      'agent-browser --session 11111111-1 open https://example.com',
+      'agent-browser',
+      ['--session', '11111111-1', 'open', 'https://example.com'],
       expect.any(Object)
     );
   });
@@ -77,6 +81,50 @@ describe('Browser', () => {
   it('sin sessionId, no antepone --session (comportamiento actual intacto)', () => {
     mockExec.mockReturnValue(Buffer.from(''));
     browser.snapshot();
-    expect(mockExec).toHaveBeenCalledWith('agent-browser snapshot', expect.any(Object));
+    expect(mockExec).toHaveBeenCalledWith('agent-browser', ['snapshot'], expect.any(Object));
+  });
+
+  // Bug real en prod: una clave tributaria con comillas/`$`/backtick/`\` rompía
+  // el comando ("Unterminated quoted string") cuando `run()` armaba un string
+  // de shell por interpolación — o peor, podía inyectar comandos arbitrarios,
+  // ya que la clave llega del body de /v1/sesion/validar-clave (tenant
+  // externo). Con execFileSync + argv array, el texto viaja como UN argumento
+  // sin pasar por ningún shell: estos caracteres no tienen significado especial.
+  it('fill con caracteres especiales de shell no rompe el comando ni inyecta nada', () => {
+    mockExec.mockReturnValue(Buffer.from(''));
+    const claveMaliciosa = `o'brien"$(rm -rf /)\`whoami\`\\ con espacios`;
+    browser.fill('@e2', claveMaliciosa);
+    expect(mockExec).toHaveBeenCalledWith(
+      'agent-browser',
+      ['fill', '@e2', claveMaliciosa],
+      expect.any(Object)
+    );
+  });
+
+  // Verificado a mano contra el binario real: `agent-browser fill @e3 "--session"`
+  // NO reinterpreta el valor como flag — resuelve <selector>/<text> por
+  // posición para un subcomando de aridad fija, no escaneando tokens con
+  // guión entre los argumentos. Se documenta acá para que quede como
+  // regresión: si `run()` alguna vez cambia a pasar los argumentos por otro
+  // medio (por ejemplo, uniéndolos de nuevo en un string), este test lo
+  // detecta.
+  it('un valor que empieza con guión (aunque parezca un flag) viaja como argumento posicional, no como flag', () => {
+    mockExec.mockReturnValue(Buffer.from(''));
+    browser.fill('@e2', '--session');
+    expect(mockExec).toHaveBeenCalledWith(
+      'agent-browser',
+      ['fill', '@e2', '--session'],
+      expect.any(Object)
+    );
+  });
+
+  it('eval ya no necesita escapar comillas manualmente (van como argumento propio)', () => {
+    mockExec.mockReturnValue(Buffer.from(''));
+    browser.eval('document.title === "algo"');
+    expect(mockExec).toHaveBeenCalledWith(
+      'agent-browser',
+      ['eval', 'document.title === "algo"'],
+      expect.any(Object)
+    );
   });
 });
