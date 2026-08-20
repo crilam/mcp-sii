@@ -100,14 +100,26 @@ describe('SessionManager.login', () => {
       // ocurre sin handler todavía adjunto durante advanceTimersByTimeAsync
       // y Node lo marca como rejection no manejada.
       const assertion = expect(mgr.login()).rejects.toThrow('El SII rechazó la autenticación');
-      // El polling espera hasta 5s reales entre cada chequeo — con fake
+      // El polling espera hasta 15s reales entre cada chequeo — con fake
       // timers se avanza el reloj en vez de dormir de verdad, así el test
       // no paga esos segundos.
-      await jest.advanceTimersByTimeAsync(5_000);
+      await jest.advanceTimersByTimeAsync(15_000);
       await assertion;
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('login termina en un dominio que no es del SII: lanza error clasificable en vez de dar por exitoso', async () => {
+    const browser = crearBrowserMock();
+    (browser.snapshot as jest.Mock).mockReturnValueOnce(loginSnapshot);
+    // URL vacía/basura del CLI, o una redirección fuera de sii.cl — ninguna
+    // de las dos es un login exitoso, aunque ya no diga "IngresoRutClave".
+    (browser.eval as jest.Mock).mockReturnValue('');
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(mgr.login()).rejects.toThrow('El SII rechazó la autenticación');
   });
 });
 

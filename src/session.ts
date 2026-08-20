@@ -490,8 +490,15 @@ export class SessionManager {
     this.browser.click(btnRef);
 
     const urlTrasClick = await this.esperarNavegacionFueraDeLogin();
-    if (!/^https:\/\/[^/]*\.sii\.cl\//.test(urlTrasClick) || urlTrasClick.includes('IngresoRutClave')) {
+    if (urlTrasClick.includes('IngresoRutClave')) {
+      // 15s es generoso a propósito: un falso "clave incorrecta" por
+      // latencia real del SII es peor que tardar un poco más en detectar un
+      // rechazo genuino — a Tributy le llega como CREDENCIALES_INVALIDAS y
+      // se lo muestra tal cual al usuario final.
       throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+    }
+    if (!/^https:\/\/([^/]+\.)?sii\.cl\//.test(urlTrasClick)) {
+      throw new Error('El SII rechazó la autenticación: destino inesperado tras el login.');
     }
   }
 
@@ -501,7 +508,7 @@ export class SessionManager {
   // Sleep no bloqueante: este método corre dentro del proceso REST — un
   // sleep síncrono (execSync) congelaría TODO el event loop, dejando de
   // atender otros requests mientras dura el polling.
-  private async esperarNavegacionFueraDeLogin(maxMs = 5_000, step = 1_000): Promise<string> {
+  private async esperarNavegacionFueraDeLogin(maxMs = 15_000, step = 1_000): Promise<string> {
     let elapsed = 0;
     let url = this.leerUrlActual();
     while (url.includes('IngresoRutClave') && elapsed < maxMs) {
