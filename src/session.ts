@@ -472,6 +472,15 @@ export class SessionManager {
     return map;
   }
 
+  // El SII no manda ningún error HTTP ni un alert() con clave incorrecta acá
+  // (eso es específico del CGI de certificado, ver assertAutenticacionExitosa):
+  // simplemente vuelve a renderizar la MISMA página de login. Sin este chequeo,
+  // fillClaveForm "tenía éxito" con cualquier clave — el click ocurría, pero
+  // nadie miraba qué pasó después — y validarClave (src/rest/rutas/sesion.ts)
+  // reportaba {ok:true} para credenciales inválidas. Se espera un momento a que
+  // la navegación asiente y se verifica que la URL haya cambiado del login;
+  // seguir en IngresoRutClave.html es la señal de rechazo (clave o RUT
+  // incorrectos), igual criterio que ya usa loginWithCert con `location.replace`.
   private async fillClaveForm(snapshot: string): Promise<void> {
     const rutRef = this.findRef(snapshot, /rut|run/i) ?? '@e1';
     const claveRef = this.findRef(snapshot, /clave|contraseña|password/i) ?? '@e2';
@@ -480,6 +489,30 @@ export class SessionManager {
     this.browser.fill(rutRef, this.config.rut);
     this.browser.fill(claveRef, this.config.clave!);
     this.browser.click(btnRef);
+
+    const urlTrasClick = this.esperarNavegacionFueraDeLogin();
+    if (urlTrasClick.includes('IngresoRutClave')) {
+      throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+    }
+  }
+
+  // Polling corto: el click dispara la navegación pero no es instantánea.
+  // Devuelve la URL una vez que deja de ser la página de login, o la última
+  // observada si el tiempo se agota (ahí sigue siendo el login → rechazo).
+  private esperarNavegacionFueraDeLogin(maxMs = 5_000): string {
+    const step = 1_000;
+    let elapsed = 0;
+    let url = this.leerUrlActual();
+    while (url.includes('IngresoRutClave') && elapsed < maxMs) {
+      execSync(`sleep ${step / 1000}`);
+      elapsed += step;
+      url = this.leerUrlActual();
+    }
+    return url;
+  }
+
+  private leerUrlActual(): string {
+    return this.browser.eval('document.location.href');
   }
 
   // empresaRutParam es la empresa pedida en la llamada (mayor prioridad).

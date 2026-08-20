@@ -21,6 +21,10 @@ function armar() {
   // El navegador automockeado devuelve undefined, y el login por clave lee el
   // snapshot para ubicar los campos del formulario.
   (browser.snapshot as jest.Mock).mockReturnValue('');
+  // fillClaveForm verifica la URL tras el click (ver src/session.ts) — con
+  // undefined del automock rompería antes de llegar al camino que este test
+  // ejercita (RequiereCertificado para BHE por HTTP).
+  (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
   const autenticaciones = jest.spyOn(session, 'authenticateOnly');
   const http = {
     get: jest.fn(),

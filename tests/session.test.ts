@@ -5,6 +5,16 @@ import { AuthStrategy, SiiConfig } from '../src/env';
 jest.mock('../src/browser');
 const MockBrowser = Browser as jest.MockedClass<typeof Browser>;
 
+// Login exitoso: la app verifica el login leyendo document.location.href tras
+// el click (ver fillClaveForm) — hay que navegar fuera de IngresoRutClave.html
+// para que el mock represente un login que sí pasó, si no todo test de login
+// con clave fallaría con "El SII rechazó la autenticación".
+function crearBrowserMock(): Browser {
+  const browser = new MockBrowser();
+  (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+  return browser;
+}
+
 const configClave: SiiConfig = {
   rut: '12345678',
   strategy: AuthStrategy.Clave,
@@ -33,7 +43,7 @@ const dosEmpresasSnapshot = [
 
 describe('SessionManager.login', () => {
   it('llama open, fill rut, fill clave y click en login', async () => {
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce(empresaUnicaSnapshot);
@@ -49,7 +59,7 @@ describe('SessionManager.login', () => {
 
   it('selecciona empresa por SII_EMPRESA_RUT si hay multiples', async () => {
     const config = { ...configClave, empresaRut: '11111111-1' };
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce(dosEmpresasSnapshot);
@@ -61,7 +71,7 @@ describe('SessionManager.login', () => {
   });
 
   it('lanza error accionable si hay multiples empresas y no hay SII_EMPRESA_RUT', async () => {
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce(dosEmpresasSnapshot);
@@ -69,11 +79,28 @@ describe('SessionManager.login', () => {
     const mgr = new SessionManager(configClave, browser);
     await expect(mgr.login()).rejects.toThrow('SII_EMPRESA_RUT');
   });
+
+  // Bug real en prod: el SII no manda ningún error ante clave incorrecta acá
+  // (a diferencia del CGI de certificado) — sólo vuelve a renderizar la MISMA
+  // página de login. Sin verificar la URL tras el click, fillClaveForm daba
+  // por exitoso cualquier clave, y validarClave (endpoint de Tributy)
+  // reportaba {ok:true} con credenciales inválidas.
+  it('clave rechazada: sigue en la página de login tras el click, lanza error clasificable', async () => {
+    const browser = crearBrowserMock();
+    (browser.snapshot as jest.Mock).mockReturnValueOnce(loginSnapshot);
+    (browser.eval as jest.Mock).mockReturnValue(
+      'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html'
+    );
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(mgr.login()).rejects.toThrow('El SII rechazó la autenticación');
+  });
 });
 
 describe('SessionManager.getSession', () => {
   it('reutiliza la sesion cacheada sin hacer login nuevamente', async () => {
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
 
     const mgr = new SessionManager(configClave, browser);
@@ -88,7 +115,7 @@ describe('SessionManager.getSession', () => {
   // El parámetro por llamada es la máxima prioridad: es la intención explícita
   // de quien invoca la tool, así que debe ganarle incluso a SII_EMPRESA_RUT.
   it('con varias empresas, resuelve por el empresaRut del parámetro aunque no haya SII_EMPRESA_RUT', async () => {
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce(dosEmpresasSnapshot);
@@ -102,7 +129,7 @@ describe('SessionManager.getSession', () => {
 
   it('con varias empresas, resuelve por SII_EMPRESA_RUT si no viene el parámetro', async () => {
     const config = { ...configClave, empresaRut: '22222222-2' };
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce(dosEmpresasSnapshot);
@@ -114,7 +141,7 @@ describe('SessionManager.getSession', () => {
   });
 
   it('con varias empresas y ninguna resolución disponible, el error lista las empresas y menciona ambas salidas', async () => {
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce(dosEmpresasSnapshot);
@@ -135,7 +162,7 @@ describe('SessionManager.getSession', () => {
   });
 
   it('con una sola empresa y nada configurado, resuelve sin pedir nada', async () => {
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce(empresaUnicaSnapshot);
@@ -153,7 +180,7 @@ describe('SessionManager.getSession', () => {
   // quedar seleccionada en la empresa equivocada devolviendo datos que
   // parecen buenos.
   it('con una sola empresa disponible, rechaza un empresaRut pedido que no coincide', async () => {
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce(empresaUnicaSnapshot);
@@ -172,7 +199,7 @@ describe('SessionManager.getSession', () => {
   // tocado el navegador — y quedaría cacheada como válida para siempre.
   it('si la página de selección no rindió, falla en vez de fabricar una sesión', async () => {
     const config = { ...configClave, empresaRut: '11111111-1' };
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce('- generic\n  - StaticText "Cargando"');
@@ -188,7 +215,7 @@ describe('SessionManager.getSession', () => {
   // del SII (01.01.190.500.720.27).
   it('pedir una empresa distinta a la cacheada cambia de empresa sin reautenticar', async () => {
     const config = { ...configClave, empresaRut: '11111111-1' };
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValueOnce(dosEmpresasSnapshot)
@@ -212,7 +239,7 @@ describe('SessionManager.getSession', () => {
 
 describe('SessionManager.obtenerBrowser', () => {
   it('devuelve el Browser con el que se construyó la sesión', () => {
-    const browser = new MockBrowser();
+    const browser = crearBrowserMock();
     const mgr = new SessionManager(configClave, browser);
     expect(mgr.obtenerBrowser()).toBe(browser);
   });
