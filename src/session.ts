@@ -476,10 +476,17 @@ export class SessionManager {
   // CGI de certificado, ver assertAutenticacionExitosa): sólo re-renderiza la
   // MISMA página de login. Sin este chequeo, cualquier clave "pasaba" y
   // validarClave (src/rest/rutas/sesion.ts) reportaba {ok:true} con
-  // credenciales inválidas. Criterio: tras el click hay que dejar de estar en
-  // IngresoRutClave.html Y terminar en un dominio del SII — evita que una
-  // URL vacía/basura del CLI o una redirección a página de error propia del
-  // SII cuente como éxito.
+  // credenciales inválidas.
+  //
+  // Se detecta por CONTENIDO (¿sigue el campo de clave en el snapshot?), no
+  // por URL: un primer intento verificaba document.location.href, pero un
+  // login con clave VÁLIDA confirmada por el usuario también quedó atrapado
+  // — el SII no navega a otra URL en este flujo, re-renderiza sobre la misma
+  // (el timing lo confirmó: el rechazo tardó los 15s completos del timeout,
+  // no los ~9s de un rechazo genuino). El campo de clave desaparece del DOM
+  // cuando el login efectivamente avanza, tanto si cae en selección de
+  // empresa como en cualquier otra página post-login — no hace falta conocer
+  // ni la URL ni el texto exacto de error del SII.
   private async fillClaveForm(snapshot: string): Promise<void> {
     const rutRef = this.findRef(snapshot, /rut|run/i) ?? '@e1';
     const claveRef = this.findRef(snapshot, /clave|contraseña|password/i) ?? '@e2';
@@ -489,38 +496,35 @@ export class SessionManager {
     this.browser.fill(claveRef, this.config.clave!);
     this.browser.click(btnRef);
 
-    const urlTrasClick = await this.esperarNavegacionFueraDeLogin();
-    if (urlTrasClick.includes('IngresoRutClave')) {
+    const siguioEnFormularioDeLogin = await this.esperarSalirDelFormularioDeLogin();
+    if (siguioEnFormularioDeLogin) {
       // 15s es generoso a propósito: un falso "clave incorrecta" por
       // latencia real del SII es peor que tardar un poco más en detectar un
       // rechazo genuino — a Tributy le llega como CREDENCIALES_INVALIDAS y
       // se lo muestra tal cual al usuario final.
+      console.error('Login SII: el campo de clave sigue presente tras el click (posible clave incorrecta o timeout).');
       throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
     }
-    if (!/^https:\/\/([^/]+\.)?sii\.cl\//.test(urlTrasClick)) {
-      throw new Error('El SII rechazó la autenticación: destino inesperado tras el login.');
-    }
   }
 
-  // Polling corto: el click dispara la navegación pero no es instantánea.
-  // Devuelve la URL una vez que deja de ser la página de login, o la última
-  // observada si el tiempo se agota (ahí sigue siendo el login → rechazo).
-  // Sleep no bloqueante: este método corre dentro del proceso REST — un
-  // sleep síncrono (execSync) congelaría TODO el event loop, dejando de
-  // atender otros requests mientras dura el polling.
-  private async esperarNavegacionFueraDeLogin(maxMs = 15_000, step = 1_000): Promise<string> {
+  // Polling corto: el click dispara el submit pero el re-render no es
+  // instantáneo. Devuelve true si el campo de clave SIGUE en el snapshot al
+  // agotarse el tiempo (rechazo o timeout) — false apenas desaparece (login
+  // avanzó). Un snapshot vacío/basura del CLI cuenta como "sigue" (fail-safe:
+  // nunca se interpreta la ausencia de datos como éxito). Sleep no
+  // bloqueante: este método corre dentro del proceso REST — un sleep
+  // síncrono (execSync) congelaría TODO el event loop, dejando de atender
+  // otros requests mientras dura el polling.
+  private async esperarSalirDelFormularioDeLogin(maxMs = 15_000, step = 1_000): Promise<boolean> {
     let elapsed = 0;
-    let url = this.leerUrlActual();
-    while (url.includes('IngresoRutClave') && elapsed < maxMs) {
+    while (elapsed < maxMs) {
+      const s = this.browser.snapshot();
+      const sigueElCampoDeClave = !s || this.findRef(s, /clave|contraseña|password/i) !== null;
+      if (!sigueElCampoDeClave) return false;
       await new Promise(resolve => setTimeout(resolve, step));
       elapsed += step;
-      url = this.leerUrlActual();
     }
-    return url;
-  }
-
-  private leerUrlActual(): string {
-    return this.browser.eval('document.location.href');
+    return true;
   }
 
   // empresaRutParam es la empresa pedida en la llamada (mayor prioridad).
