@@ -18,12 +18,18 @@ const loginSnapshot = [
   '- button "Ingresar" [ref=e3]',
 ].join('\n');
 
+// Snapshot posterior a un login exitoso: sin campo de clave. fillClaveForm
+// verifica esto tras el click (ver src/session.ts) — con loginSnapshot
+// forever, ninguna autenticación de este archivo terminaría nunca.
+const snapshotPostLogin = '- generic\n  - StaticText "Portal"';
+
 function makeSession() {
   const browser = new MockBrowser();
-  (browser.snapshot as jest.Mock).mockReturnValue(loginSnapshot);
-  // Login exitoso: fillClaveForm verifica la URL tras el click (ver
-  // src/session.ts) — sin esto, cualquier autenticación acá fallaría con
-  // "El SII rechazó la autenticación".
+  (browser.snapshot as jest.Mock)
+    .mockReturnValueOnce(loginSnapshot)
+    .mockReturnValue(snapshotPostLogin);
+  // Además del campo de clave, fillClaveForm confirma que el destino final
+  // sea un dominio de sii.cl (ver comentario en src/session.ts).
   (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
   return { browser, session: new SessionManager(config, browser) };
 }

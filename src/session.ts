@@ -476,10 +476,20 @@ export class SessionManager {
   // CGI de certificado, ver assertAutenticacionExitosa): sólo re-renderiza la
   // MISMA página de login. Sin este chequeo, cualquier clave "pasaba" y
   // validarClave (src/rest/rutas/sesion.ts) reportaba {ok:true} con
-  // credenciales inválidas. Criterio: tras el click hay que dejar de estar en
-  // IngresoRutClave.html Y terminar en un dominio del SII — evita que una
-  // URL vacía/basura del CLI o una redirección a página de error propia del
-  // SII cuente como éxito.
+  // credenciales inválidas.
+  //
+  // Se detecta por CONTENIDO (¿sigue el campo de clave en el snapshot?), no
+  // por URL: una primera versión verificaba document.location.href, pero un
+  // login con clave VÁLIDA confirmada por el usuario también quedó atrapado
+  // — el SII no navega a otra URL en este flujo, re-renderiza sobre la misma.
+  // El campo de clave desaparece del DOM cuando el login efectivamente
+  // avanza, tanto si cae en selección de empresa como en cualquier otra
+  // página post-login. La URL sigue chequeándose, pero sólo COMO CONFIRMACIÓN
+  // final (no como condición de cambio): si el campo desaparece pero el
+  // destino no es un dominio de sii.cl, no es un login exitoso — es una
+  // página de error/mantención ajena, y sin este chequeo cualquier
+  // interstitial sin form volvería a reportar {ok:true} con credenciales
+  // inválidas (el mismo bug que cerró el PR #36, por otra vía).
   private async fillClaveForm(snapshot: string): Promise<void> {
     const rutRef = this.findRef(snapshot, /rut|run/i) ?? '@e1';
     const claveRef = this.findRef(snapshot, /clave|contraseña|password/i) ?? '@e2';
@@ -489,34 +499,63 @@ export class SessionManager {
     this.browser.fill(claveRef, this.config.clave!);
     this.browser.click(btnRef);
 
-    const urlTrasClick = await this.esperarNavegacionFueraDeLogin();
-    if (urlTrasClick.includes('IngresoRutClave')) {
-      // 15s es generoso a propósito: un falso "clave incorrecta" por
-      // latencia real del SII es peor que tardar un poco más en detectar un
-      // rechazo genuino — a Tributy le llega como CREDENCIALES_INVALIDAS y
-      // se lo muestra tal cual al usuario final.
+    // 15s es generoso a propósito: un falso "clave incorrecta" por latencia
+    // real del SII es peor que tardar un poco más en detectar un rechazo
+    // genuino — a Tributy le llega como CREDENCIALES_INVALIDAS y se lo
+    // muestra tal cual al usuario final.
+    const siguioEnFormularioDeLogin = await this.esperarSalirDelFormularioDeLogin();
+    if (siguioEnFormularioDeLogin) {
       throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
     }
-    if (!/^https:\/\/([^/]+\.)?sii\.cl\//.test(urlTrasClick)) {
+    const urlFinal = this.leerUrlActual();
+    if (!/^https:\/\/([^/?]+\.)?sii\.cl(\/|\?|$)/.test(urlFinal)) {
       throw new Error('El SII rechazó la autenticación: destino inesperado tras el login.');
     }
   }
 
-  // Polling corto: el click dispara la navegación pero no es instantánea.
-  // Devuelve la URL una vez que deja de ser la página de login, o la última
-  // observada si el tiempo se agota (ahí sigue siendo el login → rechazo).
+  // Polling corto: el click dispara el submit pero el re-render no es
+  // instantáneo. Devuelve true si el campo de clave SIGUE en el snapshot al
+  // agotarse el tiempo (rechazo o timeout) — false apenas desaparece (login
+  // avanzó). Un snapshot vacío/basura del CLI cuenta como "sigue" (fail-safe:
+  // nunca se interpreta la ausencia de datos como éxito).
+  //
+  // Exige DOS lecturas consecutivas sin el campo antes de dar por exitoso:
+  // el primer snapshot tras el click puede capturar el DOM a mitad de
+  // re-render (contenido parcial, sin el input todavía pero tampoco
+  // realmente logueado) — una sola lectura "limpia" ahí sería un falso
+  // positivo que el chequeo de dominio no detecta (sigue en sii.cl).
+  //
   // Sleep no bloqueante: este método corre dentro del proceso REST — un
   // sleep síncrono (execSync) congelaría TODO el event loop, dejando de
   // atender otros requests mientras dura el polling.
-  private async esperarNavegacionFueraDeLogin(maxMs = 15_000, step = 1_000): Promise<string> {
+  private async esperarSalirDelFormularioDeLogin(maxMs = 15_000, step = 1_000): Promise<boolean> {
     let elapsed = 0;
-    let url = this.leerUrlActual();
-    while (url.includes('IngresoRutClave') && elapsed < maxMs) {
+    let lecturasLimpiasSeguidas = 0;
+    while (elapsed < maxMs) {
+      const s = this.browser.snapshot();
+      if (s && !this.campoDeClavePresente(s)) {
+        lecturasLimpiasSeguidas++;
+        if (lecturasLimpiasSeguidas >= 2) return false;
+      } else {
+        lecturasLimpiasSeguidas = 0;
+      }
       await new Promise(resolve => setTimeout(resolve, step));
       elapsed += step;
-      url = this.leerUrlActual();
     }
-    return url;
+    return true;
+  }
+
+  // A diferencia de findRef genérico (usado para UBICAR el campo antes de
+  // llenarlo), acá exige que la línea sea un campo de INPUT (textbox o
+  // password) — no cualquier elemento que mencione "clave". Sin esta
+  // restricción, un link o botón post-login como "Cambiar clave" (existe en
+  // el menú de MiSII) haría que el chequeo crea que el form de login sigue
+  // presente, y reportaría el mismo falso CREDENCIALES_INVALIDAS que este
+  // fix corrige, por otra vía.
+  private campoDeClavePresente(snapshot: string): boolean {
+    return snapshot.split('\n').some(
+      line => /textbox|password/i.test(line) && /clave|contraseña|password/i.test(line)
+    );
   }
 
   private leerUrlActual(): string {
