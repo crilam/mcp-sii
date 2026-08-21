@@ -505,12 +505,36 @@ export class SessionManager {
     // muestra tal cual al usuario final.
     const siguioEnFormularioDeLogin = await this.esperarSalirDelFormularioDeLogin();
     if (siguioEnFormularioDeLogin) {
+      // Diagnóstico TEMPORAL (ver PR de fix del falso negativo, ronda 2): una
+      // clave real confirmada correcta por el usuario sigue cayendo acá.
+      // Hipótesis: el SII muestra una página intermedia post-login que
+      // TODAVÍA tiene un campo de tipo clave/password (cambio de clave
+      // forzado, alta de 2do factor, upsell de ClaveÚnica, encuesta) — el
+      // snapshot saneado (sin contenido de texto, sólo roles/refs) deja ver
+      // esa estructura sin loguear nada sensible ni PII.
+      console.error(
+        'Login SII: el campo de clave sigue presente tras el click. ' +
+        `snapshot=${this.sanearSnapshotParaLog(this.browser.snapshot())} url=${this.leerUrlActual()}`
+      );
       throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
     }
     const urlFinal = this.leerUrlActual();
     if (!/^https:\/\/([^/?]+\.)?sii\.cl(\/|\?|$)/.test(urlFinal)) {
+      console.error(
+        `Login SII: destino post-login fuera de sii.cl. url=${urlFinal} ` +
+        `snapshot=${this.sanearSnapshotParaLog(this.browser.snapshot())}`
+      );
       throw new Error('El SII rechazó la autenticación: destino inesperado tras el login.');
     }
+  }
+
+  // Reemplaza el contenido de cada string entre comillas por "…", preservando
+  // rol y ref de cada línea (ej: `- textbox "Ingrese su Clave" [ref=e2]` →
+  // `- textbox "…" [ref=e2]`) — sirve para diagnosticar qué ELEMENTOS trae
+  // una página sin loguear texto que podría ser PII o, en el peor caso, algo
+  // sensible que el SII haya vuelto a mostrar en pantalla.
+  private sanearSnapshotParaLog(snapshot: string): string {
+    return snapshot.replace(/"[^"]*"/g, '"…"');
   }
 
   // Polling corto: el click dispara el submit pero el re-render no es
