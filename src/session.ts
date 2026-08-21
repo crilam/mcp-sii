@@ -505,13 +505,13 @@ export class SessionManager {
     // muestra tal cual al usuario final.
     const { siguioEnFormularioDeLogin, ultimoSnapshot } = await this.esperarSalirDelFormularioDeLogin();
     if (siguioEnFormularioDeLogin) {
-      // Diagnóstico TEMPORAL (ver PR de fix del falso negativo, ronda 2): una
-      // clave real confirmada correcta por el usuario sigue cayendo acá.
-      // Hipótesis: el SII muestra una página intermedia post-login que
-      // TODAVÍA tiene un campo de tipo clave/password (cambio de clave
-      // forzado, alta de 2do factor, upsell de ClaveÚnica, encuesta) —
-      // el resumen estructural (sólo roles y refs, CERO texto) deja ver
-      // esa estructura sin loguear nada sensible ni PII.
+      // Diagnóstico TEMPORAL — SACAR una vez capturado el DOM de un login
+      // exitoso real y ajustado el criterio (ver PR #39, ronda de falso
+      // negativo con clave válida). Hipótesis: el SII muestra una página
+      // intermedia post-login que TODAVÍA tiene un campo de tipo
+      // clave/password (cambio de clave forzado, alta de 2do factor, upsell
+      // de ClaveÚnica, encuesta) — el resumen estructural (sólo roles y
+      // refs, CERO texto) deja ver esa estructura sin loguear nada sensible.
       console.error(
         'Login SII: el campo de clave sigue presente tras el click. ' +
         `estructura=${this.resumenEstructuralParaLog(ultimoSnapshot)} url=${this.sanearUrlParaLog(this.leerUrlActual())}`
@@ -528,25 +528,43 @@ export class SessionManager {
     }
   }
 
-  // Allowlist, no denylist: se extraen SÓLO el rol (textbox, button, link,
+  // Roles ARIA/accesibilidad conocidos que puede emitir agent-browser. Contra
+  // esta lista SE VALIDA cada candidato — no alcanza con "parece una palabra
+  // después de un guion": un apellido compuesto como "PEREZ-SOTO" en texto
+  // libre produciría el candidato "Soto", que sin esta validación se
+  // logueaba igual que un rol real.
+  private static readonly ROLES_CONOCIDOS = new Set([
+    'textbox', 'password', 'button', 'link', 'heading', 'checkbox', 'radio',
+    'combobox', 'option', 'generic', 'paragraph', 'statictext', 'list',
+    'listitem', 'table', 'row', 'cell', 'img', 'dialog', 'alert', 'banner',
+    'navigation', 'main', 'form', 'group', 'tab', 'tabpanel', 'menu',
+    'menuitem', 'tree', 'treeitem', 'separator', 'region', 'complementary',
+    'contentinfo', 'search', 'article', 'section', 'figure', 'caption',
+    'label', 'switch', 'progressbar', 'slider', 'spinbutton', 'tooltip',
+  ]);
+
+  // Allowlist, no denylist: se extrae SÓLO el rol (textbox, button, link,
   // heading...) y el ref (`[ref=eN]`) de cada línea — nunca el texto que
   // acompaña al elemento. Un enfoque de "enmascarar lo que parece sensible"
   // (por ejemplo strings entre comillas) es frágil: el propio snapshot trae
   // texto plano SIN comillas fuera de los elementos (el título/URL de la
   // página aparecen como encabezado libre, confirmado corriendo
   // `agent-browser snapshot` a mano), y ese texto puede traer el nombre del
-  // contribuyente u otro dato personal. Con allowlist, cualquier forma de
-  // texto que el CLI use — con o sin comillas — queda afuera del log por
-  // construcción, no por lista de casos cubiertos.
+  // contribuyente u otro dato personal. La línea debe empezar (salvo
+  // indentación) con "- <rol>", y ese rol debe estar en ROLES_CONOCIDOS —
+  // sin las dos condiciones juntas, un regex suelto matchea cualquier
+  // palabra después de un guion en cualquier parte del texto libre.
   private resumenEstructuralParaLog(snapshot: string): string {
     if (!snapshot) return '(vacío)';
     return snapshot
       .split('\n')
       .map(line => {
-        const rol = line.match(/-\s*([A-Za-z]+)/)?.[1];
-        if (!rol) return null;
+        const candidato = line.match(/^\s*-\s+([A-Za-z]+)\b/)?.[1];
+        if (!candidato || !SessionManager.ROLES_CONOCIDOS.has(candidato.toLowerCase())) {
+          return null;
+        }
         const ref = line.match(/\[ref=(e\d+)\]/)?.[1];
-        return ref ? `${rol}[${ref}]` : rol;
+        return ref ? `${candidato}[${ref}]` : candidato;
       })
       .filter((x): x is string => x !== null)
       .join(',');

@@ -177,10 +177,25 @@ describe('SessionManager: saneadores de logging (sin PII)', () => {
       '  https://misii.sii.cl/portal?rut=11111111-1',
       '- heading "Selección de empresa" [ref=e1]',
     ].join('\n');
-    const salida = resumen(snapshot);
-    expect(salida).not.toContain('JUAN PEREZ');
-    expect(salida).not.toContain('11111111-1');
-    expect(salida).toContain('heading[e1]');
+    // Igualdad exacta, no `not.toContain`: un assert negativo deja pasar
+    // fugas parciales (por ejemplo si el regex matcheara "Portal" o "Soto"
+    // de un apellido compuesto, `not.toContain('JUAN PEREZ')` seguiría en
+    // verde). Sólo `heading[e1]` debe sobrevivir.
+    expect(resumen(snapshot)).toBe('heading[e1]');
+  });
+
+  // El caso concreto que un regex sin anclar ni validar contra roles
+  // conocidos deja pasar: una línea de texto libre que empieza con "- " (el
+  // mismo marcador que usan los elementos reales) pero cuya primera palabra
+  // NO es un rol — acá "Bienvenido" no está en ROLES_CONOCIDOS, así que la
+  // línea entera queda afuera, sin importar qué apellido compuesto con
+  // guion venga después.
+  it('línea con "- " que no es un elemento real (primera palabra no es rol conocido) no se cuela', () => {
+    const snapshot = [
+      '- Bienvenido MARIA PEREZ-SOTO',
+      '- button "Ingresar" [ref=e3]',
+    ].join('\n');
+    expect(resumen(snapshot)).toBe('button[e3]');
   });
 
   it('snapshot vacío no rompe, devuelve marcador explícito', () => {
