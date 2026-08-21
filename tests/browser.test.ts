@@ -51,6 +51,15 @@ describe('Browser', () => {
     expect(mockExec).toHaveBeenCalledWith('agent-browser', ['get', 'text', '@e3'], expect.any(Object));
   });
 
+  // Comando dedicado, no eval('document.location.href'): confirmado en prod
+  // que evaluar JS justo después de una navegación puede pegarle a un
+  // contexto de ejecución destruido y devolver un error en vez de la URL.
+  it('getUrl usa el comando dedicado del CLI', () => {
+    mockExec.mockReturnValue(Buffer.from('https://mipyme.sii.cl/'));
+    expect(browser.getUrl()).toBe('https://mipyme.sii.cl/');
+    expect(mockExec).toHaveBeenCalledWith('agent-browser', ['get', 'url'], expect.any(Object));
+  });
+
   it('select elige una opcion del dropdown', () => {
     mockExec.mockReturnValue(Buffer.from(''));
     browser.select('@e4', '11111111');

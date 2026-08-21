@@ -28,7 +28,7 @@ function armar() {
     .mockReturnValueOnce('')
     .mockReturnValue('- generic\n  - StaticText "Portal"');
   // fillClaveForm también confirma el dominio de destino tras el click.
-  (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+  (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
   const autenticaciones = jest.spyOn(session, 'authenticateOnly');
   const http = {
     get: jest.fn(),

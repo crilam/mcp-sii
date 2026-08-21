@@ -58,6 +58,15 @@ export class Browser {
     return this.run(['get', 'text', ref]);
   }
 
+  // Comando dedicado del CLI, no `eval('document.location.href')`: evaluar
+  // JS en la página justo después de una navegación puede pegarle a un
+  // contexto de ejecución que ya no existe (la página cambió de nuevo) y
+  // devolver un mensaje de error del propio motor en vez de la URL —
+  // confirmado en prod, ver PR de diagnóstico del falso negativo de clave.
+  getUrl(): string {
+    return this.run(['get', 'url']);
+  }
+
   select(ref: string, value: string): void {
     this.run(['select', ref, value]);
   }
