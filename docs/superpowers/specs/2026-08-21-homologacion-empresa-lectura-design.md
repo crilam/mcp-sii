@@ -39,12 +39,45 @@ que también son legibles vía `document.cookie` desde el browser. Cambios:
 - `SessionManager`: método privado `exportarCookiesAlJar()` que lee
   `document.cookie` en un dominio `.sii.cl` post-login (via
   `browser.eval`), parsea los pares y escribe el jar Netscape en
-  `this.cookieJar` (mismo formato que escribe curl). Se llama al final del
-  camino de clave en `authenticate()`.
-- `assertPuedeEntregarCookieJar()` deja de exigir estrategia Certificate:
-  exige que el jar exista y tenga las cookies de sesión
-  (`SII_SESSION_COOKIES`). El error `RequiereCertificado` queda solo para
-  los flujos que de verdad exigen certificado (boletas Cognito, firma).
+  `this.cookieJar`. Se llama al final del camino de clave en
+  `authenticate()`, ANTES borrando el jar previo con `fs.unlinkSync`
+  (mismo unlink que hace `loginWithCert` en `session.ts:397`) — un jar
+  viejo de una corrida anterior manda cookies de una sesión muerta y
+  dispara el bloqueo 01.01.190.500.720.27.
+- **Formato exacto del jar** (el modo de fallo de curl acá es silencioso:
+  con dominio o flag mal puestos simplemente NO manda la cookie y el
+  síntoma es el genérico "la sesión pudo expirar" de `http.ts:175`): cada
+  línea lleva 7 campos separados por TAB —
+  `.sii.cl<TAB>TRUE<TAB>/<TAB>TRUE<TAB>0<TAB>nombre<TAB>valor`. Dominio
+  `.sii.cl` con punto inicial + flag `TRUE` para que curl la mande a
+  www4/zeusr/herculesr/www1/loa; `expiry=0` (cookie de sesión); campo
+  secure `TRUE`. NUNCA usar el prefijo `#HttpOnly_` (aunque curl lo
+  acepte): `parseCookieFile` propio saltea líneas que empiezan con `#`
+  (`session.ts:465`) y una cookie TOKEN escrita así rompería
+  `conversationId()`.
+- `assertPuedeEntregarCookieJar()` cambia su condición a "la ESTRATEGIA
+  puede producir el jar" (Certificate o Clave) — NO a "el jar existe": el
+  assert se llama a propósito ANTES de autenticar (`session.ts:318-324`),
+  cuando el jar de una sesión por clave todavía no existe, y un jar viejo
+  presente satisfaría una condición de existencia con cookies muertas.
+- **Guard de firma nuevo**: hoy el ÚNICO gate de certificado de
+  `verificarFirma`/emisión mipyme es este mismo assert
+  (`mipymeHttp.ts:363,378,420,576`). Antes de relajarlo, se agrega
+  `assertPuedeFirmar()` (exige estrategia Certificate +
+  `claveCertificadoSii` presente) en esos métodos, para que una sesión por
+  clave falle temprano y con mensaje accionable, no en el medio de armar el
+  documento. Los tests que hoy fijan `RequiereCertificado` para consultas
+  HTTP por clave (`bhe.sesion.test.ts`, mocks en renta/dte/rcv/mipymeHttp
+  tests) describen un contrato que deja de existir: se REESCRIBEN para
+  fijar el contrato nuevo (clave → consulta funciona; firma → sigue
+  exigiendo certificado).
+- **Carrera multi-RUT en MCP**: `crearRegistroSesionesSii` comparte UN
+  Browser sin `sessionId` entre todos los RUTs (`server.ts:13`) — con
+  login por clave, la sesión vive en las cookies del browser, y entre los
+  awaits del login de A puede intercalarse el login de B pisándolas: el
+  jar de A quedaría con la sesión de B y devolvería DATOS DE OTRO
+  CONTRIBUYENTE sin error. Fix: el registro MCP pasa a `new Browser(rut)`
+  por RUT, igual que ya hace el REST (`restServerIndex.ts:15`).
 - Verificación e2e obligatoria de la fase 0 con la clave real: cada ruta
   REST existente (rcv/resumen, renta/estado-declaracion, bhe/resumen,
   dte/list-documentos-emitidos, mipyme/list-empresas) debe responder datos
@@ -55,9 +88,14 @@ que también son legibles vía `document.cookie` desde el browser. Cambios:
 para los CGI (a diferencia de las NETSCAPE_LIVEWIRE.*), la exportación por
 `document.cookie` no la verá. El primer paso de la fase 0 es un spike: login
 con clave real, exportar, y probar una consulta HTTP (renta) contra el SII
-real. Si falta alguna cookie, plan B: obtener las cookies vía CDP
-(`agent-browser` expone `get cdp-url`; `Network.getCookies` del protocolo
-las entrega todas, httpOnly incluidas).
+real. El spike también determina el SUBCONJUNTO MÍNIMO de cookies que hace
+falta verificar tras exportar (probablemente `NETSCAPE_LIVEWIRE.mac`/`exp`
++ `TOKEN` para las rutas SDI): la lista completa `SII_SESSION_COOKIES` (13
+nombres) NUNCA está toda presente — ni el flujo de certificado la garantiza
+(`session.ts:420-426` inyecta `if (value)`). Si falta alguna cookie
+imprescindible, plan B: obtenerlas vía CDP (`agent-browser` expone
+`get cdp-url`; `Network.getCookies` entrega todas, httpOnly incluidas —
+escribiéndolas SIN el prefijo `#HttpOnly_`, ver arriba).
 
 ## Alcance
 
@@ -113,7 +151,7 @@ cae de la spec y se anota como limitación.
 - `POST /v1/f29/detalle` — + `folio`. Respuesta:
   `{ok, folio, periodo, codigos: [{codigo: string, glosa: string|null,
   valor: number}]}`. Folio inexistente → `{ok:false, error:
-  'FOLIO_NO_ENCONTRADO'}`.
+  'NO_ENCONTRADO'}` (error de negocio unificado, ver Decisiones).
 - `POST /v1/f29/estados` — sin parámetros propios. Respuesta:
   `{ok, estados: [{folio: number, periodo: string, estadoCodigo: string,
   estadoDescripcion: string}]}` (equivale a `obtener_estados`).
@@ -141,10 +179,14 @@ server-side, `conEmpresaExclusiva`):
 - `POST /v1/mipyme/list-borradores` — + los mismos filtros opcionales que
   `list-dte-emitidos` (tipo_dte, fecha_desde, fecha_hasta, receptor_rut,
   folio, pagina — el YAML de apigateway también filtra borradores).
-  Respuesta: mismo shape de listado que `list-dte-emitidos`, más `codigo`
-  (identificador del borrador) por fila.
-- `POST /v1/mipyme/borrador-pdf` — + `codigo`. Respuesta:
-  `{ok, pdfBase64, contentType: "application/pdf"}`.
+  Respuesta: mismo shape de listado que `list-dte-emitidos`, más
+  `codigo: string` por fila — round-trip tal cual: el MISMO valor, sin
+  transformación, es lo que acepta `borrador-pdf` (string aunque el SII lo
+  entregue numérico: un identificador opaco no se aritmetiza y el string
+  no rompe si el SII le agrega letras).
+- `POST /v1/mipyme/borrador-pdf` — + `codigo` (string, el de
+  list-borradores). Respuesta: `{ok, pdfBase64,
+  contentType: "application/pdf"}`.
 - `POST /v1/mipyme/list-dte-recibidos` — análogo del `list-dte-emitidos`
   existente, lado receptor, con `emisor_rut?` como filtro en lugar de
   `receptor_rut`. Mismo shape de respuesta.
@@ -169,9 +211,11 @@ uniformidad gana (los catálogos con POST son normales en RPC-style):
   Respuesta: `{ok, razonSocial: string|null, inicioActividades: boolean,
   fechaInicioActividades: string|null, autorizadoMonedaExtranjera: boolean,
   actividades: [{codigo: number, descripcion: string, categoria:
-  string|null, afectaIva: boolean}], documentosTimbrados: [{documento:
-  string, anioUltimoTimbraje: number}]}`. RUT inexistente para el SII →
-  `{ok:false, error:'RUT_INVALIDO'}`.
+  number|null, afectaIva: boolean}], documentosTimbrados: [{documento:
+  string, anioUltimoTimbraje: number}]}`. `categoria` es SIEMPRE el código
+  numérico del catálogo (mismo tipo que en actividades-economicas); null
+  cuando el portal no lo informa para esa actividad. RUT inexistente para
+  el SII → `{ok:false, error:'RUT_INVALIDO'}`.
 - `POST /v1/contribuyentes/verificar-rut` — `{rut, serie}` (número de serie
   de la cédula). Respuesta: `{ok, vigente: boolean}` — una cédula NO
   vigente es `{ok:true, vigente:false}` (resultado de negocio válido, no un
@@ -216,9 +260,20 @@ simétricas).
   del PR. El token es legacy y se revoca al terminar la homologación.
 - **Errores**: mismo esquema vigente — zod 400 `BAD_REQUEST`, credenciales
   `CREDENCIALES_INVALIDAS`, resto `ERROR` con log estructural. Errores de
-  negocio nuevos: `FOLIO_NO_ENCONTRADO` (f29/detalle), `RUT_INVALIDO`
-  (contribuyentes). El dominio contribuyentes no tiene
-  `CREDENCIALES_INVALIDAS` (no hay credencial).
+  negocio nuevos, uniformes en todo el sub-proyecto:
+  - `NO_ENCONTRADO`: el folio/código consultado no existe para el
+    contribuyente — aplica a `f29/detalle`, `f29/certificado-solemne`,
+    `f29/formulario-compacto`, `mipyme/borrador-pdf`, `mipyme/dte-pdf` y
+    `mipyme/dte-xml`. Tributy/RDTE lo manejan programáticamente, así que
+    es UN código, no uno por dominio.
+  - `RUT_INVALIDO`: el RUT consultado no existe para el SII
+    (contribuyentes).
+  - Las rutas que devuelven PDF VALIDAN los magic bytes (`%PDF`) antes de
+    encodear: si el SII devolvió HTML de error en vez del PDF, la
+    respuesta es `NO_ENCONTRADO` (si el HTML lo dice) o `ERROR` — nunca un
+    `pdfBase64` corrupto que el cliente descubre al abrirlo.
+  - El dominio contribuyentes no tiene `CREDENCIALES_INVALIDAS` (no hay
+    credencial).
 - **MCP y REST a la vez**: cada operación nueva se expone por ambos, como
   todos los dominios existentes.
 
@@ -239,10 +294,11 @@ simétricas).
    verificar las 5 rutas REST existentes con la clave real. Sin esto, nada
    de lo que sigue funciona vía REST.
 1. Contribuyentes públicos (valida el patrón de scraper sin credencial).
-2. F29 (spike de empresa_rut primero; luego patrón conocido).
-3. Mipyme lectura restante (scraper existente, métodos nuevos + camino
-   binario de SiiHttpClient).
-4. RCV async (spike primero; si falla, se documenta y se cierra el
+2. Camino binario de `SiiHttpClient` (`getBuffer` + validación `%PDF`) —
+   antes que F29 y mipyme, que lo consumen los dos.
+3. F29 (spike de empresa_rut primero; luego patrón conocido).
+4. Mipyme lectura restante (scraper existente, métodos nuevos).
+5. RCV async (spike primero; si falla, se documenta y se cierra el
    sub-proyecto sin este dominio).
 
 ## Fuera de alcance (explícito)
