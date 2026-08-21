@@ -148,6 +148,55 @@ describe('SessionManager: detección de rechazo del CGI', () => {
   });
 });
 
+// Diagnóstico del falso negativo con clave válida (ver src/session.ts):
+// estos dos saneadores garantizan que el log nunca lleve PII, sin importar
+// qué texto traiga el snapshot o la URL real.
+describe('SessionManager: saneadores de logging (sin PII)', () => {
+  const session = new SessionManager({} as any, new MockBrowser());
+  const resumen = (s: string) => (session as any).resumenEstructuralParaLog(s);
+  const url = (u: string) => (session as any).sanearUrlParaLog(u);
+
+  it('extrae sólo rol y ref, nunca el texto entre comillas', () => {
+    const snapshot = [
+      '- textbox "Ingrese su Clave" [ref=e2]',
+      '- button "Ingresar" [ref=e3]',
+    ].join('\n');
+    const salida = resumen(snapshot);
+    expect(salida).toBe('textbox[e2],button[e3]');
+    expect(salida).not.toContain('Clave');
+    expect(salida).not.toContain('Ingresar');
+  });
+
+  // El propio CLI trae texto plano SIN comillas fuera de los elementos (el
+  // encabezado con título/URL de la página) — un saneador que sólo mira
+  // comillas lo dejaría pasar intacto. Con allowlist por rol, ese texto
+  // libre no matchea ningún rol conocido y queda afuera.
+  it('descarta texto libre sin rol reconocible (encabezado título/URL del CLI)', () => {
+    const snapshot = [
+      '✓ Bienvenido JUAN PEREZ - Portal MiSII',
+      '  https://misii.sii.cl/portal?rut=11111111-1',
+      '- heading "Selección de empresa" [ref=e1]',
+    ].join('\n');
+    const salida = resumen(snapshot);
+    expect(salida).not.toContain('JUAN PEREZ');
+    expect(salida).not.toContain('11111111-1');
+    expect(salida).toContain('heading[e1]');
+  });
+
+  it('snapshot vacío no rompe, devuelve marcador explícito', () => {
+    expect(resumen('')).toBe('(vacío)');
+  });
+
+  it('quita el query string de la URL (puede traer RUT o token)', () => {
+    expect(url('https://misii.sii.cl/portal/inicio?rut=11111111-1&token=abc123'))
+      .toBe('https://misii.sii.cl/portal/inicio');
+  });
+
+  it('URL no parseable no rompe, devuelve marcador explícito', () => {
+    expect(url('esto no es una url')).toBe('(url no parseable)');
+  });
+});
+
 describe('SessionManager.logout', () => {
   it('navega a la URL de término de sesión del SII', async () => {
     const { browser, session } = makeSession();

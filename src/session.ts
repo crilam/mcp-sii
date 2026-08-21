@@ -503,38 +503,64 @@ export class SessionManager {
     // real del SII es peor que tardar un poco más en detectar un rechazo
     // genuino — a Tributy le llega como CREDENCIALES_INVALIDAS y se lo
     // muestra tal cual al usuario final.
-    const siguioEnFormularioDeLogin = await this.esperarSalirDelFormularioDeLogin();
+    const { siguioEnFormularioDeLogin, ultimoSnapshot } = await this.esperarSalirDelFormularioDeLogin();
     if (siguioEnFormularioDeLogin) {
       // Diagnóstico TEMPORAL (ver PR de fix del falso negativo, ronda 2): una
       // clave real confirmada correcta por el usuario sigue cayendo acá.
       // Hipótesis: el SII muestra una página intermedia post-login que
       // TODAVÍA tiene un campo de tipo clave/password (cambio de clave
-      // forzado, alta de 2do factor, upsell de ClaveÚnica, encuesta) — el
-      // snapshot saneado (sin contenido de texto, sólo roles/refs) deja ver
+      // forzado, alta de 2do factor, upsell de ClaveÚnica, encuesta) —
+      // el resumen estructural (sólo roles y refs, CERO texto) deja ver
       // esa estructura sin loguear nada sensible ni PII.
       console.error(
         'Login SII: el campo de clave sigue presente tras el click. ' +
-        `snapshot=${this.sanearSnapshotParaLog(this.browser.snapshot())} url=${this.leerUrlActual()}`
+        `estructura=${this.resumenEstructuralParaLog(ultimoSnapshot)} url=${this.sanearUrlParaLog(this.leerUrlActual())}`
       );
       throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
     }
     const urlFinal = this.leerUrlActual();
     if (!/^https:\/\/([^/?]+\.)?sii\.cl(\/|\?|$)/.test(urlFinal)) {
       console.error(
-        `Login SII: destino post-login fuera de sii.cl. url=${urlFinal} ` +
-        `snapshot=${this.sanearSnapshotParaLog(this.browser.snapshot())}`
+        `Login SII: destino post-login fuera de sii.cl. url=${this.sanearUrlParaLog(urlFinal)} ` +
+        `estructura=${this.resumenEstructuralParaLog(ultimoSnapshot)}`
       );
       throw new Error('El SII rechazó la autenticación: destino inesperado tras el login.');
     }
   }
 
-  // Reemplaza el contenido de cada string entre comillas por "…", preservando
-  // rol y ref de cada línea (ej: `- textbox "Ingrese su Clave" [ref=e2]` →
-  // `- textbox "…" [ref=e2]`) — sirve para diagnosticar qué ELEMENTOS trae
-  // una página sin loguear texto que podría ser PII o, en el peor caso, algo
-  // sensible que el SII haya vuelto a mostrar en pantalla.
-  private sanearSnapshotParaLog(snapshot: string): string {
-    return snapshot.replace(/"[^"]*"/g, '"…"');
+  // Allowlist, no denylist: se extraen SÓLO el rol (textbox, button, link,
+  // heading...) y el ref (`[ref=eN]`) de cada línea — nunca el texto que
+  // acompaña al elemento. Un enfoque de "enmascarar lo que parece sensible"
+  // (por ejemplo strings entre comillas) es frágil: el propio snapshot trae
+  // texto plano SIN comillas fuera de los elementos (el título/URL de la
+  // página aparecen como encabezado libre, confirmado corriendo
+  // `agent-browser snapshot` a mano), y ese texto puede traer el nombre del
+  // contribuyente u otro dato personal. Con allowlist, cualquier forma de
+  // texto que el CLI use — con o sin comillas — queda afuera del log por
+  // construcción, no por lista de casos cubiertos.
+  private resumenEstructuralParaLog(snapshot: string): string {
+    if (!snapshot) return '(vacío)';
+    return snapshot
+      .split('\n')
+      .map(line => {
+        const rol = line.match(/-\s*([A-Za-z]+)/)?.[1];
+        if (!rol) return null;
+        const ref = line.match(/\[ref=(e\d+)\]/)?.[1];
+        return ref ? `${rol}[${ref}]` : rol;
+      })
+      .filter((x): x is string => x !== null)
+      .join(',');
+  }
+
+  // Sólo origin + pathname: el query string puede traer el RUT, un token de
+  // sesión u otros identificadores que el SII agregue tras el login.
+  private sanearUrlParaLog(url: string): string {
+    try {
+      const u = new URL(url);
+      return `${u.origin}${u.pathname}`;
+    } catch {
+      return '(url no parseable)';
+    }
   }
 
   // Polling corto: el click dispara el submit pero el re-render no es
@@ -552,21 +578,28 @@ export class SessionManager {
   // Sleep no bloqueante: este método corre dentro del proceso REST — un
   // sleep síncrono (execSync) congelaría TODO el event loop, dejando de
   // atender otros requests mientras dura el polling.
-  private async esperarSalirDelFormularioDeLogin(maxMs = 15_000, step = 1_000): Promise<boolean> {
+  private async esperarSalirDelFormularioDeLogin(
+    maxMs = 15_000,
+    step = 1_000
+  ): Promise<{ siguioEnFormularioDeLogin: boolean; ultimoSnapshot: string }> {
     let elapsed = 0;
     let lecturasLimpiasSeguidas = 0;
+    let ultimoSnapshot = '';
     while (elapsed < maxMs) {
       const s = this.browser.snapshot();
+      ultimoSnapshot = s;
       if (s && !this.campoDeClavePresente(s)) {
         lecturasLimpiasSeguidas++;
-        if (lecturasLimpiasSeguidas >= 2) return false;
+        if (lecturasLimpiasSeguidas >= 2) {
+          return { siguioEnFormularioDeLogin: false, ultimoSnapshot };
+        }
       } else {
         lecturasLimpiasSeguidas = 0;
       }
       await new Promise(resolve => setTimeout(resolve, step));
       elapsed += step;
     }
-    return true;
+    return { siguioEnFormularioDeLogin: true, ultimoSnapshot };
   }
 
   // A diferencia de findRef genérico (usado para UBICAR el campo antes de
