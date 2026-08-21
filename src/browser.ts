@@ -67,10 +67,6 @@ export class Browser {
     return this.run(['get', 'url']);
   }
 
-  getTitle(): string {
-    return this.run(['get', 'title']);
-  }
-
   select(ref: string, value: string): void {
     this.run(['select', ref, value]);
   }
