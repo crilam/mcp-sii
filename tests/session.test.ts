@@ -69,7 +69,7 @@ function mockearLoginExitoso(browser: Browser, snapshotFinal: string): void {
   (browser.snapshot as jest.Mock)
     .mockReturnValueOnce(loginSnapshot)
     .mockReturnValue(snapshotFinal);
-  (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+  (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
 }
 
 describe('SessionManager.login', () => {
@@ -151,7 +151,7 @@ describe('SessionManager.login', () => {
       .mockReturnValueOnce(loginSnapshot) // 1er poll: SII todavía procesando
       .mockReturnValueOnce(loginSnapshot) // 2do poll: sigue procesando
       .mockReturnValue(empresaUnicaSnapshot); // 3er poll en adelante: ya avanzó (2 lecturas limpias)
-    (browser.eval as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
 
     const mgr = new SessionManager(configClave, browser);
     const session = await conTimers(() => mgr.login());
@@ -169,7 +169,7 @@ describe('SessionManager.login', () => {
     (browser.snapshot as jest.Mock)
       .mockReturnValueOnce(loginSnapshot)
       .mockReturnValue('- generic\n  - StaticText "Página no disponible"');
-    (browser.eval as jest.Mock).mockReturnValue('https://error-generico.example.com/');
+    (browser.getUrl as jest.Mock).mockReturnValue('https://error-generico.example.com/');
 
     const mgr = new SessionManager(configClave, browser);
 

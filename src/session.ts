@@ -634,7 +634,7 @@ export class SessionManager {
   }
 
   private leerUrlActual(): string {
-    return this.browser.eval('document.location.href');
+    return this.browser.getUrl();
   }
 
   // empresaRutParam es la empresa pedida en la llamada (mayor prioridad).
