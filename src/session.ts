@@ -21,7 +21,15 @@ const SII_MIPYME_URL = 'https://mipyme.sii.cl/';
 // esa raíz devuelve 404 (y sus subrutas, un rechazo del WAF). La selección de
 // empresa vive en el CGI del portal.
 const SII_SEL_EMPRESA_URL = 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi';
-const SII_LOGIN_URL = 'https://zeusr.sii.cl//AUT2000/InicioAutenticacion/IngresoRutClave.html';
+// Formulario de autenticación por clave. NO se navega directo (abierto de
+// frente devuelve una página en blanco): se llega por redirect desde una
+// página privada. El nombre del recurso se usa como marcador para detectar que
+// seguimos en el login, o sea que la credencial fue rechazada.
+const SII_LOGIN_RECURSO = 'IngresoRutClave';
+// Página privada del portal que se usa como PUERTA de entrada al login por
+// clave: navegar acá hace que el SII redirija al formulario (que abierto de
+// frente no rinde) y deja la referencia de vuelta. Ver loginConClave.
+const SII_PORTAL_PRIVADO = 'https://misiir.sii.cl/cgi_misii/siihome.cgi';
 const SII_CERT_CGI = 'https://herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi';
 const SII_LOGOUT_URL = 'https://zeusr.sii.cl/cgi_AUT2000/autTermino.cgi';
 const SEL_EMPRESA_MARKERS = ['SELECCIÓN DE EMPRESA', '- option "'];
@@ -233,9 +241,7 @@ export class SessionManager {
     if (this.config.strategy === AuthStrategy.Certificate) {
       await this.loginWithCert();
     } else {
-      this.browser.open(SII_LOGIN_URL);
-      const loginSnapshot = this.browser.snapshot();
-      await this.fillClaveForm(loginSnapshot);
+      await this.loginConClave();
     }
 
     // La sesión dura lo mismo que la cookie `locexp` que el propio SII emite.
@@ -490,84 +496,78 @@ export class SessionManager {
   // página de error/mantención ajena, y sin este chequeo cualquier
   // interstitial sin form volvería a reportar {ok:true} con credenciales
   // inválidas (el mismo bug que cerró el PR #36, por otra vía).
-  private async fillClaveForm(snapshot: string): Promise<void> {
-    const rutRef = this.findRef(snapshot, /rut|run/i) ?? '@e1';
-    const claveRef = this.findRef(snapshot, /clave|contraseña|password/i) ?? '@e2';
-    const btnRef = this.findRef(snapshot, /ingresar|entrar|login/i) ?? '@e3';
+  // Login con RUT + clave tributaria. Dos detalles del SII que NO son
+  // opcionales, ambos descubiertos a fuerza de spikes contra el servicio real
+  // (versiones anteriores fallaban justamente por saltearlos):
+  //
+  // 1. AL LOGIN SE LLEGA POR REDIRECT. Abrir SII_LOGIN_URL de frente devuelve
+  //    una página en blanco (about:blank): el form no rinde nunca. Hay que
+  //    navegar a una página PROTEGIDA (SII_PORTAL_PRIVADO) y dejar que el SII
+  //    redirija al formulario; recién ahí existe `myform`. Ese redirect
+  //    también deja en la URL la `referencia` de vuelta, que es lo que hace
+  //    que el CGI devuelva al portal tras autenticar.
+  //
+  // 2. EL FORM SE ENVÍA CON requestSubmit(), NO CON UN CLICK. El form declara
+  //    `onsubmit="return ejecuta_opcion()"` (que valida y llama form.submit()).
+  //    Un click sintético en el botón "Ingresar" no dispara ese handler, así
+  //    que NO SE ENVÍA NADA: la URL no cambia, no aparecen cookies de sesión,
+  //    y el login "parece" haber ocurrido. De ahí venían los falsos OK de
+  //    validarClave.
+  //
+  // Los campos se llenan por JS porque el form tiene hidden (`rut` sin dígito
+  // verificador, `dv` aparte) que el usuario nunca tipea: los completa el
+  // propio JS del SII al validar, y acá se replica.
+  private async loginConClave(): Promise<void> {
+    this.browser.open(SII_PORTAL_PRIVADO);
+    this.esperarFormularioDeLogin();
 
-    this.browser.fill(rutRef, this.config.rut);
-    this.browser.fill(claveRef, this.config.clave!);
-    this.browser.click(btnRef);
+    const { rut, dv } = partirRut(this.config.rut, 'SII_RUT');
+    const clave = this.config.clave!;
+    this.browser.eval(
+      `(function(){` +
+      `document.getElementById('rutcntr').value=${JSON.stringify(this.config.rut)};` +
+      `document.getElementById('rut').value=${JSON.stringify(rut)};` +
+      `document.getElementById('dv').value=${JSON.stringify(dv)};` +
+      `document.getElementById('clave').value=${JSON.stringify(clave)};` +
+      `})()`
+    );
+    this.browser.eval("document.getElementById('myform').requestSubmit()");
 
-    // 15s es generoso a propósito: un falso "clave incorrecta" por latencia
-    // real del SII es peor que tardar un poco más en detectar un rechazo
-    // genuino — a Tributy le llega como CREDENCIALES_INVALIDAS y se lo
-    // muestra tal cual al usuario final.
-    const { siguioEnFormularioDeLogin, ultimoSnapshot } = await this.esperarSalirDelFormularioDeLogin();
-    if (siguioEnFormularioDeLogin) {
-      // Diagnóstico TEMPORAL — SACAR una vez capturado el DOM de un login
-      // exitoso real y ajustado el criterio (ver PR #39, ronda de falso
-      // negativo con clave válida). Hipótesis: el SII muestra una página
-      // intermedia post-login que TODAVÍA tiene un campo de tipo
-      // clave/password (cambio de clave forzado, alta de 2do factor, upsell
-      // de ClaveÚnica, encuesta) — el resumen estructural (sólo roles y
-      // refs, CERO texto) deja ver esa estructura sin loguear nada sensible.
-      console.error(
-        'Login SII: el campo de clave sigue presente tras el click. ' +
-        `estructura=${this.resumenEstructuralParaLog(ultimoSnapshot)} url=${this.sanearUrlParaLog(this.leerUrlActual())}`
-      );
-      throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
-    }
-    const urlFinal = this.leerUrlActual();
-    if (!/^https:\/\/([^/?]+\.)?sii\.cl(\/|\?|$)/.test(urlFinal)) {
-      console.error(
-        `Login SII: destino post-login fuera de sii.cl. url=${this.sanearUrlParaLog(urlFinal)} ` +
-        `estructura=${this.resumenEstructuralParaLog(ultimoSnapshot)}`
-      );
-      throw new Error('El SII rechazó la autenticación: destino inesperado tras el login.');
-    }
+    await this.assertLoginPorClaveExitoso();
   }
 
-  // Roles ARIA/accesibilidad conocidos que puede emitir agent-browser. Contra
-  // esta lista SE VALIDA cada candidato — no alcanza con "parece una palabra
-  // después de un guion": un apellido compuesto como "PEREZ-SOTO" en texto
-  // libre produciría el candidato "Soto", que sin esta validación se
-  // logueaba igual que un rol real.
-  private static readonly ROLES_CONOCIDOS = new Set([
-    'textbox', 'password', 'button', 'link', 'heading', 'checkbox', 'radio',
-    'combobox', 'option', 'generic', 'paragraph', 'statictext', 'list',
-    'listitem', 'table', 'row', 'cell', 'img', 'dialog', 'alert', 'banner',
-    'navigation', 'main', 'form', 'group', 'tab', 'tabpanel', 'menu',
-    'menuitem', 'tree', 'treeitem', 'separator', 'region', 'complementary',
-    'contentinfo', 'search', 'article', 'section', 'figure', 'caption',
-    'label', 'switch', 'progressbar', 'slider', 'spinbutton', 'tooltip',
-  ]);
+  // El form sólo existe si el SII redirigió: si tras la espera no aparece,
+  // es un problema de acceso al portal (WAF, sala de espera, mantención), no
+  // una credencial inválida — se distingue en el mensaje para no reportarle a
+  // un tenant "clave incorrecta" cuando el SII no nos dejó ni intentar.
+  private esperarFormularioDeLogin(maxMs = 20_000, step = 1_000): void {
+    for (let esperado = 0; esperado < maxMs; esperado += step) {
+      if (this.browser.eval("document.getElementById('myform') ? 'SI' : 'NO'").includes('SI')) return;
+      execSync(`sleep ${step / 1000}`);
+    }
+    throw new Error(
+      'El SII no mostró el formulario de autenticación (no se pudo llegar al login). Reintentá en unos minutos.'
+    );
+  }
 
-  // Allowlist, no denylist: se extrae SÓLO el rol (textbox, button, link,
-  // heading...) y el ref (`[ref=eN]`) de cada línea — nunca el texto que
-  // acompaña al elemento. Un enfoque de "enmascarar lo que parece sensible"
-  // (por ejemplo strings entre comillas) es frágil: el propio snapshot trae
-  // texto plano SIN comillas fuera de los elementos (el título/URL de la
-  // página aparecen como encabezado libre, confirmado corriendo
-  // `agent-browser snapshot` a mano), y ese texto puede traer el nombre del
-  // contribuyente u otro dato personal. La línea debe empezar (salvo
-  // indentación) con "- <rol>", y ese rol debe estar en ROLES_CONOCIDOS —
-  // sin las dos condiciones juntas, un regex suelto matchea cualquier
-  // palabra después de un guion en cualquier parte del texto libre.
-  private resumenEstructuralParaLog(snapshot: string): string {
-    if (!snapshot) return '(vacío)';
-    return snapshot
-      .split('\n')
-      .map(line => {
-        const candidato = line.match(/^\s*-\s+([A-Za-z]+)\b/)?.[1];
-        if (!candidato || !SessionManager.ROLES_CONOCIDOS.has(candidato.toLowerCase())) {
-          return null;
-        }
-        const ref = line.match(/\[ref=(e\d+)\]/)?.[1];
-        return ref ? `${candidato}[${ref}]` : candidato;
-      })
-      .filter((x): x is string => x !== null)
-      .join(',');
+  // Éxito = el SII nos devolvió a una página del portal (fuera del formulario
+  // de autenticación). Con clave incorrecta el CGI vuelve a renderizar el
+  // login, así que seguir en IngresoRutClave al agotar la espera ES el rechazo.
+  // 15s es generoso a propósito: un falso "clave incorrecta" por latencia del
+  // SII es peor que tardar un poco más en detectar un rechazo genuino — a los
+  // consumidores les llega como CREDENCIALES_INVALIDAS y se lo muestran al
+  // usuario final.
+  private async assertLoginPorClaveExitoso(maxMs = 15_000, step = 1_000): Promise<void> {
+    let url = '';
+    for (let esperado = 0; esperado < maxMs; esperado += step) {
+      await new Promise(resolve => setTimeout(resolve, step));
+      url = this.leerUrlActual();
+      if (!url.includes(SII_LOGIN_RECURSO) && /^https:\/\/([^/?]+\.)?sii\.cl(\/|\?|$)/.test(url)) return;
+    }
+    console.error(
+      `Login SII: no salió del formulario de autenticación. url=${this.sanearUrlParaLog(url)}`
+    );
+    throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
   }
 
   // Sólo origin + pathname: el query string puede traer el RUT, un token de
@@ -579,58 +579,6 @@ export class SessionManager {
     } catch {
       return '(url no parseable)';
     }
-  }
-
-  // Polling corto: el click dispara el submit pero el re-render no es
-  // instantáneo. Devuelve true si el campo de clave SIGUE en el snapshot al
-  // agotarse el tiempo (rechazo o timeout) — false apenas desaparece (login
-  // avanzó). Un snapshot vacío/basura del CLI cuenta como "sigue" (fail-safe:
-  // nunca se interpreta la ausencia de datos como éxito).
-  //
-  // Exige DOS lecturas consecutivas sin el campo antes de dar por exitoso:
-  // el primer snapshot tras el click puede capturar el DOM a mitad de
-  // re-render (contenido parcial, sin el input todavía pero tampoco
-  // realmente logueado) — una sola lectura "limpia" ahí sería un falso
-  // positivo que el chequeo de dominio no detecta (sigue en sii.cl).
-  //
-  // Sleep no bloqueante: este método corre dentro del proceso REST — un
-  // sleep síncrono (execSync) congelaría TODO el event loop, dejando de
-  // atender otros requests mientras dura el polling.
-  private async esperarSalirDelFormularioDeLogin(
-    maxMs = 15_000,
-    step = 1_000
-  ): Promise<{ siguioEnFormularioDeLogin: boolean; ultimoSnapshot: string }> {
-    let elapsed = 0;
-    let lecturasLimpiasSeguidas = 0;
-    let ultimoSnapshot = '';
-    while (elapsed < maxMs) {
-      const s = this.browser.snapshot();
-      ultimoSnapshot = s;
-      if (s && !this.campoDeClavePresente(s)) {
-        lecturasLimpiasSeguidas++;
-        if (lecturasLimpiasSeguidas >= 2) {
-          return { siguioEnFormularioDeLogin: false, ultimoSnapshot };
-        }
-      } else {
-        lecturasLimpiasSeguidas = 0;
-      }
-      await new Promise(resolve => setTimeout(resolve, step));
-      elapsed += step;
-    }
-    return { siguioEnFormularioDeLogin: true, ultimoSnapshot };
-  }
-
-  // A diferencia de findRef genérico (usado para UBICAR el campo antes de
-  // llenarlo), acá exige que la línea sea un campo de INPUT (textbox o
-  // password) — no cualquier elemento que mencione "clave". Sin esta
-  // restricción, un link o botón post-login como "Cambiar clave" (existe en
-  // el menú de MiSII) haría que el chequeo crea que el form de login sigue
-  // presente, y reportaría el mismo falso CREDENCIALES_INVALIDAS que este
-  // fix corrige, por otra vía.
-  private campoDeClavePresente(snapshot: string): boolean {
-    return snapshot.split('\n').some(
-      line => /textbox|password/i.test(line) && /clave|contraseña|password/i.test(line)
-    );
   }
 
   private leerUrlActual(): string {
