@@ -30,7 +30,7 @@ describe('registrarRutasMipyme', () => {
   it('list-empresas: body válido llama al core', async () => {
     (core.listEmpresas as jest.Mock).mockResolvedValue([]);
     const rutas = armarRouter();
-    const respuesta = await rutas.get('POST /v1/mipyme/list-empresas')!({ rut: '11.111.111-1', clave: 'x' });
+    const respuesta = await rutas.get('POST /v1/mipyme/list-empresas')!({ rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy' });
     expect(respuesta).toEqual({ status: 200, body: { ok: true, datos: [] } });
   });
 
@@ -38,7 +38,7 @@ describe('registrarRutasMipyme', () => {
     (core.emitirDte as jest.Mock).mockResolvedValue({ emitido: false, resumen: {} });
     const rutas = armarRouter();
     const respuesta = await rutas.get('POST /v1/mipyme/emitir-dte')!({
-      rut: '11.111.111-1', clave: 'x', tipo_dte: 33, lineas: [LINEA_MINIMA], ...RECEPTOR_MINIMO,
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy', tipo_dte: 33, lineas: [LINEA_MINIMA], ...RECEPTOR_MINIMO,
     });
     expect(respuesta.status).toBe(200);
     expect(core.emitirDte).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.any(Object), false);
@@ -47,7 +47,7 @@ describe('registrarRutasMipyme', () => {
   it('emitir-dte con confirmar=true responde 400 CONFIRMAR_NO_SOPORTADO sin llamar al core', async () => {
     const rutas = armarRouter();
     const respuesta = await rutas.get('POST /v1/mipyme/emitir-dte')!({
-      rut: '11.111.111-1', clave: 'x', tipo_dte: 33, lineas: [LINEA_MINIMA], ...RECEPTOR_MINIMO, confirmar: true,
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy', tipo_dte: 33, lineas: [LINEA_MINIMA], ...RECEPTOR_MINIMO, confirmar: true,
     });
     expect(respuesta).toEqual({ status: 400, body: { error: 'CONFIRMAR_NO_SOPORTADO' } });
     expect(core.emitirDte).not.toHaveBeenCalled();

@@ -1,4 +1,16 @@
+import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
+
+// Fragmento zod compartido por las 5 rutas REST que reciben certificado
+// digital. La regex valida el alfabeto base64 (incluyendo padding) ANTES de
+// intentar decodificar: un base64 con basura no falla en Buffer.from (que lo
+// decodifica "lo mejor que puede"), sino que escribe un .pfx corrupto y
+// termina en un error tardío genérico del scraper. Rechazarlo acá devuelve
+// BAD_REQUEST temprano sin gastar cupo de rate-limit del tenant.
+export const zodCredencialCert = {
+  certificado_base64: z.string().min(1).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'certificado_base64 inválido'),
+  certificado_password: z.string().min(1),
+};
 
 export interface RespuestaRuta {
   status: number;

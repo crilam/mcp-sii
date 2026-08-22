@@ -1,5 +1,7 @@
+import * as fs from 'fs';
 import { AuthStrategy, SiiConfig } from './env';
 import { ProveedorCredenciales, normalizar } from './credenciales';
+import { rutaTemporalSii } from './rutaTemporalSii';
 
 // Credenciales que llegan en tiempo de ejecución vía sii_iniciar_sesion, no de
 // env. Vive sólo en memoria del proceso: nunca se persiste a disco. A
@@ -17,8 +19,35 @@ export class ProveedorCredencialesRuntime implements ProveedorCredenciales {
     });
   }
 
+  guardarCertificado(rut: string, certificadoBase64: string, certificadoPassword: string, claveCertSii?: string): void {
+    const certPath = rutaTemporalSii('pfxruntime', rut);
+    // Material de clave de terceros en /tmp compartido con path predecible:
+    // writeFileSync con {mode} NO baja permisos si el archivo ya existe, por
+    // eso se borra antes de escribir para garantizar 0o600 (solo el owner).
+    fs.rmSync(certPath, { force: true });
+    fs.writeFileSync(certPath, Buffer.from(certificadoBase64, 'base64'), { mode: 0o600 });
+    this.porRut.set(normalizar(rut), {
+      rut,
+      strategy: AuthStrategy.Certificate,
+      certPath,
+      certPassword: certificadoPassword,
+      claveCertificadoSii: claveCertSii,
+    });
+  }
+
   borrar(rut: string): void {
-    this.porRut.delete(normalizar(rut));
+    const n = normalizar(rut);
+    try {
+      fs.unlinkSync(rutaTemporalSii('pfxruntime', rut));
+    } catch (e) {
+      // ENOENT (no existía) es esperable y se ignora. Cualquier otro error
+      // (EACCES/EBUSY) dejaría el .pfx en disco en silencio — se loguea sin
+      // exponer el path para no filtrar el layout de /tmp.
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error('No se pudo borrar el .pfx temporal');
+      }
+    }
+    this.porRut.delete(n);
   }
 
   async para(rut: string): Promise<SiiConfig> {

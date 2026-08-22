@@ -83,7 +83,7 @@ describe('restServer', () => {
     const res = await request(port, {
       path: '/v1/rcv/resumen',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rut: '11.111.111-1', clave: 'x', periodo: '202607', operacion: 'VENTA' }),
+      body: JSON.stringify({ rut: '11.111.111-1', certificado_base64: 'x', certificado_password: 'y', periodo: '202607', operacion: 'VENTA' }),
     });
     expect(res.status).toBe(200);
   });
@@ -104,7 +104,7 @@ describe('restServer', () => {
     await request(port, {
       path: '/v1/rcv/resumen',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rut: '11.111.111-1', clave: 'x', periodo: '202607', operacion: 'VENTA' }),
+      body: JSON.stringify({ rut: '11.111.111-1', certificado_base64: 'x', certificado_password: 'y', periodo: '202607', operacion: 'VENTA' }),
     });
 
     const { rows } = await pool.query(

@@ -28,7 +28,7 @@ describe('registrarRutasDte', () => {
     (core.listar as jest.Mock).mockResolvedValue({ filas: [] });
     const rutas = armarRouter();
     const respuesta = await rutas.get('POST /v1/dte/list-documentos-emitidos')!({
-      rut: '11.111.111-1', clave: 'x', periodo: '202607',
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy', periodo: '202607',
     });
     expect(respuesta).toEqual({ status: 200, body: { ok: true, filas: [] } });
     expect(core.listar).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', '202607', 'EMITIDOS', expect.any(Object));
@@ -38,14 +38,14 @@ describe('registrarRutasDte', () => {
     (core.getDocumento as jest.Mock).mockResolvedValue({ encontrado: false });
     const rutas = armarRouter();
     await rutas.get('POST /v1/dte/get-documento-recibido')!({
-      rut: '11.111.111-1', clave: 'x', periodo: '202607', tipo_doc: 33, folio: 100,
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy', periodo: '202607', tipo_doc: 33, folio: 100,
     });
     expect(core.getDocumento).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', '202607', 'RECIBIDOS', 33, 100, undefined);
   });
 
   it('body inválido (falta periodo) devuelve 400', async () => {
     const rutas = armarRouter();
-    const respuesta = await rutas.get('POST /v1/dte/list-documentos-emitidos')!({ rut: '1', clave: 'x' });
+    const respuesta = await rutas.get('POST /v1/dte/list-documentos-emitidos')!({ rut: '1', certificado_base64: 'xxx', certificado_password: 'yyy' });
     expect(respuesta.status).toBe(400);
   });
 });

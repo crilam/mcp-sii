@@ -5,11 +5,11 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/dte';
 import { schemaListado, schemaDocumento } from '../../core/schemas/dte';
-import { ejecutorPassThroughDe } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar } from './comun';
+import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
+import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
 
-const zodListado = z.object(schemaListado()).extend({ clave: z.string().min(1) });
-const zodDocumento = z.object(schemaDocumento).extend({ clave: z.string().min(1) });
+const zodListado = z.object(schemaListado()).extend(zodCredencialCert);
+const zodDocumento = z.object(schemaDocumento).extend(zodCredencialCert);
 
 export function registrarRutasDte(
   rutas: Map<string, RutaHandler>,
@@ -20,8 +20,8 @@ export function registrarRutasDte(
     rutas.set(`POST /v1/dte/${nombre}`, async body => {
       const parseo = zodListado.safeParse(body);
       if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-      const { rut, clave, periodo, empresa_rut, tipo_doc, seccion, contraparte_rut, limit, incluir_detalle } = parseo.data;
-      const ejecutor = ejecutorPassThroughDe(registro, credenciales, rut, clave);
+      const { rut, certificado_base64, certificado_password, periodo, empresa_rut, tipo_doc, seccion, contraparte_rut, limit, incluir_detalle } = parseo.data;
+      const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
       return ejecutar(() => core.listar(ejecutor, rut, periodo, operacion, {
         empresaRut: empresa_rut, tipoDocCodigo: tipo_doc, seccion,
         contraparteRut: contraparte_rut, limit, incluirDetalle: incluir_detalle,
@@ -33,8 +33,8 @@ export function registrarRutasDte(
     rutas.set(`POST /v1/dte/${nombre}`, async body => {
       const parseo = zodDocumento.safeParse(body);
       if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-      const { rut, clave, periodo, tipo_doc, folio, empresa_rut } = parseo.data;
-      const ejecutor = ejecutorPassThroughDe(registro, credenciales, rut, clave);
+      const { rut, certificado_base64, certificado_password, periodo, tipo_doc, folio, empresa_rut } = parseo.data;
+      const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
       return ejecutar(() => core.getDocumento(ejecutor, rut, periodo, operacion, tipo_doc, folio, empresa_rut));
     });
   };

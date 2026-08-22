@@ -22,14 +22,14 @@ describe('registrarRutasRenta', () => {
   it('estado-declaracion: body válido llama al core', async () => {
     (core.estadoDeclaracion as jest.Mock).mockResolvedValue({ declaraciones: [] });
     const rutas = armarRouter();
-    const respuesta = await rutas.get('POST /v1/renta/estado-declaracion')!({ rut: '11.111.111-1', clave: 'x', anio: 2026 });
+    const respuesta = await rutas.get('POST /v1/renta/estado-declaracion')!({ rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy', anio: 2026 });
     expect(respuesta).toEqual({ status: 200, body: { ok: true, declaraciones: [] } });
   });
 
   it('f22: pasa folio opcional', async () => {
     (core.f22Completo as jest.Mock).mockResolvedValue({ lineas: [] });
     const rutas = armarRouter();
-    await rutas.get('POST /v1/renta/f22')!({ rut: '11.111.111-1', clave: 'x', anio: 2026, folio: 5 });
+    await rutas.get('POST /v1/renta/f22')!({ rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy', anio: 2026, folio: 5 });
     expect(core.f22Completo).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', 2026, 5);
   });
 });
