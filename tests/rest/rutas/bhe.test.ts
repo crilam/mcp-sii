@@ -2,6 +2,7 @@ import { registrarRutasBhe } from '../../../src/rest/rutas/bhe';
 import { RegistroSesiones } from '../../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
 import * as core from '../../../src/core/bhe';
+import { RecursoNoEncontrado } from '../../../src/erroresConsulta';
 
 jest.mock('../../../src/core/bhe');
 
@@ -96,6 +97,47 @@ describe('registrarRutasBhe', () => {
     const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
       rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
       codigo_barras: '   ',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.pdf).not.toHaveBeenCalled();
+  });
+
+  // Sin un código propio, un identificador equivocado (permanente) y una caída
+  // del portal (transitoria) devolvían los mismos bytes, y el tenant reintentaba
+  // en loop lo que no iba a funcionar nunca.
+  it('pdf: una boleta inexistente devuelve NO_ENCONTRADO, no ERROR', async () => {
+    (core.pdf as jest.Mock).mockRejectedValue(
+      new RecursoNoEncontrado('el SII informa que no existe una boleta')
+    );
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '99999999999999999999',
+    });
+
+    expect(respuesta).toEqual({ status: 200, body: { ok: false, error: 'NO_ENCONTRADO' } });
+  });
+
+  it('pdf: un fallo transitorio sigue siendo ERROR', async () => {
+    (core.pdf as jest.Mock).mockRejectedValue(new Error('el portal respondió algo inesperado'));
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '111111110000048F99ED',
+    });
+
+    expect(respuesta).toEqual({ status: 200, body: { ok: false, error: 'ERROR' } });
+  });
+
+  it('pdf: un codigo_barras absurdamente largo devuelve 400', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: 'A'.repeat(5_000),
     });
 
     expect(respuesta.status).toBe(400);

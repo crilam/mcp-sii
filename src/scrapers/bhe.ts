@@ -1,6 +1,6 @@
 import { SiiHttpClient } from '../http';
 import { RequiereCertificado, SessionManager } from '../session';
-import { LimitacionConocida } from '../erroresConsulta';
+import { LimitacionConocida, RecursoNoEncontrado } from '../erroresConsulta';
 
 export interface MesBhe {
   mes: number;
@@ -335,9 +335,12 @@ export class BheScraper {
       // no reconocerlos le negaría el reintento a un fallo que se resuelve
       // solo, con una causa inventada encima.
       if (/No existe la boleta de honorarios/i.test(cuerpo)) {
-        throw new LimitacionConocida(
+        throw new RecursoNoEncontrado(
           `${detalle}el SII informa que no existe una boleta con ese código de ` +
-          'barras para este RUT. Revisá el código; reintentar no ayuda.'
+          'barras. Además del código en sí, revisá que el flag de recibida sea ' +
+          `el correcto: se pidió como ${recibida ? 'recibida' : 'emitida'}, y ` +
+          'pedir una boleta con el origen equivocado devuelve exactamente esta ' +
+          'respuesta. Reintentar no ayuda.'
         );
       }
 

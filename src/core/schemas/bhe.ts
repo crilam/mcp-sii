@@ -32,7 +32,10 @@ export const schemaPdf = {
   // mandarle basura al SII, y sobre todo evita que un valor con separadores
   // ("../../x") se propague al `nombre_archivo` que devuelve la ruta y termine
   // siendo un path traversal en el consumidor que guarde el PDF con ese nombre.
-  codigo_barras: z.string().trim().regex(
+  // `.max(40)`: los códigos observados tienen 20-21 caracteres. Sin cota, un
+  // millón de alfanuméricos pasa la validación, arma una query enorme contra el
+  // SII y gasta cupo del tenant para nada.
+  codigo_barras: z.string().trim().max(40).regex(
     /^[A-Za-z0-9]+$/,
     'codigo_barras inválido: el SII usa sólo letras y dígitos'
   ).describe(

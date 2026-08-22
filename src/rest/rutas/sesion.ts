@@ -59,7 +59,13 @@ export async function validarClave(
     );
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: clasificarErrorCredenciales(e) };
+    // NO_ENCONTRADO no es alcanzable acá: esta ruta valida una credencial, no
+    // busca un recurso, así que nada puede lanzar RecursoNoEncontrado. Se
+    // colapsa a ERROR en vez de ensanchar el contrato de la ruta con un código
+    // que nunca va a devolver — los tenants que la consumen no tendrían cómo
+    // interpretarlo.
+    const error = clasificarErrorCredenciales(e);
+    return { ok: false, error: error === 'NO_ENCONTRADO' ? 'ERROR' : error };
   }
 }
 

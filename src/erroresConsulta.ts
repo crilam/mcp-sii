@@ -13,7 +13,7 @@ export class LimitacionConocida extends Error {
   // Error, y perder la causa deja el fallo original sin rastro en el log.
   constructor(mensaje: string, opciones?: { cause?: unknown }) {
     super(mensaje);
-    this.name = 'LimitacionConocida';
+    this.name = new.target.name;
     if (opciones && 'cause' in opciones) {
       // No enumerable: `console.error(err)` imprime las props propias, y la
       // causa de un execFileSync trae el comando completo con sus argumentos.
@@ -23,3 +23,11 @@ export class LimitacionConocida extends Error {
     }
   }
 }
+
+// El SII confirmó que el dato pedido no existe (no que falló al buscarlo). Se
+// distingue del resto de las limitaciones porque el adaptador REST la traduce a
+// un código propio del contrato, `NO_ENCONTRADO`: sin eso, un identificador
+// equivocado —permanente— llega al tenant con los mismos bytes que una caída
+// del portal —transitoria—, y el tenant reintenta en loop lo que nunca va a
+// funcionar.
+export class RecursoNoEncontrado extends LimitacionConocida {}
