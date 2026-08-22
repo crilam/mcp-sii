@@ -287,11 +287,24 @@ export class SiiHttpClient {
       // src/rest/auditoria.ts, o sea al log central. Se reemplaza por uno que
       // nombra sólo el código del fallo — mismo criterio que ErrorDeBrowser en
       // src/browser.ts.
-      const codigo = (e as { code?: string })?.code;
-      const señal = (e as { signal?: string })?.signal;
+      // `status` Y `code`, no sólo `code`: en execFileSync el exit code del
+      // proceso viaja en `status`, mientras `code` sólo aparece cuando falla el
+      // spawn (ENOENT, ETIMEDOUT, ENOBUFS). El caso más común —curl corriendo y
+      // saliendo distinto de cero: 28 timeout, 7 conexión rechazada, 6 DNS, 35
+      // TLS— no tiene `code`, así que mirando sólo ese campo el mensaje quedaba
+      // sin ningún dato. Ninguno de los tres es sensible.
+      const partes = [
+        (e as { code?: string })?.code,
+        (e as { status?: number })?.status !== undefined
+          ? `curl salió ${(e as { status?: number }).status}`
+          : undefined,
+        (e as { signal?: string })?.signal
+          ? `señal ${(e as { signal?: string }).signal}`
+          : undefined,
+      ].filter(Boolean);
       throw new Error(
         'Falló la consulta HTTP al SII' +
-        `${codigo ? ` (${codigo})` : ''}${señal ? ` (señal ${señal})` : ''}.`
+        `${partes.length ? ` (${partes.join(', ')})` : ''}.`
       );
     }
   }

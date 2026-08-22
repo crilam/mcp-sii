@@ -57,6 +57,15 @@ const CGI_MENSUAL_REC = `${BASE}/TMBCOC_InformeMensualBheRec.cgi`;
 // sale del propio JS del informe mensual, que arma este link por cada fila.
 const CGI_PDF = `${BASE}/TMBCOT_ConsultaBoletaPdf.cgi`;
 
+// Aviso con el que el portal responde cuando el código de barras no le
+// corresponde a ninguna boleta del RUT, y cuántos bytes del cuerpo se miran
+// buscándolo. Van juntos a propósito: la respuesta observada son 1403 bytes,
+// pero si el SII alguna vez mete el aviso detrás de un header o un JS más
+// largo, el corte lo deja fuera y el fallo permanente vuelve a tratarse como
+// transitorio. Quien mueva uno tiene que ver el otro.
+const AVISO_BOLETA_INEXISTENTE = /No existe la boleta de honorarios/i;
+const BYTES_A_INSPECCIONAR = 4_000;
+
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
                'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -314,7 +323,7 @@ export class BheScraper {
       // Se corta el BUFFER antes de decodificar: `toString()` sobre la
       // respuesta completa (hasta MAX_RESPUESTA_BYTES) para después quedarse
       // con 4 KB es trabajo tirado, y acá el cuerpo puede ser un PDF entero.
-      const cuerpo = contenido.subarray(0, 4_000).toString('latin1');
+      const cuerpo = contenido.subarray(0, BYTES_A_INSPECCIONAR).toString('latin1');
       // El código lo manda el tenant: se trunca para no volcar una cadena
       // arbitrariamente larga en el log central.
       const detalle = `El SII no devolvió un PDF para la boleta ` +
@@ -334,7 +343,7 @@ export class BheScraper {
       // llegan acá, y esos SÍ son transitorios. Marcarlos como permanentes por
       // no reconocerlos le negaría el reintento a un fallo que se resuelve
       // solo, con una causa inventada encima.
-      if (/No existe la boleta de honorarios/i.test(cuerpo)) {
+      if (AVISO_BOLETA_INEXISTENTE.test(cuerpo)) {
         throw new RecursoNoEncontrado(
           `${detalle}el SII informa que no existe una boleta con ese código de ` +
           'barras. Además del código en sí, revisá que el flag de recibida sea ' +

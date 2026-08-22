@@ -410,6 +410,23 @@ describe('SiiHttpClient.getBinario', () => {
     expect(impreso).toContain('ETIMEDOUT');
   });
 
+  // El caso MÁS común: curl corre y sale distinto de cero (28 timeout, 7
+  // conexión rechazada, 35 TLS). Ahí no hay `code` — el exit code está en
+  // `status`, y mirando sólo `code` el error quedaba sin ningún dato.
+  it('conserva el exit code de curl, que viaja en status y no en code', async () => {
+    mockExec.mockImplementation(() => {
+      throw Object.assign(new Error('Command failed: curl -sk -b /tmp/jar'), { status: 28 });
+    });
+    const { client } = makeClient();
+
+    const error = await client
+      .get('https://loa.sii.cl/cgi_IMT/TMBCOC_InformeAnualBhe.cgi')
+      .catch((e: unknown) => e);
+
+    expect((error as Error).message).toMatch(/curl salió 28/);
+    expect((error as Error).message).not.toContain('Command failed');
+  });
+
   // `get`/`postForm` y `getBinario` comparten `curlCrudo`, así que el límite
   // vale para los dos caminos. Cubrir el de texto es barato y deja claro que no
   // es una propiedad exclusiva del binario.
