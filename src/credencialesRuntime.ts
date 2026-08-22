@@ -1,5 +1,7 @@
+import * as fs from 'fs';
 import { AuthStrategy, SiiConfig } from './env';
 import { ProveedorCredenciales, normalizar } from './credenciales';
+import { rutaTemporalSii } from './rutaTemporalSii';
 
 // Credenciales que llegan en tiempo de ejecución vía sii_iniciar_sesion, no de
 // env. Vive sólo en memoria del proceso: nunca se persiste a disco. A
@@ -17,8 +19,22 @@ export class ProveedorCredencialesRuntime implements ProveedorCredenciales {
     });
   }
 
+  guardarCertificado(rut: string, certificadoBase64: string, certificadoPassword: string, claveCertSii?: string): void {
+    const certPath = rutaTemporalSii('pfxruntime', rut);
+    fs.writeFileSync(certPath, Buffer.from(certificadoBase64, 'base64'));
+    this.porRut.set(normalizar(rut), {
+      rut,
+      strategy: AuthStrategy.Certificate,
+      certPath,
+      certPassword: certificadoPassword,
+      claveCertificadoSii: claveCertSii,
+    });
+  }
+
   borrar(rut: string): void {
-    this.porRut.delete(normalizar(rut));
+    const n = normalizar(rut);
+    try { fs.unlinkSync(rutaTemporalSii('pfxruntime', rut)); } catch { /* no existía */ }
+    this.porRut.delete(n);
   }
 
   async para(rut: string): Promise<SiiConfig> {
