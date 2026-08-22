@@ -310,8 +310,14 @@ export class BheScraper {
     // un fallo es el Content-Type. Sin este chequeo, el error viajaría como un
     // "PDF" de 17 KB que ningún lector abre.
     if (!/application\/pdf/i.test(contentType)) {
-      const cuerpo = contenido.toString('latin1').slice(0, 4_000);
-      const detalle = `El SII no devolvió un PDF para la boleta ${codigoBarras} ` +
+      // Se corta el BUFFER antes de decodificar: `toString()` sobre la
+      // respuesta completa (hasta MAX_RESPUESTA_BYTES) para después quedarse
+      // con 4 KB es trabajo tirado, y acá el cuerpo puede ser un PDF entero.
+      const cuerpo = contenido.subarray(0, 4_000).toString('latin1');
+      // El código lo manda el tenant: se trunca para no volcar una cadena
+      // arbitrariamente larga en el log central.
+      const detalle = `El SII no devolvió un PDF para la boleta ` +
+        `${codigoBarras.slice(0, 40)} ` +
         `(respondió "${contentType || 'sin Content-Type'}"): `;
 
       // Sólo se afirma "el código no existe" cuando el portal lo dice con estas

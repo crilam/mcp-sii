@@ -376,6 +376,21 @@ describe('BheScraper.pdfBoleta', () => {
       .rejects.toThrow(/la sesión expiró: reintentá/);
   });
 
+  // curl puede morir antes de escribir la marca del `-w`, y entonces el
+  // transporte devuelve contentType vacío. No es evidencia de nada, así que
+  // debe caer en el caso reintentable, no en uno con causa afirmada.
+  it('trata un Content-Type ausente como fallo reintentable', async () => {
+    const { scraper, http } = makePdfScraper({
+      contenido: Buffer.from(''),
+      contentType: '',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/sin Content-Type.*algo inesperado/s);
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(2);
+  });
+
   // Texto real del portal ante un código inexistente, ajeno o basura
   // (verificado en vivo: 1403 bytes, "INFORMACION AL CONTRIBUYENTE").
   const NO_EXISTE = Buffer.from(

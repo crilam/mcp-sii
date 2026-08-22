@@ -226,14 +226,12 @@ export class SiiHttpClient {
     // Se pide la salida como bytes crudos (`encoding: 'buffer'`) porque el
     // encoding correcto recién se conoce después de leer el Content-Type que
     // curl agrega con `-w`. Decodificar antes sería adivinar.
-    const salida = execFileSync(
-      'curl',
+    const salida = this.ejecutarCurl(
       [
         '-sk', '-b', jar, '-L', '--max-redirs', '5', '--max-time', '25',
         '-w', `${MARCA_CONTENT_TYPE}%{content_type}`,
         ...args,
-      ],
-      { encoding: 'buffer', timeout: TIMEOUT_MS, maxBuffer: MAX_RESPUESTA_BYTES }
+      ]
     );
 
     const bruto = Buffer.isBuffer(salida)
@@ -254,6 +252,30 @@ export class SiiHttpClient {
         .toString('ascii')
         .trim(),
     };
+  }
+
+  // Cuando la respuesta pasa `maxBuffer`, Node mata el proceso y tira ENOBUFS
+  // con un mensaje que no menciona el tamaño. Sin traducirlo, el tenant recibe
+  // el ERROR genérico del contrato REST y nadie puede distinguir "el SII no
+  // respondió" de "la respuesta no cabía" — que es exactamente el diagnóstico
+  // ciego que el límite explícito venía a evitar.
+  private ejecutarCurl(args: string[]): Buffer | string {
+    try {
+      return execFileSync('curl', args, {
+        encoding: 'buffer',
+        timeout: TIMEOUT_MS,
+        maxBuffer: MAX_RESPUESTA_BYTES,
+      });
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ENOBUFS') {
+        throw new Error(
+          `La respuesta del SII superó el máximo de ${MAX_RESPUESTA_BYTES} bytes ` +
+          'que este cliente puede leer, así que se descartó incompleta. Si es ' +
+          'un documento legítimamente grande, hay que subir MAX_RESPUESTA_BYTES.'
+        );
+      }
+      throw e;
+    }
   }
 
   private encodeParams(params: Record<string, string>, charset: 'utf-8' | 'latin1' = 'utf-8'): string {

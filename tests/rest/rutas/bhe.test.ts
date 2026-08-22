@@ -55,6 +55,7 @@ describe('registrarRutasBhe', () => {
         ok: true,
         codigo_barras: '111111110000048F99ED',
         content_type: 'application/pdf',
+        nombre_archivo: 'bhe-111111110000048F99ED.pdf',
         tamano_bytes: contenido.length,
         pdf_base64: contenido.toString('base64'),
       },

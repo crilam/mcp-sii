@@ -61,6 +61,8 @@ export function registrarRutasBhe(
       return {
         codigo_barras,
         content_type: 'application/pdf',
+        // Nombre sugerido para que los tres tenants no lo inventen distinto.
+        nombre_archivo: `bhe-${codigo_barras}.pdf`,
         tamano_bytes: contenido.length,
         pdf_base64: contenido.toString('base64'),
       };

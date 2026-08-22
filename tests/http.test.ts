@@ -351,6 +351,19 @@ describe('SiiHttpClient.getBinario', () => {
     expect(opciones.maxBuffer).toBeGreaterThan(1024 * 1024);
   });
 
+  // Node mata el proceso con ENOBUFS y un mensaje que no menciona el tamaño:
+  // sin traducirlo, el tenant no puede distinguir "el SII no respondió" de "la
+  // respuesta no cabía".
+  it('traduce ENOBUFS a un error que nombra el límite de tamaño', async () => {
+    mockExec.mockImplementation(() => {
+      throw Object.assign(new Error('spawnSync curl ENOBUFS'), { code: 'ENOBUFS' });
+    });
+    const { client } = makeClient();
+
+    await expect(client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi'))
+      .rejects.toThrow(/superó el máximo de \d+ bytes/);
+  });
+
   // `get`/`postForm` y `getBinario` comparten `curlCrudo`, así que el límite
   // vale para los dos caminos. Cubrir el de texto es barato y deja claro que no
   // es una propiedad exclusiva del binario.
