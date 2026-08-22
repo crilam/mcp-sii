@@ -18,16 +18,14 @@ function armar() {
     { rut: '11111111-1', strategy: AuthStrategy.Clave, clave: 'secreta' },
     browser
   );
-  // El navegador automockeado devuelve undefined, y el login por clave lee el
-  // snapshot para ubicar los campos del formulario. fillClaveForm verifica
-  // tras el click que el campo de clave haya desaparecido del snapshot (ver
-  // src/session.ts) — la primera lectura (login) puede ser '', pero las
-  // siguientes deben simular éxito para llegar al camino que este test
-  // ejercita (RequiereCertificado para BHE por HTTP).
-  (browser.snapshot as jest.Mock)
-    .mockReturnValueOnce('')
-    .mockReturnValue('- generic\n  - StaticText "Portal"');
-  // fillClaveForm también confirma el dominio de destino tras el click.
+  // Con estrategia de clave, assertPuedeEntregarCookieJar rechaza ANTES de
+  // tocar el navegador (ver test más abajo), así que loginConClave nunca
+  // llega a ejecutarse en estos casos. Se mockea igual, por si algún test
+  // futuro fuerza el camino (ver "no reintenta aunque el fallo aparezca
+  // recién dentro del intento").
+  (browser.eval as jest.Mock).mockImplementation((js: string) =>
+    js.includes("getElementById('myform')") ? 'SI' : ''
+  );
   (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
   const autenticaciones = jest.spyOn(session, 'authenticateOnly');
   const http = {

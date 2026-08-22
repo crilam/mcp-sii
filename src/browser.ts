@@ -4,6 +4,31 @@ import { execFileSync, execSync } from 'child_process';
 // grande del árbol de accesibilidad de una página con muchos elementos.
 const EXEC_OPTS = { encoding: 'utf-8' as const, timeout: 30_000, maxBuffer: 10 * 1024 * 1024 };
 
+// Error de una invocación de agent-browser SIN el comando ni sus argumentos en
+// el mensaje (ver comentario de Browser.run). `salida` trae stderr/stdout del
+// CLI, que sí es seguro: el CLI no repite los argumentos que recibió.
+//
+// NO se guarda el error original (`causa`/`cause`) como propiedad propia: aun
+// siendo `readonly`, una prop propia es ENUMERABLE por defecto, y
+// `console.error(err)` / `util.inspect(err)` imprimen las props propias
+// incluido `causa.message`, que en execFileSync es "Command failed: " + el
+// comando COMPLETO con argumentos — y ahí SÍ puede ir la clave tributaria (el
+// login por clave la manda en el JS de `eval`). src/rest/auditoria.ts loguea
+// el error completo con console.error, así que cualquier prop enumerable con
+// el mensaje crudo puede terminar en CloudWatch. Sólo se conservan `code` y
+// `signal`, que identifican timeouts/señales del proceso sin llevar datos.
+export class ErrorDeBrowser extends Error {
+  readonly code?: string;
+  readonly signal?: string;
+
+  constructor(readonly subcomando: string, readonly salida: string, causa?: unknown) {
+    super(`agent-browser falló al ejecutar '${subcomando}'${salida ? `: ${salida}` : ''}`);
+    this.name = 'ErrorDeBrowser';
+    this.code = (causa as any)?.code;
+    this.signal = (causa as any)?.signal;
+  }
+}
+
 export class Browser {
   constructor(private sessionId?: string) {}
 
@@ -13,9 +38,58 @@ export class Browser {
   // sintaxis) o, peor, podía inyectar comandos arbitrarios en el contenedor —
   // la clave llega del body de /v1/sesion/validar-clave, que es input de un
   // tenant externo, no confiable.
+  // El `message` del error de execFileSync arranca con "Command failed: " y
+  // el comando COMPLETO, argumentos incluidos. Varios argumentos llevan datos
+  // sensibles (la clave tributaria del tenant viaja en el JS de `eval` al
+  // llenar el formulario de login), y ese `message` sí se loguea aguas arriba
+  // (rest/rutas/comun.ts, restServer.ts) — o sea que sin esto una clave puede
+  // terminar en CloudWatch. Se reemplaza el mensaje por uno que sólo nombra el
+  // SUBCOMANDO (args[0]: open/eval/snapshot/...), nunca sus argumentos.
   private run(args: string[]): string {
     const prefijoSesion = this.sessionId ? ['--session', this.sessionId] : [];
-    return execFileSync('agent-browser', [...prefijoSesion, ...args], EXEC_OPTS).toString().trim();
+    try {
+      return execFileSync('agent-browser', [...prefijoSesion, ...args], EXEC_OPTS).toString().trim();
+    } catch (e) {
+      const subcomando = args[0] ?? '(sin comando)';
+      const salida = [(e as any)?.stderr?.toString() ?? '', (e as any)?.stdout?.toString() ?? ''].join(' ').trim();
+      throw new ErrorDeBrowser(subcomando, salida, e);
+    }
+  }
+
+  // Ejecuta UN comando pasando sus argumentos por STDIN en vez de por argv,
+  // usando el modo batch de agent-browser (`batch --json`, que acepta un
+  // array JSON de arrays de argumentos). Es la variante que usa evalPrivado():
+  // los argumentos de `run()` viajan en el argv del proceso agent-browser, así
+  // que son visibles para cualquiera con acceso a `ps`/`/proc/<pid>/cmdline`
+  // en el contenedor — y el `eval` que llena la clave del formulario de login
+  // lleva la clave tributaria del tenant en ese argumento. Por stdin el JS
+  // nunca aparece en argv.
+  private runPorStdin(args: string[]): string {
+    const prefijoSesion = this.sessionId ? ['--session', this.sessionId] : [];
+    try {
+      const salidaCruda = execFileSync(
+        'agent-browser',
+        [...prefijoSesion, 'batch', '--json'],
+        { ...EXEC_OPTS, input: JSON.stringify([args]) }
+      ).toString().trim();
+
+      // batch --json responde un array con UN resultado por comando enviado;
+      // acá siempre se manda uno solo. `success:false` es un rechazo del
+      // propio comando (no una excepción del proceso), así que se traduce
+      // igual a ErrorDeBrowser. `item.error` es un mensaje del CLI, no repite
+      // los argumentos que mandamos, así que es seguro incluirlo en `salida`.
+      const [item] = JSON.parse(salidaCruda);
+      if (!item?.success) {
+        throw new ErrorDeBrowser(args[0] ?? '(sin comando)', String(item?.error ?? ''));
+      }
+      const valor = item?.result?.result;
+      return valor === undefined || valor === null ? '' : String(valor);
+    } catch (e) {
+      if (e instanceof ErrorDeBrowser) throw e;
+      const subcomando = args[0] ?? '(sin comando)';
+      const salida = [(e as any)?.stderr?.toString() ?? '', (e as any)?.stdout?.toString() ?? ''].join(' ').trim();
+      throw new ErrorDeBrowser(subcomando, salida, e);
+    }
   }
 
   open(url: string): void {
@@ -23,18 +97,22 @@ export class Browser {
   }
 
   // Navega a una URL que puede mostrar un JS confirm dialog durante la carga.
-  // Captura el error provocado por el dialog (execFileSync pone el output en err.stderr/stdout,
-  // no en err.message) y lo deja pendiente para que el llamador resuelva con dialogAccept().
+  // Captura el error provocado por el dialog y lo deja pendiente para que el
+  // llamador resuelva con dialogAccept(). La pista del dialog/timeout viene en
+  // la salida del CLI (ErrorDeBrowser.salida / message) o, cuando el CLI no
+  // llegó a imprimir nada (timeout puro, `salida` vacía), en `code`/`signal`
+  // propagados desde el error original de execFileSync — ahí es donde
+  // "spawnSync agent-browser ETIMEDOUT" queda registrado, y ese texto ya NO
+  // está en el message saneado de ErrorDeBrowser.
   openWithPendingDialog(url: string): void {
     try {
       this.run(['open', url]);
     } catch (err: unknown) {
-      const allText = [
-        err instanceof Error ? err.message : String(err),
-        (err as any)?.stderr?.toString() ?? '',
-        (err as any)?.stdout?.toString() ?? '',
-      ].join(' ');
-      if (!/timed.?out|ETIMEDOUT|dialog/i.test(allText)) throw err;
+      const texto = err instanceof ErrorDeBrowser
+        ? `${err.message} ${err.salida}`
+        : (err instanceof Error ? err.message : String(err));
+      const esTimeoutPorCodigo = err instanceof ErrorDeBrowser && err.code === 'ETIMEDOUT';
+      if (!esTimeoutPorCodigo && !/timed.?out|ETIMEDOUT|dialog/i.test(texto)) throw err;
     }
   }
 
@@ -73,6 +151,16 @@ export class Browser {
 
   eval(js: string): string {
     return this.run(['eval', js]);
+  }
+
+  // Variante de `eval` para JS que lleva datos sensibles (la clave tributaria
+  // al llenar el formulario de login). Usa `runPorStdin`, o sea que el JS
+  // viaja por stdin del proceso agent-browser y no queda en su argv, visible
+  // para `ps`/`/proc/<pid>/cmdline` en el contenedor. Los demás `eval` (chequeo
+  // de myform, requestSubmit, lectura de document.cookie/location.href) no
+  // llevan secretos y pueden seguir usando `eval()` por argv.
+  evalPrivado(js: string): string {
+    return this.runPorStdin(['eval', js]);
   }
 
   press(key: string): void {

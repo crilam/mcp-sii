@@ -5,13 +5,22 @@ import { AuthStrategy, SiiConfig } from '../src/env';
 jest.mock('../src/browser');
 const MockBrowser = Browser as jest.MockedClass<typeof Browser>;
 
-// El polling de login (esperarSalirDelFormularioDeLogin) usa setTimeout real
-// — con fake timers global + runAllTimersAsync, cualquier test que dispare
-// ese polling (éxito con 2 lecturas limpias, o rechazo agotando 15s) avanza
-// sin pagar tiempo real, sin que cada test tenga que calcular a mano cuántos
-// ms exactos hacen falta.
+// Tanto el polling de credenciales (assertLoginPorClaveExitoso) como el del
+// formulario (esperarFormularioDeLogin) duermen con setTimeout real (no
+// bloqueante, no execSync) — con fake timers global + runAllTimersAsync,
+// cualquier test que los dispare (éxito con URLs sucesivas, rechazo agotando
+// 15s, o el formulario que nunca aparece agotando 20s) avanza sin pagar
+// tiempo real.
 beforeEach(() => jest.useFakeTimers());
 afterEach(() => jest.useRealTimers());
+
+// El mock de child_process abajo neutraliza el execSync/execFileSync
+// SINCRÓNICO que usan otros caminos (openssl/curl del login por certificado),
+// no el polling (que usa setTimeout, ver arriba).
+jest.mock('child_process', () => ({
+  execSync: jest.fn(() => ''),
+  execFileSync: jest.fn(() => ''),
+}));
 
 async function conTimers<T>(fn: () => Promise<T>): Promise<T> {
   const promesa = fn();
@@ -36,13 +45,6 @@ const configClave: SiiConfig = {
   clave: 'mipass',
 };
 
-// Snapshot de página de login (formato accessibility tree)
-const loginSnapshot = [
-  '- textbox "Ingrese su RUT" [ref=e1]',
-  '- textbox "Ingrese su Clave" [ref=e2]',
-  '- button "Ingresar" [ref=e3]',
-].join('\n');
-
 // Snapshot del portal mipyme con una sola empresa (formato "NOMBRE RUT-DV")
 const empresaUnicaSnapshot = [
   '- combobox [expanded=false, ref=e10]: Empresa',
@@ -56,34 +58,83 @@ const dosEmpresasSnapshot = [
   '- option "EMPRESA DOS LTDA 22222222-2" [ref=e12]',
 ].join('\n');
 
-// Tras el login, fillClaveForm vuelve a leer el snapshot DOS veces seguidas
-// para confirmar que el campo de clave desapareció (ver
-// esperarSalirDelFormularioDeLogin en src/session.ts — exige 2 lecturas
-// limpias consecutivas, no 1, para no confundir un DOM a mitad de re-render
-// con un login exitoso), y la URL para confirmar que el destino es un
-// dominio de sii.cl. Con `mockReturnValueOnce(loginSnapshot).mockReturnValue
-// (snapshotFinal)`, la primera lectura sigue siendo el form de login y TODAS
-// las lecturas posteriores (las 2 del chequeo post-click, más las de
-// selección de empresa) usan `snapshotFinal`.
-function mockearLoginExitoso(browser: Browser, snapshotFinal: string): void {
-  (browser.snapshot as jest.Mock)
-    .mockReturnValueOnce(loginSnapshot)
-    .mockReturnValue(snapshotFinal);
-  (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+// El nuevo login llena y envía el form por `eval`, no por fill/click. El
+// mismo método `eval` sirve para tres cosas distintas (chequear si apareció
+// myform, llenar los campos, hacer requestSubmit), así que el mock inspecciona
+// el JS recibido en vez de devolver un valor fijo — igual que hace el propio
+// SessionManager con la respuesta real del navegador.
+function mockearEvalFormulario(browser: Browser, formularioAparece = true): void {
+  (browser.eval as jest.Mock).mockImplementation((js: string) => {
+    if (js.includes("getElementById('myform')") && js.includes('SI')) {
+      return formularioAparece ? 'SI' : 'NO';
+    }
+    return '';
+  });
+}
+
+// Login por clave exitoso: el formulario aparece y la URL final queda fuera
+// del login, en un dominio sii.cl.
+function mockearLoginExitoso(
+  browser: Browser,
+  snapshotEmpresa: string,
+  urlFinal = 'https://mipyme.sii.cl/'
+): void {
+  mockearEvalFormulario(browser, true);
+  (browser.getUrl as jest.Mock).mockReturnValue(urlFinal);
+  (browser.snapshot as jest.Mock).mockReturnValue(snapshotEmpresa);
 }
 
 describe('SessionManager.login', () => {
-  it('llama open, fill rut, fill clave y click en login', async () => {
+  it('navega a la puerta de entrada del portal privado, no al form directo', async () => {
     const browser = crearBrowserMock();
     mockearLoginExitoso(browser, empresaUnicaSnapshot);
 
     const mgr = new SessionManager(configClave, browser);
     await conTimers(() => mgr.login());
 
-    expect(browser.open).toHaveBeenCalledWith(expect.stringContaining('sii.cl'));
-    expect(browser.fill).toHaveBeenCalledWith(expect.any(String), '12345678');
-    expect(browser.fill).toHaveBeenCalledWith(expect.any(String), 'mipass');
-    expect(browser.click).toHaveBeenCalled();
+    // El form de login no rinde si se navega a él directo (about:blank): hay
+    // que llegar por redirect desde una página privada del portal.
+    expect(browser.open).toHaveBeenCalledWith('https://misiir.sii.cl/cgi_misii/siihome.cgi');
+  });
+
+  it('llena el form por JS y lo envía con requestSubmit, no con un click', async () => {
+    const browser = crearBrowserMock();
+    mockearLoginExitoso(browser, empresaUnicaSnapshot);
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login());
+
+    const evals = (browser.eval as jest.Mock).mock.calls.map(([js]) => js as string);
+    // El llenado de campos (lleva la clave tributaria) va por evalPrivado, NO
+    // por eval: evalPrivado manda el JS por stdin de agent-browser en vez de
+    // por argv, para que la clave no quede visible en ps/cmdline.
+    const evalsPrivados = (browser.evalPrivado as jest.Mock).mock.calls.map(([js]) => js as string);
+    expect(evalsPrivados.some(js => js.includes("getElementById('clave').value"))).toBe(true);
+    expect(evals.some(js => js.includes("getElementById('clave').value"))).toBe(false);
+    // Un click sintético en el botón no dispara el onsubmit del form: hay que
+    // usar requestSubmit().
+    expect(evals.some(js => js.includes('requestSubmit'))).toBe(true);
+    expect(browser.click).not.toHaveBeenCalled();
+  });
+
+  it('si el formulario nunca aparece, lanza un error distinto al de credenciales', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, false);
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow(
+      'El SII no mostró el formulario de autenticación'
+    );
+  });
+
+  it('éxito: la URL final sale del login y cae en un dominio sii.cl, no lanza', async () => {
+    const browser = crearBrowserMock();
+    mockearLoginExitoso(browser, empresaUnicaSnapshot, 'https://misiir.sii.cl/cgi_misii/siihome.cgi');
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).resolves.toBeDefined();
   });
 
   it('selecciona empresa por SII_EMPRESA_RUT si hay multiples', async () => {
@@ -107,51 +158,32 @@ describe('SessionManager.login', () => {
 
   // Bug real en prod: el SII no manda ningún error ante clave incorrecta acá
   // (a diferencia del CGI de certificado) — sólo vuelve a renderizar la MISMA
-  // página de login. Sin verificar esto, fillClaveForm daba por exitoso
-  // cualquier clave, y validarClave (endpoint de Tributy) reportaba
-  // {ok:true} con credenciales inválidas.
-  //
-  // La verificación es por CONTENIDO del snapshot (¿sigue el campo de clave?),
-  // no por URL: una primera versión chequeaba document.location.href, pero
-  // una clave VÁLIDA confirmada por el usuario también quedó atrapada — el
-  // SII no navega a otra URL en este flujo, re-renderiza sobre la misma.
-  it('clave rechazada: el campo de clave sigue en el snapshot tras el click, lanza error clasificable', async () => {
+  // página de login, que se detecta porque la URL sigue conteniendo el
+  // recurso del formulario (IngresoRutClave).
+  it('clave rechazada: la URL sigue en IngresoRutClave, lanza error clasificable', async () => {
     const browser = crearBrowserMock();
-    // El campo de clave NUNCA desaparece: cada snapshot post-click sigue
-    // siendo la misma página de login.
-    (browser.snapshot as jest.Mock).mockReturnValue(loginSnapshot);
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue(
+      'https://homer.sii.cl/cgi-bin/IngresoRutClave.cgi'
+    );
 
     const mgr = new SessionManager(configClave, browser);
 
     await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
   });
 
-  // Fail-safe: un snapshot vacío/basura del CLI (falla de agent-browser, no
-  // del SII) nunca debe interpretarse como "el campo de clave desapareció" —
-  // si no, un error de infraestructura se reportaría como login exitoso.
-  it('snapshot vacío tras el click (falla del CLI, no del SII): no lo cuenta como éxito', async () => {
+  // Login lento pero exitoso: la URL sigue en el login en los primeros polls
+  // (el SII todavía está procesando el submit) y recién en uno posterior sale
+  // a un dominio sii.cl. No debe clasificarse como rechazo sólo porque no
+  // salió en el primer poll.
+  it('clave válida con login lento: sale del form recién en un poll posterior, no rechaza', async () => {
     const browser = crearBrowserMock();
-    (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce(loginSnapshot)
-      .mockReturnValue('');
-
-    const mgr = new SessionManager(configClave, browser);
-
-    await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
-  });
-
-  // Login lento pero exitoso: el campo de clave sigue presente en los
-  // primeros chequeos (el SII todavía está procesando el submit) y recién
-  // desaparece más adelante, dentro del margen de 15s. No debe clasificarse
-  // como rechazo sólo porque no desapareció en el primer poll.
-  it('clave válida con login lento: el campo desaparece recién en un poll posterior, no rechaza', async () => {
-    const browser = crearBrowserMock();
-    (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce(loginSnapshot) // lectura inicial del form
-      .mockReturnValueOnce(loginSnapshot) // 1er poll: SII todavía procesando
-      .mockReturnValueOnce(loginSnapshot) // 2do poll: sigue procesando
-      .mockReturnValue(empresaUnicaSnapshot); // 3er poll en adelante: ya avanzó (2 lecturas limpias)
-    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock)
+      .mockReturnValueOnce('https://homer.sii.cl/cgi-bin/IngresoRutClave.cgi')
+      .mockReturnValueOnce('https://homer.sii.cl/cgi-bin/IngresoRutClave.cgi')
+      .mockReturnValue('https://mipyme.sii.cl/');
+    (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
 
     const mgr = new SessionManager(configClave, browser);
     const session = await conTimers(() => mgr.login());
@@ -159,43 +191,18 @@ describe('SessionManager.login', () => {
     expect(session.empresaRut).toBe('11111111-1');
   });
 
-  // Cubre el caso que este mismo fix podía reintroducir: el campo de clave
-  // desaparece (login "avanzó"), pero el destino no es un dominio de sii.cl
-  // — una página de error o mantención ajena. Sin este chequeo, cualquier
-  // interstitial sin form volvería a reportar éxito con credenciales
-  // inválidas.
-  it('el campo de clave desaparece pero el destino no es sii.cl: rechaza igual', async () => {
+  // Cubre el caso que este mismo criterio podía introducir: la URL ya no
+  // contiene IngresoRutClave, pero tampoco es un dominio sii.cl — una página
+  // de error o mantención ajena. Sin este chequeo, cualquier interstitial
+  // fuera del login volvería a reportar éxito con credenciales inválidas.
+  it('la URL sale del login pero el destino no es sii.cl: rechaza igual', async () => {
     const browser = crearBrowserMock();
-    (browser.snapshot as jest.Mock)
-      .mockReturnValueOnce(loginSnapshot)
-      .mockReturnValue('- generic\n  - StaticText "Página no disponible"');
+    mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://error-generico.example.com/');
 
     const mgr = new SessionManager(configClave, browser);
 
     await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
-  });
-
-  // El chequeo de "campo de clave" exige rol de INPUT (textbox/password), no
-  // cualquier elemento que mencione la palabra — un link post-login como
-  // "Cambiar clave" (existe en el menú de MiSII) no debe confundirse con el
-  // formulario de login todavía presente.
-  it('un link "Cambiar clave" post-login no cuenta como el formulario de login', async () => {
-    const browser = crearBrowserMock();
-    const snapshotConLinkCambiarClave = [
-      '- generic',
-      '  - StaticText "Bienvenido"',
-      '  - link "Cambiar clave" [ref=e20]',
-    ].join('\n');
-    mockearLoginExitoso(browser, snapshotConLinkCambiarClave);
-
-    const mgr = new SessionManager(configClave, browser);
-
-    // No debe rechazar por clave: si el link se confundiera con el campo,
-    // esto lanzaría "El SII rechazó la autenticación" acá. La excepción que
-    // sí sale es la de selección de empresa (no hay combobox en este
-    // snapshot) — prueba de que el login-phase pasó de largo sin problema.
-    await expect(conTimers(() => mgr.login())).rejects.toThrow(/no terminó de cargar/);
   });
 });
 
@@ -208,7 +215,7 @@ describe('SessionManager.getSession', () => {
     await conTimers(() => mgr.getSession());
     await conTimers(() => mgr.getSession());
 
-    // login abre SII_LOGIN_URL + selectEmpresa abre SII_MIPYME_URL = 2 calls en total.
+    // login abre SII_PORTAL_PRIVADO + selectEmpresa abre SII_SEL_EMPRESA_URL = 2 calls en total.
     // El segundo getSession() usa la caché y no llama open.
     expect(browser.open).toHaveBeenCalledTimes(2);
   });
@@ -311,12 +318,12 @@ describe('SessionManager.getSession', () => {
     await conTimers(() => mgr.getSession()); // login inicial, empresa 1
 
     const loginOpensAntes = (browser.open as jest.Mock).mock.calls
-      .filter(([url]) => /IngresoRutClave/.test(url)).length;
+      .filter(([url]) => /IngresoRutClave|siihome/.test(url)).length;
 
     const session = await conTimers(() => mgr.getSession('22222222-2'));
 
     const loginOpensDespues = (browser.open as jest.Mock).mock.calls
-      .filter(([url]) => /IngresoRutClave/.test(url)).length;
+      .filter(([url]) => /IngresoRutClave|siihome/.test(url)).length;
 
     expect(session.empresaRut).toBe('22222222-2');
     expect(loginOpensDespues).toBe(loginOpensAntes); // ninguna autenticación nueva
