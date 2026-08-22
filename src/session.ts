@@ -523,7 +523,10 @@ export class SessionManager {
 
     const { rut, dv } = partirRut(this.config.rut, 'SII_RUT');
     const clave = this.config.clave!;
-    this.browser.eval(
+    // evalPrivado, NO eval: este JS lleva la clave tributaria del tenant. Con
+    // `eval` (argv) quedaría visible en `ps`/`/proc/<pid>/cmdline` del
+    // contenedor mientras agent-browser corre el comando.
+    this.browser.evalPrivado(
       `(function(){` +
       `document.getElementById('rutcntr').value=${JSON.stringify(this.config.rut)};` +
       `document.getElementById('rut').value=${JSON.stringify(rut)};` +
@@ -548,7 +551,13 @@ export class SessionManager {
   // en el polling hermano (ver assertLoginPorClaveExitoso).
   private async esperarFormularioDeLogin(maxMs = 20_000, step = 1_000): Promise<void> {
     for (let esperado = 0; esperado < maxMs; esperado += step) {
-      if (this.browser.eval("document.getElementById('myform') ? 'SI' : 'NO'").includes('SI')) return;
+      try {
+        // Envuelto en try/catch: si el poll cae justo mientras la página
+        // navega (contexto de ejecución destruido a mitad de un redirect), no
+        // es que el form no vaya a aparecer — hay que tratarlo como "todavía
+        // no", no como un error irrecuperable que corte el reintento.
+        if (this.browser.eval("document.getElementById('myform') ? 'SI' : 'NO'").includes('SI')) return;
+      } catch { /* la página está navegando; se reintenta en el próximo poll */ }
       await new Promise(resolve => setTimeout(resolve, step));
     }
     throw new Error(

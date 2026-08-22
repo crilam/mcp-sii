@@ -5,16 +5,18 @@ import { AuthStrategy, SiiConfig } from '../src/env';
 jest.mock('../src/browser');
 const MockBrowser = Browser as jest.MockedClass<typeof Browser>;
 
-// El polling de credenciales (assertLoginPorClaveExitoso) usa setTimeout real
-// — con fake timers global + runAllTimersAsync, cualquier test que lo dispare
-// (éxito con URLs sucesivas, o rechazo agotando 15s) avanza sin pagar tiempo
-// real. El polling del formulario (esperarFormularioDeLogin) usa execSync
-// (sincrónico, NO timers): se neutraliza mockeando child_process más abajo.
+// Tanto el polling de credenciales (assertLoginPorClaveExitoso) como el del
+// formulario (esperarFormularioDeLogin) duermen con setTimeout real (no
+// bloqueante, no execSync) — con fake timers global + runAllTimersAsync,
+// cualquier test que los dispare (éxito con URLs sucesivas, rechazo agotando
+// 15s, o el formulario que nunca aparece agotando 20s) avanza sin pagar
+// tiempo real.
 beforeEach(() => jest.useFakeTimers());
 afterEach(() => jest.useRealTimers());
 
-// esperarFormularioDeLogin duerme con execSync('sleep ...') entre cada poll.
-// Sin mockearlo, el test de "el formulario nunca aparece" pagaría 20s reales.
+// El mock de child_process abajo neutraliza el execSync/execFileSync
+// SINCRÓNICO que usan otros caminos (openssl/curl del login por certificado),
+// no el polling (que usa setTimeout, ver arriba).
 jest.mock('child_process', () => ({
   execSync: jest.fn(() => ''),
   execFileSync: jest.fn(() => ''),
@@ -103,8 +105,12 @@ describe('SessionManager.login', () => {
     await conTimers(() => mgr.login());
 
     const evals = (browser.eval as jest.Mock).mock.calls.map(([js]) => js as string);
-    // Los campos hidden (rut sin DV, dv aparte) se llenan por JS.
-    expect(evals.some(js => js.includes("getElementById('clave').value"))).toBe(true);
+    // El llenado de campos (lleva la clave tributaria) va por evalPrivado, NO
+    // por eval: evalPrivado manda el JS por stdin de agent-browser en vez de
+    // por argv, para que la clave no quede visible en ps/cmdline.
+    const evalsPrivados = (browser.evalPrivado as jest.Mock).mock.calls.map(([js]) => js as string);
+    expect(evalsPrivados.some(js => js.includes("getElementById('clave').value"))).toBe(true);
+    expect(evals.some(js => js.includes("getElementById('clave').value"))).toBe(false);
     // Un click sintético en el botón no dispara el onsubmit del form: hay que
     // usar requestSubmit().
     expect(evals.some(js => js.includes('requestSubmit'))).toBe(true);

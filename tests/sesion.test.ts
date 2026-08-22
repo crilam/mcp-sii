@@ -4,9 +4,10 @@ import { Browser } from '../src/browser';
 
 jest.mock('../src/browser');
 
-// esperarFormularioDeLogin duerme con execSync('sleep ...'); no aplica acá
-// (el form aparece siempre en el primer chequeo), pero se neutraliza igual
-// para no depender de que ningún test futuro dispare el loop con tiempo real.
+// esperarFormularioDeLogin duerme con setTimeout (no bloqueante); no aplica
+// acá (el form aparece siempre en el primer chequeo), pero se neutraliza el
+// child_process igual para no depender de que ningún test futuro dispare el
+// loop con tiempo real.
 jest.mock('child_process', () => ({
   execSync: jest.fn(() => ''),
   execFileSync: jest.fn(() => ''),
