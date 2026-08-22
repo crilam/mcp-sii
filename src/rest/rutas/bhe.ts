@@ -62,7 +62,11 @@ export function registrarRutasBhe(
         codigo_barras,
         content_type: 'application/pdf',
         // Nombre sugerido para que los tres tenants no lo inventen distinto.
-        nombre_archivo: `bhe-${codigo_barras}.pdf`,
+        // Se sanea igual que si el schema no validara: este valor viaja a un
+        // consumidor que probablemente lo use como nombre de archivo real, y un
+        // separador acá sería path traversal allá. Defensa en profundidad: si
+        // alguien relaja la regex del schema, esto sigue en pie.
+        nombre_archivo: `bhe-${codigo_barras.replace(/[^A-Za-z0-9]/g, '')}.pdf`,
         tamano_bytes: contenido.length,
         pdf_base64: contenido.toString('base64'),
       };

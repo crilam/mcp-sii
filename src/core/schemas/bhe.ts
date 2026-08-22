@@ -26,7 +26,16 @@ export const schemaPdf = {
   rut: z.string().min(1).describe(RUT_DESC),
   // `.trim()` antes del `.min(1)`: sin él, `"   "` pasa la validación y muere
   // más adentro como el ERROR genérico del contrato en vez de un 400 claro.
-  codigo_barras: z.string().trim().min(1).describe(
+  //
+  // Y sólo alfanuméricos: todos los códigos observados lo son
+  // ("17270613000007FEB33E", "033333333034364C969E7"). Restringirlo evita
+  // mandarle basura al SII, y sobre todo evita que un valor con separadores
+  // ("../../x") se propague al `nombre_archivo` que devuelve la ruta y termine
+  // siendo un path traversal en el consumidor que guarde el PDF con ese nombre.
+  codigo_barras: z.string().trim().regex(
+    /^[A-Za-z0-9]+$/,
+    'codigo_barras inválido: el SII usa sólo letras y dígitos'
+  ).describe(
     'Código de barras de la boleta, tal como lo devuelve el campo codigoBarras ' +
     'del listado del mes. El folio no sirve para pedir el PDF.'
   ),

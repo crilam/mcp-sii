@@ -376,6 +376,18 @@ describe('BheScraper.pdfBoleta', () => {
       .rejects.toThrow(/la sesión expiró: reintentá/);
   });
 
+  // Un PDF de 0 bytes con el Content-Type correcto pasa el chequeo pero no es
+  // un documento: sin esto, el tenant recibe un archivo vacío y ningún error.
+  it('rechaza un PDF vacío en vez de entregarlo', async () => {
+    const { scraper } = makePdfScraper({
+      contenido: Buffer.alloc(0),
+      contentType: 'application/pdf',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/PDF vacío.*reintentá/s);
+  });
+
   // curl puede morir antes de escribir la marca del `-w`, y entonces el
   // transporte devuelve contentType vacío. No es evidencia de nada, así que
   // debe caer en el caso reintentable, no en uno con causa afirmada.

@@ -102,6 +102,20 @@ describe('registrarRutasBhe', () => {
     expect(core.pdf).not.toHaveBeenCalled();
   });
 
+  // El `nombre_archivo` que devuelve la ruta suele terminar como nombre de
+  // archivo real en el consumidor: un separador acá es path traversal allá.
+  it('pdf: rechaza un codigo_barras con separadores de ruta', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '../../../tmp/x',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.pdf).not.toHaveBeenCalled();
+  });
+
   it('pdf: sin codigo_barras devuelve 400 sin llamar al core', async () => {
     const rutas = armarRouter();
 

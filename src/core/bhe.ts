@@ -45,7 +45,9 @@ export async function pdf(
   ejecutor: EjecutorSesion<SessionManager>,
   rut: string,
   codigoBarras: string,
-  recibida: boolean
+  // Mismo default que el schema, para que "emitida" no dependa de que cada
+  // llamador se acuerde de pasar false.
+  recibida = false
 ): Promise<Buffer> {
   return ejecutor.ejecutar(rut, async sesion => {
     const scraper = new BheScraper(new SiiHttpClient(sesion), sesion);

@@ -1,5 +1,6 @@
 import { SiiHttpClient } from '../http';
 import { RequiereCertificado, SessionManager } from '../session';
+import { LimitacionConocida } from '../erroresConsulta';
 
 export interface MesBhe {
   mes: number;
@@ -112,9 +113,9 @@ const ENTIDADES: Record<string, string> = {
   ordm: 'º', ordf: 'ª', deg: '°',
 };
 
-// Fallo que no depende de la sesión, sino de algo que el scraper todavía no
-// sabe hacer. Se distingue para no reintentarlo (ver conSesionFresca).
-export class LimitacionConocida extends Error {}
+// Se re-exporta para no romper a quien la importe desde acá: la clase se movió
+// a su propio módulo cuando el transporte HTTP también tuvo que lanzarla.
+export { LimitacionConocida };
 
 export class BheScraper {
   constructor(
@@ -352,6 +353,17 @@ export class BheScraper {
       throw new Error(
         `${detalle}el portal respondió algo inesperado. Puede ser una caída o ` +
         'una página de mantención del SII; reintentá.'
+      );
+    }
+
+    // Un `application/pdf` de cero bytes pasa el chequeo de arriba pero no es
+    // un documento: llegaría al tenant como un archivo vacío que su lector no
+    // abre, sin ningún error de por medio. Reintentable a propósito — es el
+    // síntoma de una descarga cortada, no de un dato que no existe.
+    if (!contenido.length) {
+      throw new Error(
+        `El SII devolvió un PDF vacío para la boleta ${codigoBarras.slice(0, 40)}. ` +
+        'La descarga se cortó; reintentá.'
       );
     }
 

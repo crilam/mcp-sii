@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import { SessionManager } from './session';
+import { LimitacionConocida } from './erroresConsulta';
 
 const TIMEOUT_MS = 30_000;
 
@@ -268,10 +269,13 @@ export class SiiHttpClient {
       });
     } catch (e) {
       if ((e as { code?: string })?.code === 'ENOBUFS') {
-        throw new Error(
+        // LimitacionConocida y no Error: reintentar una descarga que ya no cupo
+        // la va a exceder otra vez, y de paso invalidaría una sesión sana.
+        throw new LimitacionConocida(
           `La respuesta del SII superó el máximo de ${MAX_RESPUESTA_BYTES} bytes ` +
           'que este cliente puede leer, así que se descartó incompleta. Si es ' +
-          'un documento legítimamente grande, hay que subir MAX_RESPUESTA_BYTES.'
+          'un documento legítimamente grande, hay que subir MAX_RESPUESTA_BYTES.',
+          { cause: e }
         );
       }
       throw e;
