@@ -279,7 +279,20 @@ export class SiiHttpClient {
           { codigo: 'ENOBUFS' }
         );
       }
-      throw e;
+      // Cualquier otro fallo del proceso (curl con exit != 0, ETIMEDOUT, curl
+      // ausente) llega con el mensaje de execFileSync, que es "Command failed: "
+      // más el comando COMPLETO. Ahí van la ruta del cookie jar y el cuerpo de
+      // `--data-binary`, que en los POST del portal lleva datos del
+      // contribuyente. Ese mensaje se propaga hasta el console.error de
+      // src/rest/auditoria.ts, o sea al log central. Se reemplaza por uno que
+      // nombra sólo el código del fallo — mismo criterio que ErrorDeBrowser en
+      // src/browser.ts.
+      const codigo = (e as { code?: string })?.code;
+      const señal = (e as { signal?: string })?.signal;
+      throw new Error(
+        'Falló la consulta HTTP al SII' +
+        `${codigo ? ` (${codigo})` : ''}${señal ? ` (señal ${señal})` : ''}.`
+      );
     }
   }
 

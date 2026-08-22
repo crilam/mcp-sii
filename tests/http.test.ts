@@ -386,6 +386,30 @@ describe('SiiHttpClient.getBinario', () => {
     expect(impreso).not.toContain('secreto=1');
   });
 
+  // Lo mismo para cualquier otro fallo del proceso: el mensaje de execFileSync
+  // trae el comando completo, con la ruta del cookie jar y el cuerpo de
+  // --data-binary (datos del contribuyente en los POST del portal).
+  it('no arrastra el comando de curl en un fallo cualquiera del proceso', async () => {
+    mockExec.mockImplementation(() => {
+      throw Object.assign(
+        new Error('Command failed: curl -sk -b /tmp/sii_cookies_1 --data-binary rut=11111111'),
+        { code: 'ETIMEDOUT' }
+      );
+    });
+    const { client } = makeClient();
+
+    const error = await client
+      .get('https://loa.sii.cl/cgi_IMT/TMBCOC_InformeAnualBhe.cgi')
+      .catch((e: unknown) => e);
+
+    const impreso = require('util').inspect(error);
+    expect(impreso).not.toContain('Command failed');
+    expect(impreso).not.toContain('rut=11111111');
+    expect(impreso).not.toContain('sii_cookies_1');
+    // Pero el diagnóstico sí queda: sin el código, el operador no tiene nada.
+    expect(impreso).toContain('ETIMEDOUT');
+  });
+
   // `get`/`postForm` y `getBinario` comparten `curlCrudo`, así que el límite
   // vale para los dos caminos. Cubrir el de texto es barato y deja claro que no
   // es una propiedad exclusiva del binario.

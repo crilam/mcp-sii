@@ -113,9 +113,9 @@ const ENTIDADES: Record<string, string> = {
   ordm: 'º', ordf: 'ª', deg: '°',
 };
 
-// Se re-exporta para no romper a quien la importe desde acá: la clase se movió
-// a su propio módulo cuando el transporte HTTP también tuvo que lanzarla.
-export { LimitacionConocida };
+// LimitacionConocida y RecursoNoEncontrado viven en src/erroresConsulta.ts: el
+// transporte HTTP también tiene que lanzarlas, y no puede depender de un scraper
+// de dominio. Se importan de ahí, sin re-exportar desde acá.
 
 export class BheScraper {
   constructor(
