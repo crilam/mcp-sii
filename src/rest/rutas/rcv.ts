@@ -5,19 +5,10 @@ import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/rcv';
 import { schemaResumen, schemaDetalle } from '../../core/schemas/rcv';
 import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar } from './comun';
+import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
 
-// .min(1): un certificado o password vacío nunca es válido contra el SII —
-// rechazarlo acá evita gastar cupo del rate-limit del tenant en un request
-// condenado a fallar antes de siquiera intentar autenticar.
-const zodResumen = z.object(schemaResumen).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
-const zodDetalle = z.object(schemaDetalle).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
+const zodResumen = z.object(schemaResumen).extend(zodCredencialCert);
+const zodDetalle = z.object(schemaDetalle).extend(zodCredencialCert);
 
 export function registrarRutasRcv(
   rutas: Map<string, RutaHandler>,

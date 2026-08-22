@@ -5,16 +5,10 @@ import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/renta';
 import { schemaEstadoDeclaracion, schemaF22 } from '../../core/schemas/renta';
 import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar } from './comun';
+import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
 
-const zodEstadoDeclaracion = z.object(schemaEstadoDeclaracion).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
-const zodF22 = z.object(schemaF22).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
+const zodEstadoDeclaracion = z.object(schemaEstadoDeclaracion).extend(zodCredencialCert);
+const zodF22 = z.object(schemaF22).extend(zodCredencialCert);
 
 export function registrarRutasRenta(
   rutas: Map<string, RutaHandler>,

@@ -6,16 +6,10 @@ import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/dte';
 import { schemaListado, schemaDocumento } from '../../core/schemas/dte';
 import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar } from './comun';
+import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
 
-const zodListado = z.object(schemaListado()).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
-const zodDocumento = z.object(schemaDocumento).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
+const zodListado = z.object(schemaListado()).extend(zodCredencialCert);
+const zodDocumento = z.object(schemaDocumento).extend(zodCredencialCert);
 
 export function registrarRutasDte(
   rutas: Map<string, RutaHandler>,

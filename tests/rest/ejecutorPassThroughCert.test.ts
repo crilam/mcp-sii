@@ -106,4 +106,45 @@ describe('ejecutorPassThroughCertDe', () => {
 
     expect(credenciales.borrar).toHaveBeenCalledWith(rut);
   });
+
+  it('invoca finalizar (borrar) aunque fn lance excepción', async () => {
+    // Garantía central de la seguridad del material de certificado: el .pfx
+    // temporal se limpia siempre, incluso si el core revienta a mitad de
+    // camino.
+    const credenciales = {
+      guardarCertificado: jest.fn(),
+      borrar: jest.fn(),
+    } as any as ProveedorCredencialesRuntime;
+
+    const registro = {
+      ejecutarPassThrough: jest.fn(
+        async (rut: string, preparar: () => void, finalizar: () => void, fn: () => Promise<any>) => {
+          preparar();
+          try {
+            return await fn();
+          } finally {
+            finalizar();
+          }
+        }
+      ),
+    } as any as RegistroSesiones<any>;
+
+    const rut = '12.345.678-9';
+    const ejecutor: EjecutorSesion<any> = ejecutorPassThroughCertDe(
+      registro,
+      credenciales,
+      rut,
+      'LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t',
+      'mi-password'
+    );
+
+    await expect(
+      ejecutor.ejecutar('12345678', async () => {
+        throw new Error('fn reventó');
+      })
+    ).rejects.toThrow('fn reventó');
+
+    expect(credenciales.guardarCertificado).toHaveBeenCalled();
+    expect(credenciales.borrar).toHaveBeenCalledWith(rut);
+  });
 });

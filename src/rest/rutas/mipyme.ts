@@ -5,19 +5,12 @@ import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
 import { schemaListEmpresas, schemaListDteEmitidos, schemaEmitirDte } from '../../core/schemas/mipyme';
 import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar } from './comun';
+import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
 
-const zodListEmpresas = z.object(schemaListEmpresas).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
-const zodListDteEmitidos = z.object(schemaListDteEmitidos).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
+const zodListEmpresas = z.object(schemaListEmpresas).extend(zodCredencialCert);
+const zodListDteEmitidos = z.object(schemaListDteEmitidos).extend(zodCredencialCert);
 const zodEmitirDte = z.object(schemaEmitirDte).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
+  ...zodCredencialCert,
   confirmar: z.boolean().default(false)
     .describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento — NO SOPORTADO vía REST todavía, ver limitación conocida de la spec.'),
 });

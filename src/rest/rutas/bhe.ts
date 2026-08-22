@@ -5,16 +5,10 @@ import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/bhe';
 import { schemaResumen, schemaMes } from '../../core/schemas/bhe';
 import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar } from './comun';
+import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
 
-const zodResumen = z.object(schemaResumen).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
-const zodMes = z.object(schemaMes).extend({
-  certificado_base64: z.string().min(1),
-  certificado_password: z.string().min(1),
-});
+const zodResumen = z.object(schemaResumen).extend(zodCredencialCert);
+const zodMes = z.object(schemaMes).extend(zodCredencialCert);
 
 export function registrarRutasBhe(
   rutas: Map<string, RutaHandler>,
