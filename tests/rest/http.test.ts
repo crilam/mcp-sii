@@ -64,4 +64,36 @@ describe('leerBody', () => {
     expect(resultado).toBe(texto);
     expect(JSON.parse(resultado).empresa).toBe('Peña');
   });
+
+  it('acepta un body de ~10KB (mayor al viejo límite de 4KB) sin lanzar error', async () => {
+    // Simula un certificado .pfx codificado en base64 (~10KB).
+    const body = 'x'.repeat(10_240); // 10 KB
+    const fakeReq = new EventEmitter();
+    const promesa = leerBody(fakeReq as any);
+
+    // Emite el body en chunks para simular un stream real.
+    const chunkSize = 2_048;
+    for (let i = 0; i < body.length; i += chunkSize) {
+      fakeReq.emit('data', Buffer.from(body.slice(i, i + chunkSize)));
+    }
+    fakeReq.emit('end');
+
+    const resultado = await promesa;
+    expect(resultado).toBe(body);
+  });
+
+  it('rechaza un body >64KB (límite nuevo)', async () => {
+    // Verifica que el límite de 64KB sigue protegiendo de payloads gigantes.
+    const body = 'y'.repeat(65_537); // 64 KB + 1 byte
+    const fakeReq = new EventEmitter();
+    const promesa = leerBody(fakeReq as any);
+
+    const chunkSize = 16_384;
+    for (let i = 0; i < body.length; i += chunkSize) {
+      fakeReq.emit('data', Buffer.from(body.slice(i, i + chunkSize)));
+    }
+    fakeReq.emit('end');
+
+    await expect(promesa).rejects.toThrow(BodyDemasiadoGrande);
+  });
 });

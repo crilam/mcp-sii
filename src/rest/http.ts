@@ -2,12 +2,14 @@ import * as http from 'http';
 
 export class BodyDemasiadoGrande extends Error {}
 
-export function leerBody(req: http.IncomingMessage, maxBytes = 4_096): Promise<string> {
+export function leerBody(req: http.IncomingMessage, maxBytes = 65_536): Promise<string> {
   return new Promise((resolve, reject) => {
     // Se acumulan los Buffers crudos y se decodifican recién al final con
     // Buffer.concat: decodificar cada chunk por separado (`datos += chunk`,
     // que llama chunk.toString('utf8') chunk por chunk) corrompe un carácter
     // multibyte que quede partido justo en el borde entre dos chunks.
+    // maxBytes=65536 (64KB) acomoda certificados .pfx en base64 (~6-7KB típicos,
+    // hasta ~10KB con cadena) sin permitir payloads gigantes.
     const chunks: Buffer[] = [];
     let bytes = 0;
     let demasiadoGrande = false;
