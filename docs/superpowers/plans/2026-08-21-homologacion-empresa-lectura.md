@@ -4,7 +4,7 @@
 
 **Goal:** Exponer vía REST y MCP los servicios de EMPRESA de solo lectura del catálogo apigateway.cl v2 (RCV async, F29, mipyme lectura, contribuyentes públicos), sobre la arquitectura de sesión + scraping existente.
 
-**Architecture:** Cada dominio sigue el patrón vigente `src/core/<d>.ts` (lógica, tipada contra `EjecutorSesion`) + `src/core/schemas/<d>.ts` (schemas zod compartidos MCP/REST) + `src/tools/<d>.ts` (adaptador MCP, `envolverParaMcp`) + `src/rest/rutas/<d>.ts` (adaptador REST, `ejecutar`+`ejecutorPassThroughDe`). El scraping HTTP usa `SiiHttpClient` sobre el cookie jar de la sesión. Una fase 0 previa hace que el login por CLAVE (no solo certificado) produzca ese cookie jar, sin lo cual ninguna ruta REST con clave funciona.
+**Architecture:** Cada dominio sigue el patrón vigente `src/core/<d>.ts` (lógica, tipada contra `EjecutorSesion`) + `src/core/schemas/<d>.ts` (schemas zod compartidos MCP/REST) + `src/tools/<d>.ts` (adaptador MCP, `envolverParaMcp`) + `src/rest/rutas/<d>.ts` (adaptador REST, `ejecutar`+`ejecutorPassThroughDe`). El scraping HTTP usa `SiiHttpClient` sobre el cookie jar de la sesión. Una fase 0 previa habilita el pass-through de CERTIFICADO en el REST (el consumidor manda el `.pfx` en base64 + password por request, como apigateway `auth.cert`), sin lo cual ninguna ruta REST autenticada funciona (el clave pass-through no es viable: queue-it + F5 WAF).
 
 **Tech Stack:** TypeScript, Node 24, zod, jest, pg (Neon), agent-browser (Chromium), curl (vía execFileSync).
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Contrato REST: `{ok:true, ...datos}` en éxito, `{ok:false, error:CODIGO}` en fallo, siempre HTTP 200 salvo `BAD_REQUEST`/`PAYLOAD_TOO_LARGE` (400/413). Rutas `POST /v1/<dominio>/<accion>`.
-- Toda ruta REST recibe `rut`, `clave` y (según dominio) `empresa_rut?`, salvo el dominio `contribuyentes` (sin credencial de SII).
+- Toda ruta REST autenticada recibe `rut`, `certificado_base64`, `certificado_password` y (según dominio) `empresa_rut?`, salvo el dominio `contribuyentes` (sin credencial de SII). En MCP la credencial es el certificado del proceso (`.env`), no un parámetro de la tool.
 - Errores de negocio uniformes: `NO_ENCONTRADO` (folio/código inexistente), `RUT_INVALIDO` (contribuyentes), además de los vigentes `BAD_REQUEST`/`CREDENCIALES_INVALIDAS`/`ERROR`.
 - PDFs/XML como `{ok, pdfBase64|xmlBase64, contentType}`; validar magic bytes `%PDF` antes de encodear.
 - TDD estricto, un PR por dominio, `maxWorkers:1` en jest (infra comparte DB). Tests de infra requieren `TEST_DATABASE_URL` (Docker Postgres, `docker-compose.test.yml`, puerto 55432, `mcp_sii:mcp_sii@.../mcp_sii_test`).
@@ -23,335 +23,116 @@
 
 ---
 
-## FASE 0 — Cookie jar desde login por clave (prerrequisito)
+## FASE 0 — Pass-through de certificado en el adaptador REST (prerrequisito)
 
-Sin esto, las rutas REST de rcv/renta/bhe/dte/mipyme YA EN PRODUCCIÓN devuelven `ERROR` con cualquier clave válida (los scrapers HTTP exigen el jar que hoy solo escribe `loginWithCert`). Es un bug de prod además de un prerrequisito.
+El clave pass-through para consultas no es viable (spike confirmó: queue-it + F5 WAF, sin sesión reutilizable). El login por certificado sí funciona (`loginWithCert` obtiene el jar por curl TLS mutual auth). Los consumidores mandan el `.pfx` en base64 + password POR REQUEST (como apigateway `auth.cert`). Spike ya validó: `.pfx` base64 → temporal → sesión Certificate → consulta renta real OK.
 
-### Task 0.1: Spike — ¿document.cookie entrega las cookies de sesión del SII tras login por clave?
+Sin esta fase, las rutas REST de rcv/renta/bhe/dte/mipyme por credencial no funcionan vía REST.
 
-**Files:**
-- Create (throwaway): `src/scripts/spikeCookiesClave.ts`
-
-**Interfaces:**
-- Consumes: `SessionManager` (`src/session.ts:101`), `Browser` (`src/browser.ts:7`), `getConfig` (`src/env.ts:52`).
-- Produces: respuesta sí/no + lista de cookies observadas. No deja código productivo.
-
-- [ ] **Step 1: Escribir el script de spike**
-
-```typescript
-import 'dotenv/config';
-import { Browser } from '../browser';
-import { SessionManager } from '../session';
-import { AuthStrategy } from '../env';
-
-// Fuerza estrategia clave aunque el .env tenga certificado, para el spike.
-async function main() {
-  const rut = process.env.SII_RUT!;
-  const clave = process.env.SII_CLAVE!;
-  const browser = new Browser(rut);
-  const session = new SessionManager({ rut, clave, strategy: AuthStrategy.Clave }, browser);
-  await session.authenticateOnly();
-  // Leer document.cookie en dominio .sii.cl
-  browser.open('https://www.sii.cl');
-  const cookies = browser.eval('document.cookie');
-  console.log('COOKIES VISIBLES:', cookies);
-  await session.logout().catch(() => {});
-}
-main().catch(e => { console.error('SPIKE ERROR:', e.message); process.exit(1); });
-```
-
-- [ ] **Step 2: Correr con la clave real**
-
-Run: `npx ts-node src/scripts/spikeCookiesClave.ts`
-Expected: imprime `COOKIES VISIBLES: ...`. Registrar QUÉ cookies aparecen (esperado: `NETSCAPE_LIVEWIRE.*`, `TOKEN`, etc.) y CUÁLES de `SII_SESSION_COOKIES` (`src/session.ts:35-49`) faltan.
-
-- [ ] **Step 3: Decidir camino y registrar hallazgo**
-
-Si aparecen `TOKEN` + `NETSCAPE_LIVEWIRE.mac`/`exp` → camino A (document.cookie), seguir a 0.2.
-Si falta `TOKEN` u otra imprescindible (httpOnly) → camino B: usar CDP (`agent-browser get cdp-url` + `Network.getCookies`). Anotar la decisión en un comentario al inicio de 0.2 y ajustar `exportarCookiesAlJar` en consecuencia.
-Anotar el SUBCONJUNTO MÍNIMO de cookies imprescindibles observado (se usa en 0.3).
-
-- [ ] **Step 4: Borrar el script de spike**
-
-```bash
-rm src/scripts/spikeCookiesClave.ts
-```
-
-### Task 0.2: `exportarCookiesAlJar` en SessionManager
+### Task 0.1: `guardarCertificado` en ProveedorCredencialesRuntime
 
 **Files:**
-- Modify: `src/session.ts` (agregar método privado + llamada en `authenticate` `:230-243`; usa `parseCookieFile` `:460`, `cookieJar` getter `:149`, `SII_SESSION_COOKIES` `:35-49`)
-- Test: `tests/session.exportarCookies.test.ts`
+- Modify: `src/credencialesRuntime.ts` (nuevo método + `borrar` limpia el `.pfx`)
+- Modify: `src/rutaTemporalSii.ts` (nada; ya sirve `rutaTemporalSii('pfxruntime', rut)`)
+- Test: `tests/credencialesRuntime.cert.test.ts`
 
 **Interfaces:**
-- Consumes: `Browser.eval` (`src/browser.ts:74`), `fs`, `rutaTemporalSii` (`src/rutaTemporalSii.ts:14`).
-- Produces: `private exportarCookiesAlJar(): void` — lee `document.cookie`, escribe el jar Netscape en `this.cookieJar` con formato de 7 campos TAB, dominio `.sii.cl`, flag `TRUE`, expiry `0`, sin prefijo `#HttpOnly_`.
+- Consumes: `rutaTemporalSii` (`src/rutaTemporalSii.ts:14`), `fs`, `AuthStrategy`/`SiiConfig` (`src/env.ts`).
+- Produces: `guardarCertificado(rut: string, certificadoBase64: string, certificadoPassword: string, claveCertSii?: string): void` — escribe el `.pfx` decodificado a `rutaTemporalSii('pfxruntime', rut)` y guarda un `SiiConfig` con `strategy: AuthStrategy.Certificate`, `certPath` = ese temporal, `certPassword`, `claveCertificadoSii`. `borrar(rut)` además hace `fs.unlinkSync` del `.pfx` temporal si existe.
 
-- [ ] **Step 1: Escribir el test que falla**
+- [ ] **Step 1: Test que falla**
 
 ```typescript
-import { SessionManager } from '../src/session';
-import { Browser } from '../src/browser';
-import { AuthStrategy, SiiConfig } from '../src/env';
+import { ProveedorCredencialesRuntime } from '../src/credencialesRuntime';
+import { AuthStrategy } from '../src/env';
 import * as fs from 'fs';
 import { rutaTemporalSii } from '../src/rutaTemporalSii';
 
-jest.mock('../src/browser');
-const MockBrowser = Browser as jest.MockedClass<typeof Browser>;
-const cfg: SiiConfig = { rut: '11111111-1', strategy: AuthStrategy.Clave, clave: 'x' };
-
-it('exportarCookiesAlJar escribe el jar Netscape con las cookies de document.cookie', () => {
-  const browser = new MockBrowser();
-  (browser.eval as jest.Mock).mockReturnValue('TOKEN=abc123; NETSCAPE_LIVEWIRE.mac=deadbeef');
-  const s = new SessionManager(cfg, browser);
-  (s as any).exportarCookiesAlJar();
-
-  const jar = fs.readFileSync(rutaTemporalSii('cookies', '11111111-1'), 'utf-8');
-  const lineas = jar.trim().split('\n').filter(l => !l.startsWith('#'));
-  const token = lineas.find(l => l.includes('\tTOKEN\t'));
-  expect(token).toBe('.sii.cl\tTRUE\t/\tTRUE\t0\tTOKEN\tabc123');
-  expect(lineas.some(l => l.endsWith('\tNETSCAPE_LIVEWIRE.mac\tdeadbeef'))).toBe(true);
+it('guardarCertificado escribe el pfx y arma config Certificate', async () => {
+  const prov = new ProveedorCredencialesRuntime();
+  const b64 = Buffer.from('contenido-pfx-fake').toString('base64');
+  prov.guardarCertificado('11111111-1', b64, 'pass', 'clavecert');
+  const cfg = await prov.para('11111111-1');
+  expect(cfg.strategy).toBe(AuthStrategy.Certificate);
+  expect(cfg.certPassword).toBe('pass');
+  expect(cfg.claveCertificadoSii).toBe('clavecert');
+  expect(fs.readFileSync(cfg.certPath!, 'utf-8')).toBe('contenido-pfx-fake');
 });
 
-afterAll(() => { try { fs.unlinkSync(rutaTemporalSii('cookies', '11111111-1')); } catch {} });
+it('borrar limpia el pfx temporal', async () => {
+  const prov = new ProveedorCredencialesRuntime();
+  prov.guardarCertificado('22222222-2', Buffer.from('x').toString('base64'), 'p');
+  const ruta = rutaTemporalSii('pfxruntime', '22222222-2');
+  expect(fs.existsSync(ruta)).toBe(true);
+  prov.borrar('22222222-2');
+  expect(fs.existsSync(ruta)).toBe(false);
+});
 ```
 
-- [ ] **Step 2: Correr, verificar que falla**
+- [ ] **Step 2: Correr, verificar falla** — `npx jest tests/credencialesRuntime.cert.test.ts` → FAIL (`guardarCertificado is not a function`).
 
-Run: `npx jest tests/session.exportarCookies.test.ts`
-Expected: FAIL — `exportarCookiesAlJar is not a function`.
-
-- [ ] **Step 3: Implementar el método**
-
-En `src/session.ts`, después de `setLocExpCookie` (`:452`):
+- [ ] **Step 3: Implementar** en `src/credencialesRuntime.ts`:
 
 ```typescript
-// Exporta las cookies de sesión visibles en document.cookie al cookie jar
-// Netscape que curl (SiiHttpClient) espera. Necesario para que el login por
-// CLAVE (que corre en el browser) produzca el jar que hoy solo escribe
-// loginWithCert. Formato de 7 campos TAB; dominio .sii.cl + flag TRUE para
-// que curl las mande a todos los subdominios (www4, zeusr, www1, ...);
-// expiry 0 = cookie de sesión. NUNCA prefijo #HttpOnly_: parseCookieFile
-// saltea líneas con '#' y rompería conversationId().
-private exportarCookiesAlJar(): void {
-  this.browser.open('https://www.sii.cl');
-  const crudo = this.browser.eval('document.cookie'); // "a=1; b=2"
-  const lineas: string[] = [];
-  for (const par of crudo.split(';')) {
-    const idx = par.indexOf('=');
-    if (idx <= 0) continue;
-    const nombre = par.slice(0, idx).trim();
-    const valor = par.slice(idx + 1).trim();
-    if (!nombre) continue;
-    lineas.push(['.sii.cl', 'TRUE', '/', 'TRUE', '0', nombre, valor].join('\t'));
+import * as fs from 'fs';
+import { rutaTemporalSii } from './rutaTemporalSii';
+// ...
+  guardarCertificado(rut: string, certificadoBase64: string, certificadoPassword: string, claveCertSii?: string): void {
+    const certPath = rutaTemporalSii('pfxruntime', rut);
+    fs.writeFileSync(certPath, Buffer.from(certificadoBase64, 'base64'));
+    this.porRut.set(normalizar(rut), {
+      rut,
+      strategy: AuthStrategy.Certificate,
+      certPath,
+      certPassword: certificadoPassword,
+      claveCertificadoSii: claveCertSii,
+    });
   }
-  const jar = this.cookieJar;
-  try { fs.unlinkSync(jar); } catch { /* no existía */ }
-  fs.writeFileSync(jar, lineas.join('\n') + '\n', 'utf-8');
-}
+
+  borrar(rut: string): void {
+    const n = normalizar(rut);
+    try { fs.unlinkSync(rutaTemporalSii('pfxruntime', rut)); } catch { /* no existía */ }
+    this.porRut.delete(n);
+  }
 ```
 
-- [ ] **Step 4: Llamarlo en el camino de clave de `authenticate`**
+- [ ] **Step 4: Correr, verificar pasa.** **Step 5: Commit.**
 
-Modificar `src/session.ts:235-239`:
-
-```typescript
-    } else {
-      this.browser.open(SII_LOGIN_URL);
-      const loginSnapshot = this.browser.snapshot();
-      await this.fillClaveForm(loginSnapshot);
-      this.exportarCookiesAlJar();
-    }
-```
-
-- [ ] **Step 5: Correr, verificar que pasa**
-
-Run: `npx jest tests/session.exportarCookies.test.ts`
-Expected: PASS.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/session.ts tests/session.exportarCookies.test.ts
-git commit -m "feat: exportar cookies del login por clave al cookie jar (fase 0)"
-```
-
-### Task 0.3: `assertPuedeEntregarCookieJar` por capacidad + `assertPuedeFirmar`
+### Task 0.2: `ejecutorPassThroughCertDe`
 
 **Files:**
-- Modify: `src/session.ts:325-342` (relajar assert), agregar `assertPuedeFirmar`
-- Modify: `src/scrapers/mipymeHttp.ts:420,576` (emitir/verificarFirma llaman `assertPuedeFirmar`)
-- Test: `tests/session.asserts.test.ts`
+- Modify: `src/rest/ejecutorPassThrough.ts` (nueva función; conservar la existente)
+- Test: `tests/rest/ejecutorPassThroughCert.test.ts`
 
 **Interfaces:**
-- Produces: `assertPuedeEntregarCookieJar()` ya NO exige Certificate (acepta Clave y Certificate); `assertPuedeFirmar(): void` lanza `RequiereCertificado` si la estrategia no es Certificate o falta `claveCertificadoSii`.
-- Consumes: `AuthStrategy` (`src/env.ts`), `RequiereCertificado` (`src/session.ts:99`).
+- Consumes: `RegistroSesiones.ejecutarPassThrough` (existente), `ProveedorCredencialesRuntime.guardarCertificado`/`borrar` (Task 0.1).
+- Produces: `ejecutorPassThroughCertDe<T>(registro, credenciales, rut, certificadoBase64, certificadoPassword, claveCertSii?): EjecutorSesion<T>` — en `preparar` llama `guardarCertificado`, en `finalizar` `borrar` (que limpia el `.pfx`). Mismo shape que `ejecutorPassThroughDe` (`src/rest/ejecutorPassThrough.ts:11`).
 
-- [ ] **Step 1: Escribir tests que fallan**
+- [ ] TDD: test que verifica que `preparar` invoca `guardarCertificado` con el material y `finalizar` invoca `borrar` (mock de credenciales + registro). Implementar copiando la forma de `ejecutorPassThroughDe`. Commit.
 
-```typescript
-import { SessionManager, RequiereCertificado } from '../src/session';
-import { Browser } from '../src/browser';
-import { AuthStrategy, SiiConfig } from '../src/env';
-jest.mock('../src/browser');
-const MB = Browser as jest.MockedClass<typeof Browser>;
-
-it('assertPuedeEntregarCookieJar acepta estrategia Clave (ya no exige certificado)', () => {
-  const s = new SessionManager({ rut: '1-9', strategy: AuthStrategy.Clave, clave: 'x' } as SiiConfig, new MB());
-  expect(() => s.assertPuedeEntregarCookieJar()).not.toThrow();
-});
-
-it('assertPuedeFirmar exige certificado + claveCertificadoSii', () => {
-  const clave = new SessionManager({ rut: '1-9', strategy: AuthStrategy.Clave, clave: 'x' } as SiiConfig, new MB());
-  expect(() => (clave as any).assertPuedeFirmar()).toThrow(RequiereCertificado);
-  const certSinClave = new SessionManager({ rut: '1-9', strategy: AuthStrategy.Certificate, certPath: '/x', certPassword: 'y' } as SiiConfig, new MB());
-  expect(() => (certSinClave as any).assertPuedeFirmar()).toThrow(RequiereCertificado);
-  const ok = new SessionManager({ rut: '1-9', strategy: AuthStrategy.Certificate, certPath: '/x', certPassword: 'y', claveCertificadoSii: 'z' } as SiiConfig, new MB());
-  expect(() => (ok as any).assertPuedeFirmar()).not.toThrow();
-});
-```
-
-- [ ] **Step 2: Correr, verificar que falla**
-
-Run: `npx jest tests/session.asserts.test.ts`
-Expected: FAIL — el primer test lanza `RequiereCertificado` (assert viejo), `assertPuedeFirmar` no existe.
-
-- [ ] **Step 3: Reescribir `assertPuedeEntregarCookieJar` y agregar `assertPuedeFirmar`**
-
-Reemplazar el cuerpo de `assertPuedeEntregarCookieJar` (`src/session.ts:325-342`):
-
-```typescript
-  // El jar lo puede producir tanto el login por certificado (loginWithCert)
-  // como el login por clave (exportarCookiesAlJar). Se valida por CAPACIDAD
-  // de la estrategia, no por existencia del archivo: este assert se llama
-  // ANTES de autenticar (el jar de una sesión por clave todavía no existe),
-  // y un jar viejo presente traería cookies muertas (bloqueo
-  // 01.01.190.500.720.27).
-  assertPuedeEntregarCookieJar(): void {
-    const s = this.config.strategy;
-    if (s !== AuthStrategy.Certificate && s !== AuthStrategy.Clave) {
-      throw new RequiereCertificado(
-        'Esta consulta requiere una sesión autenticada (clave o certificado).'
-      );
-    }
-  }
-
-  // Firmar/emitir DTE SÍ requiere certificado (la firma es server-side con la
-  // clave del certificado centralizado). Guard temprano para que una sesión
-  // por clave falle acá y no en medio de armar el documento.
-  assertPuedeFirmar(): void {
-    if (this.config.strategy !== AuthStrategy.Certificate || !this.config.claveCertificadoSii) {
-      throw new RequiereCertificado(
-        'Emitir o firmar un DTE requiere certificado digital (SII_CERT_PATH + SII_CERT_CLAVE_SII).'
-      );
-    }
-  }
-```
-
-- [ ] **Step 4: Llamar `assertPuedeFirmar` en emisión/firma mipyme**
-
-En `src/scrapers/mipymeHttp.ts:420` (emitirDte) y `:576` (verificarFirma), agregar `this.session.assertPuedeFirmar();` justo después del `assertPuedeEntregarCookieJar()` existente.
-
-- [ ] **Step 5: Correr tests + reescribir los que fijaban el contrato viejo**
-
-Run: `npx jest tests/session.asserts.test.ts tests/scrapers/bhe.sesion.test.ts`
-Expected: los nuevos PASAN; los tests de `bhe.sesion.test.ts` (y mocks en renta/dte/rcv/mipymeHttp tests) que esperaban `RequiereCertificado` para CONSULTA por clave ahora fallan — reescribirlos para el contrato nuevo (consulta por clave funciona; solo firma exige certificado). Ajustar hasta verde.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/session.ts src/scrapers/mipymeHttp.ts tests/
-git commit -m "feat: cookie jar por capacidad de estrategia + assertPuedeFirmar (fase 0)"
-```
-
-### Task 0.4: Browser por RUT en el registro MCP (carrera multi-RUT)
+### Task 0.3: Cambiar el zod de credencial de las rutas REST existentes
 
 **Files:**
-- Modify: `src/registroSesionesSii.ts:14-21`, `src/server.ts:13,20`
+- Modify: `src/rest/rutas/rcv.ts`, `renta.ts`, `bhe.ts`, `dte.ts`, `mipyme.ts` (el `.extend({ clave: ... })` → certificado; y `ejecutorPassThroughDe` → `ejecutorPassThroughCertDe`)
+- Test: los tests de ruta existentes de esos 5 dominios
 
 **Interfaces:**
-- Consumes: `Browser` con `sessionId` (`src/browser.ts:8`).
-- Produces: `crearRegistroSesionesSii(proveedor)` — ya NO recibe un Browser compartido; crea `new Browser(rut)` por RUT dentro de la factory.
+- Consumes: `ejecutorPassThroughCertDe` (Task 0.2).
+- Produces: cada ruta valida `certificado_base64: z.string().min(1)` + `certificado_password: z.string().min(1)` en vez de `clave`. El `rut` y los params propios no cambian.
 
-- [ ] **Step 1: Test que falla — cada RUT recibe su propio Browser**
+- [ ] **Step 1:** Actualizar tests de ruta (rcv/renta/bhe/dte/mipyme): el body de éxito pasa `certificado_base64`/`certificado_password` en vez de `clave`; el mock de core sigue igual. Un test nuevo: body sin `certificado_base64` → `400 BAD_REQUEST`. → FAIL.
+- [ ] **Step 2:** En cada `src/rest/rutas/<d>.ts`: cambiar `.extend({ clave: z.string().min(1) })` por `.extend({ certificado_base64: z.string().min(1), certificado_password: z.string().min(1) })`; desestructurar esos campos; usar `ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password)`. → PASS.
+- [ ] **Step 3:** Build + suite completa con Postgres. Commit.
 
-```typescript
-// tests/registroSesionesSii.test.ts
-import { crearRegistroSesionesSii } from '../src/registroSesionesSii';
-import { Browser } from '../src/browser';
-jest.mock('../src/browser');
+Nota: NO se toca `assertPuedeEntregarCookieJar` (con Certificate ya pasa), ni el modelo MCP (sigue con certificado de `.env`), ni hay carrera multi-RUT (el jar lo escribe curl, no el browser compartido).
 
-it('crea un Browser con sessionId por RUT, no uno compartido', async () => {
-  const proveedor = { para: async (rut: string) => ({ rut, strategy: 'clave', clave: 'x' }) } as any;
-  const registro = crearRegistroSesionesSii(proveedor);
-  await registro.ejecutar('11111111-1', async () => {});
-  await registro.ejecutar('22222222-2', async () => {});
-  const rutsUsados = (Browser as jest.Mock).mock.calls.map(c => c[0]);
-  expect(rutsUsados).toEqual(expect.arrayContaining(['11111111-1', '22222222-2']));
-});
-```
+### Task 0.4: Verificación e2e real + PR
 
-- [ ] **Step 2: Correr, verificar que falla**
+**Files:** ninguno (verificación).
 
-Run: `npx jest tests/registroSesionesSii.test.ts`
-Expected: FAIL (hoy `crearRegistroSesionesSii` recibe el browser por parámetro y lo comparte).
-
-- [ ] **Step 3: Implementar**
-
-`src/registroSesionesSii.ts`:
-
-```typescript
-export function crearRegistroSesionesSii(
-  proveedor: ProveedorCredenciales
-): RegistroSesiones<SessionManager> {
-  return new RegistroSesiones(async (rut: string) => {
-    const config = await proveedor.para(rut);
-    // Browser por RUT (--session <rut>), no compartido: con login por clave
-    // la sesión vive en las cookies del browser, y un browser compartido deja
-    // que el login de un RUT pise las cookies de otro (datos cruzados).
-    return new SessionManager(config, new Browser(rut));
-  });
-}
-```
-
-`src/server.ts`: eliminar `const browser = new Browser();` (`:13`) y pasar `crearRegistroSesionesSii(credenciales)` (`:20`, sin browser). Verificar que `registerBienesRaicesTools`/etc. no dependan del `browser` suelto (ya no lo reciben desde PR anterior).
-
-- [ ] **Step 4: Correr tests + build**
-
-Run: `npx jest tests/registroSesionesSii.test.ts && npm run build`
-Expected: PASS + build limpio.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/registroSesionesSii.ts src/server.ts tests/registroSesionesSii.test.ts
-git commit -m "fix: Browser por RUT en registro MCP, evita cruce de sesiones (fase 0)"
-```
-
-### Task 0.5: Verificación e2e real de la fase 0
-
-**Files:** ninguno (verificación manual).
-
-- [ ] **Step 1: Build + suite completa con Postgres**
-
-```bash
-docker compose -f docker-compose.test.yml up -d
-export TEST_DATABASE_URL="postgres://mcp_sii:mcp_sii@localhost:55432/mcp_sii_test"
-npm run build && npm test
-docker compose -f docker-compose.test.yml down
-```
-Expected: todo verde.
-
-- [ ] **Step 2: Verificar cada ruta REST existente con CLAVE real (sin cert)**
-
-Levantar el REST local apuntando a Neon, con un `.env` temporal SIN `SII_CERT_PATH` (solo `SII_CLAVE`). Con la API key del tenant de prueba, hacer `POST /v1/rcv/resumen`, `/v1/renta/estado-declaracion`, `/v1/bhe/resumen`, `/v1/dte/list-documentos-emitidos`, `/v1/mipyme/list-empresas` con `rut`+`clave` reales.
-Expected: cada una devuelve `{ok:true, ...}` con datos reales — NO `{ok:false,error:'ERROR'}`. Esto confirma que la fase 0 arregló el bug de prod.
-
-- [ ] **Step 3: PR de la fase 0**
-
-Un PR con las tasks 0.2–0.4 (0.1 y 0.5 no dejan código). pr-review + CI + merge + deploy. Re-verificar en prod una ruta con clave real.
-
----
+- [ ] **Step 1:** Build + suite con Postgres (`docker compose -f docker-compose.test.yml up -d`, `TEST_DATABASE_URL=...`, `npm test`, `down`). Todo verde.
+- [ ] **Step 2:** Levantar el REST local contra Neon con un `.env` SIN `SII_CERT_PATH` de proceso. Convertir el `.pfx` real a base64 (`base64 -i CLCert.pfx`). Con la API key del tenant de prueba, `POST /v1/rcv/resumen` (y las otras 4 rutas existentes) con `rut` + `certificado_base64` + `certificado_password` reales. Cada una → `{ok:true, ...}` con datos reales.
+- [ ] **Step 3:** PR de la fase 0 (Tasks 0.1–0.3). pr-review + CI + merge + deploy. Re-verificar una ruta en prod con el `.pfx` real.
 
 ## DOMINIO 1 — Contribuyentes públicos
 

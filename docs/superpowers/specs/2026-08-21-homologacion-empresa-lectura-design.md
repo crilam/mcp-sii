@@ -16,86 +16,81 @@ una spec posterior, igual que los servicios de persona (sub-proyecto 2), los
 indicadores públicos (sub-proyecto 3) y todo lo que requiere API oficial con
 certificado/CAF (CAF, RTC, BTE, DTE-contribuyentes — otra arquitectura).
 
-## Fase 0 (prerrequisito): sesión por clave utilizable por los scrapers HTTP
+## Fase 0 (prerrequisito): pass-through de certificado en el adaptador REST
 
-**Hallazgo del panel de revisión, verificado en código**: el pass-through
-REST solo produce sesiones con `AuthStrategy.Clave`
-(`credencialesRuntime.ts:15`), pero TODOS los scrapers HTTP (renta, rcv,
-bhe, dte, mipymeHttp) exigen certificado vía
-`assertPuedeEntregarCookieJar()` (`session.ts:334`), porque solo
-`loginWithCert` escribe el cookie jar que `SiiHttpClient.curl` necesita
-(`http.ts:183`). Consecuencia: **las rutas REST de rcv/renta/bhe/dte/mipyme
-que ya están en producción devuelven `ERROR` con cualquier clave válida** —
-nunca se detectó porque las pruebas REST usaron credenciales falsas
-esperando error, y las pruebas con credencial real corrieron por MCP (que
-usa el certificado del `.env` del proceso).
+**Contexto y decisión (verificado con spike contra el SII real, 2026-08-21):**
+el clave pass-through para CONSULTAS no es viable — el login por clave del SII
+pasa por queue-it + F5 WAF, no deja cookies de sesión recuperables en el
+navegador, y curl no puede reproducir el handshake anti-bot. El login por
+CERTIFICADO sí funciona (`loginWithCert` obtiene el cookie jar por curl con
+TLS mutual auth). Decisión del usuario: los consumidores (Tributy/AgenticERP)
+mandan el material del certificado POR REQUEST, como `apigateway.cl auth.cert`.
 
-**Solución**: tras un login con clave exitoso en el browser, exportar las
-cookies de sesión del SII al cookie jar en formato Netscape. Es viable
-porque las cookies de sesión del SII NO son httpOnly — el propio flujo de
-certificado las inyecta vía `document.cookie` (`session.ts:419-427`), o sea
-que también son legibles vía `document.cookie` desde el browser. Cambios:
+**Spike que validó el enfoque**: recibir el `.pfx` como base64, escribirlo a un
+temporal, armar una sesión `AuthStrategy.Certificate` con ese path y hacer una
+consulta real (renta) → devolvió datos reales (2 declaraciones). El
+pass-through de certificado descansa en `loginWithCert`, que ya está probado
+end-to-end.
 
-- `SessionManager`: método privado `exportarCookiesAlJar()` que lee
-  `document.cookie` en un dominio `.sii.cl` post-login (via
-  `browser.eval`), parsea los pares y escribe el jar Netscape en
-  `this.cookieJar`. Se llama al final del camino de clave en
-  `authenticate()`, ANTES borrando el jar previo con `fs.unlinkSync`
-  (mismo unlink que hace `loginWithCert` en `session.ts:397`) — un jar
-  viejo de una corrida anterior manda cookies de una sesión muerta y
-  dispara el bloqueo 01.01.190.500.720.27.
-- **Formato exacto del jar** (el modo de fallo de curl acá es silencioso:
-  con dominio o flag mal puestos simplemente NO manda la cookie y el
-  síntoma es el genérico "la sesión pudo expirar" de `http.ts:175`): cada
-  línea lleva 7 campos separados por TAB —
-  `.sii.cl<TAB>TRUE<TAB>/<TAB>TRUE<TAB>0<TAB>nombre<TAB>valor`. Dominio
-  `.sii.cl` con punto inicial + flag `TRUE` para que curl la mande a
-  www4/zeusr/herculesr/www1/loa; `expiry=0` (cookie de sesión); campo
-  secure `TRUE`. NUNCA usar el prefijo `#HttpOnly_` (aunque curl lo
-  acepte): `parseCookieFile` propio saltea líneas que empiezan con `#`
-  (`session.ts:465`) y una cookie TOKEN escrita así rompería
-  `conversationId()`.
-- `assertPuedeEntregarCookieJar()` cambia su condición a "la ESTRATEGIA
-  puede producir el jar" (Certificate o Clave) — NO a "el jar existe": el
-  assert se llama a propósito ANTES de autenticar (`session.ts:318-324`),
-  cuando el jar de una sesión por clave todavía no existe, y un jar viejo
-  presente satisfaría una condición de existencia con cookies muertas.
-- **Guard de firma nuevo**: hoy el ÚNICO gate de certificado de
-  `verificarFirma`/emisión mipyme es este mismo assert
-  (`mipymeHttp.ts:363,378,420,576`). Antes de relajarlo, se agrega
-  `assertPuedeFirmar()` (exige estrategia Certificate +
-  `claveCertificadoSii` presente) en esos métodos, para que una sesión por
-  clave falle temprano y con mensaje accionable, no en el medio de armar el
-  documento. Los tests que hoy fijan `RequiereCertificado` para consultas
-  HTTP por clave (`bhe.sesion.test.ts`, mocks en renta/dte/rcv/mipymeHttp
-  tests) describen un contrato que deja de existir: se REESCRIBEN para
-  fijar el contrato nuevo (clave → consulta funciona; firma → sigue
-  exigiendo certificado).
-- **Carrera multi-RUT en MCP**: `crearRegistroSesionesSii` comparte UN
-  Browser sin `sessionId` entre todos los RUTs (`server.ts:13`) — con
-  login por clave, la sesión vive en las cookies del browser, y entre los
-  awaits del login de A puede intercalarse el login de B pisándolas: el
-  jar de A quedaría con la sesión de B y devolvería DATOS DE OTRO
-  CONTRIBUYENTE sin error. Fix: el registro MCP pasa a `new Browser(rut)`
-  por RUT, igual que ya hace el REST (`restServerIndex.ts:15`).
-- Verificación e2e obligatoria de la fase 0 con la clave real: cada ruta
-  REST existente (rcv/resumen, renta/estado-declaracion, bhe/resumen,
-  dte/list-documentos-emitidos, mipyme/list-empresas) debe responder datos
-  reales con `rut`+`clave` (sin certificado en el entorno) antes de dar la
-  fase por cerrada.
+**Consecuencia del modelo anterior**: el pass-through REST hoy solo arma
+sesiones `AuthStrategy.Clave` (`credencialesRuntime.ts:15`), que —como probó
+el spike— no producen jar utilizable. Las rutas REST de rcv/renta/bhe/dte/
+mipyme por clave devuelven `ERROR`. Con este cambio pasan a autenticar por
+certificado.
 
-**Riesgo**: si el SII marca httpOnly alguna de las cookies imprescindibles
-para los CGI (a diferencia de las NETSCAPE_LIVEWIRE.*), la exportación por
-`document.cookie` no la verá. El primer paso de la fase 0 es un spike: login
-con clave real, exportar, y probar una consulta HTTP (renta) contra el SII
-real. El spike también determina el SUBCONJUNTO MÍNIMO de cookies que hace
-falta verificar tras exportar (probablemente `NETSCAPE_LIVEWIRE.mac`/`exp`
-+ `TOKEN` para las rutas SDI): la lista completa `SII_SESSION_COOKIES` (13
-nombres) NUNCA está toda presente — ni el flujo de certificado la garantiza
-(`session.ts:420-426` inyecta `if (value)`). Si falta alguna cookie
-imprescindible, plan B: obtenerlas vía CDP (`agent-browser` expone
-`get cdp-url`; `Network.getCookies` entrega todas, httpOnly incluidas —
-escribiéndolas SIN el prefijo `#HttpOnly_`, ver arriba).
+**Contrato de credencial (reemplaza `clave` en el body de toda ruta con
+sesión):** cada ruta recibe, en vez de `clave`:
+- `certificado_base64` (string): el `.pfx`/PKCS#12 del contribuyente en base64.
+- `certificado_password` (string): la password del `.pfx`.
+- `clave_certificado_sii?` (string, opcional): la clave del certificado
+  centralizado cargado en el SII (`SII_CERT_CLAVE_SII`), solo necesaria para
+  FIRMAR/EMITIR — no para las consultas de este sub-proyecto. Se documenta
+  para el sub-proyecto de escritura; acá no se usa.
+
+**Cambios de código:**
+
+- `ProveedorCredencialesRuntime`: nuevo método
+  `guardarCertificado(rut, certificadoBase64, certificadoPassword, claveCertSii?)`
+  que escribe el `.pfx` a un temporal (`rutaTemporalSii('pfxruntime', rut)`) y
+  arma el `SiiConfig` con `strategy: Certificate`, `certPath` = ese temporal,
+  `certPassword`, `claveCertificadoSii`. `borrar(rut)` además hace
+  `fs.unlinkSync` del `.pfx` temporal (material de clave: no dejarlo en disco
+  tras el request). El método `guardar(rut, clave)` existente queda para el
+  flujo MCP por clave (que sigue sirviendo solo para `validar-clave`, no para
+  consultas).
+- `ejecutorPassThroughDe`: una variante
+  `ejecutorPassThroughCertDe(registro, credenciales, rut, certificadoBase64,
+  certificadoPassword)` que en `preparar` llama `guardarCertificado` y en
+  `finalizar` `borrar` (que ahora limpia el `.pfx`). El `ejecutorPassThroughDe`
+  por clave se conserva para no romper nada, pero las rutas de consulta pasan
+  a la variante cert.
+- Rutas REST existentes (rcv/renta/bhe/dte/mipyme) + las nuevas de este
+  sub-proyecto: el zod cambia `clave: z.string().min(1)` por
+  `certificado_base64: z.string().min(1)` + `certificado_password:
+  z.string().min(1)`, y usan `ejecutorPassThroughCertDe`.
+- **NO se toca `assertPuedeEntregarCookieJar`**: con estrategia Certificate ya
+  pasa (esa es su condición actual). Tampoco hace falta `exportarCookiesAlJar`
+  ni el fix de carrera multi-RUT del MCP (ese era específico del login por
+  clave en browser compartido; el certificado escribe el jar por curl, no por
+  browser). El modelo MCP local sigue con certificado de proceso (`.env`),
+  intacto.
+
+**Seguridad**: el `.pfx` y su password son material de clave de terceros. El
+temporal se borra en `finalizar` de cada request (try/finally, aunque la
+consulta falle). Nunca se loguea. El body con `certificado_base64` NO entra en
+la auditoría (que ya solo registra `rut`, no el cuerpo). Igual que hoy con la
+clave, el TLS del ALB protege el material en tránsito.
+
+**Verificación e2e obligatoria de la fase 0** (con el `.pfx` real del `.env`,
+mandado como base64): cada ruta REST existente (rcv/resumen,
+renta/estado-declaracion, bhe/resumen, dte/list-documentos-emitidos,
+mipyme/list-empresas) responde datos reales con `certificado_base64` +
+`certificado_password` (sin certificado en el entorno del proceso) antes de
+dar la fase por cerrada.
+
+**Riesgo**: subir el `.pfx` en cada request es más pesado que una clave (unos
+KB en base64), pero es exactamente lo que hace apigateway y el volumen es
+chico. El temporal por request agrega I/O de disco menor; aceptable.
 
 ## Alcance
 
@@ -104,8 +99,11 @@ Cuatro dominios, siempre con el patrón existente
 `src/tools/<dominio>.ts` (MCP) + `src/rest/rutas/<dominio>.ts` (REST).
 
 Salvo indicación contraria, TODA ruta de este sub-proyecto recibe `rut`,
-`clave` y `empresa_rut?` además de sus parámetros propios (el dominio 4,
-contribuyentes públicos, es la excepción: no lleva credencial).
+`certificado_base64`, `certificado_password` y `empresa_rut?` además de sus
+parámetros propios (ver Fase 0: pass-through de certificado). El dominio 4,
+contribuyentes públicos, es la excepción: no lleva credencial. En MCP, la
+credencial sigue siendo el certificado del proceso (`.env`), no un parámetro
+de la tool.
 
 ### 1. RCV asíncrono (equivale a `sii/rcv/{compras,ventas}/async/*`)
 
@@ -169,9 +167,10 @@ rutas y se documenta.
 
 ### 3. Mipyme lectura restante (equivale a `sii/mipyme/*` de consulta)
 
-Sobre el `MipymeScraper` existente. Todas llevan `rut`, `clave`,
-`empresa_rut?` (resolución de empresa: la existente de mipyme —
-server-side, `conEmpresaExclusiva`):
+Sobre el `MipymeScraper` existente. Todas llevan la credencial estándar
+(`rut`, `certificado_base64`, `certificado_password`) y `empresa_rut?`
+(resolución de empresa: la existente de mipyme — server-side,
+`conEmpresaExclusiva`):
 
 - `POST /v1/mipyme/info-contribuyente` — + `contribuyente_rut`, `tipo_dte`.
   Respuesta: `{ok, razonSocial: string, direccion: string|null,
@@ -290,9 +289,12 @@ simétricas).
 
 ## Orden de implementación
 
-0. **Fase 0** (spike + fix): exportar cookies del login por clave al jar y
-   verificar las 5 rutas REST existentes con la clave real. Sin esto, nada
-   de lo que sigue funciona vía REST.
+0. **Fase 0** (pass-through de certificado): `guardarCertificado` +
+   `ejecutorPassThroughCertDe` + cambiar el zod de credencial de las rutas
+   (clave → certificado_base64/password) + verificar las 5 rutas REST
+   existentes con el `.pfx` real. Sin esto, nada de lo que sigue funciona
+   vía REST. (El spike ya confirmó que loginWithCert funciona con `.pfx`
+   por request.)
 1. Contribuyentes públicos (valida el patrón de scraper sin credencial).
 2. Camino binario de `SiiHttpClient` (`getBuffer` + validación `%PDF`) —
    antes que F29 y mipyme, que lo consumen los dos.
