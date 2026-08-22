@@ -8,17 +8,11 @@
 // HTTP también necesita lanzarla (una respuesta que excede el buffer) y no
 // puede depender de un scraper de dominio.
 export class LimitacionConocida extends Error {
-  // `codigo` en vez del error original como `cause`. Guardar la causa cruda
-  // parece gratis y no lo es: el error de `execFileSync` empieza con
-  // "Command failed: " y el comando COMPLETO con argumentos, que en algunos
-  // caminos lleva datos sensibles, y `src/rest/auditoria.ts` loguea el error
-  // entero con console.error.
-  //
-  // Marcar `cause` como no enumerable NO alcanza — verificado en Node: tanto
-  // `util.inspect` como `console.error` imprimen `[cause]` igual, porque el
-  // formateador de Error la trata como caso especial en vez de recorrer sólo
-  // las props enumerables. Así que la causa no se guarda: se conserva sólo el
-  // código, que identifica el fallo sin arrastrar el comando.
+  // `codigo` en vez del error original como `cause`: identifica el fallo sin
+  // arrastrar el comando de `execFileSync`, que viaja en el mensaje del error
+  // original y termina en el log central. El razonamiento completo, incluido por
+  // qué marcar `cause` como no enumerable no alcanza, está en el comentario de
+  // `ErrorDeBrowser` en src/browser.ts.
   readonly codigo?: string;
 
   constructor(mensaje: string, opciones?: { codigo?: string }) {

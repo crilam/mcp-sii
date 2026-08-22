@@ -353,9 +353,17 @@ export class BheScraper {
 
       // Ni PDF, ni "no existe", ni login: no se sabe qué pasó, así que no se
       // nombra una causa y se deja reintentar.
+      //
+      // Se incluye el título de la página en el mensaje como señal temprana: la
+      // detección de "no existe" depende de un texto en español del portal, y si
+      // el SII le cambia una palabra, ese fallo permanente vuelve a caer acá y a
+      // reintentarse en loop. Ver un título "INFORMACION AL CONTRIBUYENTE" en
+      // esta rama del log es exactamente el aviso de que el texto se movió.
+      const titulo = /<title>([^<]{0,120})<\/title>/i.exec(cuerpo)?.[1]?.trim();
       throw new Error(
-        `${detalle}el portal respondió algo inesperado. Puede ser una caída o ` +
-        'una página de mantención del SII; reintentá.'
+        `${detalle}el portal respondió algo inesperado` +
+        `${titulo ? ` (página "${titulo}")` : ''}. Puede ser una caída o una ` +
+        'página de mantención del SII; reintentá.'
       );
     }
 

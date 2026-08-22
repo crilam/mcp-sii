@@ -1,4 +1,3 @@
-
 export class SesionNoIniciada extends Error {}
 export class SesionExpirada extends Error {}
 

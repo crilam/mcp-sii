@@ -117,7 +117,31 @@ describe('registrarRutasBhe', () => {
       codigo_barras: '99999999999999999999',
     });
 
-    expect(respuesta).toEqual({ status: 200, body: { ok: false, error: 'NO_ENCONTRADO' } });
+    // Con `detalle`: el mensaje distingue "código inexistente" de "pediste una
+    // recibida como emitida", que el SII responde igual y el tenant sí puede
+    // accionar.
+    expect(respuesta).toEqual({
+      status: 200,
+      body: {
+        ok: false,
+        error: 'NO_ENCONTRADO',
+        detalle: 'el SII informa que no existe una boleta',
+      },
+    });
+  });
+
+  // El listado deja codigoBarras en '' cuando el SII no lo informa; si el tenant
+  // reenvía eso, tiene que ser un 400 y no gastar una consulta al SII.
+  it('pdf: un codigo_barras vacío devuelve 400', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.pdf).not.toHaveBeenCalled();
   });
 
   it('pdf: un fallo transitorio sigue siendo ERROR', async () => {
