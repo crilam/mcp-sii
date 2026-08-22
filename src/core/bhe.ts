@@ -37,3 +37,18 @@ export async function listRecibidas(
     return scraper.informeMensual(anio, mes, true);
   });
 }
+
+// Devuelve el PDF de una boleta como bytes. Quien expone el resultado decide
+// cómo transportarlo (el adaptador REST lo manda en base64); el core no se
+// mete en eso.
+export async function pdf(
+  ejecutor: EjecutorSesion<SessionManager>,
+  rut: string,
+  codigoBarras: string,
+  recibida: boolean
+): Promise<Buffer> {
+  return ejecutor.ejecutar(rut, async sesion => {
+    const scraper = new BheScraper(new SiiHttpClient(sesion), sesion);
+    return scraper.pdfBoleta(codigoBarras, recibida);
+  });
+}

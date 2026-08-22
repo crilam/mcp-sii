@@ -28,6 +28,13 @@ export type RolContraparte = 'receptor' | 'emisor';
 
 export interface BoletaBhe {
   folio: number;
+  // Identificador que el SII exige para pedir el PDF de la boleta: el folio NO
+  // sirve para eso. Son ~20 caracteres que empiezan con el RUT del emisor
+  // (ej. "111111110000048F99ED"). Es el mismo valor que apigateway llama
+  // `codigo` en /bhe/emitidas/pdf/{codigo}. Cadena vacía si el SII no lo
+  // informó: es opaco, así que no se valida su forma ni su largo (las capturas
+  // muestran largos distintos entre emitidas y recibidas).
+  codigoBarras: string;
   fecha: string;
   contraparteRol: RolContraparte;
   contraparteRut: string;
@@ -45,6 +52,9 @@ const BASE = 'https://loa.sii.cl/cgi_IMT';
 const CGI_ANUAL = `${BASE}/TMBCOC_InformeAnualBhe.cgi`;
 const CGI_MENSUAL = `${BASE}/TMBCOC_InformeMensualBhe.cgi`;
 const CGI_MENSUAL_REC = `${BASE}/TMBCOC_InformeMensualBheRec.cgi`;
+// Ojo con el prefijo: los informes son TMBCO*C*_, el PDF es TMBCO*T*_. La URL
+// sale del propio JS del informe mensual, que arma este link por cada fila.
+const CGI_PDF = `${BASE}/TMBCOT_ConsultaBoletaPdf.cgi`;
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
                'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -257,6 +267,54 @@ export class BheScraper {
     );
   }
 
+  // Descarga el PDF de UNA boleta. La clave es el `codigoBarras` que entrega
+  // `informeMensual`, no el folio: el CGI no acepta el folio.
+  async pdfBoleta(codigoBarras: string, recibida = false): Promise<Buffer> {
+    return this.conSesionFresca(() => this.intentarPdfBoleta(codigoBarras, recibida));
+  }
+
+  private async intentarPdfBoleta(codigoBarras: string, recibida: boolean): Promise<Buffer> {
+    // Un código vacío llega cuando el informe no lo trajo (ver BoletaBhe). El
+    // CGI respondería el formulario de login, que después parecería una sesión
+    // caída: se corta acá con la causa real.
+    if (!codigoBarras.trim()) {
+      throw new Error(
+        'Falta el código de barras de la boleta. Es el campo codigoBarras que ' +
+        'devuelve el listado del mes, y es lo único que el SII acepta para ' +
+        'identificar la boleta al pedir el PDF (el folio no sirve).'
+      );
+    }
+
+    this.assertConsultaHttpPosible();
+    await this.session.authenticateOnly();
+
+    const { contenido, contentType } = await this.http.getBinario(CGI_PDF, {
+      txt_codigobarras: codigoBarras.trim(),
+      veroriginal: 'si',
+      // `PROPIOS` es el valor que el propio informe de emitidas pone en el link
+      // del PDF, verificado en vivo. `RECIBIDOS` viene de implementaciones de
+      // terceros del mismo CGI. El riesgo de un `origen` equivocado no es
+      // silencioso: si el CGI no reconoce el par (código, origen) responde el
+      // HTML del portal, que el chequeo de Content-Type de abajo rechaza.
+      origen: recibida ? 'RECIBIDOS' : 'PROPIOS',
+      enviar: 'si',
+    });
+
+    // El CGI responde 200 con el HTML del formulario de login cuando la sesión
+    // no le sirve, así que el status no distingue nada: lo que separa un PDF de
+    // un fallo es el Content-Type. Sin este chequeo, el error viajaría como un
+    // "PDF" de 17 KB que ningún lector abre.
+    if (!/application\/pdf/i.test(contentType)) {
+      throw new Error(
+        `El SII no devolvió un PDF para la boleta ${codigoBarras} (respondió ` +
+        `"${contentType || 'sin Content-Type'}"). La sesión pudo expirar, o el ` +
+        'código de barras no corresponde a una boleta de este RUT.'
+      );
+    }
+
+    return contenido;
+  }
+
   private parseXmlValues(html: string): Record<string, string> {
     const values: Record<string, string> = {};
     for (const m of html.matchAll(XML_VALUE)) {
@@ -365,6 +423,7 @@ export class BheScraper {
 
       boletas.push({
         folio,
+        codigoBarras: (arr[`codigobarras_${i}`] ?? '').trim(),
         fecha: (arr[`${esquema.fecha}_${i}`] ?? '').trim(),
         contraparteRol: esquema.rol,
         contraparteRut: `${arr[`${esquema.rut}_${i}`] ?? ''}-${arr[`${esquema.dv}_${i}`] ?? ''}`,

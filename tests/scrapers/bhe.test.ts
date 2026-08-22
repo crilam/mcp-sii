@@ -176,6 +176,8 @@ describe('BheScraper.informeMensual', () => {
     expect(boletas).toHaveLength(2);
     expect(boletas[0]).toEqual({
       folio: 311,
+      // Es lo único que el SII acepta para pedir el PDF de esta boleta.
+      codigoBarras: '111111110000048F99ED',
       fecha: '22/05/2025',
       contraparteRol: 'receptor',
       contraparteRut: '22222222-2',
@@ -243,6 +245,8 @@ describe('BheScraper.informeMensual de recibidas', () => {
     expect(boletas).toHaveLength(1);
     expect(boletas[0]).toEqual({
       folio: 3436,
+      // Las recibidas también traen el código, así que su PDF se puede pedir.
+      codigoBarras: '033333333034364C969E7',
       // El CGI de recibidas no emite fechaemision_N: la fecha vive en
       // fecha_boleta_N.
       fecha: '05/05/2025',
@@ -300,6 +304,74 @@ ${filas}
     const { scraper } = makeScraper(html);
 
     expect(await scraper.informeMensual(2025, 5)).toHaveLength(100);
+  });
+});
+
+// El PDF se pide por código de barras a un CGI distinto (TMBCOT_, no TMBCOC_)
+// y la respuesta es binaria, así que no pasa por el parser de informes.
+describe('BheScraper.pdfBoleta', () => {
+  const PDF = Buffer.from('%PDF-1.3\n...bytes...', 'latin1');
+
+  function makePdfScraper(
+    respuesta: { contenido: Buffer; contentType: string }
+  ) {
+    const { scraper, http, session } = makeScraper('<html></html>');
+    (http.getBinario as jest.Mock).mockResolvedValue(respuesta);
+    return { scraper, http, session };
+  }
+
+  it('devuelve los bytes del PDF tal cual', async () => {
+    const { scraper } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+
+    const pdf = await scraper.pdfBoleta('111111110000048F99ED');
+
+    expect(pdf).toEqual(PDF);
+  });
+
+  it('pide el CGI del PDF con el código de barras y origen PROPIOS', async () => {
+    const { scraper, http } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+
+    await scraper.pdfBoleta('111111110000048F99ED');
+
+    const [url, params] = (http.getBinario as jest.Mock).mock.calls[0];
+    expect(url).toContain('TMBCOT_ConsultaBoletaPdf.cgi');
+    expect(params).toEqual({
+      txt_codigobarras: '111111110000048F99ED',
+      veroriginal: 'si',
+      origen: 'PROPIOS',
+      enviar: 'si',
+    });
+  });
+
+  it('usa origen RECIBIDOS para una boleta recibida', async () => {
+    const { scraper, http } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+
+    await scraper.pdfBoleta('033333333034364C969E7', true);
+
+    expect((http.getBinario as jest.Mock).mock.calls[0][1].origen).toBe('RECIBIDOS');
+  });
+
+  // El CGI responde 200 con el HTML del formulario de login cuando la sesión no
+  // le sirve: sin mirar el Content-Type, ese HTML se entregaría como "PDF".
+  it('falla si el SII responde algo que no es un PDF', async () => {
+    const { scraper } = makePdfScraper({
+      contenido: Buffer.from('<html><title>Autenticación</title></html>'),
+      contentType: 'text/html; charset=iso-8859-1',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/no devolvió un PDF.*text\/html/s);
+  });
+
+  // El listado deja el campo vacío cuando el SII no lo informa. Mandarlo así
+  // haría que el CGI devuelva el login, y el error apuntaría a la sesión.
+  it('rechaza un código de barras vacío sin consultar al SII', async () => {
+    const { scraper, http, session } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+
+    await expect(scraper.pdfBoleta('   ')).rejects.toThrow(/Falta el código de barras/);
+
+    expect(http.getBinario as jest.Mock).not.toHaveBeenCalled();
+    expect(session.authenticateOnly).not.toHaveBeenCalled();
   });
 });
 

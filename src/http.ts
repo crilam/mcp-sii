@@ -103,6 +103,21 @@ export class SiiHttpClient {
     return this.curl([`${url}${query}`]);
   }
 
+  // Variante de `get` para respuestas que NO son texto (el PDF de una boleta de
+  // honorarios). Devuelve los bytes crudos junto al Content-Type declarado, sin
+  // decodificar: pasar un PDF por `TextDecoder` lo destruye —los bytes que no
+  // forman secuencias válidas se reemplazan por U+FFFD y no hay vuelta atrás—
+  // y el daño es silencioso, porque el resultado sigue siendo un string.
+  // Quien llama decide qué hacer con el Content-Type; el transporte no sabe
+  // qué tipo esperaba.
+  async getBinario(
+    url: string,
+    params?: Record<string, string>
+  ): Promise<{ contenido: Buffer; contentType: string }> {
+    const query = params ? `?${this.encodeParams(params)}` : '';
+    return this.curlCrudo([`${url}${query}`]);
+  }
+
   // `charset` decide cómo se percent-encodean los valores. El default UTF-8
   // sirve para las aplicaciones modernas; los CGI legacy de Portal001 esperan
   // ISO-8859-1 y hay que decírselo explícitamente.
@@ -180,6 +195,13 @@ export class SiiHttpClient {
   }
 
   private async curl(args: string[]): Promise<string> {
+    const { contenido, contentType } = await this.curlCrudo(args);
+    return decodificarRespuesta(contenido, contentType);
+  }
+
+  // Ejecuta curl y separa cuerpo de Content-Type SIN decodificar el cuerpo. Es
+  // la base de `curl` (que decodifica) y de `getBinario` (que no).
+  private async curlCrudo(args: string[]): Promise<{ contenido: Buffer; contentType: string }> {
     const jar = await this.session.rutaCookieJar();
     // execFileSync con arreglo de argumentos previene inyección de shell: ningún
     // valor pasa por un intérprete de comandos, así que metacaracteres como
@@ -204,17 +226,17 @@ export class SiiHttpClient {
     const corte = bruto.lastIndexOf(MARCA_CONTENT_TYPE);
     if (corte === -1) {
       // Sin marca no hubo `-w` (o curl murió antes de escribirla): no hay
-      // Content-Type que respetar y se usa el default.
-      return decodificarRespuesta(bruto, '');
+      // Content-Type que respetar y quien llama usa su default.
+      return { contenido: bruto, contentType: '' };
     }
 
-    const cuerpo = bruto.subarray(0, corte);
-    const contentType = bruto
-      .subarray(corte + MARCA_CONTENT_TYPE.length)
-      .toString('ascii')
-      .trim();
-
-    return decodificarRespuesta(cuerpo, contentType);
+    return {
+      contenido: bruto.subarray(0, corte),
+      contentType: bruto
+        .subarray(corte + MARCA_CONTENT_TYPE.length)
+        .toString('ascii')
+        .trim(),
+    };
   }
 
   private encodeParams(params: Record<string, string>, charset: 'utf-8' | 'latin1' = 'utf-8'): string {

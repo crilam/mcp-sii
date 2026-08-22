@@ -3,12 +3,13 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/bhe';
-import { schemaResumen, schemaMes } from '../../core/schemas/bhe';
+import { schemaResumen, schemaMes, schemaPdf } from '../../core/schemas/bhe';
 import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
 
 const zodResumen = z.object(schemaResumen).extend(zodCredencialCert);
 const zodMes = z.object(schemaMes).extend(zodCredencialCert);
+const zodPdf = z.object(schemaPdf).extend(zodCredencialCert);
 
 export function registrarRutasBhe(
   rutas: Map<string, RutaHandler>,
@@ -37,5 +38,27 @@ export function registrarRutasBhe(
     const { rut, certificado_base64, certificado_password, anio, mes } = parseo.data;
     const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
     return ejecutar(() => core.listRecibidas(ejecutor, rut, anio, mes));
+  });
+
+  // El PDF viaja en base64 dentro del JSON, no como cuerpo binario: todo el
+  // contrato REST es {ok:true,...} / {ok:false,error} con status 200, y una
+  // ruta que devolviera application/pdf no tendría forma de expresar
+  // {ok:false} sin romperlo para los tenants que ya lo consumen.
+  rutas.set('POST /v1/bhe/pdf', async body => {
+    const parseo = zodPdf.safeParse(body);
+    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
+    const { rut, certificado_base64, certificado_password, codigo_barras, recibida } = parseo.data;
+    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
+    return ejecutar(async () => {
+      const contenido = await core.pdf(ejecutor, rut, codigo_barras, recibida);
+      // Se envuelve a mano: `ejecutar` spreadea el resultado, y spreadear un
+      // Buffer produciría {"0":37,"1":80,...} — un JSON enorme e inservible.
+      return {
+        codigo_barras,
+        content_type: 'application/pdf',
+        tamano_bytes: contenido.length,
+        pdf_base64: contenido.toString('base64'),
+      };
+    });
   });
 }

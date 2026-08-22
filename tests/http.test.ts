@@ -307,3 +307,48 @@ describe('SiiHttpClient.postForm', () => {
     expect(args.some(arg => arg.includes('glosa=a%20b%26c'))).toBe(true);
   });
 });
+
+// El PDF de una boleta de honorarios no es texto: pasarlo por TextDecoder
+// reemplaza cada byte que no forma una secuencia válida por U+FFFD, y el daño
+// es irreversible y silencioso (el resultado sigue siendo un string).
+describe('SiiHttpClient.getBinario', () => {
+  // La cabecera real de un PDF: arranca con %PDF y sigue con bytes altos que no
+  // son UTF-8 válido, así que un round-trip por string los perdería.
+  const PDF = Buffer.from([
+    ...Buffer.from('%PDF-1.3\n', 'ascii'), 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a,
+  ]);
+
+  it('devuelve los bytes crudos y el Content-Type, sin decodificar', async () => {
+    mockExec.mockReturnValue(respuesta(PDF, 'application/pdf') as never);
+    const { client } = makeClient();
+
+    const r = await client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi');
+
+    expect(r.contentType).toBe('application/pdf');
+    expect(r.contenido.equals(PDF)).toBe(true);
+  });
+
+  it('percent-encodea los parámetros en el query string', async () => {
+    mockExec.mockReturnValue(respuesta(PDF, 'application/pdf') as never);
+    const { client } = makeClient();
+
+    await client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi',
+      { txt_codigobarras: 'ABC123', origen: 'PROPIOS' });
+
+    const args = mockExec.mock.calls[0][1] as string[];
+    expect(args.some(a => a.includes('txt_codigobarras=ABC123&origen=PROPIOS'))).toBe(true);
+  });
+
+  // Cuando el CGI responde el HTML del login, quien llama necesita ver ese
+  // Content-Type para distinguirlo de un PDF: el status es 200 en ambos casos.
+  it('reporta el Content-Type de una respuesta que no es PDF', async () => {
+    mockExec.mockReturnValue(
+      respuesta('<html><title>Autenticación</title></html>', 'text/html; charset=iso-8859-1') as never
+    );
+    const { client } = makeClient();
+
+    const r = await client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi');
+
+    expect(r.contentType).toBe('text/html; charset=iso-8859-1');
+  });
+});
