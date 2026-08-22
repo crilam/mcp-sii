@@ -24,3 +24,26 @@ export function ejecutorPassThroughDe<T>(
       ),
   };
 }
+
+// Arma un EjecutorSesion de un solo uso para UN request REST con autenticación
+// por certificado digital: guardar el certificado, crear la sesión, correr fn
+// y borrar el certificado corren como una sola unidad atómica encolada por RUT.
+// Similar a ejecutorPassThroughDe pero para flujos de certificado.
+export function ejecutorPassThroughCertDe<T>(
+  registro: RegistroSesiones<T>,
+  credenciales: ProveedorCredencialesRuntime,
+  rut: string,
+  certificadoBase64: string,
+  certificadoPassword: string,
+  claveCertSii?: string
+): EjecutorSesion<T> {
+  return {
+    ejecutar: (rutInterno, fn) =>
+      registro.ejecutarPassThrough(
+        rutInterno,
+        () => credenciales.guardarCertificado(rut, certificadoBase64, certificadoPassword, claveCertSii),
+        () => credenciales.borrar(rut),
+        fn
+      ),
+  };
+}
