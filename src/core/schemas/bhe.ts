@@ -24,7 +24,9 @@ export const schemaMes = {
 // tool guarde el archivo y devuelva la ruta.
 export const schemaPdf = {
   rut: z.string().min(1).describe(RUT_DESC),
-  codigo_barras: z.string().min(1).describe(
+  // `.trim()` antes del `.min(1)`: sin él, `"   "` pasa la validación y muere
+  // más adentro como el ERROR genérico del contrato en vez de un 400 claro.
+  codigo_barras: z.string().trim().min(1).describe(
     'Código de barras de la boleta, tal como lo devuelve el campo codigoBarras ' +
     'del listado del mes. El folio no sirve para pedir el PDF.'
   ),

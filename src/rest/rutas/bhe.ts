@@ -45,10 +45,10 @@ export function registrarRutasBhe(
   // ruta que devolviera application/pdf no tendría forma de expresar
   // {ok:false} sin romperlo para los tenants que ya lo consumen.
   //
-  // Techo de tamaño para los tenants: el transporte corta la descarga en 16 MiB
+  // Techo de tamaño para los tenants: el transporte corta la descarga en 4 MiB
   // (MAX_RESPUESTA_BYTES en http.ts), y base64 la infla ~33%, así que la
-  // respuesta de esta ruta puede llegar a ~21 MB — mucho más que las demás. En
-  // la práctica una boleta pesa ~8 KB; el techo importa sólo como límite duro.
+  // respuesta de esta ruta puede llegar a ~5,5 MB — más que las demás. En la
+  // práctica una boleta pesa ~8 KB; el techo importa sólo como límite duro.
   rutas.set('POST /v1/bhe/pdf', async body => {
     const parseo = zodPdf.safeParse(body);
     if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };

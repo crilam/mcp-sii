@@ -376,14 +376,36 @@ describe('BheScraper.pdfBoleta', () => {
       .rejects.toThrow(/la sesión expiró: reintentá/);
   });
 
-  it('nombra el código ajeno cuando el cuerpo no es el formulario de login', async () => {
-    const { scraper } = makePdfScraper({
-      contenido: Buffer.from('<html><title>Boletas de honorarios</title></html>', 'latin1'),
+  // Texto real del portal ante un código inexistente, ajeno o basura
+  // (verificado en vivo: 1403 bytes, "INFORMACION AL CONTRIBUYENTE").
+  const NO_EXISTE = Buffer.from(
+    '<html><title>INFORMACION AL CONTRIBUYENTE</title><body>Sr. Contribuyente: ' +
+    'No existe la boleta de honorarios electrónica con la información ' +
+    'especificada, favor revisar la información e intentarlo nuevamente.</body></html>',
+    'latin1'
+  );
+
+  it('nombra el código inexistente cuando el portal lo dice', async () => {
+    const { scraper } = makePdfScraper({ contenido: NO_EXISTE, contentType: 'text/html' });
+
+    await expect(scraper.pdfBoleta('99999999999999999999'))
+      .rejects.toThrow(/no existe una boleta con ese código de barras/);
+  });
+
+  // La clasificación es por evidencia positiva: lo que no se reconoce puede ser
+  // una caída o mantención del SII, que sí se resuelve reintentando. Marcarlo
+  // como permanente le negaría el reintento a un fallo transitorio.
+  it('no afirma una causa cuando el cuerpo es desconocido, y deja reintentar', async () => {
+    const { scraper, http, session } = makePdfScraper({
+      contenido: Buffer.from('<html><title>Servicio en mantención</title></html>', 'latin1'),
       contentType: 'text/html',
     });
 
-    await expect(scraper.pdfBoleta('99999999999999999999'))
-      .rejects.toThrow(/no corresponde a una boleta de este RUT/);
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/algo inesperado/);
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(2);
+    expect(session.invalidate).toHaveBeenCalled();
   });
 
   // El listado deja el campo vacío cuando el SII no lo informa. Mandarlo así
@@ -403,9 +425,11 @@ describe('BheScraper.pdfBoleta', () => {
   // conSesionFresca reintenta todo lo que no sea LimitacionConocida. Un código
   // ajeno al RUT no se arregla reautenticando: reintentarlo gasta un re-login y
   // una consulta para fallar igual.
-  it('no reintenta cuando el código no corresponde al RUT', async () => {
+  it('no reintenta cuando el portal informa que la boleta no existe', async () => {
     const { scraper, http, session } = makePdfScraper({
-      contenido: Buffer.from('<html><title>Boletas de honorarios</title></html>', 'latin1'),
+      contenido: Buffer.from(
+        '<html><body>No existe la boleta de honorarios electrónica con la ' +
+        'información especificada</body></html>', 'latin1'),
       contentType: 'text/html',
     });
 

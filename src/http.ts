@@ -8,7 +8,12 @@ const TIMEOUT_MS = 30_000;
 // una boleta es el primer payload que puede acercarse: una con logo o anexos
 // pasa el megabyte sin nada raro. El fallo además no se explica solo — sale
 // como el ERROR genérico del contrato REST, sin mencionar el tamaño.
-const MAX_RESPUESTA_BYTES = 16 * 1024 * 1024;
+//
+// 4 MiB y no más: cada request bufferea su respuesta completa en memoria, así
+// que el techo real del proceso es (requests en vuelo) × este número, y el
+// servidor REST atiende varios tenants a la vez. Una boleta pesa ~8 KB, o sea
+// que esto ya deja 500× de margen sobre lo observado.
+const MAX_RESPUESTA_BYTES = 4 * 1024 * 1024;
 
 // El charset NO es uniforme en el portal: varía por aplicación, y hay que
 // respetar el `Content-Type` de cada respuesta. Medido en vivo:

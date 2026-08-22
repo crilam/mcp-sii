@@ -310,31 +310,42 @@ export class BheScraper {
     // un fallo es el Content-Type. Sin este chequeo, el error viajaría como un
     // "PDF" de 17 KB que ningún lector abre.
     if (!/application\/pdf/i.test(contentType)) {
-      // Las dos causas se ven igual desde el Content-Type, pero el cuerpo las
-      // separa: el portal manda el formulario de autenticación cuando la sesión
-      // cayó, y otra página cuando el código no le corresponde a este RUT.
-      // Nombrar la causa concreta importa porque quien recibe esto sólo ve el
-      // ERROR genérico del contrato REST, y reintentar sirve en un caso y no en
-      // el otro.
-      const esFormularioDeLogin = /<title>[^<]*Autenticaci/i.test(
-        contenido.toString('latin1').slice(0, 4_000)
-      );
+      const cuerpo = contenido.toString('latin1').slice(0, 4_000);
       const detalle = `El SII no devolvió un PDF para la boleta ${codigoBarras} ` +
         `(respondió "${contentType || 'sin Content-Type'}"): `;
 
-      // Un código que no le corresponde a este RUT no se arregla
-      // reautenticando, y `conSesionFresca` reintenta cualquier cosa que no sea
-      // LimitacionConocida: sin esto, el mensaje diría "reintentar no ayuda"
-      // mientras el wrapper gasta un re-login y una consulta para fallar igual.
-      if (!esFormularioDeLogin) {
+      // Sólo se afirma "el código no existe" cuando el portal lo dice con estas
+      // palabras — verificado en vivo: ante un código inexistente, ajeno o
+      // basura responde 1403 bytes titulados "INFORMACION AL CONTRIBUYENTE" con
+      // ese texto. Eso NO se arregla reautenticando, y `conSesionFresca`
+      // reintenta cualquier cosa que no sea LimitacionConocida, así que sin
+      // esta rama el wrapper gastaría un re-login y otra consulta para fallar
+      // igual.
+      //
+      // La clasificación es por evidencia positiva, no por descarte: una página
+      // de mantención, un 500 del CGI o un login con el título cambiado también
+      // llegan acá, y esos SÍ son transitorios. Marcarlos como permanentes por
+      // no reconocerlos le negaría el reintento a un fallo que se resuelve
+      // solo, con una causa inventada encima.
+      if (/No existe la boleta de honorarios/i.test(cuerpo)) {
         throw new LimitacionConocida(
-          `${detalle}el código de barras no corresponde a una boleta de este RUT.`
+          `${detalle}el SII informa que no existe una boleta con ese código de ` +
+          'barras para este RUT. Revisá el código; reintentar no ayuda.'
         );
       }
 
+      if (/<title>[^<]*Autenticaci/i.test(cuerpo)) {
+        throw new Error(
+          `${detalle}el SII devolvió el formulario de autenticación, así que la ` +
+          'sesión expiró: reintentá.'
+        );
+      }
+
+      // Ni PDF, ni "no existe", ni login: no se sabe qué pasó, así que no se
+      // nombra una causa y se deja reintentar.
       throw new Error(
-        `${detalle}el SII devolvió el formulario de autenticación, así que la ` +
-        'sesión expiró: reintentá.'
+        `${detalle}el portal respondió algo inesperado. Puede ser una caída o ` +
+        'una página de mantención del SII; reintentá.'
       );
     }
 

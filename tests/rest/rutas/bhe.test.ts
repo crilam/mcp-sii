@@ -87,6 +87,20 @@ describe('registrarRutasBhe', () => {
       expect.anything(), '11.111.111-1', '033333333034364C969E7', true);
   });
 
+  // Sin `.trim()` en el schema, "   " pasaba la validación y moría adentro como
+  // el ERROR genérico del contrato, en vez de un 400 que dice qué está mal.
+  it('pdf: un codigo_barras en blanco devuelve 400, no ERROR', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '   ',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.pdf).not.toHaveBeenCalled();
+  });
+
   it('pdf: sin codigo_barras devuelve 400 sin llamar al core', async () => {
     const rutas = armarRouter();
 
