@@ -355,12 +355,35 @@ describe('BheScraper.pdfBoleta', () => {
   // le sirve: sin mirar el Content-Type, ese HTML se entregaría como "PDF".
   it('falla si el SII responde algo que no es un PDF', async () => {
     const { scraper } = makePdfScraper({
-      contenido: Buffer.from('<html><title>Autenticación</title></html>'),
+      contenido: Buffer.from('<html><title>Autenticación</title></html>', 'latin1'),
       contentType: 'text/html; charset=iso-8859-1',
     });
 
     await expect(scraper.pdfBoleta('111111110000048F99ED'))
       .rejects.toThrow(/no devolvió un PDF.*text\/html/s);
+  });
+
+  // Las dos causas llegan con el mismo Content-Type, pero sólo una se arregla
+  // reintentando: quien recibe el ERROR genérico del contrato REST necesita que
+  // el mensaje lo diga.
+  it('nombra la sesión expirada cuando el cuerpo es el formulario de login', async () => {
+    const { scraper } = makePdfScraper({
+      contenido: Buffer.from('<html><head><title>Autenticación</title></head></html>', 'latin1'),
+      contentType: 'text/html',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/la sesión expiró: reintentá/);
+  });
+
+  it('nombra el código ajeno cuando el cuerpo no es el formulario de login', async () => {
+    const { scraper } = makePdfScraper({
+      contenido: Buffer.from('<html><title>Boletas de honorarios</title></html>', 'latin1'),
+      contentType: 'text/html',
+    });
+
+    await expect(scraper.pdfBoleta('99999999999999999999'))
+      .rejects.toThrow(/no corresponde a una boleta de este RUT/);
   });
 
   // El listado deja el campo vacío cuando el SII no lo informa. Mandarlo así

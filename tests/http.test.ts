@@ -339,6 +339,18 @@ describe('SiiHttpClient.getBinario', () => {
     expect(args.some(a => a.includes('txt_codigobarras=ABC123&origen=PROPIOS'))).toBe(true);
   });
 
+  // Sin maxBuffer explícito, execFileSync corta en 1 MiB y lanza ENOBUFS. El
+  // PDF de una boleta es el primer payload que puede pasar ese límite.
+  it('declara un maxBuffer mayor al default de 1 MiB de Node', async () => {
+    mockExec.mockReturnValue(respuesta(PDF, 'application/pdf') as never);
+    const { client } = makeClient();
+
+    await client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi');
+
+    const opciones = mockExec.mock.calls[0][2] as { maxBuffer?: number };
+    expect(opciones.maxBuffer).toBeGreaterThan(1024 * 1024);
+  });
+
   // Cuando el CGI responde el HTML del login, quien llama necesita ver ese
   // Content-Type para distinguirlo de un PDF: el status es 200 en ambos casos.
   it('reporta el Content-Type de una respuesta que no es PDF', async () => {

@@ -305,10 +305,21 @@ export class BheScraper {
     // un fallo es el Content-Type. Sin este chequeo, el error viajaría como un
     // "PDF" de 17 KB que ningún lector abre.
     if (!/application\/pdf/i.test(contentType)) {
+      // Las dos causas se ven igual desde el Content-Type, pero el cuerpo las
+      // separa: el portal manda el formulario de autenticación cuando la sesión
+      // cayó, y otra página cuando el código no le corresponde a este RUT.
+      // Nombrar la causa concreta importa porque quien recibe esto sólo ve el
+      // ERROR genérico del contrato REST, y reintentar sirve en un caso y no en
+      // el otro.
+      const esFormularioDeLogin = /<title>[^<]*Autenticaci/i.test(
+        contenido.toString('latin1').slice(0, 4_000)
+      );
+      const causa = esFormularioDeLogin
+        ? 'el SII devolvió el formulario de autenticación, así que la sesión expiró: reintentá'
+        : 'el código de barras no corresponde a una boleta de este RUT (reintentar no ayuda)';
       throw new Error(
         `El SII no devolvió un PDF para la boleta ${codigoBarras} (respondió ` +
-        `"${contentType || 'sin Content-Type'}"). La sesión pudo expirar, o el ` +
-        'código de barras no corresponde a una boleta de este RUT.'
+        `"${contentType || 'sin Content-Type'}"): ${causa}.`
       );
     }
 

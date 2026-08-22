@@ -16,6 +16,12 @@ export const schemaMes = {
 // El PDF se pide por código de barras, no por folio: es lo único que el CGI
 // acepta. Se toma tal cual del listado del mes, sin validar forma ni largo (es
 // un identificador opaco del SII y los largos observados varían).
+//
+// A diferencia de los otros schemas de este archivo, éste lo consume SÓLO el
+// adaptador REST: no hay tool MCP del PDF, y la ausencia es deliberada. La tool
+// tendría que devolver el PDF en base64 dentro del contexto del modelo, que es
+// ruido y no información. Si alguna vez se expone en MCP, lo útil sería que la
+// tool guarde el archivo y devuelva la ruta.
 export const schemaPdf = {
   rut: z.string().min(1).describe(RUT_DESC),
   codigo_barras: z.string().min(1).describe(

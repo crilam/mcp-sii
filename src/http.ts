@@ -3,6 +3,13 @@ import { SessionManager } from './session';
 
 const TIMEOUT_MS = 30_000;
 
+// `execFileSync` corta la salida en 1 MiB por defecto y lanza ENOBUFS. Mientras
+// todo lo que pedíamos era HTML de informes el default alcanzaba, pero el PDF de
+// una boleta es el primer payload que puede acercarse: una con logo o anexos
+// pasa el megabyte sin nada raro. El fallo además no se explica solo — sale
+// como el ERROR genérico del contrato REST, sin mencionar el tamaño.
+const MAX_RESPUESTA_BYTES = 16 * 1024 * 1024;
+
 // El charset NO es uniforme en el portal: varía por aplicación, y hay que
 // respetar el `Content-Type` de cada respuesta. Medido en vivo:
 //
@@ -216,7 +223,7 @@ export class SiiHttpClient {
         '-w', `${MARCA_CONTENT_TYPE}%{content_type}`,
         ...args,
       ],
-      { encoding: 'buffer', timeout: TIMEOUT_MS }
+      { encoding: 'buffer', timeout: TIMEOUT_MS, maxBuffer: MAX_RESPUESTA_BYTES }
     );
 
     const bruto = Buffer.isBuffer(salida)
