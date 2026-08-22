@@ -291,11 +291,11 @@ export class BheScraper {
     const { contenido, contentType } = await this.http.getBinario(CGI_PDF, {
       txt_codigobarras: codigoBarras.trim(),
       veroriginal: 'si',
-      // `PROPIOS` es el valor que el propio informe de emitidas pone en el link
-      // del PDF, verificado en vivo. `RECIBIDOS` viene de implementaciones de
-      // terceros del mismo CGI. El riesgo de un `origen` equivocado no es
-      // silencioso: si el CGI no reconoce el par (código, origen) responde el
-      // HTML del portal, que el chequeo de Content-Type de abajo rechaza.
+      // `PROPIOS` es el valor que el informe de emitidas pone en el link del
+      // PDF. Los dos valores están verificados en vivo contra el portal (una
+      // emitida y una recibida, PDF completo en ambos casos). Un `origen`
+      // equivocado no falla en silencio: el CGI responde el HTML del portal, y
+      // el chequeo de Content-Type de abajo lo rechaza.
       origen: recibida ? 'RECIBIDOS' : 'PROPIOS',
       enviar: 'si',
     });
