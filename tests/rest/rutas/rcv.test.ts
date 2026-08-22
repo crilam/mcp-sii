@@ -29,17 +29,28 @@ describe('registrarRutasRcv', () => {
     const rutas = armarRouter();
 
     const respuesta = await rutas.get('POST /v1/rcv/resumen')!(
-      { rut: '11.111.111-1', clave: 'x', periodo: '202607', operacion: 'VENTA' }
+      { rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy', periodo: '202607', operacion: 'VENTA' }
     );
 
     expect(respuesta).toEqual({ status: 200, body: { ok: true, filas: [] } });
   });
 
-  it('resumen: clave vacía devuelve 400 sin llamar al core', async () => {
+  it('resumen: certificado_base64 vacío devuelve 400 sin llamar al core', async () => {
     const rutas = armarRouter();
 
     const respuesta = await rutas.get('POST /v1/rcv/resumen')!(
-      { rut: '11.111.111-1', clave: '', periodo: '202607', operacion: 'VENTA' }
+      { rut: '11.111.111-1', certificado_base64: '', certificado_password: 'yyy', periodo: '202607', operacion: 'VENTA' }
+    );
+
+    expect(respuesta).toEqual({ status: 400, body: { error: 'BAD_REQUEST' } });
+    expect(core.resumen).not.toHaveBeenCalled();
+  });
+
+  it('resumen: sin certificado_base64 devuelve 400 sin llamar al core', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/rcv/resumen')!(
+      { rut: '11.111.111-1', certificado_password: 'yyy', periodo: '202607', operacion: 'VENTA' }
     );
 
     expect(respuesta).toEqual({ status: 400, body: { error: 'BAD_REQUEST' } });
@@ -50,7 +61,7 @@ describe('registrarRutasRcv', () => {
     const rutas = armarRouter();
 
     const respuesta = await rutas.get('POST /v1/rcv/resumen')!(
-      { rut: '11.111.111-1', clave: 'x', periodo: 'no-es-un-periodo', operacion: 'VENTA' }
+      { rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy', periodo: 'no-es-un-periodo', operacion: 'VENTA' }
     );
 
     expect(respuesta.status).toBe(400);
@@ -62,7 +73,7 @@ describe('registrarRutasRcv', () => {
     const rutas = armarRouter();
 
     const respuesta = await rutas.get('POST /v1/rcv/resumen')!(
-      { rut: '1', clave: 'x', periodo: '202607', operacion: 'VENTA' }
+      { rut: '1', certificado_base64: 'xxx', certificado_password: 'yyy', periodo: '202607', operacion: 'VENTA' }
     );
 
     expect(respuesta).toEqual({ status: 200, body: { ok: false, error: 'ERROR' } });

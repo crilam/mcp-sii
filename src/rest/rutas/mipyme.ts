@@ -4,13 +4,20 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
 import { schemaListEmpresas, schemaListDteEmitidos, schemaEmitirDte } from '../../core/schemas/mipyme';
-import { ejecutorPassThroughDe } from '../ejecutorPassThrough';
+import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar } from './comun';
 
-const zodListEmpresas = z.object(schemaListEmpresas).extend({ clave: z.string().min(1) });
-const zodListDteEmitidos = z.object(schemaListDteEmitidos).extend({ clave: z.string().min(1) });
+const zodListEmpresas = z.object(schemaListEmpresas).extend({
+  certificado_base64: z.string().min(1),
+  certificado_password: z.string().min(1),
+});
+const zodListDteEmitidos = z.object(schemaListDteEmitidos).extend({
+  certificado_base64: z.string().min(1),
+  certificado_password: z.string().min(1),
+});
 const zodEmitirDte = z.object(schemaEmitirDte).extend({
-  clave: z.string().min(1),
+  certificado_base64: z.string().min(1),
+  certificado_password: z.string().min(1),
   confirmar: z.boolean().default(false)
     .describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento — NO SOPORTADO vía REST todavía, ver limitación conocida de la spec.'),
 });
@@ -23,16 +30,16 @@ export function registrarRutasMipyme(
   rutas.set('POST /v1/mipyme/list-empresas', async body => {
     const parseo = zodListEmpresas.safeParse(body);
     if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, clave } = parseo.data;
-    const ejecutor = ejecutorPassThroughDe(registro, credenciales, rut, clave);
+    const { rut, certificado_base64, certificado_password } = parseo.data;
+    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
     return ejecutar(() => core.listEmpresas(ejecutor, rut));
   });
 
   rutas.set('POST /v1/mipyme/list-dte-emitidos', async body => {
     const parseo = zodListDteEmitidos.safeParse(body);
     if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, clave, empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, folio, pagina } = parseo.data;
-    const ejecutor = ejecutorPassThroughDe(registro, credenciales, rut, clave);
+    const { rut, certificado_base64, certificado_password, empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, folio, pagina } = parseo.data;
+    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
     return ejecutar(() => core.listDteEmitidos(ejecutor, rut, {
       empresaRut: empresa_rut, tipoDte: tipo_dte, fechaDesde: fecha_desde,
       fechaHasta: fecha_hasta, receptorRut: receptor_rut, folio, pagina,
@@ -54,7 +61,7 @@ export function registrarRutasMipyme(
       return { status: 400, body: { error: 'CONFIRMAR_NO_SOPORTADO' } };
     }
 
-    const ejecutor = ejecutorPassThroughDe(registro, credenciales, datos.rut, datos.clave);
+    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, datos.rut, datos.certificado_base64, datos.certificado_password);
     return ejecutar(() => core.emitirDte(ejecutor, datos.rut, {
       empresaRut: datos.empresa_rut,
       tipoDte: datos.tipo_dte,

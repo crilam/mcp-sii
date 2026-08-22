@@ -4,14 +4,20 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/rcv';
 import { schemaResumen, schemaDetalle } from '../../core/schemas/rcv';
-import { ejecutorPassThroughDe } from '../ejecutorPassThrough';
+import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar } from './comun';
 
-// .min(1): una clave vacía nunca es válida contra el SII — rechazarla acá
-// evita gastar cupo del rate-limit del tenant en un request condenado a
-// fallar antes de siquiera intentar autenticar.
-const zodResumen = z.object(schemaResumen).extend({ clave: z.string().min(1) });
-const zodDetalle = z.object(schemaDetalle).extend({ clave: z.string().min(1) });
+// .min(1): un certificado o password vacío nunca es válido contra el SII —
+// rechazarlo acá evita gastar cupo del rate-limit del tenant en un request
+// condenado a fallar antes de siquiera intentar autenticar.
+const zodResumen = z.object(schemaResumen).extend({
+  certificado_base64: z.string().min(1),
+  certificado_password: z.string().min(1),
+});
+const zodDetalle = z.object(schemaDetalle).extend({
+  certificado_base64: z.string().min(1),
+  certificado_password: z.string().min(1),
+});
 
 export function registrarRutasRcv(
   rutas: Map<string, RutaHandler>,
@@ -21,18 +27,18 @@ export function registrarRutasRcv(
   rutas.set('POST /v1/rcv/resumen', async body => {
     const parseo = zodResumen.safeParse(body);
     if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, clave, periodo, operacion, empresa_rut } = parseo.data;
+    const { rut, certificado_base64, certificado_password, periodo, operacion, empresa_rut } = parseo.data;
 
-    const ejecutor = ejecutorPassThroughDe(registro, credenciales, rut, clave);
+    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
     return ejecutar(() => core.resumen(ejecutor, rut, periodo, operacion, empresa_rut));
   });
 
   rutas.set('POST /v1/rcv/detalle', async body => {
     const parseo = zodDetalle.safeParse(body);
     if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, clave, periodo, operacion, tipo_doc, empresa_rut } = parseo.data;
+    const { rut, certificado_base64, certificado_password, periodo, operacion, tipo_doc, empresa_rut } = parseo.data;
 
-    const ejecutor = ejecutorPassThroughDe(registro, credenciales, rut, clave);
+    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
     return ejecutar(() => core.detalle(ejecutor, rut, periodo, operacion, tipo_doc, empresa_rut));
   });
 }
