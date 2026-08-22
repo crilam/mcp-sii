@@ -13,8 +13,13 @@ WORKDIR /app
 # --with-deps` intenta instalarlas solo pero corre `sudo apt-get`, y esta
 # imagen ya es root sin sudo instalado. Se instalan a mano acá y se deja que
 # el comando de abajo sólo baje el binario del browser.
+# curl + openssl: los usa el flujo de certificado (loginWithCert hace curl con
+# TLS mutual auth al CGI del SII, y SiiHttpClient hace todas las consultas por
+# curl; openssl 3.x con -legacy extrae el .pfx PKCS#12 del SII, cifrado RC2
+# legacy). node:24-slim NO trae curl — sin esto, las consultas por certificado
+# vía REST fallan con "curl: not found" (encontrado en verificación e2e en prod).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
+    ca-certificates curl openssl \
     libxcb-shm0 libx11-xcb1 libx11-6 libxcb1 libxext6 libxrandr2 libxcomposite1 \
     libxcursor1 libxdamage1 libxfixes3 libxi6 libgtk-3-0 libpangocairo-1.0-0 \
     libpango-1.0-0 libatk1.0-0 libcairo-gobject2 libcairo2 libgdk-pixbuf-2.0-0 \
