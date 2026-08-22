@@ -135,7 +135,7 @@ lado.
 
 **Riesgo conocido**: los endpoints async del backend RCV del SII no están
 verificados desde `SiiHttpClient`. Spike primero (con la empresa real
-78122544-4); si el SII no los expone por la vía que usamos, el dominio se
+la empresa del .env); si el SII no los expone por la vía que usamos, el dominio se
 cae de la spec y se anota como limitación.
 
 ### 2. F29 (equivale a `sii/f29/*`)
@@ -282,7 +282,7 @@ simétricas).
   el test de anonimización existente las vigila), de core, de tools y de
   rutas, como en los 6 dominios ya migrados.
 - Verificación e2e manual por dominio con las credenciales reales del
-  `.env` (persona 17.270.613-4, empresa 78122544-4) + comparación con
+  `.env` (persona y empresa de prueba del entorno) + comparación con
   apigateway v1 vía el script, antes de abrir cada PR.
 - Suite completa + build + pr-review + merge + deploy por dominio (un PR
   por dominio, no uno gigante).

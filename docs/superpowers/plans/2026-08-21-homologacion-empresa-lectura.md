@@ -18,7 +18,7 @@
 - PDFs/XML como `{ok, pdfBase64|xmlBase64, contentType}`; validar magic bytes `%PDF` antes de encodear.
 - TDD estricto, un PR por dominio, `maxWorkers:1` en jest (infra comparte DB). Tests de infra requieren `TEST_DATABASE_URL` (Docker Postgres, `docker-compose.test.yml`, puerto 55432, `mcp_sii:mcp_sii@.../mcp_sii_test`).
 - RUTs en fixtures/tests: solo de dígito repetido (11111111-1, etc.) — el test `tests/anonimizacion.test.ts` rechaza RUTs reales en archivos versionados.
-- Verificación e2e real por dominio: credenciales del `.env` (persona 17.270.613-4, empresa 78122544-4) + comparación con apigateway v1 (`APIGATEWAY_TOKEN` en `.env`) antes de cada PR.
+- Verificación e2e real por dominio: credenciales del `.env` (persona y empresa de prueba del entorno) + comparación con apigateway v1 (`APIGATEWAY_TOKEN` en `.env`) antes de cada PR.
 - Comentarios y mensajes en español, sin em-dash en nombres de recursos AWS.
 
 ---
@@ -225,7 +225,7 @@ Nota: NO se toca `assertPuedeEntregarCookieJar` (con Certificate ya pasa), ni el
 
 - [ ] **Step 1:** Tests PDF (folio válido → base64 empieza por el b64 de `%PDF`; folio inexistente → `NO_ENCONTRADO`; SII devuelve HTML → `NO_ENCONTRADO`/`ERROR` vía `assertPdf`). → FAIL → implementar → PASS.
 - [ ] **Step 2:** Rutas REST + tools MCP para las 5 operaciones. Tests. → PASS.
-- [ ] **Step 3:** Build + suite. Verificación e2e real (empresa 78122544-4) + comparar apigateway. Commit + PR + pr-review + merge + deploy.
+- [ ] **Step 3:** Build + suite. Verificación e2e real (empresa de prueba del .env) + comparar apigateway. Commit + PR + pr-review + merge + deploy.
 
 ---
 
