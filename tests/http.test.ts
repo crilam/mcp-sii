@@ -364,6 +364,28 @@ describe('SiiHttpClient.getBinario', () => {
       .rejects.toThrow(/superó el máximo de \d+ bytes/);
   });
 
+  // El error de execFileSync empieza con "Command failed: " y el comando
+  // completo. Guardarlo como `cause` filtraría eso al log central: no basta con
+  // marcarla no enumerable, porque console.error/util.inspect imprimen `cause`
+  // de todos modos (el formateador de Error la trata como caso especial).
+  it('no arrastra el comando de curl al error de tamaño', async () => {
+    mockExec.mockImplementation(() => {
+      throw Object.assign(
+        new Error('Command failed: curl -sk -b /tmp/sii_cookies_1 --data-binary secreto=1'),
+        { code: 'ENOBUFS' }
+      );
+    });
+    const { client } = makeClient();
+
+    const error = await client
+      .getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi')
+      .catch((e: unknown) => e);
+
+    const impreso = require('util').inspect(error);
+    expect(impreso).not.toContain('Command failed');
+    expect(impreso).not.toContain('secreto=1');
+  });
+
   // `get`/`postForm` y `getBinario` comparten `curlCrudo`, así que el límite
   // vale para los dos caminos. Cubrir el de texto es barato y deja claro que no
   // es una propiedad exclusiva del binario.

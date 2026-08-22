@@ -275,7 +275,8 @@ export class SiiHttpClient {
           `La respuesta del SII superó el máximo de ${MAX_RESPUESTA_BYTES} bytes ` +
           'que este cliente puede leer, así que se descartó incompleta. Si es ' +
           'un documento legítimamente grande, hay que subir MAX_RESPUESTA_BYTES.',
-          { cause: e }
+          // Sólo el código: el error original trae el comando curl completo.
+          { codigo: 'ENOBUFS' }
         );
       }
       throw e;

@@ -349,7 +349,14 @@ describe('BheScraper.pdfBoleta', () => {
 
     await scraper.pdfBoleta('033333333034364C969E7', true);
 
-    expect((http.getBinario as jest.Mock).mock.calls[0][1].origen).toBe('RECIBIDOS');
+    // toEqual completo y no sólo `origen`: el resto de los parámetros también
+    // tiene que viajar en el camino de recibidas, no sólo en el de emitidas.
+    expect((http.getBinario as jest.Mock).mock.calls[0][1]).toEqual({
+      txt_codigobarras: '033333333034364C969E7',
+      veroriginal: 'si',
+      origen: 'RECIBIDOS',
+      enviar: 'si',
+    });
   });
 
   // El CGI responde 200 con el HTML del formulario de login cuando la sesión no
