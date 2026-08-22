@@ -17,6 +17,11 @@ const EXEC_OPTS = { encoding: 'utf-8' as const, timeout: 30_000, maxBuffer: 10 *
 // el error completo con console.error, así que cualquier prop enumerable con
 // el mensaje crudo puede terminar en CloudWatch. Sólo se conservan `code` y
 // `signal`, que identifican timeouts/señales del proceso sin llevar datos.
+//
+// Y no alcanzaría con hacerla no enumerable: si se guardara bajo el nombre
+// `cause`, `util.inspect`/`console.error` la imprimen igual (verificado en
+// Node), porque el formateador de Error trata `cause` como caso especial en vez
+// de recorrer sólo las props enumerables. La única defensa es no guardarla.
 export class ErrorDeBrowser extends Error {
   readonly code?: string;
   readonly signal?: string;

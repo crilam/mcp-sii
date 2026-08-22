@@ -307,3 +307,149 @@ describe('SiiHttpClient.postForm', () => {
     expect(args.some(arg => arg.includes('glosa=a%20b%26c'))).toBe(true);
   });
 });
+
+// El PDF de una boleta de honorarios no es texto: pasarlo por TextDecoder
+// reemplaza cada byte que no forma una secuencia válida por U+FFFD, y el daño
+// es irreversible y silencioso (el resultado sigue siendo un string).
+describe('SiiHttpClient.getBinario', () => {
+  // La cabecera real de un PDF: arranca con %PDF y sigue con bytes altos que no
+  // son UTF-8 válido, así que un round-trip por string los perdería.
+  const PDF = Buffer.from([
+    ...Buffer.from('%PDF-1.3\n', 'ascii'), 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a,
+  ]);
+
+  it('devuelve los bytes crudos y el Content-Type, sin decodificar', async () => {
+    mockExec.mockReturnValue(respuesta(PDF, 'application/pdf') as never);
+    const { client } = makeClient();
+
+    const r = await client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi');
+
+    expect(r.contentType).toBe('application/pdf');
+    expect(r.contenido.equals(PDF)).toBe(true);
+  });
+
+  it('percent-encodea los parámetros en el query string', async () => {
+    mockExec.mockReturnValue(respuesta(PDF, 'application/pdf') as never);
+    const { client } = makeClient();
+
+    await client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi',
+      { txt_codigobarras: 'ABC123', origen: 'PROPIOS' });
+
+    const args = mockExec.mock.calls[0][1] as string[];
+    expect(args.some(a => a.includes('txt_codigobarras=ABC123&origen=PROPIOS'))).toBe(true);
+  });
+
+  // Sin maxBuffer explícito, execFileSync corta en 1 MiB y lanza ENOBUFS. El
+  // PDF de una boleta es el primer payload que puede pasar ese límite.
+  it('declara un maxBuffer mayor al default de 1 MiB de Node', async () => {
+    mockExec.mockReturnValue(respuesta(PDF, 'application/pdf') as never);
+    const { client } = makeClient();
+
+    await client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi');
+
+    const opciones = mockExec.mock.calls[0][2] as { maxBuffer?: number };
+    expect(opciones.maxBuffer).toBeGreaterThan(1024 * 1024);
+  });
+
+  // Node mata el proceso con ENOBUFS y un mensaje que no menciona el tamaño:
+  // sin traducirlo, el tenant no puede distinguir "el SII no respondió" de "la
+  // respuesta no cabía".
+  it('traduce ENOBUFS a un error que nombra el límite de tamaño', async () => {
+    mockExec.mockImplementation(() => {
+      throw Object.assign(new Error('spawnSync curl ENOBUFS'), { code: 'ENOBUFS' });
+    });
+    const { client } = makeClient();
+
+    await expect(client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi'))
+      .rejects.toThrow(/superó el máximo de \d+ bytes/);
+  });
+
+  // El error de execFileSync empieza con "Command failed: " y el comando
+  // completo. Guardarlo como `cause` filtraría eso al log central: no basta con
+  // marcarla no enumerable, porque console.error/util.inspect imprimen `cause`
+  // de todos modos (el formateador de Error la trata como caso especial).
+  it('no arrastra el comando de curl al error de tamaño', async () => {
+    mockExec.mockImplementation(() => {
+      throw Object.assign(
+        new Error('Command failed: curl -sk -b /tmp/sii_cookies_1 --data-binary secreto=1'),
+        { code: 'ENOBUFS' }
+      );
+    });
+    const { client } = makeClient();
+
+    const error = await client
+      .getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi')
+      .catch((e: unknown) => e);
+
+    const impreso = require('util').inspect(error);
+    expect(impreso).not.toContain('Command failed');
+    expect(impreso).not.toContain('secreto=1');
+  });
+
+  // Lo mismo para cualquier otro fallo del proceso: el mensaje de execFileSync
+  // trae el comando completo, con la ruta del cookie jar y el cuerpo de
+  // --data-binary (datos del contribuyente en los POST del portal).
+  it('no arrastra el comando de curl en un fallo cualquiera del proceso', async () => {
+    mockExec.mockImplementation(() => {
+      throw Object.assign(
+        new Error('Command failed: curl -sk -b /tmp/sii_cookies_1 --data-binary rut=11111111'),
+        { code: 'ETIMEDOUT' }
+      );
+    });
+    const { client } = makeClient();
+
+    const error = await client
+      .get('https://loa.sii.cl/cgi_IMT/TMBCOC_InformeAnualBhe.cgi')
+      .catch((e: unknown) => e);
+
+    const impreso = require('util').inspect(error);
+    expect(impreso).not.toContain('Command failed');
+    expect(impreso).not.toContain('rut=11111111');
+    expect(impreso).not.toContain('sii_cookies_1');
+    // Pero el diagnóstico sí queda: sin el código, el operador no tiene nada.
+    expect(impreso).toContain('ETIMEDOUT');
+  });
+
+  // El caso MÁS común: curl corre y sale distinto de cero (28 timeout, 7
+  // conexión rechazada, 35 TLS). Ahí no hay `code` — el exit code está en
+  // `status`, y mirando sólo `code` el error quedaba sin ningún dato.
+  it('conserva el exit code de curl, que viaja en status y no en code', async () => {
+    mockExec.mockImplementation(() => {
+      throw Object.assign(new Error('Command failed: curl -sk -b /tmp/jar'), { status: 28 });
+    });
+    const { client } = makeClient();
+
+    const error = await client
+      .get('https://loa.sii.cl/cgi_IMT/TMBCOC_InformeAnualBhe.cgi')
+      .catch((e: unknown) => e);
+
+    expect((error as Error).message).toMatch(/curl salió 28/);
+    expect((error as Error).message).not.toContain('Command failed');
+  });
+
+  // `get`/`postForm` y `getBinario` comparten `curlCrudo`, así que el límite
+  // vale para los dos caminos. Cubrir el de texto es barato y deja claro que no
+  // es una propiedad exclusiva del binario.
+  it('el camino de texto hereda el mismo maxBuffer', async () => {
+    mockExec.mockReturnValue(respuesta('<html>ok</html>', 'text/html') as never);
+    const { client } = makeClient();
+
+    await client.get('https://loa.sii.cl/cgi_IMT/TMBCOC_InformeAnualBhe.cgi');
+
+    const opciones = mockExec.mock.calls[0][2] as { maxBuffer?: number };
+    expect(opciones.maxBuffer).toBeGreaterThan(1024 * 1024);
+  });
+
+  // Cuando el CGI responde el HTML del login, quien llama necesita ver ese
+  // Content-Type para distinguirlo de un PDF: el status es 200 en ambos casos.
+  it('reporta el Content-Type de una respuesta que no es PDF', async () => {
+    mockExec.mockReturnValue(
+      respuesta('<html><title>Autenticación</title></html>', 'text/html; charset=iso-8859-1') as never
+    );
+    const { client } = makeClient();
+
+    const r = await client.getBinario('https://loa.sii.cl/cgi_IMT/TMBCOT_ConsultaBoletaPdf.cgi');
+
+    expect(r.contentType).toBe('text/html; charset=iso-8859-1');
+  });
+});

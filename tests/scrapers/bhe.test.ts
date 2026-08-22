@@ -3,6 +3,7 @@ import * as path from 'path';
 import { BheScraper } from '../../src/scrapers/bhe';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
+import { LimitacionConocida } from '../../src/erroresConsulta';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -176,6 +177,8 @@ describe('BheScraper.informeMensual', () => {
     expect(boletas).toHaveLength(2);
     expect(boletas[0]).toEqual({
       folio: 311,
+      // Es lo único que el SII acepta para pedir el PDF de esta boleta.
+      codigoBarras: '111111110000048F99ED',
       fecha: '22/05/2025',
       contraparteRol: 'receptor',
       contraparteRut: '22222222-2',
@@ -243,6 +246,8 @@ describe('BheScraper.informeMensual de recibidas', () => {
     expect(boletas).toHaveLength(1);
     expect(boletas[0]).toEqual({
       folio: 3436,
+      // Las recibidas también traen el código, así que su PDF se puede pedir.
+      codigoBarras: '033333333034364C969E7',
       // El CGI de recibidas no emite fechaemision_N: la fecha vive en
       // fecha_boleta_N.
       fecha: '05/05/2025',
@@ -300,6 +305,203 @@ ${filas}
     const { scraper } = makeScraper(html);
 
     expect(await scraper.informeMensual(2025, 5)).toHaveLength(100);
+  });
+});
+
+// El PDF se pide por código de barras a un CGI distinto (TMBCOT_, no TMBCOC_)
+// y la respuesta es binaria, así que no pasa por el parser de informes.
+describe('BheScraper.pdfBoleta', () => {
+  const PDF = Buffer.from('%PDF-1.3\n...bytes...', 'latin1');
+
+  function makePdfScraper(
+    respuesta: { contenido: Buffer; contentType: string }
+  ) {
+    const { scraper, http, session } = makeScraper('<html></html>');
+    (http.getBinario as jest.Mock).mockResolvedValue(respuesta);
+    return { scraper, http, session };
+  }
+
+  it('devuelve los bytes del PDF tal cual', async () => {
+    const { scraper } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+
+    const pdf = await scraper.pdfBoleta('111111110000048F99ED');
+
+    expect(pdf).toEqual(PDF);
+  });
+
+  it('pide el CGI del PDF con el código de barras y origen PROPIOS', async () => {
+    const { scraper, http } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+
+    await scraper.pdfBoleta('111111110000048F99ED');
+
+    const [url, params] = (http.getBinario as jest.Mock).mock.calls[0];
+    expect(url).toContain('TMBCOT_ConsultaBoletaPdf.cgi');
+    expect(params).toEqual({
+      txt_codigobarras: '111111110000048F99ED',
+      veroriginal: 'si',
+      origen: 'PROPIOS',
+      enviar: 'si',
+    });
+  });
+
+  it('usa origen RECIBIDOS para una boleta recibida', async () => {
+    const { scraper, http } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+
+    await scraper.pdfBoleta('033333333034364C969E7', true);
+
+    // toEqual completo y no sólo `origen`: el resto de los parámetros también
+    // tiene que viajar en el camino de recibidas, no sólo en el de emitidas.
+    expect((http.getBinario as jest.Mock).mock.calls[0][1]).toEqual({
+      txt_codigobarras: '033333333034364C969E7',
+      veroriginal: 'si',
+      origen: 'RECIBIDOS',
+      enviar: 'si',
+    });
+  });
+
+  // El CGI responde 200 con el HTML del formulario de login cuando la sesión no
+  // le sirve: sin mirar el Content-Type, ese HTML se entregaría como "PDF".
+  it('falla si el SII responde algo que no es un PDF', async () => {
+    const { scraper } = makePdfScraper({
+      contenido: Buffer.from('<html><title>Autenticación</title></html>', 'latin1'),
+      contentType: 'text/html; charset=iso-8859-1',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/no devolvió un PDF.*text\/html/s);
+  });
+
+  // Las dos causas llegan con el mismo Content-Type, pero sólo una se arregla
+  // reintentando: quien recibe el ERROR genérico del contrato REST necesita que
+  // el mensaje lo diga.
+  it('nombra la sesión expirada cuando el cuerpo es el formulario de login', async () => {
+    const { scraper } = makePdfScraper({
+      contenido: Buffer.from('<html><head><title>Autenticación</title></head></html>', 'latin1'),
+      contentType: 'text/html',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/la sesión expiró: reintentá/);
+  });
+
+  // La razón de que el techo de tamaño lance LimitacionConocida y no Error es
+  // justamente que conSesionFresca la deja pasar: reintentar una descarga que ya
+  // no cupo la va a exceder otra vez, gastando una sesión sana en el camino.
+  it('no reintenta cuando la respuesta excede el techo de tamaño', async () => {
+    const { scraper, http, session } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+    (http.getBinario as jest.Mock).mockRejectedValue(
+      new LimitacionConocida('La respuesta del SII superó el máximo de 4194304 bytes')
+    );
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/superó el máximo/);
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(1);
+    expect(session.invalidate).not.toHaveBeenCalled();
+  });
+
+  // Un PDF de 0 bytes con el Content-Type correcto pasa el chequeo pero no es
+  // un documento: sin esto, el tenant recibe un archivo vacío y ningún error.
+  it('rechaza un PDF vacío en vez de entregarlo', async () => {
+    const { scraper } = makePdfScraper({
+      contenido: Buffer.alloc(0),
+      contentType: 'application/pdf',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/PDF vacío.*reintentá/s);
+  });
+
+  // curl puede morir antes de escribir la marca del `-w`, y entonces el
+  // transporte devuelve contentType vacío. No es evidencia de nada, así que
+  // debe caer en el caso reintentable, no en uno con causa afirmada.
+  it('trata un Content-Type ausente como fallo reintentable', async () => {
+    const { scraper, http } = makePdfScraper({
+      contenido: Buffer.from(''),
+      contentType: '',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/sin Content-Type.*algo inesperado/s);
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(2);
+  });
+
+  // Texto real del portal ante un código inexistente, ajeno o basura
+  // (verificado en vivo: 1403 bytes, "INFORMACION AL CONTRIBUYENTE").
+  const NO_EXISTE = Buffer.from(
+    '<html><title>INFORMACION AL CONTRIBUYENTE</title><body>Sr. Contribuyente: ' +
+    'No existe la boleta de honorarios electrónica con la información ' +
+    'especificada, favor revisar la información e intentarlo nuevamente.</body></html>',
+    'latin1'
+  );
+
+  it('nombra el código inexistente cuando el portal lo dice', async () => {
+    const { scraper } = makePdfScraper({ contenido: NO_EXISTE, contentType: 'text/html' });
+
+    await expect(scraper.pdfBoleta('99999999999999999999'))
+      .rejects.toThrow(/no existe una boleta con ese código de barras/);
+  });
+
+  // La clasificación es por evidencia positiva: lo que no se reconoce puede ser
+  // una caída o mantención del SII, que sí se resuelve reintentando. Marcarlo
+  // como permanente le negaría el reintento a un fallo transitorio.
+  it('no afirma una causa cuando el cuerpo es desconocido, y deja reintentar', async () => {
+    const { scraper, http, session } = makePdfScraper({
+      contenido: Buffer.from('<html><title>Servicio en mantención</title></html>', 'latin1'),
+      contentType: 'text/html',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/algo inesperado/);
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(2);
+    expect(session.invalidate).toHaveBeenCalled();
+  });
+
+  // El listado deja el campo vacío cuando el SII no lo informa. Mandarlo así
+  // haría que el CGI devuelva el login, y el error apuntaría a la sesión.
+  it('rechaza un código de barras vacío sin consultar al SII', async () => {
+    const { scraper, http, session } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+
+    await expect(scraper.pdfBoleta('   ')).rejects.toThrow(/Falta el código de barras/);
+
+    expect(http.getBinario as jest.Mock).not.toHaveBeenCalled();
+    expect(session.authenticateOnly).not.toHaveBeenCalled();
+    // Y no tira abajo la sesión: la validación va fuera de conSesionFresca, que
+    // si no invalidaría una sesión sana por un input inválido del tenant.
+    expect(session.invalidate).not.toHaveBeenCalled();
+  });
+
+  // conSesionFresca reintenta todo lo que no sea LimitacionConocida. Un código
+  // ajeno al RUT no se arregla reautenticando: reintentarlo gasta un re-login y
+  // una consulta para fallar igual.
+  it('no reintenta cuando el portal informa que la boleta no existe', async () => {
+    const { scraper, http, session } = makePdfScraper({
+      contenido: Buffer.from(
+        '<html><body>No existe la boleta de honorarios electrónica con la ' +
+        'información especificada</body></html>', 'latin1'),
+      contentType: 'text/html',
+    });
+
+    await expect(scraper.pdfBoleta('99999999999999999999')).rejects.toThrow();
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(1);
+    expect(session.invalidate).not.toHaveBeenCalled();
+  });
+
+  // La sesión caída sí se arregla reautenticando, así que acá el reintento debe
+  // ocurrir: es la diferencia con el caso de arriba.
+  it('reintenta cuando el SII devolvió el formulario de login', async () => {
+    const { scraper, http, session } = makePdfScraper({
+      contenido: Buffer.from('<html><title>Autenticación</title></html>', 'latin1'),
+      contentType: 'text/html',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED')).rejects.toThrow();
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(2);
+    expect(session.invalidate).toHaveBeenCalled();
   });
 });
 

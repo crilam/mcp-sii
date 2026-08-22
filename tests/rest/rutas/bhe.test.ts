@@ -2,6 +2,7 @@ import { registrarRutasBhe } from '../../../src/rest/rutas/bhe';
 import { RegistroSesiones } from '../../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
 import * as core from '../../../src/core/bhe';
+import { RecursoNoEncontrado } from '../../../src/erroresConsulta';
 
 jest.mock('../../../src/core/bhe');
 
@@ -14,10 +15,11 @@ function armarRouter() {
 describe('registrarRutasBhe', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 3 rutas bajo /v1/bhe', () => {
+  it('registra las 4 rutas bajo /v1/bhe', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
-      'POST /v1/bhe/resumen', 'POST /v1/bhe/list-emitidas', 'POST /v1/bhe/list-recibidas',
+      'POST /v1/bhe/resumen', 'POST /v1/bhe/list-emitidas',
+      'POST /v1/bhe/list-recibidas', 'POST /v1/bhe/pdf',
     ]);
   });
 
@@ -33,6 +35,162 @@ describe('registrarRutasBhe', () => {
     const respuesta = await rutas.get('POST /v1/bhe/resumen')!({ rut: '1', certificado_base64: 'xxx', certificado_password: 'yyy', anio: 1899 });
     expect(respuesta.status).toBe(400);
     expect(core.resumen).not.toHaveBeenCalled();
+  });
+
+  // El PDF viaja en base64 dentro del JSON: el contrato REST es todo {ok}, y
+  // `ejecutar` spreadea el resultado, así que un Buffer devuelto crudo saldría
+  // como {"0":37,"1":80,...}.
+  it('pdf: devuelve el PDF en base64 con su tamaño, no el Buffer spreadeado', async () => {
+    const contenido = Buffer.from('%PDF-1.3 boleta', 'latin1');
+    (core.pdf as jest.Mock).mockResolvedValue(contenido);
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '111111110000048F99ED',
+    });
+
+    expect(respuesta).toEqual({
+      status: 200,
+      body: {
+        ok: true,
+        codigo_barras: '111111110000048F99ED',
+        content_type: 'application/pdf',
+        nombre_archivo: 'bhe-111111110000048F99ED.pdf',
+        tamano_bytes: contenido.length,
+        pdf_base64: contenido.toString('base64'),
+      },
+    });
+  });
+
+  it('pdf: `recibida` es opcional y por defecto pide la emitida', async () => {
+    (core.pdf as jest.Mock).mockResolvedValue(Buffer.from('x'));
+    const rutas = armarRouter();
+
+    await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '111111110000048F99ED',
+    });
+
+    expect(core.pdf).toHaveBeenCalledWith(
+      expect.anything(), '11.111.111-1', '111111110000048F99ED', false);
+  });
+
+  it('pdf: recibida:true llega al core', async () => {
+    (core.pdf as jest.Mock).mockResolvedValue(Buffer.from('x'));
+    const rutas = armarRouter();
+
+    await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '033333333034364C969E7', recibida: true,
+    });
+
+    expect(core.pdf).toHaveBeenCalledWith(
+      expect.anything(), '11.111.111-1', '033333333034364C969E7', true);
+  });
+
+  // Sin `.trim()` en el schema, "   " pasaba la validación y moría adentro como
+  // el ERROR genérico del contrato, en vez de un 400 que dice qué está mal.
+  it('pdf: un codigo_barras en blanco devuelve 400, no ERROR', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '   ',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.pdf).not.toHaveBeenCalled();
+  });
+
+  // Sin un código propio, un identificador equivocado (permanente) y una caída
+  // del portal (transitoria) devolvían los mismos bytes, y el tenant reintentaba
+  // en loop lo que no iba a funcionar nunca.
+  it('pdf: una boleta inexistente devuelve NO_ENCONTRADO, no ERROR', async () => {
+    (core.pdf as jest.Mock).mockRejectedValue(
+      new RecursoNoEncontrado('el SII informa que no existe una boleta')
+    );
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '99999999999999999999',
+    });
+
+    // Con `detalle`: el mensaje distingue "código inexistente" de "pediste una
+    // recibida como emitida", que el SII responde igual y el tenant sí puede
+    // accionar.
+    expect(respuesta).toEqual({
+      status: 200,
+      body: {
+        ok: false,
+        error: 'NO_ENCONTRADO',
+        detalle: 'el SII informa que no existe una boleta',
+      },
+    });
+  });
+
+  // El listado deja codigoBarras en '' cuando el SII no lo informa; si el tenant
+  // reenvía eso, tiene que ser un 400 y no gastar una consulta al SII.
+  it('pdf: un codigo_barras vacío devuelve 400', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.pdf).not.toHaveBeenCalled();
+  });
+
+  it('pdf: un fallo transitorio sigue siendo ERROR', async () => {
+    (core.pdf as jest.Mock).mockRejectedValue(new Error('el portal respondió algo inesperado'));
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '111111110000048F99ED',
+    });
+
+    expect(respuesta).toEqual({ status: 200, body: { ok: false, error: 'ERROR' } });
+  });
+
+  it('pdf: un codigo_barras absurdamente largo devuelve 400', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: 'A'.repeat(5_000),
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.pdf).not.toHaveBeenCalled();
+  });
+
+  // El `nombre_archivo` que devuelve la ruta suele terminar como nombre de
+  // archivo real en el consumidor: un separador acá es path traversal allá.
+  it('pdf: rechaza un codigo_barras con separadores de ruta', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+      codigo_barras: '../../../tmp/x',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.pdf).not.toHaveBeenCalled();
+  });
+
+  it('pdf: sin codigo_barras devuelve 400 sin llamar al core', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', certificado_base64: 'xxx', certificado_password: 'yyy',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.pdf).not.toHaveBeenCalled();
   });
 
   it('list-emitidas: pasa anio y mes al core', async () => {

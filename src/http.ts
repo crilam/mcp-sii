@@ -1,7 +1,20 @@
 import { execFileSync } from 'child_process';
 import { SessionManager } from './session';
+import { LimitacionConocida } from './erroresConsulta';
 
 const TIMEOUT_MS = 30_000;
+
+// `execFileSync` corta la salida en 1 MiB por defecto y lanza ENOBUFS. Mientras
+// todo lo que pedíamos era HTML de informes el default alcanzaba, pero el PDF de
+// una boleta es el primer payload que puede acercarse: una con logo o anexos
+// pasa el megabyte sin nada raro. El fallo además no se explica solo — sale
+// como el ERROR genérico del contrato REST, sin mencionar el tamaño.
+//
+// 4 MiB y no más: cada request bufferea su respuesta completa en memoria, así
+// que el techo real del proceso es (requests en vuelo) × este número, y el
+// servidor REST atiende varios tenants a la vez. Una boleta pesa ~8 KB, o sea
+// que esto ya deja 500× de margen sobre lo observado.
+const MAX_RESPUESTA_BYTES = 4 * 1024 * 1024;
 
 // El charset NO es uniforme en el portal: varía por aplicación, y hay que
 // respetar el `Content-Type` de cada respuesta. Medido en vivo:
@@ -103,6 +116,26 @@ export class SiiHttpClient {
     return this.curl([`${url}${query}`]);
   }
 
+  // Variante de `get` para respuestas que NO son texto (el PDF de una boleta de
+  // honorarios). Devuelve los bytes crudos junto al Content-Type declarado, sin
+  // decodificar: pasar un PDF por `TextDecoder` lo destruye —los bytes que no
+  // forman secuencias válidas se reemplazan por U+FFFD y no hay vuelta atrás—
+  // y el daño es silencioso, porque el resultado sigue siendo un string.
+  // Quien llama decide qué hacer con el Content-Type; el transporte no sabe
+  // qué tipo esperaba.
+  //
+  // No expone el `charset` que sí tienen `get`/`postForm`, y no es un olvido:
+  // los únicos parámetros que viajan por acá son identificadores del SII
+  // (códigos de barras), que son ASCII. Si alguna vez hay que mandar texto con
+  // acentos en un GET binario, hay que agregarlo igual que en `postForm`.
+  async getBinario(
+    url: string,
+    params?: Record<string, string>
+  ): Promise<{ contenido: Buffer; contentType: string }> {
+    const query = params ? `?${this.encodeParams(params)}` : '';
+    return this.curlCrudo([`${url}${query}`]);
+  }
+
   // `charset` decide cómo se percent-encodean los valores. El default UTF-8
   // sirve para las aplicaciones modernas; los CGI legacy de Portal001 esperan
   // ISO-8859-1 y hay que decírselo explícitamente.
@@ -180,6 +213,13 @@ export class SiiHttpClient {
   }
 
   private async curl(args: string[]): Promise<string> {
+    const { contenido, contentType } = await this.curlCrudo(args);
+    return decodificarRespuesta(contenido, contentType);
+  }
+
+  // Ejecuta curl y separa cuerpo de Content-Type SIN decodificar el cuerpo. Es
+  // la base de `curl` (que decodifica) y de `getBinario` (que no).
+  private async curlCrudo(args: string[]): Promise<{ contenido: Buffer; contentType: string }> {
     const jar = await this.session.rutaCookieJar();
     // execFileSync con arreglo de argumentos previene inyección de shell: ningún
     // valor pasa por un intérprete de comandos, así que metacaracteres como
@@ -187,14 +227,12 @@ export class SiiHttpClient {
     // Se pide la salida como bytes crudos (`encoding: 'buffer'`) porque el
     // encoding correcto recién se conoce después de leer el Content-Type que
     // curl agrega con `-w`. Decodificar antes sería adivinar.
-    const salida = execFileSync(
-      'curl',
+    const salida = this.ejecutarCurl(
       [
         '-sk', '-b', jar, '-L', '--max-redirs', '5', '--max-time', '25',
         '-w', `${MARCA_CONTENT_TYPE}%{content_type}`,
         ...args,
-      ],
-      { encoding: 'buffer', timeout: TIMEOUT_MS }
+      ]
     );
 
     const bruto = Buffer.isBuffer(salida)
@@ -204,17 +242,71 @@ export class SiiHttpClient {
     const corte = bruto.lastIndexOf(MARCA_CONTENT_TYPE);
     if (corte === -1) {
       // Sin marca no hubo `-w` (o curl murió antes de escribirla): no hay
-      // Content-Type que respetar y se usa el default.
-      return decodificarRespuesta(bruto, '');
+      // Content-Type que respetar y quien llama usa su default.
+      return { contenido: bruto, contentType: '' };
     }
 
-    const cuerpo = bruto.subarray(0, corte);
-    const contentType = bruto
-      .subarray(corte + MARCA_CONTENT_TYPE.length)
-      .toString('ascii')
-      .trim();
+    return {
+      contenido: bruto.subarray(0, corte),
+      contentType: bruto
+        .subarray(corte + MARCA_CONTENT_TYPE.length)
+        .toString('ascii')
+        .trim(),
+    };
+  }
 
-    return decodificarRespuesta(cuerpo, contentType);
+  // Cuando la respuesta pasa `maxBuffer`, Node mata el proceso y tira ENOBUFS
+  // con un mensaje que no menciona el tamaño. Sin traducirlo, el tenant recibe
+  // el ERROR genérico del contrato REST y nadie puede distinguir "el SII no
+  // respondió" de "la respuesta no cabía" — que es exactamente el diagnóstico
+  // ciego que el límite explícito venía a evitar.
+  private ejecutarCurl(args: string[]): Buffer | string {
+    try {
+      return execFileSync('curl', args, {
+        encoding: 'buffer',
+        timeout: TIMEOUT_MS,
+        maxBuffer: MAX_RESPUESTA_BYTES,
+      });
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'ENOBUFS') {
+        // LimitacionConocida y no Error: reintentar una descarga que ya no cupo
+        // la va a exceder otra vez, y de paso invalidaría una sesión sana.
+        throw new LimitacionConocida(
+          `La respuesta del SII superó el máximo de ${MAX_RESPUESTA_BYTES} bytes ` +
+          'que este cliente puede leer, así que se descartó incompleta. Si es ' +
+          'un documento legítimamente grande, hay que subir MAX_RESPUESTA_BYTES.',
+          // Sólo el código: el error original trae el comando curl completo.
+          { codigo: 'ENOBUFS' }
+        );
+      }
+      // Cualquier otro fallo del proceso (curl con exit != 0, ETIMEDOUT, curl
+      // ausente) llega con el mensaje de execFileSync, que es "Command failed: "
+      // más el comando COMPLETO. Ahí van la ruta del cookie jar y el cuerpo de
+      // `--data-binary`, que en los POST del portal lleva datos del
+      // contribuyente. Ese mensaje se propaga hasta el console.error de
+      // src/rest/auditoria.ts, o sea al log central. Se reemplaza por uno que
+      // nombra sólo el código del fallo — mismo criterio que ErrorDeBrowser en
+      // src/browser.ts.
+      // `status` Y `code`, no sólo `code`: en execFileSync el exit code del
+      // proceso viaja en `status`, mientras `code` sólo aparece cuando falla el
+      // spawn (ENOENT, ETIMEDOUT, ENOBUFS). El caso más común —curl corriendo y
+      // saliendo distinto de cero: 28 timeout, 7 conexión rechazada, 6 DNS, 35
+      // TLS— no tiene `code`, así que mirando sólo ese campo el mensaje quedaba
+      // sin ningún dato. Ninguno de los tres es sensible.
+      const partes = [
+        (e as { code?: string })?.code,
+        (e as { status?: number })?.status !== undefined
+          ? `curl salió ${(e as { status?: number }).status}`
+          : undefined,
+        (e as { signal?: string })?.signal
+          ? `señal ${(e as { signal?: string }).signal}`
+          : undefined,
+      ].filter(Boolean);
+      throw new Error(
+        'Falló la consulta HTTP al SII' +
+        `${partes.length ? ` (${partes.join(', ')})` : ''}.`
+      );
+    }
   }
 
   private encodeParams(params: Record<string, string>, charset: 'utf-8' | 'latin1' = 'utf-8'): string {

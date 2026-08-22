@@ -1,6 +1,7 @@
-import { resumen, listEmitidas, listRecibidas } from '../../src/core/bhe';
+import { resumen, listEmitidas, listRecibidas, pdf } from '../../src/core/bhe';
 import { BheScraper } from '../../src/scrapers/bhe';
 import { RegistroSesiones } from '../../src/registroSesiones';
+import { RecursoNoEncontrado } from '../../src/erroresConsulta';
 
 jest.mock('../../src/scrapers/bhe');
 const MockScraper = BheScraper as jest.MockedClass<typeof BheScraper>;
@@ -29,5 +30,38 @@ describe('core/bhe', () => {
     (MockScraper.prototype.informeMensual as jest.Mock).mockResolvedValue([]);
     await listRecibidas(registroQueEjecuta(), '11.111.111-1', 2026, 7);
     expect(MockScraper.prototype.informeMensual).toHaveBeenCalledWith(2026, 7, true);
+  });
+
+  // Tres posicionales seguidos (rut, código, flag): invertir los dos últimos
+  // compila igual y devolvería el PDF de otra cosa sin que nada avise.
+  it('pdf pasa el código de barras y el flag de recibida, en ese orden', async () => {
+    const contenido = Buffer.from('%PDF-1.3');
+    (MockScraper.prototype.pdfBoleta as jest.Mock).mockResolvedValue(contenido);
+
+    const resultado = await pdf(registroQueEjecuta(), '11.111.111-1', '111111110000048F99ED', true);
+
+    expect(MockScraper.prototype.pdfBoleta).toHaveBeenCalledWith('111111110000048F99ED', true);
+    expect(resultado).toBe(contenido);
+  });
+
+  // El contrato REST decide NO_ENCONTRADO con un `instanceof`, así que el tipo
+  // tiene que sobrevivir el paso por el ejecutor: si alguna vez lo envolviera,
+  // el tenant volvería a recibir ERROR y a reintentar en loop.
+  it('pdf propaga RecursoNoEncontrado sin envolverlo', async () => {
+    (MockScraper.prototype.pdfBoleta as jest.Mock).mockRejectedValue(
+      new RecursoNoEncontrado('no existe una boleta con ese código')
+    );
+
+    const error = await pdf(registroQueEjecuta(), '11.111.111-1', 'ABC123').catch(e => e);
+
+    expect(error).toBeInstanceOf(RecursoNoEncontrado);
+  });
+
+  it('pdf pide la emitida cuando no se pasa el flag', async () => {
+    (MockScraper.prototype.pdfBoleta as jest.Mock).mockResolvedValue(Buffer.from('x'));
+
+    await pdf(registroQueEjecuta(), '11.111.111-1', '111111110000048F99ED');
+
+    expect(MockScraper.prototype.pdfBoleta).toHaveBeenCalledWith('111111110000048F99ED', false);
   });
 });

@@ -1,5 +1,6 @@
 import { SiiHttpClient } from '../http';
 import { RequiereCertificado, SessionManager } from '../session';
+import { LimitacionConocida, RecursoNoEncontrado } from '../erroresConsulta';
 
 export interface MesBhe {
   mes: number;
@@ -28,6 +29,13 @@ export type RolContraparte = 'receptor' | 'emisor';
 
 export interface BoletaBhe {
   folio: number;
+  // Identificador que el SII exige para pedir el PDF de la boleta: el folio NO
+  // sirve para eso. Son ~20 caracteres que empiezan con el RUT del emisor
+  // (ej. "111111110000048F99ED"). Es el mismo valor que apigateway llama
+  // `codigo` en /bhe/emitidas/pdf/{codigo}. Cadena vacía si el SII no lo
+  // informó: es opaco, así que no se valida su forma ni su largo (las capturas
+  // muestran largos distintos entre emitidas y recibidas).
+  codigoBarras: string;
   fecha: string;
   contraparteRol: RolContraparte;
   contraparteRut: string;
@@ -45,6 +53,18 @@ const BASE = 'https://loa.sii.cl/cgi_IMT';
 const CGI_ANUAL = `${BASE}/TMBCOC_InformeAnualBhe.cgi`;
 const CGI_MENSUAL = `${BASE}/TMBCOC_InformeMensualBhe.cgi`;
 const CGI_MENSUAL_REC = `${BASE}/TMBCOC_InformeMensualBheRec.cgi`;
+// Ojo con el prefijo: los informes son TMBCO*C*_, el PDF es TMBCO*T*_. La URL
+// sale del propio JS del informe mensual, que arma este link por cada fila.
+const CGI_PDF = `${BASE}/TMBCOT_ConsultaBoletaPdf.cgi`;
+
+// Aviso con el que el portal responde cuando el código de barras no le
+// corresponde a ninguna boleta del RUT, y cuántos bytes del cuerpo se miran
+// buscándolo. Van juntos a propósito: la respuesta observada son 1403 bytes,
+// pero si el SII alguna vez mete el aviso detrás de un header o un JS más
+// largo, el corte lo deja fuera y el fallo permanente vuelve a tratarse como
+// transitorio. Quien mueva uno tiene que ver el otro.
+const AVISO_BOLETA_INEXISTENTE = /No existe la boleta de honorarios/i;
+const BYTES_A_INSPECCIONAR = 4_000;
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
                'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -102,9 +122,9 @@ const ENTIDADES: Record<string, string> = {
   ordm: 'º', ordf: 'ª', deg: '°',
 };
 
-// Fallo que no depende de la sesión, sino de algo que el scraper todavía no
-// sabe hacer. Se distingue para no reintentarlo (ver conSesionFresca).
-export class LimitacionConocida extends Error {}
+// LimitacionConocida y RecursoNoEncontrado viven en src/erroresConsulta.ts: el
+// transporte HTTP también tiene que lanzarlas, y no puede depender de un scraper
+// de dominio. Se importan de ahí, sin re-exportar desde acá.
 
 export class BheScraper {
   constructor(
@@ -257,6 +277,119 @@ export class BheScraper {
     );
   }
 
+  // Descarga el PDF de UNA boleta. La clave es el `codigoBarras` que entrega
+  // `informeMensual`, no el folio: el CGI no acepta el folio.
+  async pdfBoleta(codigoBarras: string, recibida = false): Promise<Buffer> {
+    // La validación va FUERA de `conSesionFresca`, a propósito. Adentro, este
+    // error no sería ni LimitacionConocida ni RequiereCertificado, así que el
+    // wrapper invalidaría la sesión y reintentaría: un `codigo_barras` vacío
+    // mandado por un tenant tiraría abajo una sesión del SII que estaba sana y
+    // forzaría un re-login en la consulta siguiente. Un input inválido del
+    // cliente no debe degradar el estado del proceso.
+    //
+    // Un código vacío llega cuando el informe no lo trajo (ver BoletaBhe).
+    if (!codigoBarras.trim()) {
+      throw new Error(
+        'Falta el código de barras de la boleta. Es el campo codigoBarras que ' +
+        'devuelve el listado del mes, y es lo único que el SII acepta para ' +
+        'identificar la boleta al pedir el PDF (el folio no sirve).'
+      );
+    }
+
+    return this.conSesionFresca(() => this.intentarPdfBoleta(codigoBarras, recibida));
+  }
+
+  private async intentarPdfBoleta(codigoBarras: string, recibida: boolean): Promise<Buffer> {
+    this.assertConsultaHttpPosible();
+    await this.session.authenticateOnly();
+
+    const { contenido, contentType } = await this.http.getBinario(CGI_PDF, {
+      txt_codigobarras: codigoBarras.trim(),
+      veroriginal: 'si',
+      // `PROPIOS` es el valor que el informe de emitidas pone en el link del
+      // PDF. Los dos valores están verificados en vivo contra el portal (una
+      // emitida y una recibida, PDF completo en ambos casos). Un `origen`
+      // equivocado no falla en silencio: el CGI responde el HTML del portal, y
+      // el chequeo de Content-Type de abajo lo rechaza.
+      origen: recibida ? 'RECIBIDOS' : 'PROPIOS',
+      enviar: 'si',
+    });
+
+    // El CGI responde 200 con el HTML del formulario de login cuando la sesión
+    // no le sirve, así que el status no distingue nada: lo que separa un PDF de
+    // un fallo es el Content-Type. Sin este chequeo, el error viajaría como un
+    // "PDF" de 17 KB que ningún lector abre.
+    if (!/application\/pdf/i.test(contentType)) {
+      // Se corta el BUFFER antes de decodificar: `toString()` sobre la
+      // respuesta completa (hasta MAX_RESPUESTA_BYTES) para después quedarse
+      // con 4 KB es trabajo tirado, y acá el cuerpo puede ser un PDF entero.
+      const cuerpo = contenido.subarray(0, BYTES_A_INSPECCIONAR).toString('latin1');
+      // El código lo manda el tenant: se trunca para no volcar una cadena
+      // arbitrariamente larga en el log central.
+      const detalle = `El SII no devolvió un PDF para la boleta ` +
+        `${codigoBarras.slice(0, 40)} ` +
+        `(respondió "${contentType || 'sin Content-Type'}"): `;
+
+      // Sólo se afirma "el código no existe" cuando el portal lo dice con estas
+      // palabras — verificado en vivo: ante un código inexistente, ajeno o
+      // basura responde 1403 bytes titulados "INFORMACION AL CONTRIBUYENTE" con
+      // ese texto. Eso NO se arregla reautenticando, y `conSesionFresca`
+      // reintenta cualquier cosa que no sea LimitacionConocida, así que sin
+      // esta rama el wrapper gastaría un re-login y otra consulta para fallar
+      // igual.
+      //
+      // La clasificación es por evidencia positiva, no por descarte: una página
+      // de mantención, un 500 del CGI o un login con el título cambiado también
+      // llegan acá, y esos SÍ son transitorios. Marcarlos como permanentes por
+      // no reconocerlos le negaría el reintento a un fallo que se resuelve
+      // solo, con una causa inventada encima.
+      if (AVISO_BOLETA_INEXISTENTE.test(cuerpo)) {
+        throw new RecursoNoEncontrado(
+          `${detalle}el SII informa que no existe una boleta con ese código de ` +
+          'barras. Además del código en sí, revisá que el flag de recibida sea ' +
+          `el correcto: se pidió como ${recibida ? 'recibida' : 'emitida'}, y ` +
+          'pedir una boleta con el origen equivocado devuelve exactamente esta ' +
+          'respuesta. Reintentar no ayuda.'
+        );
+      }
+
+      if (/<title>[^<]*Autenticaci/i.test(cuerpo)) {
+        throw new Error(
+          `${detalle}el SII devolvió el formulario de autenticación, así que la ` +
+          'sesión expiró: reintentá.'
+        );
+      }
+
+      // Ni PDF, ni "no existe", ni login: no se sabe qué pasó, así que no se
+      // nombra una causa y se deja reintentar.
+      //
+      // Se incluye el título de la página en el mensaje como señal temprana: la
+      // detección de "no existe" depende de un texto en español del portal, y si
+      // el SII le cambia una palabra, ese fallo permanente vuelve a caer acá y a
+      // reintentarse en loop. Ver un título "INFORMACION AL CONTRIBUYENTE" en
+      // esta rama del log es exactamente el aviso de que el texto se movió.
+      const titulo = /<title>([^<]{0,120})<\/title>/i.exec(cuerpo)?.[1]?.trim();
+      throw new Error(
+        `${detalle}el portal respondió algo inesperado` +
+        `${titulo ? ` (página "${titulo}")` : ''}. Puede ser una caída o una ` +
+        'página de mantención del SII; reintentá.'
+      );
+    }
+
+    // Un `application/pdf` de cero bytes pasa el chequeo de arriba pero no es
+    // un documento: llegaría al tenant como un archivo vacío que su lector no
+    // abre, sin ningún error de por medio. Reintentable a propósito — es el
+    // síntoma de una descarga cortada, no de un dato que no existe.
+    if (!contenido.length) {
+      throw new Error(
+        `El SII devolvió un PDF vacío para la boleta ${codigoBarras.slice(0, 40)}. ` +
+        'La descarga se cortó; reintentá.'
+      );
+    }
+
+    return contenido;
+  }
+
   private parseXmlValues(html: string): Record<string, string> {
     const values: Record<string, string> = {};
     for (const m of html.matchAll(XML_VALUE)) {
@@ -365,6 +498,7 @@ export class BheScraper {
 
       boletas.push({
         folio,
+        codigoBarras: (arr[`codigobarras_${i}`] ?? '').trim(),
         fecha: (arr[`${esquema.fecha}_${i}`] ?? '').trim(),
         contraparteRol: esquema.rol,
         contraparteRut: `${arr[`${esquema.rut}_${i}`] ?? ''}-${arr[`${esquema.dv}_${i}`] ?? ''}`,
