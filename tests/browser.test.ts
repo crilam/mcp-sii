@@ -136,4 +136,44 @@ describe('Browser', () => {
       expect.any(Object)
     );
   });
+
+  // Fuga real verificada: el `message` de execFileSync arranca con
+  // "Command failed: " + el comando COMPLETO con argumentos. El login por
+  // clave manda la clave dentro del JS de `eval`, y ese message se loguea
+  // aguas arriba (rest/rutas/comun.ts, restServer.ts) — sin este saneo la
+  // clave de un tenant termina en CloudWatch.
+  it('un fallo del CLI NO expone los argumentos (la clave viaja en el JS de eval)', () => {
+    const claveEnJs = `document.getElementById('clave').value="CLAVE_SUPER_SECRETA"`;
+    mockExec.mockImplementation(() => {
+      throw Object.assign(new Error(`Command failed: agent-browser eval ${claveEnJs}`), {
+        stderr: Buffer.from('page crashed'),
+        stdout: Buffer.from(''),
+      });
+    });
+
+    let capturado: unknown;
+    try { browser.eval(claveEnJs); } catch (e) { capturado = e; }
+
+    const mensaje = (capturado as Error).message;
+    expect(mensaje).not.toContain('CLAVE_SUPER_SECRETA');
+    // Sí debe decir QUÉ subcomando falló y la salida del CLI (que es segura).
+    expect(mensaje).toContain('eval');
+    expect(mensaje).toContain('page crashed');
+  });
+
+  it('el error de un fallo del CLI tampoco expone los argumentos al serializarlo', () => {
+    const claveEnJs = `document.getElementById('clave').value="OTRA_CLAVE_SECRETA"`;
+    mockExec.mockImplementation(() => {
+      throw Object.assign(new Error(`Command failed: agent-browser eval ${claveEnJs}`), {
+        stderr: Buffer.from(''), stdout: Buffer.from(''),
+      });
+    });
+
+    let capturado: unknown;
+    try { browser.eval(claveEnJs); } catch (e) { capturado = e; }
+
+    // Ni el message ni el stack (que incluye el message) deben traer la clave.
+    expect(String((capturado as Error).message)).not.toContain('OTRA_CLAVE_SECRETA');
+    expect(String((capturado as Error).stack)).not.toContain('OTRA_CLAVE_SECRETA');
+  });
 });

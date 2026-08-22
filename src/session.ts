@@ -519,7 +519,7 @@ export class SessionManager {
   // propio JS del SII al validar, y acá se replica.
   private async loginConClave(): Promise<void> {
     this.browser.open(SII_PORTAL_PRIVADO);
-    this.esperarFormularioDeLogin();
+    await this.esperarFormularioDeLogin();
 
     const { rut, dv } = partirRut(this.config.rut, 'SII_RUT');
     const clave = this.config.clave!;
@@ -540,10 +540,16 @@ export class SessionManager {
   // es un problema de acceso al portal (WAF, sala de espera, mantención), no
   // una credencial inválida — se distingue en el mensaje para no reportarle a
   // un tenant "clave incorrecta" cuando el SII no nos dejó ni intentar.
-  private esperarFormularioDeLogin(maxMs = 20_000, step = 1_000): void {
+  //
+  // Sleep NO bloqueante (setTimeout, no execSync): este método corre dentro
+  // del proceso REST, que atiende a varios tenants. Un sleep síncrono de hasta
+  // 20s congelaría TODO el event loop y dejaría de responder a los demás
+  // requests mientras espera. Ya se corrigió una vez este mismo anti-patrón
+  // en el polling hermano (ver assertLoginPorClaveExitoso).
+  private async esperarFormularioDeLogin(maxMs = 20_000, step = 1_000): Promise<void> {
     for (let esperado = 0; esperado < maxMs; esperado += step) {
       if (this.browser.eval("document.getElementById('myform') ? 'SI' : 'NO'").includes('SI')) return;
-      execSync(`sleep ${step / 1000}`);
+      await new Promise(resolve => setTimeout(resolve, step));
     }
     throw new Error(
       'El SII no mostró el formulario de autenticación (no se pudo llegar al login). Reintentá en unos minutos.'
