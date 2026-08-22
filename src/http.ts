@@ -117,6 +117,11 @@ export class SiiHttpClient {
   // y el daño es silencioso, porque el resultado sigue siendo un string.
   // Quien llama decide qué hacer con el Content-Type; el transporte no sabe
   // qué tipo esperaba.
+  //
+  // No expone el `charset` que sí tienen `get`/`postForm`, y no es un olvido:
+  // los únicos parámetros que viajan por acá son identificadores del SII
+  // (códigos de barras), que son ASCII. Si alguna vez hay que mandar texto con
+  // acentos en un GET binario, hay que agregarlo igual que en `postForm`.
   async getBinario(
     url: string,
     params?: Record<string, string>

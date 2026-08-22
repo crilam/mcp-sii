@@ -395,6 +395,38 @@ describe('BheScraper.pdfBoleta', () => {
 
     expect(http.getBinario as jest.Mock).not.toHaveBeenCalled();
     expect(session.authenticateOnly).not.toHaveBeenCalled();
+    // Y no tira abajo la sesión: la validación va fuera de conSesionFresca, que
+    // si no invalidaría una sesión sana por un input inválido del tenant.
+    expect(session.invalidate).not.toHaveBeenCalled();
+  });
+
+  // conSesionFresca reintenta todo lo que no sea LimitacionConocida. Un código
+  // ajeno al RUT no se arregla reautenticando: reintentarlo gasta un re-login y
+  // una consulta para fallar igual.
+  it('no reintenta cuando el código no corresponde al RUT', async () => {
+    const { scraper, http, session } = makePdfScraper({
+      contenido: Buffer.from('<html><title>Boletas de honorarios</title></html>', 'latin1'),
+      contentType: 'text/html',
+    });
+
+    await expect(scraper.pdfBoleta('99999999999999999999')).rejects.toThrow();
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(1);
+    expect(session.invalidate).not.toHaveBeenCalled();
+  });
+
+  // La sesión caída sí se arregla reautenticando, así que acá el reintento debe
+  // ocurrir: es la diferencia con el caso de arriba.
+  it('reintenta cuando el SII devolvió el formulario de login', async () => {
+    const { scraper, http, session } = makePdfScraper({
+      contenido: Buffer.from('<html><title>Autenticación</title></html>', 'latin1'),
+      contentType: 'text/html',
+    });
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED')).rejects.toThrow();
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(2);
+    expect(session.invalidate).toHaveBeenCalled();
   });
 });
 

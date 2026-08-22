@@ -270,13 +270,14 @@ export class BheScraper {
   // Descarga el PDF de UNA boleta. La clave es el `codigoBarras` que entrega
   // `informeMensual`, no el folio: el CGI no acepta el folio.
   async pdfBoleta(codigoBarras: string, recibida = false): Promise<Buffer> {
-    return this.conSesionFresca(() => this.intentarPdfBoleta(codigoBarras, recibida));
-  }
-
-  private async intentarPdfBoleta(codigoBarras: string, recibida: boolean): Promise<Buffer> {
-    // Un código vacío llega cuando el informe no lo trajo (ver BoletaBhe). El
-    // CGI respondería el formulario de login, que después parecería una sesión
-    // caída: se corta acá con la causa real.
+    // La validación va FUERA de `conSesionFresca`, a propósito. Adentro, este
+    // error no sería ni LimitacionConocida ni RequiereCertificado, así que el
+    // wrapper invalidaría la sesión y reintentaría: un `codigo_barras` vacío
+    // mandado por un tenant tiraría abajo una sesión del SII que estaba sana y
+    // forzaría un re-login en la consulta siguiente. Un input inválido del
+    // cliente no debe degradar el estado del proceso.
+    //
+    // Un código vacío llega cuando el informe no lo trajo (ver BoletaBhe).
     if (!codigoBarras.trim()) {
       throw new Error(
         'Falta el código de barras de la boleta. Es el campo codigoBarras que ' +
@@ -285,6 +286,10 @@ export class BheScraper {
       );
     }
 
+    return this.conSesionFresca(() => this.intentarPdfBoleta(codigoBarras, recibida));
+  }
+
+  private async intentarPdfBoleta(codigoBarras: string, recibida: boolean): Promise<Buffer> {
     this.assertConsultaHttpPosible();
     await this.session.authenticateOnly();
 
@@ -314,12 +319,22 @@ export class BheScraper {
       const esFormularioDeLogin = /<title>[^<]*Autenticaci/i.test(
         contenido.toString('latin1').slice(0, 4_000)
       );
-      const causa = esFormularioDeLogin
-        ? 'el SII devolvió el formulario de autenticación, así que la sesión expiró: reintentá'
-        : 'el código de barras no corresponde a una boleta de este RUT (reintentar no ayuda)';
+      const detalle = `El SII no devolvió un PDF para la boleta ${codigoBarras} ` +
+        `(respondió "${contentType || 'sin Content-Type'}"): `;
+
+      // Un código que no le corresponde a este RUT no se arregla
+      // reautenticando, y `conSesionFresca` reintenta cualquier cosa que no sea
+      // LimitacionConocida: sin esto, el mensaje diría "reintentar no ayuda"
+      // mientras el wrapper gasta un re-login y una consulta para fallar igual.
+      if (!esFormularioDeLogin) {
+        throw new LimitacionConocida(
+          `${detalle}el código de barras no corresponde a una boleta de este RUT.`
+        );
+      }
+
       throw new Error(
-        `El SII no devolvió un PDF para la boleta ${codigoBarras} (respondió ` +
-        `"${contentType || 'sin Content-Type'}"): ${causa}.`
+        `${detalle}el SII devolvió el formulario de autenticación, así que la ` +
+        'sesión expiró: reintentá.'
       );
     }
 

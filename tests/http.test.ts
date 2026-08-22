@@ -351,6 +351,19 @@ describe('SiiHttpClient.getBinario', () => {
     expect(opciones.maxBuffer).toBeGreaterThan(1024 * 1024);
   });
 
+  // `get`/`postForm` y `getBinario` comparten `curlCrudo`, así que el límite
+  // vale para los dos caminos. Cubrir el de texto es barato y deja claro que no
+  // es una propiedad exclusiva del binario.
+  it('el camino de texto hereda el mismo maxBuffer', async () => {
+    mockExec.mockReturnValue(respuesta('<html>ok</html>', 'text/html') as never);
+    const { client } = makeClient();
+
+    await client.get('https://loa.sii.cl/cgi_IMT/TMBCOC_InformeAnualBhe.cgi');
+
+    const opciones = mockExec.mock.calls[0][2] as { maxBuffer?: number };
+    expect(opciones.maxBuffer).toBeGreaterThan(1024 * 1024);
+  });
+
   // Cuando el CGI responde el HTML del login, quien llama necesita ver ese
   // Content-Type para distinguirlo de un PDF: el status es 200 en ambos casos.
   it('reporta el Content-Type de una respuesta que no es PDF', async () => {
