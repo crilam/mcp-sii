@@ -24,8 +24,9 @@ export const schemaMes = {
 // tool guarde el archivo y devuelva la ruta.
 export const schemaPdf = {
   rut: z.string().min(1).describe(RUT_DESC),
-  // `.trim()` antes del `.min(1)`: sin él, `"   "` pasa la validación y muere
-  // más adentro como el ERROR genérico del contrato en vez de un 400 claro.
+  // `.trim()` primero: sin él, `"   "` llegaría al scraper y moriría como el
+  // ERROR genérico del contrato en vez de un 400 que dice qué está mal. Quien
+  // rechaza la cadena vacía es el `+` de la regex de abajo, no un `.min(1)`.
   //
   // Y sólo alfanuméricos: todos los códigos observados lo son
   // ("17270613000007FEB33E", "033333333034364C969E7"). Restringirlo evita

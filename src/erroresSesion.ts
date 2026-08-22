@@ -1,4 +1,3 @@
-import { RecursoNoEncontrado } from './erroresConsulta';
 
 export class SesionNoIniciada extends Error {}
 export class SesionExpirada extends Error {}
@@ -21,14 +20,7 @@ export async function conErroresDeSesion<T>(fn: () => Promise<T>): Promise<T> {
 // extrae acá porque el endpoint de validación de clave necesita la misma
 // clasificación y una segunda copia inline sería la misma duplicación que ya
 // se resolvió una vez para conScraper.
-export function clasificarErrorCredenciales(
-  e: unknown
-): 'CREDENCIALES_INVALIDAS' | 'NO_ENCONTRADO' | 'ERROR' {
-  // NO_ENCONTRADO antes que nada: es el único caso donde el SII confirmó que el
-  // dato no existe. Sin un código propio, un identificador equivocado
-  // (permanente) devuelve exactamente los mismos bytes que una caída del portal
-  // (transitoria), y el tenant no tiene con qué decidir si reintentar.
-  if (e instanceof RecursoNoEncontrado) return 'NO_ENCONTRADO';
+export function clasificarErrorCredenciales(e: unknown): 'CREDENCIALES_INVALIDAS' | 'ERROR' {
   const mensaje = e instanceof Error ? e.message : String(e);
   return mensaje.includes('El SII rechazó la autenticación') ? 'CREDENCIALES_INVALIDAS' : 'ERROR';
 }

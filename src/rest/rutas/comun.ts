@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
+import { RecursoNoEncontrado } from '../../erroresConsulta';
 
 // Fragmento zod compartido por las 5 rutas REST que reciben certificado
 // digital. La regex valida el alfabeto base64 (incluyendo padding) ANTES de
@@ -35,6 +36,18 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
     const cuerpo = Array.isArray(resultado) ? { datos: resultado } : (resultado as object);
     return { status: 200, body: { ok: true, ...cuerpo } };
   } catch (e) {
+    // NO_ENCONTRADO se resuelve acá y no dentro de clasificarErrorCredenciales:
+    // ésta es la única ruta que lo necesita, y ensanchar esa función obligaba a
+    // cada otro llamador (validar-clave, las tools MCP) a colapsar a mano un
+    // código que nunca puede recibir. Uno se olvidaba y stringificaba el código
+    // crudo.
+    //
+    // Importa distinguirlo: cuando el SII confirma que el dato no existe, el
+    // fallo es permanente. Con el ERROR genérico, el tenant no puede separarlo
+    // de una caída del portal y reintenta en loop lo que nunca va a funcionar.
+    if (e instanceof RecursoNoEncontrado) {
+      return { status: 200, body: { ok: false, error: 'NO_ENCONTRADO' } };
+    }
     const error = clasificarErrorCredenciales(e);
     // Un error que no es rechazo de credenciales es un bug (del scraper, de
     // infraestructura) — sin este log, queda invisible detrás del status 200.

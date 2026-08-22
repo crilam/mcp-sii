@@ -3,6 +3,7 @@ import * as path from 'path';
 import { BheScraper } from '../../src/scrapers/bhe';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
+import { LimitacionConocida } from '../../src/erroresConsulta';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -374,6 +375,22 @@ describe('BheScraper.pdfBoleta', () => {
 
     await expect(scraper.pdfBoleta('111111110000048F99ED'))
       .rejects.toThrow(/la sesión expiró: reintentá/);
+  });
+
+  // La razón de que el techo de tamaño lance LimitacionConocida y no Error es
+  // justamente que conSesionFresca la deja pasar: reintentar una descarga que ya
+  // no cupo la va a exceder otra vez, gastando una sesión sana en el camino.
+  it('no reintenta cuando la respuesta excede el techo de tamaño', async () => {
+    const { scraper, http, session } = makePdfScraper({ contenido: PDF, contentType: 'application/pdf' });
+    (http.getBinario as jest.Mock).mockRejectedValue(
+      new LimitacionConocida('La respuesta del SII superó el máximo de 4194304 bytes')
+    );
+
+    await expect(scraper.pdfBoleta('111111110000048F99ED'))
+      .rejects.toThrow(/superó el máximo/);
+
+    expect((http.getBinario as jest.Mock).mock.calls).toHaveLength(1);
+    expect(session.invalidate).not.toHaveBeenCalled();
   });
 
   // Un PDF de 0 bytes con el Content-Type correcto pasa el chequeo pero no es

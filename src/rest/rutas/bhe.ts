@@ -60,6 +60,9 @@ export function registrarRutasBhe(
       // Buffer produciría {"0":37,"1":80,...} — un JSON enorme e inservible.
       return {
         codigo_barras,
+        // Constante, no un eco del SII: el scraper ya rechazó todo lo que no
+        // fuera application/pdf, así que si llegamos acá el tipo es ese. Se
+        // manda igual para que el tenant no tenga que asumirlo.
         content_type: 'application/pdf',
         // Nombre sugerido para que los tres tenants no lo inventen distinto.
         // Se sanea igual que si el schema no validara: este valor viaja a un
