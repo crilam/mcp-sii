@@ -114,7 +114,13 @@ const ESQUEMA_EMITIDAS: EsquemaBoletas = {
   rut: 'rutreceptor',
   dv: 'dvreceptor',
   nombre: 'nombrereceptor',
-  fecha: 'fechaemision',
+  // `fecha` es la del DOCUMENTO (`fecha_boleta`), igual que en recibidas, y
+  // `fechaEmision` es la de emisión (`fechaemision`). El CGI de emitidas manda
+  // las dos claves por separado y antes las dos apuntaban a `fechaemision`: el
+  // campo nuevo era un alias del viejo —nunca podían diferir, aunque su
+  // comentario dijera que sí— y la fecha del documento se descartaba. En las
+  // capturas coinciden, así que el error era invisible hasta el día que no.
+  fecha: 'fecha_boleta',
   retencionEmisor: 'retencion_emisor',
   fechaEmision: 'fechaemision',
   emailEnvio: 'email_envio',

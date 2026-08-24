@@ -211,6 +211,26 @@ describe('BheScraper.informeMensual', () => {
     await expect(scraper.informeMensual(2025, 5)).rejects.toThrow(/no declara CantidadFilas/);
   });
 
+  // En las capturas `fecha_boleta` y `fechaemision` coinciden, asi que un alias
+  // entre las dos era invisible. Este test las separa a proposito: `fecha` es la
+  // del documento y `fechaEmision` la de emision.
+  it('distingue la fecha del documento de la de emision', async () => {
+    const { scraper } = makeScraper(
+      `<html><script>xml_values['anio_consulta'] = "2025";
+ xml_values['total_boletas'] = "1";
+CantidadFilas=1;
+ arr_informe_mensual['nroboleta_1'] = "311";
+ arr_informe_mensual['fecha_boleta_1'] = "20/05/2025";
+ arr_informe_mensual['fechaemision_1'] = "22/05/2025";
+</script></html>`
+    );
+
+    const boletas = await scraper.informeMensual(2025, 5);
+
+    expect(boletas[0].fecha).toBe('20/05/2025');
+    expect(boletas[0].fechaEmision).toBe('22/05/2025');
+  });
+
   it('marca sociedadProfesional cuando el CGI manda SI', async () => {
     const { scraper } = makeScraper(
       `<html><script>xml_values['anio_consulta'] = "2025";
