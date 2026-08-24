@@ -710,8 +710,17 @@ export class SessionManager {
     // incorrecta es definitiva (el tenant no debe guardar esa credencial) y
     // cualquier otra cosa puede ser transitoria.
     const motivo = this.leerMotivoDeRechazo();
+    // La URL es sólo para el log, así que su lectura no puede tumbar la
+    // clasificación: si `getUrl` falla justo acá, el error que se propagaría es
+    // el del CLI, y `validar-clave` devolvería ERROR en vez de
+    // CREDENCIALES_INVALIDAS — o sea el tenant guardaría una clave inválida por
+    // un fallo de logging. Mismo blindaje que ya tiene leerMotivoDeRechazo.
+    let urlParaLog = '(no se pudo leer)';
+    try {
+      urlParaLog = this.sanearUrlParaLog(this.leerUrlActual());
+    } catch { /* el log pierde la URL; la clasificación sigue en pie */ }
     console.error(
-      `Login SII: no se establecieron cookies de sesión. url=${this.sanearUrlParaLog(this.leerUrlActual())}` +
+      `Login SII: no se establecieron cookies de sesión. url=${urlParaLog}` +
       `${motivo ? ` motivo=${motivo}` : ''}`
     );
     if (motivo === 'CLAVE_INCORRECTA') {

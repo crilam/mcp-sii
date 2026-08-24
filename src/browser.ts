@@ -215,10 +215,6 @@ export class Browser {
     }
   }
 
-  cookiesDelSii(): string[] {
-    return this.cookiesDelSiiConUbicacion().map(c => c.name);
-  }
-
   // Las cookies de dominio SII con el dominio y el path que reporta el CLI, que
   // es lo que hace falta para BORRAR una: una emitida host-only por
   // `zeusr.sii.cl`, o con un path específico, no se borra apuntándole a

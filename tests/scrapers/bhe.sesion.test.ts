@@ -22,7 +22,6 @@ function conJarSimulado(browser: Browser, presentes: string[]): void {
     nombres.map(name => ({ name, domain: '.sii.cl', path: '/', tieneValor: true }));
   let jar = ubicar(presentes);
   (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => jar);
-  (browser.cookiesDelSii as jest.Mock).mockImplementation(() => jar.map(c => c.name));
   (browser.borrarCookies as jest.Mock).mockImplementation((aBorrar: Array<{ name: string }>) => {
     const nombres = new Set(aBorrar.map(c => c.name));
     jar = jar.filter(c => !nombres.has(c.name));

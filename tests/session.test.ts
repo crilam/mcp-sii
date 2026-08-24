@@ -55,7 +55,6 @@ const ubicadas = (nombres: string[]) =>
 function conJarSimulado(browser: Browser, inicial: string[], trasElSubmit = inicial): void {
   let jar = ubicadas(inicial);
   (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => jar);
-  (browser.cookiesDelSii as jest.Mock).mockImplementation(() => jar.map(c => c.name));
   (browser.borrarCookies as jest.Mock).mockImplementation((aBorrar: Array<{ name: string }>) => {
     const nombres = new Set(aBorrar.map(c => c.name));
     jar = jar.filter(c => !nombres.has(c.name));
@@ -205,7 +204,7 @@ describe('SessionManager.login', () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
-    (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_SIN_SESION);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_SIN_SESION));
     (browser.eval as jest.Mock).mockImplementation((js: string) =>
       js.includes('innerText')
         ? 'La Clave Tributaria ingresada no es correcta, verifique que su teclado...'
@@ -269,7 +268,7 @@ describe('SessionManager.login', () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
-    (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_SIN_SESION);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_SIN_SESION));
     (browser.eval as jest.Mock).mockImplementation((js: string) => {
       if (js.includes('innerText')) return 'El código de este mensaje es 01.01.217.500.720.20';
       return js.includes("getElementById('myform')") && js.includes('SI') ? 'SI' : '';
@@ -309,7 +308,7 @@ describe('SessionManager.login', () => {
     let cookies = COOKIES_CON_SESION;
     (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => ubicadas(cookies));
     (browser.borrarCookies as jest.Mock).mockImplementation(() => { cookies = COOKIES_SIN_SESION; });
-    (browser.cookiesDelSii as jest.Mock).mockImplementation(() => cookies);
+    
     (browser.eval as jest.Mock).mockImplementation((js: string) => {
       if (js.includes('innerText')) return 'La Clave Tributaria ingresada no es correcta';
       return js.includes("getElementById('myform')") && js.includes('SI') ? 'SI' : '';
@@ -349,26 +348,49 @@ describe('SessionManager.login', () => {
   // credencial esté mal: puede ser la cola de espera, una caída o un bloqueo
   // temporal. Se rechaza igual, pero con un mensaje que NO clasifica como
   // credencial inválida — si no, el tenant borraría una clave que sí servía.
-  // Cada poll spawnea un proceso `agent-browser cookies get`. Con paso fijo de
-  // 1s, agotar los 15s costaba 15 procesos; con backoff son 4. Sin este test, un
-  // `step *= 2` mal editado vuelve a los 15 sin que se caiga nada.
-  it('el poll usa backoff: agotar el tiempo cuesta 4 lecturas, no 15', async () => {
+  // Cada lectura spawnea un proceso `agent-browser cookies get`. Con paso fijo
+  // de 1s, agotar los 15s costaba 15 polls; con backoff capado en 2s son 8
+  // (1+2+2+2+2+2+2+2 = 15s), más las 2 de la limpieza previa: 10 en total. Sin
+  // este test, un `step *= 2` mal editado vuelve a las 15 sin que nada se caiga.
+  it('el poll usa backoff: agotar el tiempo cuesta 10 lecturas, no 17', async () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
-    (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_SIN_SESION);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_SIN_SESION));
 
     const mgr = new SessionManager(configClave, browser);
     await conTimers(() => mgr.login()).catch(() => {});
 
-    expect((browser.cookiesDelSii as jest.Mock).mock.calls.length).toBeLessThanOrEqual(4);
+    expect((browser.cookiesDelSiiConUbicacion as jest.Mock).mock.calls.length).toBe(10);
+  });
+
+  // La URL es sólo para el log: si su lectura falla, la clasificación no puede
+  // degradarse a ERROR — el tenant guardaría una clave inválida por un fallo de
+  // logging.
+  it('clasifica la clave incorrecta aunque falle la lectura de la URL', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    conJarSimulado(browser, COOKIES_SIN_SESION);
+    (browser.getUrl as jest.Mock).mockImplementation(() => {
+      throw new Error('agent-browser falló al ejecutar get');
+    });
+    const evalFormulario = (browser.eval as jest.Mock).getMockImplementation()!;
+    (browser.eval as jest.Mock).mockImplementation((js: string) =>
+      js.includes('innerText')
+        ? 'La Clave Tributaria ingresada no es correcta'
+        : evalFormulario(js)
+    );
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
   });
 
   it('sin cookies y sin motivo reconocible: rechaza sin culpar a la credencial', async () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
-    (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_SIN_SESION);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_SIN_SESION));
     (browser.eval as jest.Mock).mockImplementation((js: string) =>
       js.includes('innerText') ? 'Servicio temporalmente no disponible' : 'SI'
     );

@@ -244,7 +244,7 @@ describe('Browser', () => {
   // El login por clave decide si autenticó según estas cookies, así que un
   // parseo que falle en silencio rompe TODO login válido (o, peor, da por bueno
   // uno inválido).
-  describe('cookiesDelSii', () => {
+  describe('cookiesDelSiiConUbicacion', () => {
     // Forma real del CLI, verificada contra agent-browser.
     function salidaDelCli(cookies: unknown[]) {
       return Buffer.from(JSON.stringify({ success: true, data: { cookies } }));
@@ -256,7 +256,7 @@ describe('Browser', () => {
         { name: 'CSESSIONID', value: 'v2', domain: 'misiir.sii.cl', path: '/' },
       ]));
 
-      expect(browser.cookiesDelSii()).toEqual(['TOKEN', 'CSESSIONID']);
+      expect(browser.cookiesDelSiiConUbicacion().map(c => c.name)).toEqual(['TOKEN', 'CSESSIONID']);
       expect(mockExec).toHaveBeenCalledWith(
         'agent-browser',
         ['cookies', 'get', '--json'],
@@ -271,7 +271,7 @@ describe('Browser', () => {
         { name: 'TOKEN', value: 'VALOR_SECRETO', domain: '.sii.cl', path: '/' },
       ]));
 
-      expect(JSON.stringify(browser.cookiesDelSii())).not.toContain('VALOR_SECRETO');
+      expect(JSON.stringify(browser.cookiesDelSiiConUbicacion())).not.toContain('VALOR_SECRETO');
     });
 
     it('descarta las cookies de otros dominios', () => {
@@ -282,7 +282,7 @@ describe('Browser', () => {
         { name: 'OTRA', domain: '.google.com' },
       ]));
 
-      expect(browser.cookiesDelSii()).toEqual(['TOKEN']);
+      expect(browser.cookiesDelSiiConUbicacion().map(c => c.name)).toEqual(['TOKEN']);
     });
 
     // Un JSON válido con otra forma NO es "no hay cookies": es que no se pudo
@@ -290,13 +290,13 @@ describe('Browser', () => {
     it('lanza si el JSON parsea pero no trae data.cookies como arreglo', () => {
       mockExec.mockReturnValue(Buffer.from(JSON.stringify({ success: true, data: {} })));
 
-      expect(() => browser.cookiesDelSii()).toThrow(ErrorDeBrowser);
+      expect(() => browser.cookiesDelSiiConUbicacion()).toThrow(ErrorDeBrowser);
     });
 
     it('lanza si la salida no es JSON', () => {
       mockExec.mockReturnValue(Buffer.from('no soy json'));
 
-      expect(() => browser.cookiesDelSii()).toThrow(ErrorDeBrowser);
+      expect(() => browser.cookiesDelSiiConUbicacion()).toThrow(ErrorDeBrowser);
     });
   });
 
