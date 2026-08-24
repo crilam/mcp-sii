@@ -266,6 +266,14 @@ export class Browser {
   // cortar ahí dejaría sin borrar todas las siguientes —incluidas las que sí
   // importan— y haría fallar el login entero sin salida. Quien llama decide qué
   // hacer; la garantía real es re-leer y verificar, no que cada `set` funcione.
+  // Vacía TODO el jar del contexto. Es el último recurso: se lleva también el
+  // token del WAF y el de la cola de espera, así que el intento siguiente vuelve
+  // a encolarse. Sólo tiene sentido cuando el borrado selectivo no logró sacar
+  // una cookie de sesión, porque dejarla es peor (ver `loginConClave`).
+  vaciarCookies(): void {
+    this.run(['cookies', 'clear']);
+  }
+
   borrarCookies(cookies: CookieUbicada[]): number {
     let fallidas = 0;
     for (const { name, domain, path } of cookies) {

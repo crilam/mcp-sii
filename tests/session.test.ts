@@ -320,6 +320,48 @@ describe('SessionManager.login', () => {
     expect(browser.open).not.toHaveBeenCalled();
   });
 
+  // El contexto es persistente por RUT: una cookie de sesión que el borrado
+  // selectivo no logre sacar dejaría a ese RUT sin poder autenticar nunca más,
+  // ni con la clave correcta. Vaciar el jar cuesta re-encolarse una vez; quedar
+  // bloqueado no tiene salida.
+  it('si el borrado selectivo no saca la sesión, vacía el jar completo y sigue', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
+
+    // El borrado selectivo no logra sacar TOKEN (atributos que no matchean);
+    // sólo el vaciado total lo consigue.
+    let jar = ubicadas(['TOKEN']);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => jar);
+    (browser.borrarCookies as jest.Mock).mockReturnValue(0);
+    (browser.vaciarCookies as jest.Mock).mockImplementation(() => { jar = []; });
+    const evalFormulario = (browser.eval as jest.Mock).getMockImplementation()!;
+    (browser.eval as jest.Mock).mockImplementation((js: string) => {
+      if (js.includes('requestSubmit')) jar = ubicadas(['TOKEN', 'CSESSIONID']);
+      return evalFormulario(js);
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login());
+
+    expect(browser.vaciarCookies).toHaveBeenCalled();
+  });
+
+  it('si ni vaciar el jar saca la sesión, ahí sí aborta', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    // TOKEN sobrevive a todo: no hay forma de confiar en el chequeo posterior.
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(['TOKEN']));
+    (browser.borrarCookies as jest.Mock).mockReturnValue(0);
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow(/no se pudo limpiar la sesión anterior/i);
+    expect(browser.vaciarCookies).toHaveBeenCalled();
+    expect(browser.open).not.toHaveBeenCalled();
+  });
+
   // El escenario completo del bug, no sólo el orden de las llamadas: el contexto
   // ya traía TOKEN de un login anterior y la clave de ahora es incorrecta. Sin
   // el borrado previo, el primer poll vería esa cookie vieja y reportaría

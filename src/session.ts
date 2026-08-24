@@ -587,14 +587,26 @@ export class SessionManager {
       // apenas la página corre, y eso abortaba todos los logins — verificado en
       // vivo. Esas cookies no prueban ninguna sesión, así que su presencia es
       // irrelevante para lo que acá se está protegiendo.
-      const sobrevivientes = this.browser
-        .cookiesDelSiiConUbicacion()
-        .filter(c => c.tieneValor && COOKIES_QUE_PRUEBAN_SESION.includes(c.name))
-        .map(c => c.name);
+      const sobrevivientes = this.sesionResidual();
       if (sobrevivientes.length > 0) {
-        throw new Error(
-          `quedaron cookies de la sesión anterior sin borrar: ${sobrevivientes.join(', ')}`
+        // Último recurso antes de rendirse: vaciar el jar completo. Cuesta el
+        // token del WAF y el de la cola, o sea que este intento probablemente se
+        // re-encole — pero la alternativa es peor de manera permanente: el
+        // contexto es persistente por RUT (`--session <rut>`), así que una cookie
+        // de sesión que el borrado selectivo no logre sacar dejaría a ese RUT sin
+        // poder autenticar NUNCA MÁS, ni con la clave correcta. Re-encolarse es
+        // caro una vez; un tenant bloqueado para siempre no tiene salida.
+        console.error(
+          `Login SII: el borrado selectivo dejó ${sobrevivientes.join(', ')}; se vacía el jar completo.`
         );
+        this.browser.vaciarCookies();
+
+        const tercos = this.sesionResidual();
+        if (tercos.length > 0) {
+          throw new Error(
+            `quedaron cookies de la sesión anterior sin borrar incluso tras vaciar el jar: ${tercos.join(', ')}`
+          );
+        }
       }
     } catch (e) {
       // Sin poder limpiar no se puede confiar en las cookies que aparezcan
@@ -739,6 +751,16 @@ export class SessionManager {
       'El SII no estableció una sesión y no informó que la clave sea incorrecta. ' +
       'Puede ser una caída del portal, la cola de espera o un bloqueo temporal; reintentá.'
     );
+  }
+
+  // Las cookies que todavía probarían una sesión. Es exactamente el conjunto que
+  // mira `tieneCookiesDeSesion`: si acá queda alguna después de limpiar, el
+  // chequeo de éxito la vería y daría por válida cualquier clave.
+  private sesionResidual(): string[] {
+    return this.browser
+      .cookiesDelSiiConUbicacion()
+      .filter(c => c.tieneValor && COOKIES_QUE_PRUEBAN_SESION.includes(c.name))
+      .map(c => c.name);
   }
 
   private logearRechazo(motivo: string | undefined): void {
