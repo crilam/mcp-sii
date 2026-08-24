@@ -64,6 +64,57 @@ describe('BheScraper.informeAnual', () => {
     expect(informe.meses[1].emisionesAnuladas).toBe(0);
   });
 
+  // Omitir el mes haria que el consumidor lo lea como "no emitio", y un motor
+  // contable que escribe "importado, sin emisiones" sobre un mes que si tuvo es
+  // peor que un error: nadie vuelve a mirarlo.
+  it('falla si un mes trae montos pero ningun folio legible', async () => {
+    const { scraper } = makeScraper(`<html><body><script>
+ xml_values['anio_consulta'] = "2025";
+ xml_values['rut_arrastre'] = "11111111";
+ xml_values['dv_arrastre'] = "1";
+ xml_values['ene1']= "1.500.000";
+ xml_values['ene4']= "N/A";
+ xml_values['tot4']= "101";
+ xml_values['tot5']= "105";
+</script></body></html>`);
+
+    await expect(scraper.informeAnual(2025)).rejects.toThrow(/datos para el mes 1/);
+  });
+
+  // La deteccion no depende del honorario bruto: un mes de puras boletas
+  // anuladas tiene montos en cero y aun asi tuvo emisiones.
+  it('falla tambien si el unico dato del mes son emisiones anuladas', async () => {
+    const { scraper } = makeScraper(`<html><body><script>
+ xml_values['anio_consulta'] = "2025";
+ xml_values['rut_arrastre'] = "11111111";
+ xml_values['dv_arrastre'] = "1";
+ xml_values['ene7']= "3";
+ xml_values['ene4']= "";
+ xml_values['tot4']= "101";
+ xml_values['tot5']= "105";
+</script></body></html>`);
+
+    await expect(scraper.informeAnual(2025)).rejects.toThrow(/datos para el mes 1/);
+  });
+
+  // Y un mes REALMENTE vacio se sigue omitiendo: asi informa el SII los meses
+  // sin actividad, y convertirlos en error rompria todos los años incompletos.
+  it('sigue omitiendo un mes sin folio y sin montos', async () => {
+    const { scraper } = makeScraper(`<html><body><script>
+ xml_values['anio_consulta'] = "2025";
+ xml_values['rut_arrastre'] = "11111111";
+ xml_values['dv_arrastre'] = "1";
+ xml_values['ene1']= "";
+ xml_values['ene4']= "";
+ xml_values['tot4']= "0";
+ xml_values['tot5']= "0";
+</script></body></html>`);
+
+    const informe = await scraper.informeAnual(2025);
+
+    expect(informe.meses).toEqual([]);
+  });
+
   it('expone el rango de folios del año', async () => {
     const { scraper } = makeScraper(fixture('bhe-informe-anual.html'));
 

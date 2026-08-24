@@ -287,6 +287,15 @@ export class BheScraper {
     // Mandarle el índice de emitidas pediría `0` y `1`, que probablemente son la
     // misma página: 200 boletas con folios duplicados, el fallo silencioso que
     // todo esto evita. Hasta relevar ese CGI, recibidas falla explícito.
+    //
+    // PISTA para cuando se releve, aportada por la sesión que integra Tributy:
+    // apigateway.cl expone su listado de BHE con `pagina` + `pagina_sig_codigo`
+    // y marca el fin con `pagina_sig_codigo == "00000000000000"`. Como ellos
+    // scrapean el mismo CGI, es muy probable que ése sea el mecanismo real:
+    // pedir la página siguiente mandando el código que devolvió la anterior, en
+    // vez de un índice. Encaja con que este informe emita `pagina_sig_codigo`,
+    // que el de emitidas no tiene. Igual hay que verificarlo con un mes real de
+    // más de 100 recibidas antes de implementarlo.
     if (recibidas && totalPaginas > 1) {
       throw new LimitacionConocida(
         `El SII informa ${total} boletas recibidas para ${String(mes).padStart(2, '0')}/${anio}, ` +
@@ -503,7 +512,32 @@ export class BheScraper {
     mes: number
   ): MesBhe | null {
     const folioInicial = this.toInt(values[`${prefijo}4`]);
-    if (folioInicial === null) return null;
+    if (folioInicial === null) {
+      // Sin folio inicial el mes se omite, y quien consume lee esa ausencia como
+      // "no emitió". Eso es correcto para un mes vacío, que es como el SII
+      // informa los meses sin actividad.
+      //
+      // Pero si el mes trae MONTOS y no folio, la ausencia mentiría: habría
+      // emisiones y el consumidor las tomaría como cero. Un motor contable que
+      // escribe "mes importado, sin emisiones" sobre un mes que sí tuvo es peor
+      // que un error, porque nadie vuelve a mirarlo. Se corta acá.
+      // Todas las columnas del mes menos la 4, que es la que falta. Incluye la 5
+      // (folio final): un mes con folio final y sin folio inicial tuvo
+      // emisiones, aunque sus montos estén en cero — omitirlo sería la misma
+      // mentira. Los montos en cero con folios presentes pasan de verdad: un mes
+      // de puras boletas anuladas.
+      const conDatos = [1, 2, 3, 5, 6, 7]
+        .some(col => (this.toInt(values[`${prefijo}${col}`]) ?? 0) !== 0);
+      if (conDatos) {
+        throw new LimitacionConocida(
+          `El informe anual trae datos para el mes ${mes} pero ningún folio inicial ` +
+          'legible, así que no se puede saber si hubo emisiones. Omitir ese mes lo ' +
+          'haría pasar por uno sin actividad, así que no se devuelve NINGÚN mes del ' +
+          'año: el año no está vacío, no se pudo leer. Consultalo desde el portal.'
+        );
+      }
+      return null;
+    }
 
     return {
       mes,

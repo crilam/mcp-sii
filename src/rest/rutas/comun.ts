@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { RecursoNoEncontrado } from '../../erroresConsulta';
+import { LimitacionConocida, RecursoNoEncontrado } from '../../erroresConsulta';
 
 // Fragmento zod compartido por las rutas REST que reciben SÓLO certificado
 // digital (renta, dte, mipyme; las de BHE usan `conCredencial`, que acepta
@@ -157,6 +157,24 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
       // mandarlo: estos mensajes los redacta el scraper, no son un error crudo
       // de subproceso con el comando adentro.
       return { status: 200, body: { ok: false, error: 'NO_ENCONTRADO', detalle: e.message } };
+    }
+    // Lo que el SII no puede darnos por un límite que ya conocemos: un mes de
+    // recibidas con más de 100 boletas (ese CGI pagina con otro esquema, sin
+    // relevar), un descuadre entre lo que el SII informa y lo que se recupera, o
+    // un cambio de formato del CGI.
+    //
+    // Va con código propio porque `ERROR` significa "reintentá" y esto NO se
+    // arregla reintentando: el tenant reintentaría en loop un mes que nunca va a
+    // funcionar. Es el mismo razonamiento que NO_ENCONTRADO, aplicado a la otra
+    // familia de fallos permanentes.
+    //
+    // El `detalle` importa más acá que en NO_ENCONTRADO: de los tres casos, sólo
+    // el corte de las 100 es accionable por el usuario final ("este mes tiene
+    // demasiadas boletas para esta vía"); los otros dos son para el operador.
+    // Va después de RecursoNoEncontrado a propósito: es su clase madre, así que
+    // el orden decide, y el caso más específico tiene que ganar.
+    if (e instanceof LimitacionConocida) {
+      return { status: 200, body: { ok: false, error: 'LIMITE_CONOCIDO', detalle: e.message } };
     }
     const error = clasificarErrorCredenciales(e);
     // Un error que no es rechazo de credenciales es un bug (del scraper, de

@@ -2,7 +2,7 @@ import { registrarRutasBhe } from '../../../src/rest/rutas/bhe';
 import { RegistroSesiones } from '../../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
 import * as core from '../../../src/core/bhe';
-import { RecursoNoEncontrado } from '../../../src/erroresConsulta';
+import { LimitacionConocida, RecursoNoEncontrado } from '../../../src/erroresConsulta';
 
 jest.mock('../../../src/core/bhe');
 
@@ -142,6 +142,59 @@ describe('registrarRutasBhe', () => {
 
     expect(respuesta.status).toBe(400);
     expect(core.pdf).not.toHaveBeenCalled();
+  });
+
+  // ERROR significa "reintentá". Un limite conocido —un mes de recibidas con mas
+  // de 100 boletas, un descuadre de conteo, un cambio de formato del CGI— es
+  // permanente: con ERROR el tenant reintentaria en loop un mes que nunca va a
+  // funcionar.
+  it('un limite conocido devuelve LIMITE_CONOCIDO con detalle, no ERROR', async () => {
+    (core.listRecibidas as jest.Mock).mockRejectedValue(
+      new LimitacionConocida('El SII informa 150 boletas recibidas y entrega 100 por pagina')
+    );
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/list-recibidas')!({
+      rut: '11.111.111-1', clave: 'secreta', anio: 2026, mes: 7,
+    });
+
+    expect(respuesta).toEqual({
+      status: 200,
+      body: {
+        ok: false,
+        error: 'LIMITE_CONOCIDO',
+        detalle: 'El SII informa 150 boletas recibidas y entrega 100 por pagina',
+      },
+    });
+  });
+
+  // `resumen` es la ruta que estrena el throw nuevo del informe anual, asi que
+  // se cubre por separado de `list-recibidas`.
+  it('resumen: un limite conocido tambien sale como LIMITE_CONOCIDO', async () => {
+    (core.resumen as jest.Mock).mockRejectedValue(
+      new LimitacionConocida('El informe anual trae datos para el mes 3 pero ningun folio')
+    );
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/resumen')!({
+      rut: '11.111.111-1', clave: 'secreta', anio: 2026,
+    });
+
+    expect((respuesta.body as { error: string }).error).toBe('LIMITE_CONOCIDO');
+    expect((respuesta.body as { detalle?: string }).detalle).toMatch(/mes 3/);
+  });
+
+  // RecursoNoEncontrado extiende LimitacionConocida, asi que el orden de los
+  // `instanceof` decide: el caso mas especifico tiene que ganar.
+  it('una boleta inexistente sigue siendo NO_ENCONTRADO, no LIMITE_CONOCIDO', async () => {
+    (core.pdf as jest.Mock).mockRejectedValue(new RecursoNoEncontrado('no existe'));
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', clave: 'secreta', codigo_barras: 'ABC123',
+    });
+
+    expect((respuesta.body as { error: string }).error).toBe('NO_ENCONTRADO');
   });
 
   it('pdf: un fallo transitorio sigue siendo ERROR', async () => {

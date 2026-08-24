@@ -225,6 +225,30 @@ empresa en el portal.
 - **Cada aplicación del SII tiene su propia lista de empresas autorizadas.** La de
   `sii_mipyme_list_empresas` no coincide con la que habilitan el RCV o Consultas DTE.
 
+## Adaptador REST: contrato de errores
+
+Las rutas `/v1/*` responden siempre HTTP 200 —salvo `400` por body inválido— y el
+resultado va en el cuerpo: `{"ok": true, ...}` o `{"ok": false, "error": "..."}`.
+
+Lo que un consumidor necesita saber de cada código es **si reintentar sirve**:
+
+| `error` | ¿Reintentar? | Cuándo aparece |
+|---|---|---|
+| `BAD_REQUEST` (HTTP 400) | No | El body no valida. Trae `detalle` con el campo y el motivo |
+| `CREDENCIALES_INVALIDAS` | No | El portal dijo explícitamente que la clave es incorrecta |
+| `NO_ENCONTRADO` | No | El SII confirmó que el dato no existe. Trae `detalle` |
+| `LIMITE_CONOCIDO` | No | Un límite que ya conocemos: un mes de recibidas con más de 100 boletas, un descuadre entre lo que el SII informa y lo que se recupera, o un cambio de formato de un CGI. Trae `detalle` |
+| `ERROR` | **Sí** | Todo lo demás: cola de espera del SII, portal caído, fallo de red |
+
+Los dos códigos con "no" que podrían confundirse:
+
+- `CREDENCIALES_INVALIDAS` se reserva para cuando el portal lo dice con esas
+  palabras. Un fallo transitorio sale como `ERROR`, nunca como credencial
+  inválida — si no, un consumidor que borra la credencial al recibirlo estaría
+  borrando claves que sí servían por una caída del SII.
+- `LIMITE_CONOCIDO` existe porque esos casos son permanentes y salían como
+  `ERROR`: el consumidor reintentaba en loop algo que nunca iba a funcionar.
+
 ## Desarrollo
 
 ```bash
