@@ -255,17 +255,6 @@ export class Browser {
       .filter(c => c.name !== '');
   }
 
-  // Borra las cookies indicadas, y sólo esas, expirándolas en el pasado
-  // (verificado contra el CLI: una cookie con `--expires 1` desaparece del
-  // contexto). NO se usa `cookies clear`, que borraría todo el jar: ahí también
-  // viven el token del WAF y el de la cola de espera del SII (`QueueITAccepted`),
-  // y tirarlos manda cada login de vuelta a la cola, que bajo carga puede hacer
-  // fallar un login con credenciales perfectamente válidas.
-  // Devuelve cuántas no se pudieron borrar. Un `set` que falla NO aborta el
-  // resto: si una cookie del jar tiene un nombre o dominio que el CLI rechaza,
-  // cortar ahí dejaría sin borrar todas las siguientes —incluidas las que sí
-  // importan— y haría fallar el login entero sin salida. Quien llama decide qué
-  // hacer; la garantía real es re-leer y verificar, no que cada `set` funcione.
   // Vacía TODO el jar del contexto. Es el último recurso: se lleva también el
   // token del WAF y el de la cola de espera, así que el intento siguiente vuelve
   // a encolarse. Sólo tiene sentido cuando el borrado selectivo no logró sacar
@@ -274,6 +263,18 @@ export class Browser {
     this.run(['cookies', 'clear']);
   }
 
+  // Borra las cookies indicadas, y sólo esas, expirándolas en el pasado
+  // (verificado contra el CLI: una cookie con `--expires 1` desaparece del
+  // contexto). No usa `cookies clear` —eso es `vaciarCookies`, el último
+  // recurso— porque en el jar también viven el token del WAF y el de la cola de
+  // espera del SII, y tirarlos manda cada login de vuelta a la cola, que bajo
+  // carga puede hacer fallar un login con credenciales perfectamente válidas.
+  //
+  // Devuelve cuántas no se pudieron borrar. Un `set` que falla NO aborta el
+  // resto: si una cookie del jar tiene un nombre o dominio que el CLI rechaza,
+  // cortar ahí dejaría sin borrar todas las siguientes —incluidas las que sí
+  // importan— y haría fallar el login entero sin salida. Quien llama decide qué
+  // hacer; la garantía real es re-leer y verificar, no que cada `set` funcione.
   borrarCookies(cookies: CookieUbicada[]): number {
     let fallidas = 0;
     for (const { name, domain, path } of cookies) {
