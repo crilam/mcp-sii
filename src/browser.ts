@@ -190,12 +190,15 @@ export class Browser {
     return this.runPorStdin(['eval', js]);
   }
 
-  // Nombres de las cookies que el contexto tiene para dominios del SII.
-  // Va por el comando dedicado del CLI y no por `eval('document.cookie')`
-  // porque las cookies de sesión del SII son HttpOnly: `document.cookie` no las
-  // ve, y basar en eso un chequeo de "¿hay sesión?" daría siempre que no.
-  // Se devuelven sólo los NOMBRES: para saber si hay sesión alcanza con eso, y
-  // los valores son credenciales de sesión que no tienen por qué circular.
+  // Va por el comando dedicado del CLI y no por `eval('document.cookie')`: el
+  // comando lee el jar del CONTEXTO, que es lo que hace falta —`document.cookie`
+  // depende de la página cargada y no ve las cookies marcadas HttpOnly, así que
+  // un chequeo de "¿hay sesión?" basado en eso sería frágil justo cuando importa.
+  // (Medido contra el portal: hoy TOKEN y CSESSIONID vienen con httpOnly=false y
+  // valor de 13 caracteres, pero el criterio no depende de que eso siga así.)
+  //
+  // Nunca devuelve los valores: son credenciales de sesión, y para saber si hay
+  // sesión alcanza con el nombre y un booleano de "tiene contenido".
   // Se relanza SIN la salida del CLI. `run()` mete stderr+stdout en el mensaje y
   // en la prop `salida`, y acá eso es peligroso: si el comando falla con código
   // ≠ 0 pero alcanzó a imprimir JSON, ese JSON trae los VALORES de
@@ -258,10 +261,21 @@ export class Browser {
   // viven el token del WAF y el de la cola de espera del SII (`QueueITAccepted`),
   // y tirarlos manda cada login de vuelta a la cola, que bajo carga puede hacer
   // fallar un login con credenciales perfectamente válidas.
-  borrarCookies(cookies: CookieUbicada[]): void {
+  // Devuelve cuántas no se pudieron borrar. Un `set` que falla NO aborta el
+  // resto: si una cookie del jar tiene un nombre o dominio que el CLI rechaza,
+  // cortar ahí dejaría sin borrar todas las siguientes —incluidas las que sí
+  // importan— y haría fallar el login entero sin salida. Quien llama decide qué
+  // hacer; la garantía real es re-leer y verificar, no que cada `set` funcione.
+  borrarCookies(cookies: CookieUbicada[]): number {
+    let fallidas = 0;
     for (const { name, domain, path } of cookies) {
-      this.run(['cookies', 'set', name, '', '--domain', domain, '--path', path, '--expires', '1']);
+      try {
+        this.run(['cookies', 'set', name, '', '--domain', domain, '--path', path, '--expires', '1']);
+      } catch {
+        fallidas += 1;
+      }
     }
+    return fallidas;
   }
 
   press(key: string): void {

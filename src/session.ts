@@ -567,7 +567,13 @@ export class SessionManager {
       const aBorrar = this.browser
         .cookiesDelSiiConUbicacion()
         .filter(c => !esCookieDeInfraestructura(c.name));
-      this.browser.borrarCookies(aBorrar);
+      // Los fallos individuales no cortan: lo que decide es la verificación de
+      // abajo. Si alguna cookie que importa quedó viva, ahí se detecta; y si las
+      // que fallaron eran irrelevantes, abortar habría sido un falso bloqueo.
+      const fallidas = this.browser.borrarCookies(aBorrar);
+      if (fallidas > 0) {
+        console.error(`Login SII: ${fallidas} de ${aBorrar.length} cookies no se pudieron borrar.`);
+      }
 
       // Se VERIFICA el borrado en vez de confiar en él. Expirar una cookie
       // depende de acertarle a sus atributos (dominio host-only, path, Secure):

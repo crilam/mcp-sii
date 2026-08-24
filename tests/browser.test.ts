@@ -322,6 +322,26 @@ describe('Browser', () => {
     expect(argv).not.toContain('clear');
   });
 
+  // Cortar en la primera que falla dejaría sin borrar todas las siguientes,
+  // incluidas las que sí importan, y haría fallar el login entero sin salida.
+  // La garantía real es la verificación posterior, no que cada `set` funcione.
+  it('borrarCookies sigue con las demás si una falla, y reporta cuántas', () => {
+    mockExec.mockImplementation((_cmd, args) => {
+      if ((args as string[]).includes('RARA')) throw new Error('el CLI la rechazó');
+      return Buffer.from('');
+    });
+
+    const fallidas = browser.borrarCookies([
+      { name: 'RARA', domain: '.sii.cl', path: '/', tieneValor: true },
+      { name: 'TOKEN', domain: '.sii.cl', path: '/', tieneValor: true },
+    ]);
+
+    expect(fallidas).toBe(1);
+    // Y la que importa se intentó igual, después de la que falló.
+    const argv = mockExec.mock.calls.flatMap(([, args]) => args as string[]);
+    expect(argv).toContain('TOKEN');
+  });
+
   // El hueco que reabría el falso positivo: una cookie host-only de
   // zeusr.sii.cl, o con un path propio, no se borra apuntándole a `.sii.cl` con
   // path `/` — pero sí la ve el chequeo de sesión. Hay que borrarla donde vive.
