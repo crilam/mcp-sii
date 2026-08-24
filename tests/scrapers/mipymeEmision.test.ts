@@ -46,6 +46,7 @@ function armar() {
   const http = new MockHttp(session);
   (session.conEmpresaExclusiva as jest.Mock) = jest.fn((fn: () => Promise<unknown>) => fn());
   (session.assertPuedeEntregarCookieJar as jest.Mock).mockImplementation(() => {});
+  (session.assertPuedeFirmar as jest.Mock).mockImplementation(() => {});
 
   // GET: primero la selección de empresa, después el formulario de emisión.
   (http.get as jest.Mock).mockImplementation(async (url: string) =>
@@ -201,6 +202,40 @@ describe('MipymeHttpScraper.emitirDte', () => {
     expect(urlsPosteadas(http).some(u => u.includes('mipeDisplayPreView'))).toBe(true);
     expect(resultado.emitido).toBe(false);
     expect(resultado.resumen).toMatchObject({ neto: 3, iva: 1, total: 4 });
+  });
+
+  // Emitir exige certificado: la clave tributaria autentica pero no firma. Este
+  // chequeo se volvió imprescindible cuando `assertPuedeEntregarCookieJar` dejó
+  // de exigir certificado (ahora la clave también produce el cookie jar): sin
+  // él, una sesión con clave llegaba hasta el POST de firma del portal, y emitir
+  // es un acto tributario irreversible.
+  it('con confirmar exige poder firmar ANTES de tocar la red', async () => {
+    const { scraper, http, session } = armar();
+    // Error común y no `RequiereCertificado`: esta suite mockea el módulo de
+    // sesión entero, así que la clase real llega automockeada y su constructor
+    // no guarda el mensaje. Lo que este test fija es que el guard se consulta y
+    // que su rechazo corta la emisión, no de qué clase es el error.
+    (session.assertPuedeFirmar as jest.Mock).mockImplementation(() => {
+      throw new Error('Firmar documentos tributarios requiere certificado digital');
+    });
+
+    await expect(scraper.emitirDte(params(), true)).rejects.toThrow(/requiere certificado/);
+    expect(session.assertPuedeFirmar).toHaveBeenCalled();
+
+    // Ni un request: el fallo tiene que ocurrir antes de empezar.
+    expect(http.get).not.toHaveBeenCalled();
+    expect(http.postForm).not.toHaveBeenCalled();
+  });
+
+  // La previsualización no firma nada, así que con clave tiene que seguir
+  // funcionando: bloquearla también sería restringir de más.
+  it('sin confirmar NO exige poder firmar', async () => {
+    const { scraper, session } = armar();
+    (session.assertPuedeFirmar as jest.Mock).mockImplementation(() => {
+      throw new Error('no debería llamarse');
+    });
+
+    await expect(scraper.emitirDte(params())).resolves.toMatchObject({ emitido: false });
   });
 
   it('con confirmar reenvía los campos de la previsualización sin tocarlos', async () => {

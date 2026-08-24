@@ -40,6 +40,16 @@ export interface BoletaBhe {
   contraparteRol: RolContraparte;
   contraparteRut: string;
   contraparteNombre: string;
+  // Fecha en que se EMITIÓ la boleta, que puede diferir de la fecha del
+  // documento (`fecha`): el SII las informa por separado y apigateway también
+  // (`fecha` y `fecha_emision`). Vacía en recibidas, donde el CGI no la trae.
+  fechaEmision: string;
+  // Mail al que el emisor envió la boleta. Vacío si no se envió por mail o si el
+  // informe no lo trae (recibidas).
+  emailEnvio: string;
+  // Si la contraparte es sociedad profesional. Cambia el tratamiento tributario,
+  // así que se expone en vez de descartarlo: el CGI ya lo manda.
+  sociedadProfesional: boolean;
   honorarioBruto: number;
   // El informe de recibidas no trae la retención del emisor (el receptor no la
   // ve). null es "el SII no lo informa", distinto de un cero que sí informó.
@@ -91,6 +101,12 @@ interface EsquemaBoletas {
   fecha: string;
   // Ausente en recibidas: el receptor no ve la retención que declaró el emisor.
   retencionEmisor: string | null;
+  // Campos que sólo emite el informe de EMITIDAS. `null` significa "este informe
+  // no lo trae", que es distinto de "vino vacío": sin la distinción se leería
+  // una clave inexistente y el campo saldría vacío sin que nadie note que el
+  // informe cambió de forma.
+  fechaEmision: string | null;
+  emailEnvio: string | null;
 }
 
 const ESQUEMA_EMITIDAS: EsquemaBoletas = {
@@ -98,8 +114,16 @@ const ESQUEMA_EMITIDAS: EsquemaBoletas = {
   rut: 'rutreceptor',
   dv: 'dvreceptor',
   nombre: 'nombrereceptor',
-  fecha: 'fechaemision',
+  // `fecha` es la del DOCUMENTO (`fecha_boleta`), igual que en recibidas, y
+  // `fechaEmision` es la de emisión (`fechaemision`). El CGI de emitidas manda
+  // las dos claves por separado y antes las dos apuntaban a `fechaemision`: el
+  // campo nuevo era un alias del viejo —nunca podían diferir, aunque su
+  // comentario dijera que sí— y la fecha del documento se descartaba. En las
+  // capturas coinciden, así que el error era invisible hasta el día que no.
+  fecha: 'fecha_boleta',
   retencionEmisor: 'retencion_emisor',
+  fechaEmision: 'fechaemision',
+  emailEnvio: 'email_envio',
 };
 
 const ESQUEMA_RECIBIDAS: EsquemaBoletas = {
@@ -110,6 +134,8 @@ const ESQUEMA_RECIBIDAS: EsquemaBoletas = {
   nombre: 'nombre_emisor',
   fecha: 'fecha_boleta',
   retencionEmisor: null,
+  fechaEmision: null,
+  emailEnvio: null,
 };
 
 // Entidades HTML que el SII emite en razones sociales (respuesta ISO-8859-1).
@@ -225,6 +251,106 @@ export class BheScraper {
     this.assertConsultaHttpPosible();
     // No requiere seleccionar empresa: la BHE es de la persona natural.
     await this.session.authenticateOnly();
+
+    // Primera página: además de sus filas, trae el total del mes, que es lo que
+    // dice cuántas páginas hay.
+    const primera = await this.pedirPagina(anio, mes, recibidas, 0);
+    const total = this.toInt(primera.values['total_boletas']) ?? 0;
+    const esquema = recibidas ? ESQUEMA_RECIBIDAS : ESQUEMA_EMITIDAS;
+    const primeraPagina = this.parseBoletas(primera.html, esquema);
+    const boletas = primeraPagina.boletas;
+    let descartadas = primeraPagina.descartadas;
+
+    // Cuántas páginas hay y cómo se piden NO se adivina: lo declara el propio JS
+    // del informe, que arma su paginador con
+    //   tot_pag = Math.ceil(max/100)   y   listar(i) para i en [0, tot_pag)
+    // poniendo `i` en `pagina_solicitada`. O sea que el índice es 0-based y la
+    // cuenta sale del total del mes. (Antes esto era un error explícito: el
+    // comentario decía que sin una captura de un mes con más de 100 boletas no
+    // se podía saber qué valor pide la página 2. Se podía: está escrito en la
+    // respuesta.)
+    // La cuenta de páginas usa SÓLO el tamaño de página del CGI (100), nunca el
+    // `CantidadFilas` de la primera respuesta. Derivarlo de ahí parecía más
+    // honesto y era un bug: `CantidadFilas` es cuántas filas trae ESA página, y
+    // no es el tamaño de página cuando el mes no la llena. Con total=103 y una
+    // primera página de 50 filas daba `ceil(103/50)=3`, o sea pedir dos páginas
+    // que no existen — descuadre y mes inconsultable con el CGI funcionando bien.
+    // `CantidadFilas` sirve para iterar las filas de cada página, y nada más.
+    const totalPaginas = Math.ceil(total / MAX_FILAS_POR_PAGINA);
+
+    // La paginación se implementa SÓLO para emitidas, y no por comodidad: los
+    // dos CGI paginan distinto. El de emitidas usa `pagina_solicitada` 0-based
+    // (su paginador hace `listar(i)` para i en [0, tot_pag)). El de recibidas
+    // devuelve `pagina_solicitada="1"` y `pagina_actual="1"`, y navega con
+    // `GLB_sig_pag`/`pagina_sig_codigo` — o sea 1-based y con un código de
+    // continuación, y su `listar()` vive en un JS que no tenemos capturado.
+    // Mandarle el índice de emitidas pediría `0` y `1`, que probablemente son la
+    // misma página: 200 boletas con folios duplicados, el fallo silencioso que
+    // todo esto evita. Hasta relevar ese CGI, recibidas falla explícito.
+    if (recibidas && totalPaginas > 1) {
+      throw new LimitacionConocida(
+        `El SII informa ${total} boletas recibidas para ${String(mes).padStart(2, '0')}/${anio}, ` +
+        `y entrega ${MAX_FILAS_POR_PAGINA} por página. La paginación del informe de ` +
+        'recibidas usa otro esquema que el de emitidas y todavía no está relevada, ' +
+        'así que no se devuelve un listado incompleto. Consultá el mes desde el portal.'
+      );
+    }
+
+    for (let pagina = 1; pagina < totalPaginas; pagina++) {
+      const { html } = await this.pedirPagina(anio, mes, recibidas, pagina);
+      const siguiente = this.parseBoletas(html, esquema);
+      boletas.push(...siguiente.boletas);
+      descartadas += siguiente.descartadas;
+    }
+
+    // Chequeo de integridad: si el SII dijo N y juntamos otra cantidad, algo se
+    // perdió o se duplicó, y un listado incompleto presentado como el mes
+    // completo entra al motor contable del consumidor como un total real. Es el
+    // modo de falla silencioso que el error explícito anterior evitaba, así que
+    // no se cambia por confianza: se verifica.
+    // Dos chequeos SEPARADOS, para que el mensaje no mienta sobre la causa.
+    //
+    // La clave de unicidad incluye el folio Y el código de barras. Con sólo el
+    // código, dos filas que vinieran sin él (el caso de una boleta anulada nunca
+    // se capturó) caían las dos en '' y el Set las contaba como una: el mes
+    // entero se volvía inconsultable con un error que decía "duplicados". Y con
+    // sólo el folio, un mes legítimo de recibidas con dos emisores que usan el
+    // mismo folio se caía igual.
+    const claves = new Set(boletas.map(b => `${b.folio}|${b.codigoBarras}`));
+    const faltan = boletas.length !== total;
+    const repetidos = claves.size !== boletas.length;
+
+    if (faltan || repetidos) {
+      const causa = repetidos
+        // Un CGI que ignore `pagina_solicitada` devuelve dos veces la misma
+        // página: el conteo puede cuadrar y aun así ser basura.
+        ? `hay ${boletas.length - claves.size} documento(s) repetido(s), probablemente una página servida dos veces`
+        : descartadas > 0
+          ? `${descartadas} fila(s) vinieron sin folio y se descartaron`
+          : 'faltan páginas o filas';
+
+      // LimitacionConocida y NO Error pelado: `conSesionFresca` reintenta todo lo
+      // que no sea esto, y un descuadre de conteo es determinístico. El reintento
+      // haría invalidate() + authenticateOnly() + las N páginas otra vez para
+      // fallar igual, gastando DOS sesiones del SII en una consulta — el bloqueo
+      // 01.01.190.500.720.27 que el resto del archivo cuida.
+      throw new LimitacionConocida(
+        `El SII informó ${total} boletas para ${String(mes).padStart(2, '0')}/${anio} ` +
+        `y se recuperaron ${boletas.length} (${claves.size} distintas) en ` +
+        `${totalPaginas} página(s): ${causa}. No se devuelve un listado ` +
+        'incompleto ni con duplicados.'
+      );
+    }
+
+    return boletas;
+  }
+
+  private async pedirPagina(
+    anio: number,
+    mes: number,
+    recibidas: boolean,
+    pagina: number
+  ): Promise<{ html: string; values: Record<string, string> }> {
     const { rut, dv } = this.session.identidad();
     const html = await this.http.postForm(
       recibidas ? CGI_MENSUAL_REC : CGI_MENSUAL,
@@ -232,7 +358,8 @@ export class BheScraper {
         rut_arrastre: rut,
         dv_arrastre: dv,
         // Sin este campo el CGI responde el error TMB020a en vez del informe.
-        pagina_solicitada: '0',
+        // Es 0-based (ver el paginador del propio informe).
+        pagina_solicitada: String(pagina),
         // El formulario del portal manda el mes con dos digitos.
         cbmesinformemensual: String(mes).padStart(2, '0'),
         cbanoinformemensual: String(anio),
@@ -245,36 +372,7 @@ export class BheScraper {
         'El SII no devolvió un informe de boletas de honorarios. La sesión pudo expirar; reintentá.'
       );
     }
-
-    const total = this.toInt(values['total_boletas']) ?? 0;
-
-    // `total_boletas` es el total del MES, no el de la página, y el CGI sólo
-    // manda 100 filas por página. Iterando hasta el total, los índices 101+ no
-    // existen, quedan con folio null y el `continue` los descartaba: el usuario
-    // recibía 100 boletas presentadas como el mes completo.
-    //
-    // Decisión: error explícito en vez de paginar. Las dos respuestas capturadas
-    // numeran las páginas distinto —emitidas devuelve pagina_solicitada "0",
-    // recibidas devuelve "1" y además pagina_actual— y no hay ninguna captura
-    // real de un mes con más de una página contra la cual verificar qué valor
-    // pide la página 2 en cada CGI. Adivinarlo tiene un modo de falla peor que
-    // el actual: si el CGI ignora el parámetro devuelve otra vez la página 1 y
-    // el resultado serían 200 boletas con folios duplicados, igual de silencioso.
-    // Preferimos fallar fuerte y dejar la paginación para cuando haya fixture.
-    if (total > MAX_FILAS_POR_PAGINA) {
-      throw new LimitacionConocida(
-        `El SII informa ${total} boletas para ${String(mes).padStart(2, '0')}/${anio}, ` +
-        `pero entrega como máximo ${MAX_FILAS_POR_PAGINA} por página y la paginación ` +
-        'todavía no está implementada. Consultá el mes desde el portal para no ' +
-        'trabajar con un listado incompleto.'
-      );
-    }
-
-    return this.parseBoletas(
-      html,
-      total,
-      recibidas ? ESQUEMA_RECIBIDAS : ESQUEMA_EMITIDAS
-    );
+    return { html, values };
   }
 
   // Descarga el PDF de UNA boleta. La clave es el `codigoBarras` que entrega
@@ -479,27 +577,56 @@ export class BheScraper {
     });
   }
 
+  // Devuelve las boletas Y cuántas filas se descartaron. Lo segundo se devuelve
+  // en vez de acumularse en un campo de la instancia: dos `informeMensual`
+  // concurrentes sobre el mismo scraper se pisaban el contador, y aunque sólo
+  // afectaba el mensaje de error, es estado mutable evitable.
   private parseBoletas(
     html: string,
-    total: number,
     esquema: EsquemaBoletas
-  ): BoletaBhe[] {
+  ): { boletas: BoletaBhe[]; descartadas: number } {
     const arr = this.parseArrInforme(html);
     const boletas: BoletaBhe[] = [];
 
-    for (let i = 1; i <= total; i++) {
+    // `CantidadFilas` es la cantidad de filas de ESTA página, y es lo correcto
+    // para iterar. Antes se iteraba hasta `total_boletas`, que es el total del
+    // MES: con más de una página los índices se pasaban del final (las claves de
+    // `arr_informe_mensual` se numeran 1..N dentro de cada respuesta, no
+    // globalmente) y las filas inexistentes se descartaban en silencio.
+    const filas = this.cantidadFilas(html);
+    let descartadas = 0;
+
+    for (let i = 1; i <= filas; i++) {
       const folio = this.toInt(arr[`nroboleta_${i}`]);
       // Un indice sin folio significa que el SII devolvio menos filas de las
-      // que anuncio: se omite en vez de inventar una boleta vacia.
-      if (folio === null) continue;
+      // que anuncio: se omite en vez de inventar una boleta vacia, y se cuenta
+      // para que el chequeo de integridad pueda nombrar la causa.
+      if (folio === null) {
+        descartadas += 1;
+        continue;
+      }
 
       const estado = (arr[`estado_${i}`] ?? '').trim();
       const fechaAnulacion = (arr[`fechaanulacion_${i}`] ?? '').trim();
+      // El CGI lo manda como "SI"/"NO". Se compara contra "SI" y no se niega
+      // "NO": si algún día llega vacío o con otro valor, "no es sociedad
+      // profesional" es la lectura conservadora.
+      const socProfesional = (arr[`es_soc_profesional_${i}`] ?? '').trim().toUpperCase();
 
       boletas.push({
         folio,
         codigoBarras: (arr[`codigobarras_${i}`] ?? '').trim(),
         fecha: (arr[`${esquema.fecha}_${i}`] ?? '').trim(),
+        // Cadena vacía cuando el informe no trae el campo (recibidas): distinto
+        // de "vino vacío", pero el consumidor no puede hacer nada distinto con
+        // esa diferencia, así que no se inventa un tercer estado.
+        fechaEmision: esquema.fechaEmision === null
+          ? ''
+          : (arr[`${esquema.fechaEmision}_${i}`] ?? '').trim(),
+        emailEnvio: esquema.emailEnvio === null
+          ? ''
+          : (arr[`${esquema.emailEnvio}_${i}`] ?? '').trim(),
+        sociedadProfesional: socProfesional === 'SI',
         contraparteRol: esquema.rol,
         contraparteRut: `${arr[`${esquema.rut}_${i}`] ?? ''}-${arr[`${esquema.dv}_${i}`] ?? ''}`,
         contraparteNombre: (arr[`${esquema.nombre}_${i}`] ?? '').trim(),
@@ -517,6 +644,31 @@ export class BheScraper {
       });
     }
 
-    return boletas;
+    return { boletas, descartadas };
+  }
+
+  // Cantidad de filas de la página, que el CGI declara en su JS como
+  // `CantidadFilas=N;` (fuera de `xml_values`, por eso tiene su propio parser).
+  private cantidadFilas(html: string): number {
+    // Anclado al inicio de línea (sin eso, un `TotalCantidadFilas=` matchearía y
+    // devolvería el número equivocado), pero tolerando indentación y `var`: en
+    // la captura actual la variable va pegada al margen, y las capturas
+    // documentadas del mismo CGI traen las líneas vecinas indentadas. Si el SII
+    // la emite con sangría o con `var`, un ancla estricta haría fallar TODA
+    // consulta mensual — y el costo de ser tolerante acá es cero.
+    const match = /^[ \t]*(?:var[ \t]+)?CantidadFilas\s*=\s*(\d+)/m.exec(html);
+    if (!match) {
+      // Devolver 0 haría que el mes salga vacío y el error apareciera después
+      // como un descuadre de conteo, culpando a la paginación en vez de al
+      // parser. Si el CGI renombra la variable, esto lo dice donde pasa.
+      // LimitacionConocida y no Error: si el CGI renombró la variable, el
+      // reintento de `conSesionFresca` va a fallar igual, y de paso gasta una
+      // segunda sesión del SII (bloqueo 01.01.190.500.720.27).
+      throw new LimitacionConocida(
+        'El informe del SII no declara CantidadFilas, así que no se sabe cuántas ' +
+        'filas trae la página. El formato del CGI pudo cambiar.'
+      );
+    }
+    return this.toInt(match[1]) ?? 0;
   }
 }

@@ -18,6 +18,9 @@ const MockBrowser = Browser as jest.MockedClass<typeof Browser>;
 // el borrado y aborta si sobrevive una cookie de sesión: un mock que devuelva
 // siempre lo mismo haría fallar todo login.
 function conJarSimulado(browser: Browser, presentes: string[]): void {
+  // El login exige que se hayan escrito cookies: con 0 lanza a propósito, para
+  // no dejar un jar vacío que después se reporte como sesión caducada.
+  (browser.escribirCookieJar as jest.Mock).mockReturnValue(presentes.length);
   const ubicar = (nombres: string[]) =>
     nombres.map(name => ({ name, domain: '.sii.cl', path: '/', tieneValor: true }));
   let jar = ubicar(presentes);
@@ -66,11 +69,10 @@ function armar() {
   };
 }
 
-// Cada autenticación abre una sesión en el SII y el servicio bloquea el RUT que
-// acumule varias (01.01.190.500.720.27). Con estrategia de clave estas consultas
-// no pueden funcionar nunca, así que el costo correcto es cero sesiones: ni la
-// del primer intento ni la del reintento. Verificar sólo que lanza dejaba pasar
-// exactamente el bug que esto cubre.
+// La clave tributaria SÍ habilita estas consultas: el login por clave exporta las
+// cookies del navegador al jar que consume curl, y verificamos contra el portal
+// que esos CGI responden con datos reales. Antes se rechazaban de entrada
+// exigiendo certificado, que era una limitación nuestra y no del SII.
 describe('BheScraper con estrategia de clave tributaria', () => {
   beforeEach(() => jest.clearAllMocks());
 
@@ -78,21 +80,35 @@ describe('BheScraper con estrategia de clave tributaria', () => {
     ['informeAnual', (s: BheScraper) => s.informeAnual(2025)],
     ['informeMensual', (s: BheScraper) => s.informeMensual(2025, 3)],
     ['informeMensual recibidas', (s: BheScraper) => s.informeMensual(2025, 3, true)],
-  ])('%s no abre ninguna sesión en el SII y no reintenta', async (_nombre, invocar) => {
-    const { scraper, browser, autenticaciones, http } = armar();
+  ])('%s consulta el SII en vez de rechazar por falta de certificado', async (_nombre, invocar) => {
+    const { scraper, autenticaciones, http } = armar();
+    // Respuesta mínima con la cabecera que el parser exige.
+    // `CantidadFilas` es obligatorio: el parser itera por las filas de la
+    // página y ahora falla explícito si el informe no la declara.
+    const informe = `<html><script>xml_values['anio_consulta'] = "2025";
+ xml_values['total_boletas'] = "0";
+CantidadFilas=0;
+</script></html>`;
+    (http.get as jest.Mock).mockResolvedValue(informe);
+    (http.postForm as jest.Mock).mockResolvedValue(informe);
 
-    await expect(invocar(scraper)).rejects.toThrow(/certificado digital/);
+    await expect(invocar(scraper)).resolves.toBeDefined();
 
-    expect(autenticaciones).not.toHaveBeenCalled();
-    expect(browser.open).not.toHaveBeenCalled();
-    expect(http.get).not.toHaveBeenCalled();
-    expect(http.postForm).not.toHaveBeenCalled();
+    // Autenticó UNA vez y consultó: ni rechazo previo ni reintento.
+    expect(autenticaciones).toHaveBeenCalledTimes(1);
   });
 
-  it('el mensaje sigue diciendo qué configurar', async () => {
-    const { scraper } = armar();
+  it('el login por clave deja escrito el cookie jar que usa curl', async () => {
+    const { scraper, browser, http } = armar();
+    (http.get as jest.Mock).mockResolvedValue(
+      `<html><script>xml_values['anio_consulta'] = "2025";</script></html>`
+    );
 
-    await expect(scraper.informeAnual(2025)).rejects.toThrow(/SII_CERT_PATH/);
+    await scraper.informeAnual(2025);
+
+    // Sin esto el navegador tiene la sesión y curl sale sin cookies: el fallo
+    // aparecería después como "la sesión expiró", apuntando al lugar equivocado.
+    expect(browser.escribirCookieJar).toHaveBeenCalled();
   });
 
   // Defensa en profundidad del segundo arreglo: aunque el chequeo previo ya

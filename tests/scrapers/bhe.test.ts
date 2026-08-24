@@ -180,6 +180,10 @@ describe('BheScraper.informeMensual', () => {
       // Es lo único que el SII acepta para pedir el PDF de esta boleta.
       codigoBarras: '111111110000048F99ED',
       fecha: '22/05/2025',
+      // El CGI de emitidas los trae y antes se descartaban.
+      fechaEmision: '22/05/2025',
+      emailEnvio: 'receptor@ejemplo.cl',
+      sociedadProfesional: false,
       contraparteRol: 'receptor',
       contraparteRut: '22222222-2',
       contraparteNombre: 'EMPRESA EJEMPLO SPA',
@@ -193,6 +197,55 @@ describe('BheScraper.informeMensual', () => {
 
   // Los montos vienen envueltos en formatMiles("1000000",'.'), no como string
   // pelado: un parser que no lo contemple devuelve la expresion o nada.
+  // Si el CGI renombra la variable, devolver 0 filas haria que el mes salga
+  // vacio y el error apareciera despues como un descuadre de conteo, culpando a
+  // la paginacion en vez de al parser.
+  it('falla explicito si el informe no declara CantidadFilas', async () => {
+    const { scraper } = makeScraper(
+      `<html><script>xml_values['anio_consulta'] = "2025";
+ xml_values['total_boletas'] = "1";
+ arr_informe_mensual['nroboleta_1'] = "311";
+</script></html>`
+    );
+
+    await expect(scraper.informeMensual(2025, 5)).rejects.toThrow(/no declara CantidadFilas/);
+  });
+
+  // En las capturas `fecha_boleta` y `fechaemision` coinciden, asi que un alias
+  // entre las dos era invisible. Este test las separa a proposito: `fecha` es la
+  // del documento y `fechaEmision` la de emision.
+  it('distingue la fecha del documento de la de emision', async () => {
+    const { scraper } = makeScraper(
+      `<html><script>xml_values['anio_consulta'] = "2025";
+ xml_values['total_boletas'] = "1";
+CantidadFilas=1;
+ arr_informe_mensual['nroboleta_1'] = "311";
+ arr_informe_mensual['fecha_boleta_1'] = "20/05/2025";
+ arr_informe_mensual['fechaemision_1'] = "22/05/2025";
+</script></html>`
+    );
+
+    const boletas = await scraper.informeMensual(2025, 5);
+
+    expect(boletas[0].fecha).toBe('20/05/2025');
+    expect(boletas[0].fechaEmision).toBe('22/05/2025');
+  });
+
+  it('marca sociedadProfesional cuando el CGI manda SI', async () => {
+    const { scraper } = makeScraper(
+      `<html><script>xml_values['anio_consulta'] = "2025";
+ xml_values['total_boletas'] = "1";
+CantidadFilas=1;
+ arr_informe_mensual['nroboleta_1'] = "311";
+ arr_informe_mensual['es_soc_profesional_1'] = "SI";
+</script></html>`
+    );
+
+    const boletas = await scraper.informeMensual(2025, 5);
+
+    expect(boletas[0].sociedadProfesional).toBe(true);
+  });
+
   it('desenvuelve los montos de formatMiles', async () => {
     const { scraper } = makeScraper(fixture('bhe-informe-mensual.html'));
 
@@ -249,8 +302,12 @@ describe('BheScraper.informeMensual de recibidas', () => {
       // Las recibidas también traen el código, así que su PDF se puede pedir.
       codigoBarras: '033333333034364C969E7',
       // El CGI de recibidas no emite fechaemision_N: la fecha vive en
-      // fecha_boleta_N.
+      // fecha_boleta_N. Tampoco trae el mail de envío, así que los dos van
+      // vacíos en vez de inventar un valor.
       fecha: '05/05/2025',
+      fechaEmision: '',
+      emailEnvio: '',
+      sociedadProfesional: false,
       contraparteRol: 'emisor',
       contraparteRut: '33333333-3',
       contraparteNombre: 'PEDRO GOMEZ LARRAIN',
@@ -266,45 +323,128 @@ describe('BheScraper.informeMensual de recibidas', () => {
 });
 
 describe('BheScraper.informeMensual con más de una página', () => {
-  // El CGI entrega 100 filas por página, pero total_boletas es el total del mes.
-  // Antes se devolvían 100 boletas presentadas como el mes completo.
-  it('falla explícitamente en vez de devolver un listado truncado', async () => {
-    const html = `<html><script>
+  // El CGI entrega 100 filas por página. Antes esto fallaba a propósito porque
+  // no sabíamos cómo pedir la página 2; sí se podía saber: el propio informe
+  // arma su paginador con `tot_pag = Math.ceil(max/100)` y `listar(i)` para i en
+  // [0, tot_pag), poniendo ese i (0-based) en `pagina_solicitada`.
+  function paginaCon(totalMes: number, folios: number[]): string {
+    const filas = folios.map((folio, i) => `
+ arr_informe_mensual['nroboleta_${i + 1}'] = "${folio}";
+ arr_informe_mensual['codigobarras_${i + 1}'] = "COD${folio}";
+ arr_informe_mensual['totalhonorarios_${i + 1}'] = formatMiles("1000",'.');`).join('');
+    return `<html><script>
  xml_values['anio_consulta'] = "2025";
- xml_values['total_boletas'] = "150";
- arr_informe_mensual['nroboleta_1'] = "311";
-</script></html>`;
-    const { scraper } = makeScraper(html);
-
-    await expect(scraper.informeMensual(2025, 5))
-      .rejects.toThrow(/150 boletas.*paginación todavía no está implementada/s);
-  });
-
-  it('no reintenta la consulta por una limitación que ya conoce', async () => {
-    const html = `<html><script>
- xml_values['anio_consulta'] = "2025";
- xml_values['total_boletas'] = "150";
-</script></html>`;
-    const { scraper, http, session } = makeScraper(html);
-
-    await expect(scraper.informeMensual(2025, 5)).rejects.toThrow();
-
-    expect((http.postForm as jest.Mock).mock.calls).toHaveLength(1);
-    expect(session.invalidate).not.toHaveBeenCalled();
-  });
-
-  it('acepta un mes de exactamente 100 boletas', async () => {
-    const filas = Array.from({ length: 100 }, (_, i) =>
-      ` arr_informe_mensual['nroboleta_${i + 1}'] = "${300 + i}";`
-    ).join('\n');
-    const html = `<html><script>
- xml_values['anio_consulta'] = "2025";
- xml_values['total_boletas'] = "100";
+ xml_values['total_boletas'] = "${totalMes}";
+CantidadFilas=${folios.length};
 ${filas}
 </script></html>`;
-    const { scraper } = makeScraper(html);
+  }
+
+  it('junta todas las páginas y devuelve el mes completo', async () => {
+    const primeraPagina = Array.from({ length: 100 }, (_, i) => 300 + i);
+    const segundaPagina = [400, 401, 402];
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock)
+      .mockResolvedValueOnce(paginaCon(103, primeraPagina))
+      .mockResolvedValueOnce(paginaCon(103, segundaPagina));
+
+    const boletas = await scraper.informeMensual(2025, 5);
+
+    expect(boletas).toHaveLength(103);
+    // Y en orden, sin duplicar: el bug que el error explícito evitaba era
+    // justamente devolver dos veces la primera página.
+    expect(boletas[0].folio).toBe(300);
+    expect(boletas[102].folio).toBe(402);
+  });
+
+  it('pide las páginas con el índice 0-based que usa el CGI', async () => {
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock)
+      .mockResolvedValueOnce(paginaCon(150, Array.from({ length: 100 }, (_, i) => 300 + i)))
+      .mockResolvedValueOnce(paginaCon(150, Array.from({ length: 50 }, (_, i) => 400 + i)));
+
+    await scraper.informeMensual(2025, 5);
+
+    const pedidas = (http.postForm as jest.Mock).mock.calls.map(([, c]) => c.pagina_solicitada);
+    expect(pedidas).toEqual(['0', '1']);
+  });
+
+  it('no pide una segunda página cuando el mes entra en una', async () => {
+    const { scraper, http } = makeScraper(
+      paginaCon(3, [301, 302, 303])
+    );
+
+    await scraper.informeMensual(2025, 5);
+
+    expect((http.postForm as jest.Mock).mock.calls).toHaveLength(1);
+  });
+
+  // Si el SII dijo N y juntamos otra cantidad, algo se perdió o se duplicó. Un
+  // listado incompleto presentado como el mes completo entra al motor contable
+  // del consumidor como un total real, así que se verifica en vez de confiar.
+  it('falla si el total no coincide con lo recuperado', async () => {
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock)
+      .mockResolvedValue(paginaCon(103, Array.from({ length: 100 }, (_, i) => 300 + i)));
+
+    await expect(scraper.informeMensual(2025, 5))
+      .rejects.toThrow(/informó 103 boletas.*se recuperaron 200/s);
+  });
+
+  // Sólo con el conteo, un CGI que ignorara `pagina_solicitada` y devolviera dos
+  // veces la misma página pasaría inadvertido en un mes de exactamente 200: 200
+  // filas, 200 == 200, y el consumidor recibiría 100 boletas duplicadas como si
+  // fueran el mes completo.
+  it('detecta páginas duplicadas aunque el conteo cuadre', async () => {
+    const pagina = Array.from({ length: 100 }, (_, i) => 300 + i);
+    const { scraper, http } = makeScraper('');
+    // El CGI ignora el índice y devuelve siempre la primera página.
+    (http.postForm as jest.Mock).mockResolvedValue(paginaCon(200, pagina));
+
+    await expect(scraper.informeMensual(2025, 5))
+      // El mensaje nombra la causa: repetidos, no faltantes.
+      .rejects.toThrow(/100 documento\(s\) repetido\(s\).*pagina servida dos veces|100 documento\(s\) repetido\(s\)/s);
+  });
+
+  // Los dos CGI paginan distinto: el de recibidas es 1-based y navega con
+  // `pagina_sig_codigo`. Mandarle el índice de emitidas pediría dos veces la
+  // misma página, así que hasta relevarlo se falla explícito.
+  it('no adivina la paginación de recibidas: falla explícito', async () => {
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock).mockResolvedValue(
+      paginaCon(150, Array.from({ length: 100 }, (_, i) => 300 + i))
+    );
+
+    await expect(scraper.informeMensual(2025, 5, true))
+      .rejects.toThrow(/recibidas usa otro esquema/);
+    // Y no pidió una segunda página con el índice equivocado.
+    expect((http.postForm as jest.Mock).mock.calls).toHaveLength(1);
+  });
+
+  // El descuadre es determinístico: reintentar hace invalidate() +
+  // authenticateOnly() + las N páginas otra vez para fallar igual, gastando DOS
+  // sesiones del SII en una consulta — el bloqueo 01.01.190.500.720.27 que el
+  // resto del archivo cuida. Por eso es LimitacionConocida y no Error pelado.
+  it('un descuadre no se reintenta ni abre una segunda sesión', async () => {
+    const { scraper, http, session } = makeScraper('');
+    (http.postForm as jest.Mock).mockResolvedValue(
+      paginaCon(103, Array.from({ length: 100 }, (_, i) => 300 + i))
+    );
+
+    await expect(scraper.informeMensual(2025, 5)).rejects.toThrow(LimitacionConocida);
+
+    expect(session.invalidate).not.toHaveBeenCalled();
+    // Dos páginas de la única tanda, no cuatro de dos tandas.
+    expect((http.postForm as jest.Mock).mock.calls).toHaveLength(2);
+  });
+
+  it('acepta un mes de exactamente 100 boletas sin pedir otra página', async () => {
+    const { scraper, http } = makeScraper(
+      paginaCon(100, Array.from({ length: 100 }, (_, i) => 300 + i))
+    );
 
     expect(await scraper.informeMensual(2025, 5)).toHaveLength(100);
+    expect((http.postForm as jest.Mock).mock.calls).toHaveLength(1);
   });
 });
 
@@ -512,6 +652,7 @@ describe('BheScraper y el valor de arr_informe_mensual', () => {
     const html = `<html><script>
  xml_values['anio_consulta'] = "2025";
  xml_values['total_boletas'] = "1";
+CantidadFilas=1;
  arr_informe_mensual['nroboleta_1'] = "311";
  arr_informe_mensual['nombrereceptor_1'] = "SOC. GARC&Iacute;A &amp; CIA";
 </script></html>`;
@@ -527,6 +668,7 @@ describe('BheScraper y el valor de arr_informe_mensual', () => {
     const html = `<html><script>
  xml_values['anio_consulta'] = "2025";
  xml_values['total_boletas'] = "1";
+CantidadFilas=1;
  arr_informe_mensual['nroboleta_1'] = "311";
  arr_informe_mensual['nombrereceptor_1'] = "PE&#209;A LTDA";
 </script></html>`;

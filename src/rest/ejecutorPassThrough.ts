@@ -1,5 +1,6 @@
 import { RegistroSesiones, EjecutorSesion } from '../registroSesiones';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
+import { Credencial } from './rutas/comun';
 
 // Arma un EjecutorSesion de un solo uso para UN request REST: guardar la
 // credencial, crear la sesión, correr fn y borrar la credencial corren como
@@ -23,6 +24,21 @@ export function ejecutorPassThroughDe<T>(
         fn
       ),
   };
+}
+
+// Elige el ejecutor según la credencial que trajo el request, sin que cada ruta
+// tenga que repetir el `if`. Recibe la credencial ya discriminada (ver
+// `credencialDe` en rutas/comun.ts), así que un tipo nuevo de credencial rompe
+// la compilación acá en vez de caer en un `else` silencioso.
+export function ejecutorPara<T>(
+  registro: RegistroSesiones<T>,
+  credenciales: ProveedorCredencialesRuntime,
+  rut: string,
+  credencial: Credencial
+): EjecutorSesion<T> {
+  return credencial.tipo === 'clave'
+    ? ejecutorPassThroughDe(registro, credenciales, rut, credencial.clave)
+    : ejecutorPassThroughCertDe(registro, credenciales, rut, credencial.base64, credencial.password);
 }
 
 // Arma un EjecutorSesion de un solo uso para UN request REST con autenticación

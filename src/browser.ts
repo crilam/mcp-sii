@@ -242,35 +242,111 @@ export class Browser {
   // `zeusr.sii.cl`, o con un path específico, no se borra apuntándole a
   // `.sii.cl` con path `/`. Nunca devuelve los valores.
   cookiesDelSiiConUbicacion(): CookieUbicada[] {
+    // Proyección del parser único: el valor se reduce a un booleano acá, así que
+    // ningún llamador lo ve.
+    return this.cookiesCrudasDelSii().map(({ name, domain, path, value }) => ({
+      name, domain, path, tieneValor: value !== '',
+    }));
+  }
+
+  // Escribe las cookies del SII a `ruta`, en el formato Netscape que consume
+  // `curl -b`. Devuelve cuántas escribió.
+  //
+  // Vive acá y no en quien llama porque es el único punto del código que puede
+  // ver los VALORES de las cookies: son credenciales de sesión, y el resto del
+  // sistema trabaja con nombres y un booleano de "tiene valor" justamente para
+  // que no circulen. Acá tienen que viajar al archivo, así que el valor entra y
+  // sale del método sin pasar por nadie más.
+  //
+  // Detalles del formato, los tres verificados contra curl:
+  //  - 7 campos separados por TAB: dominio, flag de subdominios, path, secure,
+  //    expiración, nombre, valor;
+  //  - expiración 0 significa "cookie de sesión", que es lo que son;
+  //  - NO se usa el prefijo `#HttpOnly_` que escribe `curl -c`. Nuestro propio
+  //    `parseCookieFile` (session.ts) saltea las líneas que empiezan con `#`,
+  //    así que con ese prefijo la cookie TOKEN se volvía invisible y el
+  //    conversationId de las apps SDI dejaba de resolverse.
+  escribirCookieJar(ruta: string): number {
+    const cookies = this.cookiesCrudasDelSii()
+      .filter(c => c.value !== '')
+      // Un valor con TAB o salto de línea rompe el formato: la línea sale con
+      // más de 7 campos y curl la descarta EN SILENCIO, así que el fallo
+      // reaparece después como "la sesión expiró", apuntando al lugar
+      // equivocado. Ninguna cookie del SII los trae; si alguna los trajera, es
+      // mejor omitir esa que corromper el archivo entero.
+      .filter(c => !/[\t\r\n]/.test(c.value));
+
+    // Sin cookies no se crea el archivo. Un jar vacío es basura con ruta
+    // predecible en un directorio compartido y, peor, un archivo presente pero
+    // inservible: curl saldría sin autenticación y el error se reportaría como
+    // sesión caducada. Quien llama decide qué hacer con el 0.
+    if (cookies.length === 0) return 0;
+
+    const lineas = cookies.map(c => [
+      c.domain,
+      c.domain.startsWith('.') ? 'TRUE' : 'FALSE',
+      c.path || '/',
+      // El flag `secure` real que reporta el CLI, no un TRUE fijo. Forzarlo
+      // funciona mientras todo sea https, pero si algún CGI cayera a http, curl
+      // omitiría esas cookies en silencio y el fallo se vería como sesión
+      // caducada.
+      c.secure ? 'TRUE' : 'FALSE',
+      '0',
+      c.name,
+      c.value,
+    ].join('\t'));
+    // Se BORRA y se crea con `wx`, en vez de sobrescribir con `{ mode: 0o600 }`.
+    // Dos motivos, los dos concretos porque la ruta es predecible y vive en un
+    // directorio compartido (`os.tmpdir()/sii_cookies_<rut>`):
+    //
+    //  - `mode` sólo se aplica al CREAR el archivo. Si ya existía —por ejemplo
+    //    el jar que dejó `curl -c` en una corrida con certificado— se reescribía
+    //    conservando sus permisos, que pueden ser abiertos.
+    //  - `writeFileSync` sigue symlinks. Otro usuario local podía pre-crear
+    //    `/tmp/sii_cookies_<rut>` apuntando a donde quisiera y las cookies de
+    //    sesión del SII —credenciales completas— se escribían ahí.
+    //
+    // `rmSync` borra el symlink en sí (no su destino) y `wx` falla si el archivo
+    // existe, así que el que queda lo creamos nosotros con 0600. Mismo patrón
+    // que `credencialesRuntime.guardarCertificado` para el .pfx.
+    fs.rmSync(ruta, { force: true });
+    fs.writeFileSync(ruta, `${lineas.join('\n')}\n`, { flag: 'wx', mode: 0o600 });
+    return lineas.length;
+  }
+
+  // Único lector de valores de cookie del proyecto. Privado a propósito.
+  // ÚNICO parser de cookies del proyecto, y el único punto que ve sus valores.
+  // Antes había dos copias —una para `cookiesDelSiiConUbicacion` y otra para
+  // escribir el jar— idénticas salvo qué campos proyectaban: dos versiones del
+  // mismo parseo, listas para separarse.
+  private cookiesCrudasDelSii(): Array<{
+    name: string; domain: string; path: string; value: string; secure: boolean;
+  }> {
     const salida = this.leerCookiesCrudas();
     let cookies: unknown;
     try {
-      // Forma verificada contra el CLI: {"success":true,"data":{"cookies":[…]}}.
       cookies = JSON.parse(salida)?.data?.cookies;
     } catch {
       throw new ErrorDeBrowser('cookies get', 'respuesta no parseable del CLI');
     }
-    // Un JSON válido con OTRA forma no es "no hay cookies": es que no se pudo
-    // saber. Devolver [] acá sería el peor resultado posible — quien pregunta
-    // usa esto para decidir si el login autenticó, así que un array vacío
-    // silencioso haría fallar todo login con clave válida. Se lanza, igual que
-    // si el JSON no parseara.
     if (!Array.isArray(cookies)) {
       throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
     }
     return cookies
-      .filter((c): c is { name?: string; domain?: string; path?: string; value?: string } =>
+      .filter((c): c is { name?: string; domain?: string; path?: string; value?: string; secure?: boolean } =>
         esDominioDelSii(String((c as { domain?: string })?.domain ?? '')))
       .map(c => ({
         name: String(c?.name ?? ''),
         domain: String(c?.domain ?? ''),
         path: String(c?.path ?? '/') || '/',
-        // El valor se convierte a booleano acá mismo y no sale de este método.
-        tieneValor: String(c?.value ?? '') !== '',
+        value: String(c?.value ?? ''),
+        secure: Boolean((c as { secure?: boolean })?.secure),
       }))
-      // Una cookie sin nombre no sirve para nada y en el camino de borrado
-      // produciría `cookies set '' '' --domain …`, una llamada basura que puede
-      // fallar y abortar el login entero.
+      // Sólo se descarta lo que no sirve para NADA: una cookie sin nombre. El
+      // filtro por valor vacío NO va acá — es propio del jar, y en el chequeo de
+      // sesión la diferencia entre "presente con valor" y "presente vacía" es
+      // justamente la señal que se mira (ver `tieneValor`). Estaba de más porque
+      // este parser salió de fusionar dos, y uno de los dos sí lo necesitaba.
       .filter(c => c.name !== '');
   }
 

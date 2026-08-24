@@ -4,12 +4,14 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/bhe';
 import { schemaResumen, schemaMes, schemaPdf } from '../../core/schemas/bhe';
-import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
+import { ejecutorPara } from '../ejecutorPassThrough';
+import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from './comun';
 
-const zodResumen = z.object(schemaResumen).extend(zodCredencialCert);
-const zodMes = z.object(schemaMes).extend(zodCredencialCert);
-const zodPdf = z.object(schemaPdf).extend(zodCredencialCert);
+// Las tres aceptan clave tributaria O certificado digital: las dos autentican y
+// las dos producen el cookie jar que estas consultas necesitan.
+const zodResumen = conCredencial(schemaResumen);
+const zodMes = conCredencial(schemaMes);
+const zodPdf = conCredencial(schemaPdf);
 
 export function registrarRutasBhe(
   rutas: Map<string, RutaHandler>,
@@ -18,25 +20,25 @@ export function registrarRutasBhe(
 ): void {
   rutas.set('POST /v1/bhe/resumen', async body => {
     const parseo = zodResumen.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, certificado_base64, certificado_password, anio } = parseo.data;
-    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, anio } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(() => core.resumen(ejecutor, rut, anio));
   });
 
   rutas.set('POST /v1/bhe/list-emitidas', async body => {
     const parseo = zodMes.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, certificado_base64, certificado_password, anio, mes } = parseo.data;
-    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, anio, mes } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(() => core.listEmitidas(ejecutor, rut, anio, mes));
   });
 
   rutas.set('POST /v1/bhe/list-recibidas', async body => {
     const parseo = zodMes.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, certificado_base64, certificado_password, anio, mes } = parseo.data;
-    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, anio, mes } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(() => core.listRecibidas(ejecutor, rut, anio, mes));
   });
 
@@ -51,9 +53,9 @@ export function registrarRutasBhe(
   // práctica una boleta pesa ~8 KB; el techo importa sólo como límite duro.
   rutas.set('POST /v1/bhe/pdf', async body => {
     const parseo = zodPdf.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, certificado_base64, certificado_password, codigo_barras, recibida } = parseo.data;
-    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, codigo_barras, recibida } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(async () => {
       const contenido = await core.pdf(ejecutor, rut, codigo_barras, recibida);
       // Se envuelve a mano: `ejecutar` spreadea el resultado, y spreadear un

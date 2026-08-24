@@ -418,6 +418,18 @@ export class MipymeHttpScraper {
       );
     }
     this.session.assertPuedeEntregarCookieJar();
+    // Emitir de verdad exige certificado: la clave tributaria autentica pero no
+    // firma, y la firma electrónica avanzada sale del certificado.
+    //
+    // Este chequeo es imprescindible desde que `assertPuedeEntregarCookieJar`
+    // dejó de exigir certificado (ahora la clave también produce el jar). Sin
+    // él, una sesión con clave llegaba hasta el POST de firma del portal — y
+    // emitir un DTE es un acto tributario irreversible, así que el fallo tiene
+    // que ocurrir ANTES de tocar la red, no a mitad del intento.
+    //
+    // Sólo cuando se va a firmar: la previsualización (`confirmar=false`) no
+    // firma nada y funciona bien con clave.
+    if (confirmar) this.session.assertPuedeFirmar();
 
     return this.session.conEmpresaExclusiva(() => this.prepararYEmitir(params, confirmar));
   }
@@ -574,6 +586,12 @@ export class MipymeHttpScraper {
     detalle: string;
   }> {
     this.session.assertPuedeEntregarCookieJar();
+    // Firma un XML de verdad contra el SII (no emite, pero firma), así que exige
+    // certificado por el mismo motivo que `emitirDte`: la clave tributaria
+    // autentica y no firma. Antes alcanzaba el guard del cookie jar porque ése
+    // exigía certificado; ahora que la clave también lo produce, hay que pedirlo
+    // acá explícitamente.
+    this.session.assertPuedeFirmar();
 
     return this.session.conEmpresaExclusiva(async () => {
       const previa = await this.prepararYEmitir(params, false);

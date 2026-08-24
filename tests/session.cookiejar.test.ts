@@ -39,7 +39,18 @@ describe('SessionManager.rutaCookieJar', () => {
 
     const ruta = await mgr.rutaCookieJar();
 
-    expect(ruta).toBe(path.join(os.tmpdir(), 'sii_cookies_12345678'));
+    expect(ruta.startsWith(path.join(os.tmpdir(), 'sii_cookies_12345678'))).toBe(true);
+  });
+
+  // Y tampoco lo comparten dos sesiones del MISMO RUT. `ejecutarPassThrough`
+  // crea a propósito una sesión que no se cachea, así que puede coexistir con la
+  // cacheada: con el jar por RUT, cerrar una le borraba el archivo a la otra, que
+  // seguía creyéndose autenticada y salía sin cookies.
+  it('dos sesiones del mismo RUT no comparten cookie jar', async () => {
+    const a = new SessionManager(configCert, new MockBrowser());
+    const b = new SessionManager(configCert, new MockBrowser());
+
+    expect(await a.rutaCookieJar()).not.toBe(await b.rutaCookieJar());
   });
 
   it('dos credenciales distintas no comparten cookie jar', async () => {
@@ -84,27 +95,59 @@ describe('SessionManager.rutaCookieJar', () => {
   // fallaran siempre con "la sesión pudo expirar" — o, si en esa máquina hubo
   // antes una corrida con certificado, que curl mandara cookies rancias y
   // disparara el bloqueo del SII por exceso de sesiones.
-  it('falla con un mensaje accionable si la estrategia es clave', async () => {
-    const mgr = new SessionManager(
-      { rut: '11111111-1', strategy: AuthStrategy.Clave, clave: 'secreta' },
-      new MockBrowser()
-    );
-
-    await expect(mgr.rutaCookieJar()).rejects.toThrow(/certificado digital/);
-    await expect(mgr.rutaCookieJar()).rejects.toThrow(/SII_CERT_PATH/);
-  });
-
-  it('no autentica ni abre el navegador cuando la estrategia es clave', async () => {
+  // Antes esto se rechazaba exigiendo certificado. Era una limitación nuestra,
+  // no del SII: el navegador tiene las cookies y nadie las escribía. Verificado
+  // contra el portal que sirven para las consultas por HTTP.
+  it('con estrategia de clave entrega el jar, no lo rechaza', async () => {
     const browser = new MockBrowser();
+    // El jar arranca con la sesión anterior y queda limpio tras el borrado: el
+    // login VERIFICA la limpieza y aborta si sobrevive una cookie de sesión, así
+    // que un mock que devuelva siempre lo mismo haría fallar todo login.
+    let jar = [{ name: 'TOKEN', domain: '.sii.cl', path: '/', tieneValor: true }];
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => jar);
+    (browser.borrarCookies as jest.Mock).mockImplementation(() => { jar = []; });
+    (browser.eval as jest.Mock).mockImplementation((js: string) => {
+      if (js.includes('requestSubmit')) {
+        jar = [{ name: 'TOKEN', domain: '.sii.cl', path: '/', tieneValor: true }];
+      }
+      return js.includes("getElementById('myform')") ? 'SI' : '';
+    });
+    (browser.escribirCookieJar as jest.Mock).mockReturnValue(14);
     const mgr = new SessionManager(
       { rut: '11111111-1', strategy: AuthStrategy.Clave, clave: 'secreta' },
       browser
     );
 
-    await expect(mgr.rutaCookieJar()).rejects.toThrow();
+    await expect(mgr.rutaCookieJar()).resolves.toContain('111111111');
+    // Y el jar quedó escrito con las cookies del navegador.
+    expect(browser.escribirCookieJar).toHaveBeenCalled();
+  });
 
-    expect(browser.open).not.toHaveBeenCalled();
-    expect(mockExec).not.toHaveBeenCalled();
+  // Si el login se verificó exitoso pero no se pudo exportar ninguna cookie,
+  // fallar es mejor que devolver la ruta de un archivo vacío: con el archivo
+  // presente y sin cookies, curl sale sin autenticación y el error termina
+  // reportado como sesión caducada, que apunta al lugar equivocado.
+  it('falla si no se pudo exportar ninguna cookie al jar', async () => {
+    const browser = new MockBrowser();
+    // El jar arranca con la sesión anterior y queda limpio tras el borrado: el
+    // login VERIFICA la limpieza y aborta si sobrevive una cookie de sesión, así
+    // que un mock que devuelva siempre lo mismo haría fallar todo login.
+    let jar = [{ name: 'TOKEN', domain: '.sii.cl', path: '/', tieneValor: true }];
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => jar);
+    (browser.borrarCookies as jest.Mock).mockImplementation(() => { jar = []; });
+    (browser.eval as jest.Mock).mockImplementation((js: string) => {
+      if (js.includes('requestSubmit')) {
+        jar = [{ name: 'TOKEN', domain: '.sii.cl', path: '/', tieneValor: true }];
+      }
+      return js.includes("getElementById('myform')") ? 'SI' : '';
+    });
+    (browser.escribirCookieJar as jest.Mock).mockReturnValue(0);
+    const mgr = new SessionManager(
+      { rut: '11111111-1', strategy: AuthStrategy.Clave, clave: 'secreta' },
+      browser
+    );
+
+    await expect(mgr.rutaCookieJar()).rejects.toThrow(/no se pudo exportar ninguna cookie/);
   });
 
   it('autentica si todavía no hay sesión', async () => {
