@@ -46,15 +46,35 @@ const COOKIES_SIN_SESION = ['TS0161cd2b', 'QueueITAccepted-SDFrts345E-V3_autenti
 // Las mismas, con la ubicación que reporta el CLI: es lo que se necesita para
 // borrarlas donde viven de verdad.
 const ubicadas = (nombres: string[]) =>
-  nombres.map(name => ({ name, domain: '.sii.cl', path: '/' }));
+  nombres.map(name => ({ name, domain: '.sii.cl', path: '/', tieneValor: true }));
+
+// Simula el jar del contexto: `borrarCookies` quita de verdad lo que se le pide.
+// Es necesario, no cosmético — loginConClave VERIFICA el borrado y aborta si
+// quedó alguna cookie de sesión viva, así que un mock que devuelva siempre lo
+// mismo haría fallar todo login.
+function conJarSimulado(browser: Browser, inicial: string[], trasElSubmit = inicial): void {
+  let jar = ubicadas(inicial);
+  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => jar);
+  (browser.cookiesDelSii as jest.Mock).mockImplementation(() => jar.map(c => c.name));
+  (browser.borrarCookies as jest.Mock).mockImplementation((aBorrar: Array<{ name: string }>) => {
+    const nombres = new Set(aBorrar.map(c => c.name));
+    jar = jar.filter(c => !nombres.has(c.name));
+  });
+  // El SII repone las cookies al autenticar; el mock lo hace cuando ve el
+  // requestSubmit, que es el momento en que el portal procesa el login.
+  const evalPrevio = (browser.eval as jest.Mock).getMockImplementation();
+  (browser.eval as jest.Mock).mockImplementation((js: string) => {
+    if (js.includes('requestSubmit')) jar = ubicadas(trasElSubmit);
+    return evalPrevio ? evalPrevio(js) : '';
+  });
+}
 
 function crearBrowserMock(): Browser {
   const browser = new MockBrowser();
   // Default: el login autentica. El éxito se decide por las cookies de sesión
   // del SII (ver assertLoginPorClaveExitoso), así que sin este mock TODO login
   // fallaría; los tests de rechazo lo sobreescriben con COOKIES_SIN_SESION.
-  (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_CON_SESION);
-  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_CON_SESION));
+  conJarSimulado(browser, COOKIES_CON_SESION);
   return browser;
 }
 
@@ -100,8 +120,7 @@ function mockearLoginExitoso(
 ): void {
   mockearEvalFormulario(browser, true);
   (browser.getUrl as jest.Mock).mockReturnValue(urlFinal);
-  (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_CON_SESION);
-  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_CON_SESION));
+  conJarSimulado(browser, COOKIES_CON_SESION);
   (browser.snapshot as jest.Mock).mockReturnValue(snapshotEmpresa);
 }
 
@@ -230,11 +249,11 @@ describe('SessionManager.login', () => {
   // cada login y puede hacer fallar uno con credenciales válidas.
   it('no borra las cookies del WAF ni de la cola de espera', async () => {
     const browser = crearBrowserMock();
-    mockearLoginExitoso(browser, empresaUnicaSnapshot);
-    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue([
-      { name: 'TOKEN', domain: '.sii.cl', path: '/' },
-      { name: 'TS0161cd2b', domain: '.sii.cl', path: '/' },
-      { name: 'QueueITAccepted-SDFrts345E-V3_autenticacionmisii', domain: '.sii.cl', path: '/' },
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
+    conJarSimulado(browser, [
+      'TOKEN', 'TS0161cd2b', 'QueueITAccepted-SDFrts345E-V3_autenticacionmisii',
     ]);
 
     const mgr = new SessionManager(configClave, browser);
@@ -308,10 +327,16 @@ describe('SessionManager.login', () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
-    (browser.cookiesDelSii as jest.Mock)
-      .mockReturnValueOnce(COOKIES_SIN_SESION)
-      .mockReturnValueOnce(COOKIES_SIN_SESION)
-      .mockReturnValue(COOKIES_CON_SESION);
+    // El submit deja el jar sin sesión y sólo la tercera lectura la ve: simula
+    // al SII procesando el login más lento que el primer poll.
+    conJarSimulado(browser, COOKIES_CON_SESION, COOKIES_SIN_SESION);
+    let lecturas = 0;
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => {
+      lecturas += 1;
+      // Las dos primeras lecturas del poll (la del borrado no cuenta) todavía no
+      // ven la sesión.
+      return lecturas <= 3 ? ubicadas(COOKIES_SIN_SESION) : ubicadas(COOKIES_CON_SESION);
+    });
     (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
 
     const mgr = new SessionManager(configClave, browser);
@@ -363,7 +388,12 @@ describe('SessionManager.login', () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
-    (browser.cookiesDelSii as jest.Mock).mockImplementation(() => {
+    // La limpieza previa funciona (primeras dos lecturas) y la lectura falla
+    // recién después, al verificar si el login estableció la sesión.
+    let lecturas = 0;
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => {
+      lecturas += 1;
+      if (lecturas <= 2) return [];
       throw new Error('respuesta no parseable del CLI');
     });
 

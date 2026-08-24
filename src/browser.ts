@@ -41,6 +41,12 @@ export interface CookieUbicada {
   name: string;
   domain: string;
   path: string;
+  // Si la cookie tiene contenido. NO el contenido: alcanza para distinguir una
+  // cookie viva de una que quedó con valor vacío, que es lo que pasa cuando el
+  // borrado por expiración no la remueve del todo (los atributos no matchean
+  // exacto: host-only contra `.sii.cl`, Secure, HttpOnly). Un nombre presente
+  // con valor vacío no prueba ninguna sesión.
+  tieneValor: boolean;
 }
 
 // `includes('sii.cl')` daría por buenos `notsii.cl` o `sii.cl.evil.com`: el
@@ -235,12 +241,14 @@ export class Browser {
       throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
     }
     return cookies
-      .filter((c): c is { name?: string; domain?: string; path?: string } =>
+      .filter((c): c is { name?: string; domain?: string; path?: string; value?: string } =>
         esDominioDelSii(String((c as { domain?: string })?.domain ?? '')))
       .map(c => ({
         name: String(c?.name ?? ''),
         domain: String(c?.domain ?? ''),
         path: String(c?.path ?? '/') || '/',
+        // El valor se convierte a booleano acá mismo y no sale de este método.
+        tieneValor: String(c?.value ?? '') !== '',
       }))
       // Una cookie sin nombre no sirve para nada y en el camino de borrado
       // produciría `cookies set '' '' --domain …`, una llamada basura que puede

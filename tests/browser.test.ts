@@ -307,8 +307,8 @@ describe('Browser', () => {
     mockExec.mockReturnValue(Buffer.from(''));
 
     browser.borrarCookies([
-      { name: 'TOKEN', domain: '.sii.cl', path: '/' },
-      { name: 'CSESSIONID', domain: '.sii.cl', path: '/' },
+      { name: 'TOKEN', domain: '.sii.cl', path: '/', tieneValor: true },
+      { name: 'CSESSIONID', domain: '.sii.cl', path: '/', tieneValor: true },
     ]);
 
     expect(mockExec).toHaveBeenCalledTimes(2);
@@ -329,7 +329,7 @@ describe('Browser', () => {
     mockExec.mockReturnValue(Buffer.from(''));
 
     browser.borrarCookies([
-      { name: 'TOKEN', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000' },
+      { name: 'TOKEN', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000', tieneValor: true },
     ]);
 
     expect(mockExec).toHaveBeenCalledWith(
@@ -353,7 +353,7 @@ describe('Browser', () => {
     const cookies = browser.cookiesDelSiiConUbicacion();
 
     expect(cookies).toEqual([
-      { name: 'TOKEN', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000' },
+      { name: 'TOKEN', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000', tieneValor: true },
     ]);
     expect(JSON.stringify(cookies)).not.toContain('VALOR_SECRETO');
   });

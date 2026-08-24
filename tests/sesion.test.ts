@@ -44,6 +44,28 @@ function mockearFormularioPresente(browser: Browser): void {
   });
 }
 
+
+// El jar del contexto, simulado: `borrarCookies` quita de verdad lo que se le
+// pide y el submit repone la sesión. Es necesario porque loginConClave VERIFICA
+// el borrado y aborta si sobrevive una cookie de sesión: un mock que devuelva
+// siempre lo mismo haría fallar todo login.
+function conJarSimulado(browser: Browser, presentes: string[]): void {
+  const ubicar = (nombres: string[]) =>
+    nombres.map(name => ({ name, domain: '.sii.cl', path: '/', tieneValor: true }));
+  let jar = ubicar(presentes);
+  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => jar);
+  (browser.cookiesDelSii as jest.Mock).mockImplementation(() => jar.map(c => c.name));
+  (browser.borrarCookies as jest.Mock).mockImplementation((aBorrar: Array<{ name: string }>) => {
+    const nombres = new Set(aBorrar.map(c => c.name));
+    jar = jar.filter(c => !nombres.has(c.name));
+  });
+  const evalPrevio = (browser.eval as jest.Mock).getMockImplementation();
+  (browser.eval as jest.Mock).mockImplementation((js: string) => {
+    if (js.includes('requestSubmit')) jar = ubicar(presentes);
+    return evalPrevio ? evalPrevio(js) : '';
+  });
+}
+
 function makeSession() {
   const browser = new MockBrowser();
   mockearFormularioPresente(browser);
@@ -52,9 +74,7 @@ function makeSession() {
   // El login se da por exitoso cuando el contexto tiene las cookies de sesión
   // del SII, no por la URL: un rechazo por clave incorrecta también sale del
   // formulario y sigue en sii.cl (ver assertLoginPorClaveExitoso).
-  (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID', 'RUT_NS']);
-  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(
-    ['TOKEN', 'CSESSIONID', 'RUT_NS'].map(name => ({ name, domain: '.sii.cl', path: '/' })));
+  conJarSimulado(browser, ['TOKEN', 'CSESSIONID', 'RUT_NS']);
   return { browser, session: new SessionManager(config, browser) };
 }
 
@@ -97,9 +117,7 @@ describe('SessionManager.listEmpresasDisponibles', () => {
       '- option "EMPRESA UNO SPA 11111111-1" [ref=e11]'
     );
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
-    (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID']);
-    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(
-      [{ name: 'TOKEN', domain: '.sii.cl', path: '/' }]);
+    conJarSimulado(browser, ['TOKEN', 'CSESSIONID']);
     const session = new SessionManager(config, browser);
 
     await conTimers(() => session.listEmpresasDisponibles());
@@ -117,9 +135,7 @@ describe('SessionManager: página de empresas que no rinde', () => {
     mockearFormularioPresente(browser);
     (browser.snapshot as jest.Mock).mockReturnValue('- generic\n  - StaticText "Cargando"');
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
-    (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID']);
-    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(
-      [{ name: 'TOKEN', domain: '.sii.cl', path: '/' }]);
+    conJarSimulado(browser, ['TOKEN', 'CSESSIONID']);
     const session = new SessionManager(config, browser);
 
     await expect(conTimers(() => session.listEmpresasDisponibles())).rejects.toThrow(/no terminó de cargar/);

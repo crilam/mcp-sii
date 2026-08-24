@@ -562,6 +562,28 @@ export class SessionManager {
         .cookiesDelSiiConUbicacion()
         .filter(c => !esCookieDeInfraestructura(c.name));
       this.browser.borrarCookies(aBorrar);
+
+      // Se VERIFICA el borrado en vez de confiar en él. Expirar una cookie
+      // depende de acertarle a sus atributos (dominio host-only, path, Secure):
+      // si el `set` no matchea, crea otra entrada y la original sobrevive. Y una
+      // cookie de sesión sobreviviente es exactamente lo que hace que una clave
+      // incorrecta se reporte como válida, así que acá no alcanza con intentar.
+      //
+      // Se verifica SÓLO lo que el chequeo de éxito mira. Exigir que no
+      // sobreviva ninguna cookie no-infraestructura era demasiado: el portal
+      // tiene JS de analítica (AMCV_*, de Adobe) que se vuelve a escribir sola
+      // apenas la página corre, y eso abortaba todos los logins — verificado en
+      // vivo. Esas cookies no prueban ninguna sesión, así que su presencia es
+      // irrelevante para lo que acá se está protegiendo.
+      const sobrevivientes = this.browser
+        .cookiesDelSiiConUbicacion()
+        .filter(c => c.tieneValor && COOKIES_QUE_PRUEBAN_SESION.includes(c.name))
+        .map(c => c.name);
+      if (sobrevivientes.length > 0) {
+        throw new Error(
+          `quedaron cookies de la sesión anterior sin borrar: ${sobrevivientes.join(', ')}`
+        );
+      }
     } catch (e) {
       // Sin poder limpiar no se puede confiar en las cookies que aparezcan
       // después: una de un login anterior daría por válida una clave que no lo
@@ -652,11 +674,18 @@ export class SessionManager {
   // que falla explícitamente si la página no rinde.
   private async assertLoginPorClaveExitoso(maxMs = 15_000, stepInicial = 1_000): Promise<void> {
     let falloDeLectura: string | undefined;
-    // Backoff: cada poll spawnea un `agent-browser cookies get`, y con paso fijo
-    // de 1s un login que agota los 15s cuesta 15 procesos. Duplicando la espera,
-    // el mismo techo de 15s cuesta 4 — y el caso rápido (la sesión aparece en el
-    // primer segundo) no se paga más caro.
-    for (let esperado = 0, step = stepInicial; esperado < maxMs; esperado += step, step *= 2) {
+    // Backoff con techo: cada poll spawnea un `agent-browser cookies get`, y con
+    // paso fijo de 1s agotar los 15s cuesta 15 procesos. Duplicando, cuesta 4 —
+    // pero sin cap el cuarto poll cae a los 15s, así que un login que autentica a
+    // los 3,1s tardaría 7s en detectarse, y `validar-clave` es síncrono para
+    // Tributy. Con el cap en 2s son 8 lecturas: la mitad de procesos que antes,
+    // sin regalarle segundos al caso feliz.
+    const stepMaximo = 2_000;
+    for (
+      let esperado = 0, step = stepInicial;
+      esperado < maxMs;
+      esperado += step, step = Math.min(step * 2, stepMaximo)
+    ) {
       await new Promise(resolve => setTimeout(resolve, Math.min(step, maxMs - esperado)));
       try {
         if (this.tieneCookiesDeSesion()) return;
@@ -699,8 +728,17 @@ export class SessionManager {
   // Lanza si no se puede leer el estado: quien llama distingue "no hay sesión"
   // de "no se pudo saber", que son cosas distintas para el tenant.
   private tieneCookiesDeSesion(): boolean {
-    const presentes = new Set(this.browser.cookiesDelSii());
-    return COOKIES_QUE_PRUEBAN_SESION.some(nombre => presentes.has(nombre));
+    // Se exige que la cookie TENGA VALOR, no sólo que el nombre esté. El borrado
+    // funciona expirando con valor vacío, y si el CLI no llega a removerla
+    // —pasa cuando los atributos no matchean exacto: host-only contra `.sii.cl`,
+    // Secure, HttpOnly— el nombre sobrevive con valor vacío. Mirando sólo el
+    // nombre, esa cookia muerta daría por válida cualquier clave: el mismo falso
+    // positivo por una tercera puerta. Así el chequeo no depende de que el
+    // borrado haya sido perfecto.
+    const conValor = new Set(
+      this.browser.cookiesDelSiiConUbicacion().filter(c => c.tieneValor).map(c => c.name)
+    );
+    return COOKIES_QUE_PRUEBAN_SESION.some(nombre => conValor.has(nombre));
   }
 
   // Devuelve un motivo normalizado o undefined si no se reconoce. Sólo se
