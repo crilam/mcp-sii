@@ -232,3 +232,35 @@ npm test          # correr tests
 npm run dev       # desarrollo con ts-node
 npm run build     # compilar TypeScript
 ```
+
+### Pruebas contra el SII real
+
+`npm test` usa el navegador mockeado y no toca la red. Existe además una suite
+que le pregunta al portal de verdad, con su propio comando:
+
+```bash
+npm run test:e2e
+```
+
+Necesita `SII_RUT` y `SII_CLAVE` en el `.env`; sin credenciales se saltea sola en
+vez de fallar. Cubre dos cosas: que la clave correcta autentique y deje cookies
+de sesión utilizables, y que un login que no puede tener éxito **no** se reporte
+como exitoso. Ese segundo caso existe porque fue un bug real en producción
+(`validar-clave` respondía `ok:true` con cualquier clave) y ningún test con el
+navegador mockeado podía detectarlo: el criterio de éxito estaba mal, y el mock
+contestaba lo que le habíamos enseñado a contestar.
+
+Va separada de `npm test` a propósito. Cada test abre una sesión real, y el SII
+limita las sesiones simultáneas por RUT y **bloquea las claves con varios
+intentos fallidos**, así que no conviene que se dispare desde CI ni sin querer.
+
+Hay un tercer caso, apagado por defecto, que manda una clave incorrecta al RUT
+propio para verificar que se clasifica como `CREDENCIALES_INVALIDAS`:
+
+```bash
+SII_E2E_CLAVE_MALA=1 npm run test:e2e
+```
+
+Es el único que ejercita esa clasificación de punta a punta, y también el único
+que acumula intentos fallidos sobre una cuenta real. Correlo puntualmente, no en
+loop.

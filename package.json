@@ -12,7 +12,8 @@
     "crear-tenant": "ts-node src/scripts/crearTenant.ts",
     "validate-cert": "ts-node src/validateCert.ts",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "test:e2e": "jest --config jest.e2e.config.js --runInBand"
   },
   "type": "commonjs",
   "engines": {
