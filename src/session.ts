@@ -708,6 +708,20 @@ export class SessionManager {
         // esto, el motivo real es "no se pudo verificar", no "no hay sesión".
         falloDeLectura = e instanceof Error ? e.message : String(e);
       }
+
+      // El rechazo por clave incorrecta se busca DENTRO del loop, no al final.
+      // Dos razones: es definitivo, así que esperar los 15s completos regala
+      // tiempo en un endpoint que Tributy llama sincrónicamente; y el mensaje
+      // vive en la página, así que si el portal navega mientras esperamos (un
+      // interstitial, un redirect lento) el texto desaparece, el motivo saldría
+      // `undefined` y una clave que nunca va a servir se reportaría como fallo
+      // transitorio para que el tenant la reintente.
+      if (this.leerMotivoDeRechazo() === 'CLAVE_INCORRECTA') {
+        this.logearRechazo('CLAVE_INCORRECTA');
+        // Este texto es el que clasificarErrorCredenciales mapea a
+        // CREDENCIALES_INVALIDAS; no cambiarlo sin actualizar esa función.
+        throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+      }
     }
 
     if (falloDeLectura) {
@@ -718,10 +732,16 @@ export class SessionManager {
       );
     }
 
-    // Sin sesión. El motivo lo dice la página, y distinguirlo importa: una clave
-    // incorrecta es definitiva (el tenant no debe guardar esa credencial) y
-    // cualquier otra cosa puede ser transitoria.
-    const motivo = this.leerMotivoDeRechazo();
+    // Se agotó el tiempo sin sesión y sin que la página dijera nunca que la
+    // clave era incorrecta (eso ya habría salido dentro del loop).
+    this.logearRechazo(undefined);
+    throw new Error(
+      'El SII no estableció una sesión y no informó que la clave sea incorrecta. ' +
+      'Puede ser una caída del portal, la cola de espera o un bloqueo temporal; reintentá.'
+    );
+  }
+
+  private logearRechazo(motivo: string | undefined): void {
     // La URL es sólo para el log, así que su lectura no puede tumbar la
     // clasificación: si `getUrl` falla justo acá, el error que se propagaría es
     // el del CLI, y `validar-clave` devolvería ERROR en vez de
@@ -734,15 +754,6 @@ export class SessionManager {
     console.error(
       `Login SII: no se establecieron cookies de sesión. url=${urlParaLog}` +
       `${motivo ? ` motivo=${motivo}` : ''}`
-    );
-    if (motivo === 'CLAVE_INCORRECTA') {
-      // Este texto es el que clasificarErrorCredenciales mapea a
-      // CREDENCIALES_INVALIDAS; no cambiarlo sin actualizar esa función.
-      throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
-    }
-    throw new Error(
-      'El SII no estableció una sesión y no informó que la clave sea incorrecta. ' +
-      'Puede ser una caída del portal, la cola de espera o un bloqueo temporal; reintentá.'
     );
   }
 

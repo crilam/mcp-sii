@@ -390,6 +390,27 @@ describe('SessionManager.login', () => {
     expect((browser.cookiesDelSiiConUbicacion as jest.Mock).mock.calls.length).toBe(10);
   });
 
+  // El rechazo por clave incorrecta es definitivo: esperar los 15s completos
+  // regala tiempo en un endpoint síncrono, y si el portal navega en el medio el
+  // mensaje desaparece y el fallo se reportaría como transitorio.
+  it('corta en el primer poll cuando el portal ya dijo que la clave es incorrecta', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    conJarSimulado(browser, COOKIES_SIN_SESION);
+    const evalFormulario = (browser.eval as jest.Mock).getMockImplementation()!;
+    (browser.eval as jest.Mock).mockImplementation((js: string) =>
+      js.includes('innerText')
+        ? 'La Clave Tributaria ingresada no es correcta'
+        : evalFormulario(js)
+    );
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
+    // Una sola vuelta del poll (más las 2 lecturas de la limpieza previa), no las 8.
+    expect((browser.cookiesDelSiiConUbicacion as jest.Mock).mock.calls.length).toBe(3);
+  });
+
   // La URL es sólo para el log: si su lectura falla, la clasificación no puede
   // degradarse a ERROR — el tenant guardaría una clave inválida por un fallo de
   // logging.
