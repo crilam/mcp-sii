@@ -1,4 +1,7 @@
 import { execFileSync, execSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // maxBuffer explícito: el default de Node (1 MB) lo revienta un snapshot
 // grande del árbol de accesibilidad de una página con muchos elementos.
@@ -324,5 +327,39 @@ export class Browser {
 
   close(): void {
     this.run(['close']);
+  }
+
+  // Cierra el contexto Y borra su perfil del disco.
+  //
+  // Hacen falta las dos cosas: `close` termina el proceso pero DEJA el perfil
+  // (verificado — tras cerrar sobreviven `<id>.config`, `.engine`, `.pid`,
+  // `.version` en el directorio de agent-browser). Como cada sesión usa un id
+  // único, no borrarlos convierte la fuga de procesos en una de disco, que en un
+  // contenedor es peor: se llena el disco efímero de la task. En la máquina de
+  // desarrollo este directorio ya había juntado 356 MB en 97 entradas.
+  //
+  // El acoplamiento con el layout interno del CLI es deliberado y acotado: se
+  // toca SÓLO lo que empieza con el id de esta sesión, y cualquier fallo se
+  // ignora — es limpieza, no puede tumbar la operación que ya terminó.
+  cerrarYBorrarPerfil(): void {
+    try {
+      this.close();
+    } catch {
+      // El proceso pudo haber muerto solo; el perfil se borra igual.
+    }
+    if (!this.sessionId) return;
+    const base = process.env.AGENT_BROWSER_HOME ?? path.join(os.homedir(), '.agent-browser');
+    try {
+      for (const entrada of fs.readdirSync(base)) {
+        // `<id>.algo` y nada más: un `startsWith(id)` pelado borraría el perfil
+        // de una sesión cuyo id empiece igual (`rut-1` contra `rut-10`).
+        if (entrada.startsWith(`${this.sessionId}.`)) {
+          fs.rmSync(path.join(base, entrada), { recursive: true, force: true });
+        }
+      }
+    } catch {
+      // El directorio puede no existir (nunca se lanzó el navegador) o no ser
+      // legible. No hay nada que hacer al respecto acá.
+    }
   }
 }

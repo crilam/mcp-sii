@@ -45,6 +45,11 @@ export function registerSesionTools(
     async ({ rut }) => {
       await registro.ejecutar(rut, sesion => sesion.logout());
       credenciales.borrar(rut);
+      // Y se desaloja la sesión, que cierra su contexto de navegador y borra su
+      // perfil. Sin esto, "cerrar sesión" dejaba vivo el proceso del navegador y
+      // su perfil en disco para siempre: la credencial se olvidaba, el contexto
+      // no. Va DESPUÉS del logout, que corre dentro de la cola por RUT.
+      registro.olvidar(rut);
       return {
         content: [{ type: 'text' as const, text: `Sesión cerrada en el SII para ${rut}.` }],
       };

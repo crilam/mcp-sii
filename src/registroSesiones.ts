@@ -36,7 +36,7 @@ export class RegistroSesiones<T> implements EjecutorSesion<T> {
   // uno.
   constructor(
     private crear: (rut: string) => T | Promise<T>,
-    private destruir?: (sesion: T) => void
+    private destruir?: (sesion: T) => void | Promise<void>
   ) {}
 
   // Desaloja la sesión cacheada de un RUT liberando sus recursos. Se usa desde
@@ -48,13 +48,17 @@ export class RegistroSesiones<T> implements EjecutorSesion<T> {
     if (sesion) this.destruirSeguro(sesion);
   }
 
+  // Se traga cualquier fallo, sincrónico o asíncrono: cerrar el contexto es
+  // limpieza y no puede tumbar la operación que ya terminó ni el logout que el
+  // usuario pidió. El `.catch` no es redundante con el try: si alguien inyecta
+  // un `destruir` async, su rechazo no pasa por el try y quedaría como unhandled
+  // rejection.
   private destruirSeguro(sesion: T): void {
     if (!this.destruir) return;
     try {
-      this.destruir(sesion);
+      void Promise.resolve(this.destruir(sesion)).catch(() => {});
     } catch {
-      // Cerrar el contexto es limpieza: si falla, no puede tumbar la operación
-      // que ya terminó ni el logout que el usuario pidió.
+      // Falló de forma sincrónica.
     }
   }
 
@@ -77,9 +81,22 @@ export class RegistroSesiones<T> implements EjecutorSesion<T> {
     return sesion;
   }
 
-  // Descarta la sesión cacheada de un RUT: la próxima llamada a ejecutar()
-  // vuelve a pasar por `crear`, con la credencial que tenga el proveedor en
-  // ese momento.
+  // Descarta la sesión cacheada de un RUT y libera sus recursos: la próxima
+  // llamada a ejecutar() vuelve a pasar por `crear`, con la credencial que tenga
+  // el proveedor en ese momento.
+  //
+  // PRECONDICIÓN: corre FUERA de la cola por RUT, así que quien llame tiene que
+  // saber que no hay una operación de ese RUT en curso — si la hubiera, le
+  // cerraría el contexto por debajo. Hoy el único llamador en producción es
+  // `sii_cerrar_sesion`, que lo invoca después de que su propio `logout()`
+  // terminó.
+  //
+  // Nota de alcance: mientras nadie más lo llame, las sesiones CACHEADAS de un
+  // proceso de larga vida no se desalojan solas. No hay TTL ni tope: un RUT que
+  // abrió sesión y nunca la cerró mantiene su contexto vivo. Aceptable hoy
+  // porque el adaptador REST usa pass-through (que sí cierra) y el servidor MCP
+  // atiende un puñado de RUTs por proceso, pero es el próximo límite a mirar si
+  // eso cambia.
   olvidar(rut: string): void {
     this.desalojar(normalizar(rut));
   }

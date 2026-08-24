@@ -291,7 +291,9 @@ export class SessionManager {
   // sin esto, un servidor de larga vida acumula un contexto por cada RUT y por
   // cada request pass-through, sin techo.
   cerrarContexto(): void {
-    this.browser.close();
+    // Cierra Y borra el perfil: cada sesión usa un contexto propio, así que
+    // dejar el perfil en disco cambiaría una fuga de procesos por una de disco.
+    this.browser.cerrarYBorrarPerfil();
   }
 
   // Orden de resolución de la empresa: el parámetro de la llamada gana siempre
@@ -681,14 +683,10 @@ export class SessionManager {
   // El éxito se decide por la EVIDENCIA de que hay sesión —las cookies que el
   // SII sólo emite cuando autenticó— y no por la URL.
   //
-  // (Acá sobrevivía el comentario del criterio viejo, que decía que "seguir en
-  // IngresoRutClave al agotar la espera ES el rechazo". Se borró: describía
-  // exactamente el razonamiento que causó el incidente, y leerlo al lado del
-  // criterio nuevo invitaba a volver atrás. Lo que sí conviene conservar de ahí
-  // es el motivo de que la espera sea generosa: un falso "clave incorrecta" por
-  // latencia del SII es peor que tardar en detectar un rechazo genuino, porque
-  // al consumidor le llega como CREDENCIALES_INVALIDAS y se lo muestra al
-  // usuario final.)
+  // La espera es generosa a propósito: un falso "clave incorrecta" por latencia
+  // del SII es peor que tardar en detectar un rechazo genuino, porque al
+  // consumidor le llega como CREDENCIALES_INVALIDAS y se lo muestra al usuario
+  // final.
   //
   // Basarlo en la URL fue un falso positivo grave, verificado contra el portal:
   // con una clave incorrecta el SII postea a `CAutInicio.cgi` y renderiza ahí

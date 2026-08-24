@@ -119,7 +119,10 @@ describe('crearRegistroSesionesSii', () => {
     await registro.ejecutarPassThrough('11111111-1', () => {}, () => {}, async s => s);
 
     expect(navegadores).toHaveLength(1);
-    expect(navegadores[0].close).toHaveBeenCalled();
+    // `cerrarYBorrarPerfil`, no `close`: cada sesión tiene su propio perfil en
+    // disco y `close` sólo termina el proceso, así que cerrar sin borrar
+    // cambiaría la fuga de procesos por una de disco.
+    expect(navegadores[0].cerrarYBorrarPerfil).toHaveBeenCalled();
   });
 
   it('propaga el error del proveedor cuando el RUT no está registrado', async () => {

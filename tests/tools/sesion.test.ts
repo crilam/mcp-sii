@@ -18,6 +18,7 @@ describe('sii_iniciar_sesion / sii_cerrar_sesion', () => {
     const authenticateOnly = jest.fn().mockResolvedValue(undefined);
     const registro = {
       ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly, logout: jest.fn() }),
+      olvidar: jest.fn(),
     } as unknown as RegistroSesiones<any>;
 
     const { tools } = armar(registro, proveedor);
@@ -33,6 +34,7 @@ describe('sii_iniciar_sesion / sii_cerrar_sesion', () => {
     const authenticateOnly = jest.fn().mockRejectedValue(new Error('El SII rechazó la autenticación: clave incorrecta'));
     const registro = {
       ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly, logout: jest.fn() }),
+      olvidar: jest.fn(),
     } as unknown as RegistroSesiones<any>;
 
     const { tools } = armar(registro, proveedor);
@@ -48,8 +50,10 @@ describe('sii_iniciar_sesion / sii_cerrar_sesion', () => {
     const proveedor = new ProveedorCredencialesRuntime();
     proveedor.guardar('11.111.111-1', 'secreta');
     const logout = jest.fn().mockResolvedValue(undefined);
+    const olvidar = jest.fn();
     const registro = {
       ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly: jest.fn(), logout }),
+      olvidar,
     } as unknown as RegistroSesiones<any>;
 
     const { tools } = armar(registro, proveedor);
@@ -57,5 +61,8 @@ describe('sii_iniciar_sesion / sii_cerrar_sesion', () => {
 
     expect(logout).toHaveBeenCalled();
     await expect(proveedor.para('11.111.111-1')).rejects.toThrow();
+    // Y desaloja la sesión: sin esto, "cerrar sesión" olvidaba la credencial
+    // pero dejaba vivos el proceso del navegador y su perfil en disco.
+    expect(olvidar).toHaveBeenCalledWith('11.111.111-1');
   });
 });

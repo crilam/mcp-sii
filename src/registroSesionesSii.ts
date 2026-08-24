@@ -1,11 +1,8 @@
+import { randomUUID } from 'crypto';
 import { Browser } from './browser';
 import { ProveedorCredenciales } from './credenciales';
 import { RegistroSesiones } from './registroSesiones';
 import { SessionManager } from './session';
-
-// Contador de contextos, para que cada sesión tenga el suyo. Ver el comentario
-// de abajo: el id NO puede ser sólo el RUT.
-let contextosCreados = 0;
 
 // Arma el registro multi-tenant de sesiones del SII: una `SessionManager` por
 // RUT, construida con la credencial que entrega el proveedor. Es el punto donde
@@ -48,8 +45,14 @@ export function crearRegistroSesionesSii(
     async (rut: string) => {
       const config = await proveedor.para(rut);
       // El RUT queda en el id para que el contexto sea rastreable en un `ps` o
-      // en el directorio de perfiles; el correlativo es lo que lo hace único.
-      return new SessionManager(config, browserPara(`${rut}-${++contextosCreados}`));
+      // en el directorio de perfiles; el UUID es lo que lo hace único.
+      //
+      // UUID y no un contador en memoria: el contador arranca en 0 en cada
+      // reinicio del proceso, y `--session <id>` es un perfil PERSISTENTE en
+      // disco — así que tras reiniciar, el id `<rut>-1` volvería a tomar el
+      // perfil que dejó la corrida anterior, con sus cookies. Sería la misma
+      // herencia de jar que esto viene a eliminar, colándose por el reinicio.
+      return new SessionManager(config, browserPara(`${rut}-${randomUUID()}`));
     },
     sesion => sesion.cerrarContexto()
   );
