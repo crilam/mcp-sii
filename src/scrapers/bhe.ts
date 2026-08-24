@@ -263,12 +263,14 @@ export class BheScraper {
     // comentario decía que sin una captura de un mes con más de 100 boletas no
     // se podía saber qué valor pide la página 2. Se podía: está escrito en la
     // respuesta.)
-    // El tamaño de página sale de la primera respuesta cuando se puede: el CGI
-    // declara `CantidadFilas`, así que no hace falta confiar en la constante si
-    // el mes ya llenó una página. Cuando el mes entra en una sola, esa cuenta
-    // daría 1 y alcanza igual.
-    const porPagina = Math.max(this.cantidadFilas(primera.html), 1);
-    const totalPaginas = Math.ceil(total / Math.min(porPagina, MAX_FILAS_POR_PAGINA));
+    // La cuenta de páginas usa SÓLO el tamaño de página del CGI (100), nunca el
+    // `CantidadFilas` de la primera respuesta. Derivarlo de ahí parecía más
+    // honesto y era un bug: `CantidadFilas` es cuántas filas trae ESA página, y
+    // no es el tamaño de página cuando el mes no la llena. Con total=103 y una
+    // primera página de 50 filas daba `ceil(103/50)=3`, o sea pedir dos páginas
+    // que no existen — descuadre y mes inconsultable con el CGI funcionando bien.
+    // `CantidadFilas` sirve para iterar las filas de cada página, y nada más.
+    const totalPaginas = Math.ceil(total / MAX_FILAS_POR_PAGINA);
 
     // La paginación se implementa SÓLO para emitidas, y no por comodidad: los
     // dos CGI paginan distinto. El de emitidas usa `pagina_solicitada` 0-based
@@ -653,7 +655,10 @@ export class BheScraper {
       // Devolver 0 haría que el mes salga vacío y el error apareciera después
       // como un descuadre de conteo, culpando a la paginación en vez de al
       // parser. Si el CGI renombra la variable, esto lo dice donde pasa.
-      throw new Error(
+      // LimitacionConocida y no Error: si el CGI renombró la variable, el
+      // reintento de `conSesionFresca` va a fallar igual, y de paso gasta una
+      // segunda sesión del SII (bloqueo 01.01.190.500.720.27).
+      throw new LimitacionConocida(
         'El informe del SII no declara CantidadFilas, así que no se sabe cuántas ' +
         'filas trae la página. El formato del CGI pudo cambiar.'
       );

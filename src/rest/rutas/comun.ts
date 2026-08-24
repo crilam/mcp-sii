@@ -97,6 +97,27 @@ export function credencialDe(d: {
   };
 }
 
+// Arma el 400 de un body inválido incluyendo QUÉ estuvo mal. El código sigue
+// siendo `BAD_REQUEST` (el contrato no cambia), y `detalle` se agrega porque los
+// mensajes de validación estaban escritos con cuidado —"mandá clave, o
+// certificado con sus dos campos"— y se descartaban: el llamador recibía un
+// `BAD_REQUEST` pelado y tenía que adivinar cuál de los campos era el problema.
+//
+// Es seguro: son mensajes que redactamos nosotros en los schemas, no el eco del
+// body del tenant. El `path` sí dice el nombre del campo, que es justamente lo
+// que hace útil el detalle.
+export function badRequest(error: z.ZodError): RespuestaRuta {
+  const primero = error.issues[0];
+  const campo = primero?.path?.join('.');
+  return {
+    status: 400,
+    body: {
+      error: 'BAD_REQUEST',
+      detalle: campo ? `${campo}: ${primero.message}` : primero?.message,
+    },
+  };
+}
+
 export interface RespuestaRuta {
   status: number;
   body: unknown;

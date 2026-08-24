@@ -213,6 +213,21 @@ describe('registrarRutasBhe', () => {
     expect(core.resumen).not.toHaveBeenCalled();
   });
 
+  // El mensaje del schema estaba escrito con cuidado y se descartaba: el
+  // llamador recibia un BAD_REQUEST pelado y tenia que adivinar cual de los
+  // campos era el problema.
+  it('el 400 dice QUE estuvo mal, no solo BAD_REQUEST', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/pdf')!({
+      rut: '11.111.111-1', clave: 'secreta', codigo_barras: 'no-alfanumerico!',
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect((respuesta.body as { error: string }).error).toBe('BAD_REQUEST');
+    expect((respuesta.body as { detalle?: string }).detalle).toMatch(/codigo_barras/);
+  });
+
   it('rechaza no mandar ninguna credencial', async () => {
     const rutas = armarRouter();
 

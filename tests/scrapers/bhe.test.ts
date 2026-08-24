@@ -197,6 +197,35 @@ describe('BheScraper.informeMensual', () => {
 
   // Los montos vienen envueltos en formatMiles("1000000",'.'), no como string
   // pelado: un parser que no lo contemple devuelve la expresion o nada.
+  // Si el CGI renombra la variable, devolver 0 filas haria que el mes salga
+  // vacio y el error apareciera despues como un descuadre de conteo, culpando a
+  // la paginacion en vez de al parser.
+  it('falla explicito si el informe no declara CantidadFilas', async () => {
+    const { scraper } = makeScraper(
+      `<html><script>xml_values['anio_consulta'] = "2025";
+ xml_values['total_boletas'] = "1";
+ arr_informe_mensual['nroboleta_1'] = "311";
+</script></html>`
+    );
+
+    await expect(scraper.informeMensual(2025, 5)).rejects.toThrow(/no declara CantidadFilas/);
+  });
+
+  it('marca sociedadProfesional cuando el CGI manda SI', async () => {
+    const { scraper } = makeScraper(
+      `<html><script>xml_values['anio_consulta'] = "2025";
+ xml_values['total_boletas'] = "1";
+CantidadFilas=1;
+ arr_informe_mensual['nroboleta_1'] = "311";
+ arr_informe_mensual['es_soc_profesional_1'] = "SI";
+</script></html>`
+    );
+
+    const boletas = await scraper.informeMensual(2025, 5);
+
+    expect(boletas[0].sociedadProfesional).toBe(true);
+  });
+
   it('desenvuelve los montos de formatMiles', async () => {
     const { scraper } = makeScraper(fixture('bhe-informe-mensual.html'));
 
