@@ -294,6 +294,15 @@ export class SessionManager {
     // Cierra Y borra el perfil: cada sesión usa un contexto propio, así que
     // dejar el perfil en disco cambiaría una fuga de procesos por una de disco.
     this.browser.cerrarYBorrarPerfil();
+    // Y el cookie jar, que son credenciales de sesión vivas en un directorio
+    // compartido. Importa más desde que el login por clave también lo escribe:
+    // `validar-clave` arma un jar en CADA validación, así que sin esto cada
+    // request de un tenant deja uno atrás.
+    try {
+      fs.rmSync(this.cookieJar, { force: true });
+    } catch {
+      // Es limpieza: no puede tumbar el cierre de la sesión.
+    }
   }
 
   // Orden de resolución de la empresa: el parámetro de la llamada gana siempre

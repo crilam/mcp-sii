@@ -259,7 +259,7 @@ export class Browser {
       throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
     }
     return cookies
-      .filter((c): c is { name?: string; domain?: string; path?: string; value?: string } =>
+      .filter((c): c is { name?: string; domain?: string; path?: string; value?: string; secure?: boolean } =>
         esDominioDelSii(String((c as { domain?: string })?.domain ?? '')))
       .map(c => ({
         name: String(c?.name ?? ''),
@@ -297,7 +297,11 @@ export class Browser {
       c.domain,
       c.domain.startsWith('.') ? 'TRUE' : 'FALSE',
       c.path || '/',
-      'TRUE',
+      // El flag `secure` real que reporta el CLI, no un TRUE fijo. Forzarlo
+      // funciona mientras todo sea https, pero si algún CGI cayera a http, curl
+      // omitiría esas cookies en silencio y el fallo se vería como sesión
+      // caducada.
+      c.secure ? 'TRUE' : 'FALSE',
       '0',
       c.name,
       c.value,
@@ -322,7 +326,9 @@ export class Browser {
   }
 
   // Único lector de valores de cookie del proyecto. Privado a propósito.
-  private cookiesConValor(): Array<{ name: string; domain: string; path: string; value: string }> {
+  private cookiesConValor(): Array<{
+    name: string; domain: string; path: string; value: string; secure: boolean;
+  }> {
     const salida = this.leerCookiesCrudas();
     let cookies: unknown;
     try {
@@ -334,13 +340,14 @@ export class Browser {
       throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
     }
     return cookies
-      .filter((c): c is { name?: string; domain?: string; path?: string; value?: string } =>
+      .filter((c): c is { name?: string; domain?: string; path?: string; value?: string; secure?: boolean } =>
         esDominioDelSii(String((c as { domain?: string })?.domain ?? '')))
       .map(c => ({
         name: String(c?.name ?? ''),
         domain: String(c?.domain ?? ''),
         path: String(c?.path ?? '/') || '/',
         value: String(c?.value ?? ''),
+        secure: Boolean((c as { secure?: boolean })?.secure),
       }))
       .filter(c => c.name !== '' && c.value !== '');
   }

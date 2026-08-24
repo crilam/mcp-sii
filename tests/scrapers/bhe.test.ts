@@ -353,7 +353,8 @@ ${filas}
     (http.postForm as jest.Mock).mockResolvedValue(paginaCon(200, pagina));
 
     await expect(scraper.informeMensual(2025, 5))
-      .rejects.toThrow(/200 \(100 documentos distintos\)/);
+      // El mensaje nombra la causa: repetidos, no faltantes.
+      .rejects.toThrow(/100 documento\(s\) repetido\(s\).*pagina servida dos veces|100 documento\(s\) repetido\(s\)/s);
   });
 
   // Los dos CGI paginan distinto: el de recibidas es 1-based y navega con
@@ -369,6 +370,23 @@ ${filas}
       .rejects.toThrow(/recibidas usa otro esquema/);
     // Y no pidió una segunda página con el índice equivocado.
     expect((http.postForm as jest.Mock).mock.calls).toHaveLength(1);
+  });
+
+  // El descuadre es determinístico: reintentar hace invalidate() +
+  // authenticateOnly() + las N páginas otra vez para fallar igual, gastando DOS
+  // sesiones del SII en una consulta — el bloqueo 01.01.190.500.720.27 que el
+  // resto del archivo cuida. Por eso es LimitacionConocida y no Error pelado.
+  it('un descuadre no se reintenta ni abre una segunda sesión', async () => {
+    const { scraper, http, session } = makeScraper('');
+    (http.postForm as jest.Mock).mockResolvedValue(
+      paginaCon(103, Array.from({ length: 100 }, (_, i) => 300 + i))
+    );
+
+    await expect(scraper.informeMensual(2025, 5)).rejects.toThrow(LimitacionConocida);
+
+    expect(session.invalidate).not.toHaveBeenCalled();
+    // Dos páginas de la única tanda, no cuatro de dos tandas.
+    expect((http.postForm as jest.Mock).mock.calls).toHaveLength(2);
   });
 
   it('acepta un mes de exactamente 100 boletas sin pedir otra página', async () => {
