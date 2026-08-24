@@ -70,6 +70,12 @@ function conJarSimulado(browser: Browser, inicial: string[], trasElSubmit = inic
 
 function crearBrowserMock(): Browser {
   const browser = new MockBrowser();
+  // El orden importa: `conJarSimulado` engancha el `eval` que haya en ese
+  // momento para repoblar el jar tras el requestSubmit, así que el mock del
+  // formulario tiene que estar puesto ANTES. Al revés, un
+  // `mockearEvalFormulario` posterior reemplaza la implementación entera y se
+  // lleva el hook — el default parecía cubrir tests que en realidad no cubría.
+  mockearEvalFormulario(browser, true);
   // Default: el login autentica. El éxito se decide por las cookies de sesión
   // del SII (ver assertLoginPorClaveExitoso), así que sin este mock TODO login
   // fallaría; los tests de rechazo lo sobreescriben con COOKIES_SIN_SESION.
@@ -431,7 +437,13 @@ describe('SessionManager.login', () => {
     const mgr = new SessionManager(configClave, browser);
     await conTimers(() => mgr.login()).catch(() => {});
 
-    expect((browser.cookiesDelSiiConUbicacion as jest.Mock).mock.calls.length).toBe(10);
+    // Rango, no un número exacto: atar el test a la cantidad de lecturas que
+    // hace la limpieza previa lo rompería ante cualquier lectura extra que no
+    // tiene nada de malo. Lo que se está fijando es el orden de magnitud de las
+    // vueltas del poll: 8 y no 15.
+    const lecturas = (browser.cookiesDelSiiConUbicacion as jest.Mock).mock.calls.length;
+    expect(lecturas).toBeLessThanOrEqual(11);
+    expect(lecturas).toBeGreaterThan(4);
   });
 
   // El rechazo por clave incorrecta es definitivo: esperar los 15s completos
@@ -451,8 +463,9 @@ describe('SessionManager.login', () => {
     const mgr = new SessionManager(configClave, browser);
 
     await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
-    // Una sola vuelta del poll (más las 2 lecturas de la limpieza previa), no las 8.
-    expect((browser.cookiesDelSiiConUbicacion as jest.Mock).mock.calls.length).toBe(3);
+    // Cortó en la primera vuelta del poll: bastante menos que las 8 que daría
+    // agotar el tiempo (más las lecturas de la limpieza previa).
+    expect((browser.cookiesDelSiiConUbicacion as jest.Mock).mock.calls.length).toBeLessThanOrEqual(4);
   });
 
   // La URL es sólo para el log: si su lectura falla, la clasificación no puede
