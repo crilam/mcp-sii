@@ -168,6 +168,28 @@ export class Browser {
     return this.runPorStdin(['eval', js]);
   }
 
+  // Nombres de las cookies que el contexto tiene para dominios del SII.
+  // Va por el comando dedicado del CLI y no por `eval('document.cookie')`
+  // porque las cookies de sesión del SII son HttpOnly: `document.cookie` no las
+  // ve, y basar en eso un chequeo de "¿hay sesión?" daría siempre que no.
+  // Se devuelven sólo los NOMBRES: para saber si hay sesión alcanza con eso, y
+  // los valores son credenciales de sesión que no tienen por qué circular.
+  cookiesDelSii(): string[] {
+    const salida = this.run(['cookies', 'get', '--json']);
+    try {
+      const cookies = JSON.parse(salida)?.data?.cookies;
+      if (!Array.isArray(cookies)) return [];
+      return cookies
+        .filter((c: { domain?: string }) => String(c?.domain ?? '').includes('sii.cl'))
+        .map((c: { name?: string }) => String(c?.name ?? ''));
+    } catch {
+      // Una salida que no es el JSON esperado no es "no hay cookies": es que no
+      // se pudo saber. Se propaga para no confundir un fallo de lectura con una
+      // sesión ausente, que es justo la distinción que este chequeo cuida.
+      throw new ErrorDeBrowser('cookies get', 'respuesta no parseable del CLI');
+    }
+  }
+
   press(key: string): void {
     this.run(['press', key]);
   }

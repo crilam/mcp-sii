@@ -33,7 +33,7 @@ const config = {
 } as SiiConfig;
 
 // El login por clave llena y envía el form por `eval`, no por fill/click, y
-// confirma el éxito mirando la URL final (ver src/session.ts). El mock de
+// confirma el éxito mirando las cookies de sesión (ver src/session.ts). El mock de
 // `eval` inspecciona el JS recibido: responde 'SI' sólo a la pregunta por
 // `myform`, para que el resto de los usos (llenado, requestSubmit) no se
 // confundan con esa respuesta.
@@ -48,8 +48,11 @@ function makeSession() {
   const browser = new MockBrowser();
   mockearFormularioPresente(browser);
   (browser.snapshot as jest.Mock).mockReturnValue('- generic\n  - StaticText "Portal"');
-  // Confirma que el destino final sea un dominio de sii.cl (ver src/session.ts).
   (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+  // El login se da por exitoso cuando el contexto tiene las cookies de sesión
+  // del SII, no por la URL: un rechazo por clave incorrecta también sale del
+  // formulario y sigue en sii.cl (ver assertLoginPorClaveExitoso).
+  (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID', 'RUT_NS']);
   return { browser, session: new SessionManager(config, browser) };
 }
 
@@ -92,6 +95,7 @@ describe('SessionManager.listEmpresasDisponibles', () => {
       '- option "EMPRESA UNO SPA 11111111-1" [ref=e11]'
     );
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID']);
     const session = new SessionManager(config, browser);
 
     await conTimers(() => session.listEmpresasDisponibles());
@@ -109,6 +113,7 @@ describe('SessionManager: página de empresas que no rinde', () => {
     mockearFormularioPresente(browser);
     (browser.snapshot as jest.Mock).mockReturnValue('- generic\n  - StaticText "Cargando"');
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID']);
     const session = new SessionManager(config, browser);
 
     await expect(conTimers(() => session.listEmpresasDisponibles())).rejects.toThrow(/no terminó de cargar/);

@@ -572,17 +572,75 @@ export class SessionManager {
   // SII es peor que tardar un poco más en detectar un rechazo genuino — a los
   // consumidores les llega como CREDENCIALES_INVALIDAS y se lo muestran al
   // usuario final.
+  // El éxito se decide por la EVIDENCIA de que hay sesión —las cookies que el
+  // SII sólo emite cuando autenticó— y no por la URL.
+  //
+  // Basarlo en la URL fue un falso positivo grave, verificado contra el portal:
+  // con una clave incorrecta el SII postea a `CAutInicio.cgi` y renderiza ahí
+  // mismo "La Clave Tributaria ingresada no es correcta" (código de mensaje
+  // 01.01.217.500.720.20). Esa URL no es `IngresoRutClave` y sí es `sii.cl`, o
+  // sea que cumplía las dos condiciones del chequeo viejo: `validar-clave`
+  // devolvía ok:true para CUALQUIER clave, y el gate que Tributy usa para no
+  // guardar credenciales inválidas no protegía nada.
+  //
+  // Las cookies no admiten esa ambigüedad: el login rechazado deja sólo las del
+  // WAF y la cola (TS01…, QueueITAccepted), mientras el exitoso deja TOKEN,
+  // CSESSIONID y las NETSCAPE_LIVEWIRE.* (17 en la corrida verificada).
   private async assertLoginPorClaveExitoso(maxMs = 15_000, step = 1_000): Promise<void> {
-    let url = '';
     for (let esperado = 0; esperado < maxMs; esperado += step) {
       await new Promise(resolve => setTimeout(resolve, step));
-      url = this.leerUrlActual();
-      if (!url.includes(SII_LOGIN_RECURSO) && /^https:\/\/([^/?]+\.)?sii\.cl(\/|\?|$)/.test(url)) return;
+      if (this.tieneCookiesDeSesion()) return;
     }
+
+    // Sin sesión. El motivo lo dice la página, y distinguirlo importa: una clave
+    // incorrecta es definitiva (el tenant no debe guardar esa credencial) y
+    // cualquier otra cosa puede ser transitoria.
+    const motivo = this.leerMotivoDeRechazo();
     console.error(
-      `Login SII: no salió del formulario de autenticación. url=${this.sanearUrlParaLog(url)}`
+      `Login SII: no se establecieron cookies de sesión. url=${this.sanearUrlParaLog(this.leerUrlActual())}` +
+      `${motivo ? ` motivo=${motivo}` : ''}`
     );
-    throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+    if (motivo === 'CLAVE_INCORRECTA') {
+      // Este texto es el que clasificarErrorCredenciales mapea a
+      // CREDENCIALES_INVALIDAS; no cambiarlo sin actualizar esa función.
+      throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+    }
+    throw new Error(
+      'El SII no estableció una sesión y no informó que la clave sea incorrecta. ' +
+      'Puede ser una caída del portal, la cola de espera o un bloqueo temporal; reintentá.'
+    );
+  }
+
+  private tieneCookiesDeSesion(): boolean {
+    try {
+      const presentes = new Set(this.browser.cookiesDelSii());
+      // TOKEN y CSESSIONID son las que usa el resto del flujo (el cookie jar de
+      // curl y `conversationId`). Con cualquiera de las dos hay sesión; exigir
+      // las 13 de SII_SESSION_COOKIES ataría el chequeo a que el SII no cambie
+      // ninguna.
+      return presentes.has('TOKEN') || presentes.has('CSESSIONID');
+    } catch {
+      // No se pudo leer: se trata como "todavía no" y lo resuelve el próximo
+      // poll, o el error final si nunca se puede.
+      return false;
+    }
+  }
+
+  // Devuelve un motivo normalizado o undefined si no se reconoce. Sólo se
+  // afirma lo que el portal dice con estas palabras: inventar una causa haría
+  // que un fallo transitorio se reporte como credencial inválida, y el tenant
+  // borraría una clave que en realidad servía.
+  private leerMotivoDeRechazo(): 'CLAVE_INCORRECTA' | undefined {
+    try {
+      const texto = this.browser.eval(
+        'document.body ? document.body.innerText.slice(0, 2000) : ""'
+      );
+      return /Clave Tributaria ingresada no es correcta/i.test(texto)
+        ? 'CLAVE_INCORRECTA'
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   // Sólo origin + pathname: el query string puede traer el RUT, un token de
