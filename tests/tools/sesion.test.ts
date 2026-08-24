@@ -50,19 +50,19 @@ describe('sii_iniciar_sesion / sii_cerrar_sesion', () => {
     const proveedor = new ProveedorCredencialesRuntime();
     proveedor.guardar('11.111.111-1', 'secreta');
     const logout = jest.fn().mockResolvedValue(undefined);
-    const olvidar = jest.fn();
-    const registro = {
-      ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly: jest.fn(), logout }),
-      olvidar,
-    } as unknown as RegistroSesiones<any>;
+    // `cerrarYOlvidar` corre el logout Y el desalojo dentro del turno de la cola
+    // del RUT: el desalojo cierra el navegador y borra su perfil, así que fuera
+    // de la cola podría arrancarle el contexto a otra operación en vuelo.
+    const cerrarYOlvidar = jest.fn(async (_rut: string, cerrar: any) => {
+      await cerrar({ logout });
+    });
+    const registro = { cerrarYOlvidar } as unknown as RegistroSesiones<any>;
 
     const { tools } = armar(registro, proveedor);
     await tools['sii_cerrar_sesion'].handler({ rut: '11.111.111-1' });
 
+    expect(cerrarYOlvidar).toHaveBeenCalledWith('11.111.111-1', expect.any(Function));
     expect(logout).toHaveBeenCalled();
     await expect(proveedor.para('11.111.111-1')).rejects.toThrow();
-    // Y desaloja la sesión: sin esto, "cerrar sesión" olvidaba la credencial
-    // pero dejaba vivos el proceso del navegador y su perfil en disco.
-    expect(olvidar).toHaveBeenCalledWith('11.111.111-1');
   });
 });

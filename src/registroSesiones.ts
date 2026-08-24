@@ -101,6 +101,32 @@ export class RegistroSesiones<T> implements EjecutorSesion<T> {
     this.desalojar(normalizar(rut));
   }
 
+  // Cierra la sesión de un RUT y la desaloja, TODO dentro del turno de la cola
+  // de ese RUT. Es la vía correcta para "cerrar sesión": `olvidar()` sola corre
+  // fuera de la cola, y desalojar ya no es sólo sacar una entrada de un Map —
+  // cierra el proceso del navegador y borra su perfil del disco. Si otra
+  // operación del mismo RUT estuviera encolada o en vuelo, le arrancaría el
+  // contexto por debajo mientras lo usa.
+  //
+  // `cerrar` lo provee quien llama porque el registro es genérico y no sabe qué
+  // significa cerrar una sesión (para SessionManager es `logout()`, o sea la
+  // sesión del lado del SII).
+  //
+  // Si no hay sesión cacheada no se crea una para cerrarla: no habría nada que
+  // cerrar y sólo se pagaría abrir un navegador al vacío.
+  async cerrarYOlvidar(rut: string, cerrar: (sesion: T) => Promise<void>): Promise<void> {
+    const clave = normalizar(rut);
+    return this.cola.ejecutar(clave, async () => {
+      const sesion = this.instancias.get(clave);
+      if (!sesion) return;
+      try {
+        await cerrar(sesion);
+      } finally {
+        this.desalojar(clave);
+      }
+    });
+  }
+
   // Para flujos de una sola pasada con credencial por request (validar-clave,
   // rutas REST pass-through): `preparar` (guardar la credencial), la creación
   // de la sesión, `fn`, y `finalizar` (borrar la credencial) corren TODOS

@@ -255,4 +255,69 @@ describe('RegistroSesiones', () => {
       expect(finalizar).toHaveBeenCalled();
     });
   });
+
+  describe('cerrarYOlvidar', () => {
+    // Desalojar ya no es sacar una entrada de un Map: cierra el proceso del
+    // navegador y borra su perfil del disco. Si eso corriera fuera de la cola,
+    // le arrancaría el contexto a una operación del mismo RUT en vuelo.
+    it('cierra y desaloja dentro del turno de la cola del RUT', async () => {
+      const eventos: string[] = [];
+      let creadas = 0;
+      const registro = new RegistroSesiones(
+        () => ({ id: ++creadas }),
+        sesion => { eventos.push(`destruir-${sesion.id}`); }
+      );
+
+      await registro.ejecutar('rut-1', async () => { eventos.push('operacion'); });
+      // Se lanza una operación del mismo RUT y, sin esperarla, el cierre: la
+      // cola tiene que ordenarlos, no entrelazarlos.
+      const enVuelo = registro.ejecutar('rut-1', async () => {
+        await new Promise(r => setTimeout(r, 10));
+        eventos.push('operacion-lenta-termina');
+      });
+      const cierre = registro.cerrarYOlvidar('rut-1', async () => { eventos.push('logout'); });
+      await Promise.all([enVuelo, cierre]);
+
+      expect(eventos).toEqual([
+        'operacion', 'operacion-lenta-termina', 'logout', 'destruir-1',
+      ]);
+    });
+
+    it('la siguiente operación del RUT crea una sesión nueva', async () => {
+      let creadas = 0;
+      const registro = new RegistroSesiones(() => ({ id: ++creadas }));
+
+      const primera = await registro.ejecutar('rut-1', async s => s);
+      await registro.cerrarYOlvidar('rut-1', async () => {});
+      const segunda = await registro.ejecutar('rut-1', async s => s);
+
+      expect(segunda).not.toBe(primera);
+    });
+
+    it('desaloja aunque el cierre lance', async () => {
+      const cerradas: number[] = [];
+      const registro = new RegistroSesiones(
+        () => ({ id: 1 }),
+        sesion => { cerradas.push(sesion.id); }
+      );
+
+      await registro.ejecutar('rut-1', async s => s);
+      await expect(
+        registro.cerrarYOlvidar('rut-1', async () => { throw new Error('logout falló'); })
+      ).rejects.toThrow('logout falló');
+
+      // El logout del lado del SII puede fallar (portal caído); el contexto
+      // local se libera igual, si no queda huérfano para siempre.
+      expect(cerradas).toEqual([1]);
+    });
+
+    it('sin sesión cacheada no crea una para cerrarla', async () => {
+      let creadas = 0;
+      const registro = new RegistroSesiones(() => ({ id: ++creadas }));
+
+      await registro.cerrarYOlvidar('rut-1', async () => {});
+
+      expect(creadas).toBe(0);
+    });
+  });
 });

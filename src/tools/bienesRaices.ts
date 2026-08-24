@@ -43,13 +43,14 @@ export function registerSesionTools(
       rut: z.string().describe('RUT de la persona cuya sesión se cierra'),
     },
     async ({ rut }) => {
-      await registro.ejecutar(rut, sesion => sesion.logout());
+      // logout + desalojo como UNA unidad dentro de la cola del RUT. Antes esto
+      // era `ejecutar(logout)` y nada más: la credencial se olvidaba pero el
+      // proceso del navegador y su perfil en disco quedaban vivos para siempre.
+      // Y hacerlo en dos pasos (ejecutar + olvidar) tampoco sirve: el desalojo
+      // cierra el navegador y borra su perfil, así que fuera de la cola puede
+      // arrancarle el contexto a otra operación del mismo RUT que esté en vuelo.
+      await registro.cerrarYOlvidar(rut, sesion => sesion.logout());
       credenciales.borrar(rut);
-      // Y se desaloja la sesión, que cierra su contexto de navegador y borra su
-      // perfil. Sin esto, "cerrar sesión" dejaba vivo el proceso del navegador y
-      // su perfil en disco para siempre: la credencial se olvidaba, el contexto
-      // no. Va DESPUÉS del logout, que corre dentro de la cola por RUT.
-      registro.olvidar(rut);
       return {
         content: [{ type: 'text' as const, text: `Sesión cerrada en el SII para ${rut}.` }],
       };
