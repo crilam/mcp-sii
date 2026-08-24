@@ -262,6 +262,26 @@ describe('SessionManager.login', () => {
     expect((aBorrar as Array<{ name: string }>).map(c => c.name)).toEqual(['TOKEN']);
   });
 
+  // Con un prefijo laxo (`/^TS[0-9a-f]/`), `TSESSION` contaría como
+  // infraestructura —la `e` es hex— y sobreviviría al borrado: justo el residuo
+  // de sesión que todo esto existe para evitar.
+  it('no confunde una cookie de sesión con el token del WAF por el prefijo TS', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
+    conJarSimulado(browser, ['TOKEN', 'TS0161cd2b', 'TSESSION', 'TSAuth']);
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login());
+
+    const [aBorrar] = (browser.borrarCookies as jest.Mock).mock.calls[0];
+    const nombres = (aBorrar as Array<{ name: string }>).map(c => c.name);
+    expect(nombres).toEqual(expect.arrayContaining(['TOKEN', 'TSESSION', 'TSAuth']));
+    // Sólo el token real del WAF se preserva.
+    expect(nombres).not.toContain('TS0161cd2b');
+  });
+
   // El mensaje del portal puede cambiar de copy; el código de mensaje que
   // imprime debajo es la señal estable del mismo caso.
   it('reconoce la clave incorrecta por el código de mensaje, sin el texto', async () => {

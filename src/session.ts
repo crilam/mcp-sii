@@ -49,7 +49,12 @@ const COOKIES_QUE_PRUEBAN_SESION = ['TOKEN', 'CSESSIONID'];
 // delante: el WAF F5 (`TS…`) y la cola de espera de Queue-it. Se preservan al
 // limpiar antes de un login, porque tirarlas manda el intento de vuelta a la
 // cola. Verificado en vivo: son exactamente las dos que sobreviven al borrado.
-const COOKIES_DE_INFRAESTRUCTURA = [/^TS[0-9a-f]/i, /^QueueITAccepted/i];
+// La del WAF va anclada a su forma completa (`TS` + al menos 6 dígitos hex y
+// nada más; la observada es `TS0161cd2b`). Con un prefijo laxo como
+// `/^TS[0-9a-f]/`, nombres como `TSESSION`, `TSEC` o `TSAuth` —la `e` es hex—
+// contarían como infraestructura y NO se borrarían, que es justo el residuo de
+// sesión que este arreglo existe para evitar.
+const COOKIES_DE_INFRAESTRUCTURA = [/^TS[0-9a-f]{6,}$/i, /^QueueITAccepted/i];
 
 function esCookieDeInfraestructura(nombre: string): boolean {
   return COOKIES_DE_INFRAESTRUCTURA.some(patron => patron.test(nombre));
