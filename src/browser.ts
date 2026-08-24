@@ -207,6 +207,14 @@ export class Browser {
   }
 
   cookiesDelSii(): string[] {
+    return this.cookiesDelSiiConUbicacion().map(c => c.name);
+  }
+
+  // Las cookies de dominio SII con el dominio y el path que reporta el CLI, que
+  // es lo que hace falta para BORRAR una: una emitida host-only por
+  // `zeusr.sii.cl`, o con un path específico, no se borra apuntándole a
+  // `.sii.cl` con path `/`. Nunca devuelve los valores.
+  cookiesDelSiiConUbicacion(): CookieUbicada[] {
     const salida = this.leerCookiesCrudas();
     let cookies: unknown;
     try {
@@ -223,28 +231,6 @@ export class Browser {
     if (!Array.isArray(cookies)) {
       throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
     }
-    return this.soloDelSii(cookies).map(c => c.name);
-  }
-
-  // Igual que `cookiesDelSii` pero con el dominio y el path que reporta el CLI,
-  // que es lo que hace falta para BORRAR una cookie: una emitida host-only por
-  // `zeusr.sii.cl`, o con un path específico, no se borra apuntándole a
-  // `.sii.cl` con path `/`. Sigue sin devolver los valores.
-  cookiesDelSiiConUbicacion(): CookieUbicada[] {
-    const salida = this.leerCookiesCrudas();
-    let cookies: unknown;
-    try {
-      cookies = JSON.parse(salida)?.data?.cookies;
-    } catch {
-      throw new ErrorDeBrowser('cookies get', 'respuesta no parseable del CLI');
-    }
-    if (!Array.isArray(cookies)) {
-      throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
-    }
-    return this.soloDelSii(cookies);
-  }
-
-  private soloDelSii(cookies: unknown[]): CookieUbicada[] {
     return cookies
       .filter((c): c is { name?: string; domain?: string; path?: string } =>
         esDominioDelSii(String((c as { domain?: string })?.domain ?? '')))

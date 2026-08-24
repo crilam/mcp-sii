@@ -225,6 +225,57 @@ describe('SessionManager.login', () => {
     expect(ordenLimpiar).toBeLessThan(ordenOpen);
   });
 
+  // El diseño es allowlist inversa: se va todo lo del SII salvo WAF y cola.
+  // Nadie más atrapa una regresión que vacíe el jar completo, que re-encolaría
+  // cada login y puede hacer fallar uno con credenciales válidas.
+  it('no borra las cookies del WAF ni de la cola de espera', async () => {
+    const browser = crearBrowserMock();
+    mockearLoginExitoso(browser, empresaUnicaSnapshot);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue([
+      { name: 'TOKEN', domain: '.sii.cl', path: '/' },
+      { name: 'TS0161cd2b', domain: '.sii.cl', path: '/' },
+      { name: 'QueueITAccepted-SDFrts345E-V3_autenticacionmisii', domain: '.sii.cl', path: '/' },
+    ]);
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login());
+
+    const [aBorrar] = (browser.borrarCookies as jest.Mock).mock.calls[0];
+    expect((aBorrar as Array<{ name: string }>).map(c => c.name)).toEqual(['TOKEN']);
+  });
+
+  // El mensaje del portal puede cambiar de copy; el código de mensaje que
+  // imprime debajo es la señal estable del mismo caso.
+  it('reconoce la clave incorrecta por el código de mensaje, sin el texto', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
+    (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_SIN_SESION);
+    (browser.eval as jest.Mock).mockImplementation((js: string) => {
+      if (js.includes('innerText')) return 'El código de este mensaje es 01.01.217.500.720.20';
+      return js.includes("getElementById('myform')") && js.includes('SI') ? 'SI' : '';
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
+  });
+
+  // Si no se puede limpiar, no se puede confiar en las cookies que aparezcan
+  // después: se corta antes de intentar, con un mensaje propio.
+  it('si no puede limpiar la sesión previa, no intenta el login', async () => {
+    const browser = crearBrowserMock();
+    mockearLoginExitoso(browser, empresaUnicaSnapshot);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => {
+      throw new Error('respuesta no parseable del CLI');
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow(/no se pudo limpiar la sesión anterior/i);
+    expect(browser.open).not.toHaveBeenCalled();
+  });
+
   // El escenario completo del bug, no sólo el orden de las llamadas: el contexto
   // ya traía TOKEN de un login anterior y la clave de ahora es incorrecta. Sin
   // el borrado previo, el primer poll vería esa cookie vieja y reportaría

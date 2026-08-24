@@ -557,10 +557,24 @@ export class SessionManager {
     // fijo: una cookie host-only de `zeusr.sii.cl` no se borra apuntándole a
     // `.sii.cl`, pero sí la vería el chequeo de sesión — justo la asimetría que
     // reabría el agujero.
-    const aBorrar = this.browser
-      .cookiesDelSiiConUbicacion()
-      .filter(c => !esCookieDeInfraestructura(c.name));
-    this.browser.borrarCookies(aBorrar);
+    try {
+      const aBorrar = this.browser
+        .cookiesDelSiiConUbicacion()
+        .filter(c => !esCookieDeInfraestructura(c.name));
+      this.browser.borrarCookies(aBorrar);
+    } catch (e) {
+      // Sin poder limpiar no se puede confiar en las cookies que aparezcan
+      // después: una de un login anterior daría por válida una clave que no lo
+      // es. Se corta acá, y con un mensaje propio — si dijera lo mismo que el
+      // fallo del chequeo posterior, en el log serían indistinguibles.
+      console.error(
+        `Login SII: no se pudo limpiar la sesión previa. detalle=${e instanceof Error ? e.message : e}`
+      );
+      throw new Error(
+        'No se pudo limpiar la sesión anterior del navegador, así que no se ' +
+        'puede verificar de forma confiable si la clave es correcta. Reintentá.'
+      );
+    }
 
     this.browser.open(SII_PORTAL_PRIVADO);
     await this.esperarFormularioDeLogin();
@@ -692,7 +706,13 @@ export class SessionManager {
       const texto = this.browser.eval(
         'document.body ? document.body.innerText.slice(0, 2000) : ""'
       );
-      return /Clave Tributaria ingresada no es correcta/i.test(texto)
+      // Dos señales, no una: el texto y el código de mensaje que el propio
+      // portal imprime debajo ("El código de este mensaje es …"). Si el SII
+      // cambia el copy, el código sigue identificando el caso; si mostrara el
+      // código sin texto, tampoco se perdería. El tercer grupo del código varía
+      // entre respuestas (se vieron 217 y 225), así que no se fija.
+      return /Clave Tributaria ingresada no es correcta/i.test(texto) ||
+        /01\.01\.\d+\.500\.720\.20\b/.test(texto)
         ? 'CLAVE_INCORRECTA'
         : undefined;
     } catch {
