@@ -21,11 +21,6 @@ const SII_MIPYME_URL = 'https://mipyme.sii.cl/';
 // esa raíz devuelve 404 (y sus subrutas, un rechazo del WAF). La selección de
 // empresa vive en el CGI del portal.
 const SII_SEL_EMPRESA_URL = 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi';
-// Formulario de autenticación por clave. NO se navega directo (abierto de
-// frente devuelve una página en blanco): se llega por redirect desde una
-// página privada. El nombre del recurso se usa como marcador para detectar que
-// seguimos en el login, o sea que la credencial fue rechazada.
-const SII_LOGIN_RECURSO = 'IngresoRutClave';
 // Página privada del portal que se usa como PUERTA de entrada al login por
 // clave: navegar acá hace que el SII redirija al formulario (que abierto de
 // frente no rinde) y deja la referencia de vuelta. Ver loginConClave.
@@ -49,12 +44,18 @@ const COOKIES_QUE_PRUEBAN_SESION = ['TOKEN', 'CSESSIONID'];
 // delante: el WAF F5 (`TS…`) y la cola de espera de Queue-it. Se preservan al
 // limpiar antes de un login, porque tirarlas manda el intento de vuelta a la
 // cola. Verificado en vivo: son exactamente las dos que sobreviven al borrado.
-// La del WAF va anclada a su forma completa (`TS` + al menos 6 dígitos hex y
-// nada más; la observada es `TS0161cd2b`). Con un prefijo laxo como
-// `/^TS[0-9a-f]/`, nombres como `TSESSION`, `TSEC` o `TSAuth` —la `e` es hex—
-// contarían como infraestructura y NO se borrarían, que es justo el residuo de
-// sesión que este arreglo existe para evitar.
-const COOKIES_DE_INFRAESTRUCTURA = [/^TS[0-9a-f]{6,}$/i, /^QueueITAccepted/i];
+// Las del WAF van ancladas a las formas que emite F5: `TS<hex>` (la observada es
+// `TS0161cd2b`), la misma con sufijo numérico (`TS01a1b2c3_28`) y las `TSPD*`.
+// Ancladas y no por prefijo laxo: con `/^TS[0-9a-f]/`, nombres como `TSESSION`,
+// `TSEC` o `TSAuth` —la `e` es hex— contarían como infraestructura y NO se
+// borrarían, que es justo el residuo de sesión que este arreglo evita. Pero
+// tampoco de más: una forma real del WAF que quede afuera se borra en cada
+// login y devuelve el intento a la cola o al challenge, en silencio.
+const COOKIES_DE_INFRAESTRUCTURA = [
+  /^TS[0-9a-f]{6,}(_\d+)?$/i,
+  /^TSPD/i,
+  /^QueueITAccepted/i,
+];
 
 function esCookieDeInfraestructura(nombre: string): boolean {
   return COOKIES_DE_INFRAESTRUCTURA.some(patron => patron.test(nombre));

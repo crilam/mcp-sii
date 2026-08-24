@@ -270,7 +270,12 @@ describe('SessionManager.login', () => {
     mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
     (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
-    conJarSimulado(browser, ['TOKEN', 'TS0161cd2b', 'TSESSION', 'TSAuth']);
+    conJarSimulado(browser, [
+      'TOKEN', 'TSESSION', 'TSAuth',
+      // Las tres formas que emite F5. Si alguna se borrara, cada login volvería
+      // a la cola o al challenge del WAF, en silencio.
+      'TS0161cd2b', 'TS01a1b2c3_28', 'TSPD_101',
+    ]);
 
     const mgr = new SessionManager(configClave, browser);
     await conTimers(() => mgr.login());
@@ -278,8 +283,9 @@ describe('SessionManager.login', () => {
     const [aBorrar] = (browser.borrarCookies as jest.Mock).mock.calls[0];
     const nombres = (aBorrar as Array<{ name: string }>).map(c => c.name);
     expect(nombres).toEqual(expect.arrayContaining(['TOKEN', 'TSESSION', 'TSAuth']));
-    // Sólo el token real del WAF se preserva.
     expect(nombres).not.toContain('TS0161cd2b');
+    expect(nombres).not.toContain('TS01a1b2c3_28');
+    expect(nombres).not.toContain('TSPD_101');
   });
 
   // El mensaje del portal puede cambiar de copy; el código de mensaje que
