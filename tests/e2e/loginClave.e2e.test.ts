@@ -44,7 +44,12 @@ async function conSesion<T>(
   config: { rut: string; clave: string },
   fn: (s: SessionManager, b: Browser) => Promise<T>
 ): Promise<T> {
-  const browser = new Browser(`e2e-${config.rut}-${Date.now()}`);
+  // Id FIJO por RUT, no uno nuevo por corrida: `--session <id>` crea un perfil
+  // persistente en disco, y un id con timestamp iría acumulando directorios con
+  // cookies de sesión REALES cada vez que alguien corre la suite. Reusar el
+  // mismo perfil es seguro porque el login limpia las cookies de sesión antes de
+  // autenticar (ver loginConClave).
+  const browser = new Browser(`e2e-${config.rut.replace(/[.\-]/g, '')}`);
   const sesion = new SessionManager(
     { rut: config.rut, clave: config.clave, strategy: AuthStrategy.Clave },
     browser
@@ -60,7 +65,12 @@ async function conSesion<T>(
 // caso), muy por encima del default de 5s de jest.
 const TIMEOUT_MS = 90_000;
 
-const describeConCredenciales = hayCredenciales ? describe : describe.skip;
+// Barrera además del comando separado: el `npm run test:e2e` es una convención
+// y nada impide que un pipeline lo invoque. En CI se saltea salvo que alguien lo
+// pida explícitamente, porque desde CI nadie está mirando cuántos intentos
+// fallidos se acumulan sobre una cuenta real.
+const bloqueadoPorCi = Boolean(process.env.CI) && process.env.SII_E2E_FORCE !== '1';
+const describeConCredenciales = hayCredenciales && !bloqueadoPorCi ? describe : describe.skip;
 
 describeConCredenciales('login por clave contra el SII real', () => {
   it('la clave correcta autentica y deja una sesión usable', async () => {
@@ -78,9 +88,9 @@ describeConCredenciales('login por clave contra el SII real', () => {
       const conValor = cookies.filter(c => c.tieneValor).map(c => c.name);
       expect(conValor).toContain('TOKEN');
       expect(conValor).toContain('CSESSIONID');
-
-      const { rut } = sesion.identidad();
-      expect(rut).toBeTruthy();
+      // No se asierta `identidad()`: es puro parseo del RUT de la config, sin
+      // red, así que pasaría igual sin haber hecho login. Las cookies son la
+      // única evidencia que depende de que el SII haya autenticado.
     });
   }, TIMEOUT_MS);
 
