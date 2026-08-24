@@ -182,7 +182,20 @@ export class Browser {
   // Se devuelven sólo los NOMBRES: para saber si hay sesión alcanza con eso, y
   // los valores son credenciales de sesión que no tienen por qué circular.
   cookiesDelSii(): string[] {
-    const salida = this.run(['cookies', 'get', '--json']);
+    let salida: string;
+    try {
+      salida = this.run(['cookies', 'get', '--json']);
+    } catch (e) {
+      // Se relanza SIN la salida del CLI. `run()` mete stderr+stdout en el
+      // mensaje y en `salida`, y acá eso es peligroso: si el comando falla con
+      // código ≠ 0 pero alcanzó a imprimir JSON, ese JSON trae los VALORES de
+      // TOKEN/CSESSIONID. Ese mensaje se loguea aguas arriba, así que sin este
+      // filtro los tokens de sesión terminarían en CloudWatch.
+      throw new ErrorDeBrowser(
+        'cookies get',
+        e instanceof ErrorDeBrowser && e.code ? `code=${e.code}` : ''
+      );
+    }
     let cookies: unknown;
     try {
       // Forma verificada contra el CLI: {"success":true,"data":{"cookies":[…]}}.
@@ -203,10 +216,16 @@ export class Browser {
       .map((c: { name?: string }) => String(c?.name ?? ''));
   }
 
-  // Borra TODAS las cookies del contexto. Se usa antes de un login para no
-  // arrastrar la sesión anterior — ver el comentario en `loginConClave`.
-  limpiarCookies(): void {
-    this.run(['cookies', 'clear']);
+  // Borra las cookies indicadas, y sólo esas, expirándolas en el pasado
+  // (verificado contra el CLI: una cookie con `--expires 1` desaparece del
+  // contexto). NO se usa `cookies clear`, que borraría todo el jar: ahí también
+  // viven el token del WAF y el de la cola de espera del SII (`QueueITAccepted`),
+  // y tirarlos manda cada login de vuelta a la cola, que bajo carga puede hacer
+  // fallar un login con credenciales perfectamente válidas.
+  borrarCookies(nombres: string[], dominio = '.sii.cl'): void {
+    for (const nombre of nombres) {
+      this.run(['cookies', 'set', nombre, '', '--domain', dominio, '--path', '/', '--expires', '1']);
+    }
   }
 
   press(key: string): void {

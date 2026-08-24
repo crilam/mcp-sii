@@ -300,16 +300,23 @@ describe('Browser', () => {
     });
   });
 
-  it('limpiarCookies usa el comando clear del CLI', () => {
+  // No usa `cookies clear`: eso borraría también el token del WAF y el de la
+  // cola de espera del SII, y re-encolar cada login puede hacer fallar uno con
+  // credenciales válidas. Se expira cada cookie nombrada, una por una.
+  it('borrarCookies expira sólo las cookies indicadas, sin vaciar el jar', () => {
     mockExec.mockReturnValue(Buffer.from(''));
 
-    browser.limpiarCookies();
+    browser.borrarCookies(['TOKEN', 'CSESSIONID']);
 
-    expect(mockExec).toHaveBeenCalledWith(
+    expect(mockExec).toHaveBeenCalledTimes(2);
+    expect(mockExec).toHaveBeenNthCalledWith(
+      1,
       'agent-browser',
-      ['cookies', 'clear'],
+      ['cookies', 'set', 'TOKEN', '', '--domain', '.sii.cl', '--path', '/', '--expires', '1'],
       expect.any(Object)
     );
+    const argv = mockExec.mock.calls.flatMap(([, args]) => args as string[]);
+    expect(argv).not.toContain('clear');
   });
 
   describe('evalPrivado', () => {

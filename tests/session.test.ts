@@ -202,12 +202,41 @@ describe('SessionManager.login', () => {
     const mgr = new SessionManager(configClave, browser);
     await conTimers(() => mgr.login());
 
-    expect(browser.limpiarCookies).toHaveBeenCalled();
+    expect(browser.borrarCookies).toHaveBeenCalled();
+    // Sólo las de sesión del SII, no todo el jar: ahí viven el token del WAF y
+    // el de la cola de espera, y tirarlos re-encola cada login.
+    const [nombres] = (browser.borrarCookies as jest.Mock).mock.calls[0];
+    expect(nombres).toContain('TOKEN');
+    expect(nombres).toContain('CSESSIONID');
     // Y antes de navegar al portal, no después de autenticar (que borraría la
     // sesión recién obtenida).
-    const ordenLimpiar = (browser.limpiarCookies as jest.Mock).mock.invocationCallOrder[0];
+    const ordenLimpiar = (browser.borrarCookies as jest.Mock).mock.invocationCallOrder[0];
     const ordenOpen = (browser.open as jest.Mock).mock.invocationCallOrder[0];
     expect(ordenLimpiar).toBeLessThan(ordenOpen);
+  });
+
+  // El escenario completo del bug, no sólo el orden de las llamadas: el contexto
+  // ya traía TOKEN de un login anterior y la clave de ahora es incorrecta. Sin
+  // el borrado previo, el primer poll vería esa cookie vieja y reportaría
+  // ok:true. Si alguien mueve el borrado a logout(), este test se cae.
+  it('con un TOKEN viejo en el contexto, una clave incorrecta se rechaza igual', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
+
+    // El contexto arranca con la sesión anterior puesta y sólo queda sin ella
+    // después de que loginConClave la borre.
+    let cookies = COOKIES_CON_SESION;
+    (browser.borrarCookies as jest.Mock).mockImplementation(() => { cookies = COOKIES_SIN_SESION; });
+    (browser.cookiesDelSii as jest.Mock).mockImplementation(() => cookies);
+    (browser.eval as jest.Mock).mockImplementation((js: string) => {
+      if (js.includes('innerText')) return 'La Clave Tributaria ingresada no es correcta';
+      return js.includes("getElementById('myform')") && js.includes('SI') ? 'SI' : '';
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
   });
 
   // Login lento pero exitoso: las cookies todavía no están en los primeros

@@ -45,7 +45,10 @@ const LOCEXP_TTL_MS = 7_200_000;
 // login a que el SII no deje de emitir ninguna.
 const COOKIES_QUE_PRUEBAN_SESION = ['TOKEN', 'CSESSIONID'];
 
-// Nombres de cookies de sesión que el SII establece tras autenticación.
+// Nombres de cookies de sesión que el SII establece tras autenticación. Las que
+// prueban la sesión entran por spread, no repetidas a mano: así el "subconjunto
+// de" del comentario de arriba es cierto por construcción y no puede
+// desincronizarse si alguna de las dos listas cambia.
 const SII_SESSION_COOKIES = [
   'NETSCAPE_LIVEWIRE.rut',
   'NETSCAPE_LIVEWIRE.rutm',
@@ -56,8 +59,7 @@ const SII_SESSION_COOKIES = [
   'NETSCAPE_LIVEWIRE.exp',
   'NETSCAPE_LIVEWIRE.sec',
   'NETSCAPE_LIVEWIRE.lms',
-  'TOKEN',
-  'CSESSIONID',
+  ...COOKIES_QUE_PRUEBAN_SESION,
   'DV_NS',
   'RUT_NS',
 ];
@@ -533,7 +535,11 @@ export class SessionManager {
     // anterior puede seguir ahí. Sin este borrado, una clave INCORRECTA vería
     // esa cookie vieja en el primer poll y se reportaría como válida — el mismo
     // falso positivo que este chequeo vino a cerrar, entrando por otra puerta.
-    this.browser.limpiarCookies();
+    //
+    // Se borran SÓLO las cookies de sesión del SII, no todo el jar: ahí también
+    // están el token del WAF y el de la cola de espera, y tirarlos manda cada
+    // login de vuelta a la cola.
+    this.browser.borrarCookies(SII_SESSION_COOKIES);
 
     this.browser.open(SII_PORTAL_PRIVADO);
     await this.esperarFormularioDeLogin();
