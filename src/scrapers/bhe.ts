@@ -262,6 +262,25 @@ export class BheScraper {
     // se podía saber qué valor pide la página 2. Se podía: está escrito en la
     // respuesta.)
     const totalPaginas = Math.ceil(total / MAX_FILAS_POR_PAGINA);
+
+    // La paginación se implementa SÓLO para emitidas, y no por comodidad: los
+    // dos CGI paginan distinto. El de emitidas usa `pagina_solicitada` 0-based
+    // (su paginador hace `listar(i)` para i en [0, tot_pag)). El de recibidas
+    // devuelve `pagina_solicitada="1"` y `pagina_actual="1"`, y navega con
+    // `GLB_sig_pag`/`pagina_sig_codigo` — o sea 1-based y con un código de
+    // continuación, y su `listar()` vive en un JS que no tenemos capturado.
+    // Mandarle el índice de emitidas pediría `0` y `1`, que probablemente son la
+    // misma página: 200 boletas con folios duplicados, el fallo silencioso que
+    // todo esto evita. Hasta relevar ese CGI, recibidas falla explícito.
+    if (recibidas && totalPaginas > 1) {
+      throw new LimitacionConocida(
+        `El SII informa ${total} boletas recibidas para ${String(mes).padStart(2, '0')}/${anio}, ` +
+        `y entrega ${MAX_FILAS_POR_PAGINA} por página. La paginación del informe de ` +
+        'recibidas usa otro esquema que el de emitidas y todavía no está relevada, ' +
+        'así que no se devuelve un listado incompleto. Consultá el mes desde el portal.'
+      );
+    }
+
     for (let pagina = 1; pagina < totalPaginas; pagina++) {
       const { html } = await this.pedirPagina(anio, mes, recibidas, pagina);
       boletas.push(...this.parseBoletas(html, esquema));
@@ -272,11 +291,18 @@ export class BheScraper {
     // completo entra al motor contable del consumidor como un total real. Es el
     // modo de falla silencioso que el error explícito anterior evitaba, así que
     // no se cambia por confianza: se verifica.
-    if (boletas.length !== total) {
+    const foliosUnicos = new Set(boletas.map(b => b.folio)).size;
+    if (boletas.length !== total || foliosUnicos !== total) {
+      // Se miran las DOS cosas. Sólo con el conteo, un CGI que ignorara
+      // `pagina_solicitada` y devolviera dos veces la misma página pasaría
+      // inadvertido en un mes de exactamente 200: serían 200 filas, 200 == 200,
+      // y el consumidor recibiría 100 boletas duplicadas como si fueran el mes
+      // completo. Los folios únicos son lo que detecta esa repetición.
       throw new Error(
         `El SII informó ${total} boletas para ${String(mes).padStart(2, '0')}/${anio} ` +
-        `pero se recuperaron ${boletas.length} en ${totalPaginas} página(s). ` +
-        'No se devuelve un listado incompleto; reintentá.'
+        `pero se recuperaron ${boletas.length} (${foliosUnicos} folios distintos) ` +
+        `en ${totalPaginas} página(s). No se devuelve un listado incompleto ni con ` +
+        'duplicados; reintentá.'
       );
     }
 
