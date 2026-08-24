@@ -39,7 +39,18 @@ describe('SessionManager.rutaCookieJar', () => {
 
     const ruta = await mgr.rutaCookieJar();
 
-    expect(ruta).toBe(path.join(os.tmpdir(), 'sii_cookies_12345678'));
+    expect(ruta.startsWith(path.join(os.tmpdir(), 'sii_cookies_12345678'))).toBe(true);
+  });
+
+  // Y tampoco lo comparten dos sesiones del MISMO RUT. `ejecutarPassThrough`
+  // crea a propósito una sesión que no se cachea, así que puede coexistir con la
+  // cacheada: con el jar por RUT, cerrar una le borraba el archivo a la otra, que
+  // seguía creyéndose autenticada y salía sin cookies.
+  it('dos sesiones del mismo RUT no comparten cookie jar', async () => {
+    const a = new SessionManager(configCert, new MockBrowser());
+    const b = new SessionManager(configCert, new MockBrowser());
+
+    expect(await a.rutaCookieJar()).not.toBe(await b.rutaCookieJar());
   });
 
   it('dos credenciales distintas no comparten cookie jar', async () => {

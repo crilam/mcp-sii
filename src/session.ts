@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'crypto';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import { Browser } from './browser';
@@ -158,6 +159,10 @@ export class SessionManager {
   // sesión del SII, y una marca que no caduca hace que las consultas salten el
   // login, vayan a una página protegida y fallen igual en cada reintento.
   private autenticadoHasta: number | null = null;
+  // Identifica a ESTA sesión entre las varias que puede haber del mismo RUT (una
+  // cacheada más una por request pass-through). Se usa para que sus archivos
+  // temporales no se pisen; ver el getter `cookieJar`.
+  private readonly idInstancia = randomUUID();
 
   constructor(
     private config: SiiConfig,
@@ -178,8 +183,20 @@ export class SessionManager {
   // varias: dos sesiones escribiendo el mismo archivo se pisan las cookies y las
   // consultas salen con la sesión equivocada, sin error. Con el RUT en el nombre
   // cada credencial tiene el suyo. Ver rutaTemporalSii.
+  // Un jar por INSTANCIA de sesión, no por RUT.
+  //
+  // Por RUT era un estado compartido con el mismo problema que tenía el contexto
+  // del navegador: `ejecutarPassThrough` crea a propósito una sesión que no se
+  // registra en `instancias`, así que puede coexistir con la cacheada del mismo
+  // RUT. Con el jar compartido, la secuencia era: la cacheada autentica y escribe
+  // el jar; llega un pass-through del mismo RUT, lo reescribe y al cerrar lo
+  // BORRA; la cacheada sigue creyéndose autenticada, `rutaCookieJar()` devuelve
+  // la ruta, y curl sale sin cookies — reportado después como sesión caducada.
+  //
+  // El sufijo hace únicos los archivos de cada instancia, así que cerrar una no
+  // le saca el jar a otra.
   private get cookieJar(): string {
-    return rutaTemporalSii('cookies', this.config.rut);
+    return rutaTemporalSii('cookies', `${this.config.rut}-${this.idInstancia}`);
   }
 
   // Serializa una operación COMPLETA que depende de la empresa seleccionada:
