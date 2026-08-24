@@ -168,6 +168,62 @@ describe('registrarRutasBhe', () => {
     expect(core.pdf).not.toHaveBeenCalled();
   });
 
+  // `base64` sin `-w0` (el default en BSD y GNU) corta la salida en lineas, asi
+  // que un .pfx codificado con el comando de siempre trae saltos: rechazarlo
+  // seria rechazar un certificado que funciona por el formato del volcado.
+  it('acepta un certificado en base64 con saltos de linea', async () => {
+    (core.resumen as jest.Mock).mockResolvedValue({ meses: [] });
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/resumen')!({
+      rut: '11.111.111-1',
+      certificado_base64: 'TUlJS\nlRnZ0lC\nQWdJQ0FR\n',
+      certificado_password: 'yyy',
+      anio: 2026,
+    });
+
+    expect(respuesta).toEqual({ status: 200, body: { ok: true, meses: [] } });
+  });
+
+  // La clave tributaria ahora alcanza: estas consultas van por HTTP con el
+  // cookie jar, y el login por clave lo produce igual que el certificado.
+  it('acepta clave tributaria en vez de certificado', async () => {
+    (core.resumen as jest.Mock).mockResolvedValue({ meses: [] });
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/resumen')!({
+      rut: '11.111.111-1', clave: 'secreta', anio: 2026,
+    });
+
+    expect(respuesta).toEqual({ status: 200, body: { ok: true, meses: [] } });
+  });
+
+  // Mandar las dos es un error del llamador, no algo a resolver con una
+  // prioridad implicita: con `certPath ? cert : clave` en env.ts era imposible
+  // saber con que se habia autenticado una consulta.
+  it('rechaza mandar clave y certificado a la vez', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/resumen')!({
+      rut: '11.111.111-1', clave: 'secreta',
+      certificado_base64: 'xxx', certificado_password: 'yyy', anio: 2026,
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.resumen).not.toHaveBeenCalled();
+  });
+
+  it('rechaza no mandar ninguna credencial', async () => {
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/resumen')!({
+      rut: '11.111.111-1', anio: 2026,
+    });
+
+    expect(respuesta.status).toBe(400);
+    expect(core.resumen).not.toHaveBeenCalled();
+  });
+
   // El `nombre_archivo` que devuelve la ruta suele terminar como nombre de
   // archivo real en el consumidor: un separador acá es path traversal allá.
   it('pdf: rechaza un codigo_barras con separadores de ruta', async () => {

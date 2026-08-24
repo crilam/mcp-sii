@@ -2,14 +2,24 @@ import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
 import { RecursoNoEncontrado } from '../../erroresConsulta';
 
-// Fragmento zod compartido por las 5 rutas REST que reciben certificado
-// digital. La regex valida el alfabeto base64 (incluyendo padding) ANTES de
-// intentar decodificar: un base64 con basura no falla en Buffer.from (que lo
-// decodifica "lo mejor que puede"), sino que escribe un .pfx corrupto y
-// termina en un error tardío genérico del scraper. Rechazarlo acá devuelve
-// BAD_REQUEST temprano sin gastar cupo de rate-limit del tenant.
+// Fragmento zod compartido por las rutas REST que reciben SÓLO certificado
+// digital (renta, dte, mipyme; las de BHE usan `conCredencial`, que acepta
+// también clave).
+//
+// Se valida el alfabeto base64 ANTES de intentar decodificar: un base64 con
+// basura no falla en `Buffer.from` —que decodifica "lo mejor que puede"— sino
+// que escribe un .pfx corrupto y termina en un error tardío y genérico del
+// scraper. Rechazarlo acá devuelve BAD_REQUEST temprano, sin gastarle cupo de
+// rate-limit al tenant.
+//
+// El whitespace se normaliza primero, con el mismo criterio que
+// `camposCredencial`: `base64` sin `-w0` corta la salida en líneas, y sin este
+// saneo el mismo certificado sería válido en las rutas de BHE e inválido acá.
+// Una inconsistencia así es de las peores de diagnosticar desde afuera.
 export const zodCredencialCert = {
-  certificado_base64: z.string().min(1).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'certificado_base64 inválido'),
+  certificado_base64: z.string().min(1)
+    .transform(s => s.replace(/\s+/g, ''))
+    .refine(s => /^[A-Za-z0-9+/]+={0,2}$/.test(s), 'certificado_base64 inválido'),
   certificado_password: z.string().min(1),
 };
 
@@ -29,8 +39,15 @@ export const zodCredencialCert = {
 // saber con qué se había autenticado una consulta.
 const camposCredencial = {
   clave: z.string().min(1).optional(),
+  // Se normaliza el whitespace ANTES de validar el alfabeto. `base64` sin `-w0`
+  // (el default en BSD y GNU) corta la salida en líneas de 64 o 76 caracteres,
+  // así que un `.pfx` codificado con el comando de siempre trae saltos de línea
+  // y el regex a secas lo rechazaba con 400 — un certificado que funciona,
+  // rechazado por el formato del volcado.
   certificado_base64: z.string().min(1)
-    .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'certificado_base64 inválido').optional(),
+    .transform(s => s.replace(/\s+/g, ''))
+    .refine(s => /^[A-Za-z0-9+/]+={0,2}$/.test(s), 'certificado_base64 inválido')
+    .optional(),
   certificado_password: z.string().min(1).optional(),
 };
 
