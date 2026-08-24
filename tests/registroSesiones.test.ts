@@ -195,6 +195,55 @@ describe('RegistroSesiones', () => {
       expect(creadas).toBe(2);
     });
 
+    // Cada sesión trae recursos propios (el contexto del navegador: un proceso y
+    // un perfil en disco). Sin cerrarlos, un servidor de larga vida acumula uno
+    // por cada RUT y por cada request pass-through, sin techo.
+    it('cierra los recursos de la sesión del pase al terminar', async () => {
+      const cerradas: number[] = [];
+      let creadas = 0;
+      const registro = new RegistroSesiones(
+        () => ({ id: ++creadas }),
+        sesion => { cerradas.push(sesion.id); }
+      );
+
+      await registro.ejecutarPassThrough('rut-1', () => {}, () => {}, async s => s);
+
+      expect(cerradas).toEqual([1]);
+    });
+
+    // La sesión del pase no vive en `instancias`, así que cerrarla "por clave"
+    // no la encontraría — y peor, le cerraría el contexto a la sesión cacheada
+    // de ese mismo RUT, que es otra instancia y sigue en uso.
+    it('no cierra la sesión cacheada del mismo RUT', async () => {
+      const cerradas: number[] = [];
+      let creadas = 0;
+      const registro = new RegistroSesiones(
+        () => ({ id: ++creadas }),
+        sesion => { cerradas.push(sesion.id); }
+      );
+
+      const cacheada = await registro.ejecutar('rut-1', async s => s);
+      await registro.ejecutarPassThrough('rut-1', () => {}, () => {}, async s => s);
+
+      expect(cerradas).not.toContain(cacheada.id);
+      // Y la cacheada sigue siendo la misma instancia: no fue desalojada.
+      expect(await registro.ejecutar('rut-1', async s => s)).toBe(cacheada);
+    });
+
+    it('cierra los recursos aunque fn lance', async () => {
+      const cerradas: number[] = [];
+      const registro = new RegistroSesiones(
+        () => ({ id: 1 }),
+        sesion => { cerradas.push(sesion.id); }
+      );
+
+      await expect(
+        registro.ejecutarPassThrough('rut-1', () => {}, () => {}, async () => { throw new Error('boom'); })
+      ).rejects.toThrow('boom');
+
+      expect(cerradas).toEqual([1]);
+    });
+
     it('finalizar corre aunque fn lance', async () => {
       const registro = new RegistroSesiones((rut: string) => ({ rut }));
       const finalizar = jest.fn();

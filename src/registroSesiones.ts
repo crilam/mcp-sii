@@ -29,7 +29,34 @@ export class RegistroSesiones<T> implements EjecutorSesion<T> {
   // Secrets Manager en producción. No hace falta protegerla de doble creación a
   // mano —`ejecutar` corre dentro de la cola por RUT, así que dos llamadas del
   // mismo RUT no ven la caché vacía a la vez—.
-  constructor(private crear: (rut: string) => T | Promise<T>) {}
+  // `destruir` libera los recursos de una sesión que se desaloja (el contexto
+  // del navegador, que es un proceso y un perfil en disco). Sin esto, en un
+  // servidor de larga vida cada RUT y cada pase único dejan un contexto abierto
+  // que nadie cierra nunca. Es opcional para no obligar a los tests a inventar
+  // uno.
+  constructor(
+    private crear: (rut: string) => T | Promise<T>,
+    private destruir?: (sesion: T) => void
+  ) {}
+
+  // Desaloja la sesión cacheada de un RUT liberando sus recursos. Se usa desde
+  // los dos caminos que la descartan (`olvidar` y el final de un pase único),
+  // para que ninguno se olvide de cerrar.
+  private desalojar(clave: string): void {
+    const sesion = this.instancias.get(clave);
+    this.instancias.delete(clave);
+    if (sesion) this.destruirSeguro(sesion);
+  }
+
+  private destruirSeguro(sesion: T): void {
+    if (!this.destruir) return;
+    try {
+      this.destruir(sesion);
+    } catch {
+      // Cerrar el contexto es limpieza: si falla, no puede tumbar la operación
+      // que ya terminó ni el logout que el usuario pidió.
+    }
+  }
 
   async ejecutar<R>(rut: string, fn: (sesion: T) => Promise<R>): Promise<R> {
     // Se normaliza acá, en el único punto de entrada al registro y a la cola:
@@ -54,7 +81,7 @@ export class RegistroSesiones<T> implements EjecutorSesion<T> {
   // vuelve a pasar por `crear`, con la credencial que tenga el proveedor en
   // ese momento.
   olvidar(rut: string): void {
-    this.instancias.delete(normalizar(rut));
+    this.desalojar(normalizar(rut));
   }
 
   // Para flujos de una sola pasada con credencial por request (validar-clave,
@@ -75,8 +102,11 @@ export class RegistroSesiones<T> implements EjecutorSesion<T> {
   // en curso, ninguna otra llamada para ese mismo RUT puede leer ni tocar el
   // Map de credenciales de por medio.
   //
-  // Siempre crea sesión NUEVA (nunca reusa `instancias`): un pase único no
-  // debe heredar el cookie jar/estado de una sesión anterior de ese RUT.
+  // Siempre crea sesión NUEVA (nunca reusa `instancias`): un pase único no debe
+  // heredar el cookie jar/estado de una sesión anterior de ese RUT. Para que eso
+  // sea cierto de verdad, la factory tiene que darle también un CONTEXTO de
+  // navegador propio — si dos sesiones del mismo RUT comparten contexto,
+  // comparten cookies y la promesa de arriba es falsa (ver registroSesionesSii).
   async ejecutarPassThrough<R>(
     rut: string,
     preparar: () => void,
@@ -86,11 +116,16 @@ export class RegistroSesiones<T> implements EjecutorSesion<T> {
     const clave = normalizar(rut);
     return this.cola.ejecutar(clave, async () => {
       preparar();
+      // La sesión del pase NUNCA entra en `instancias`, así que hay que cerrarla
+      // por referencia: un `desalojar(clave)` no la encontraría, y además podría
+      // cerrarle el contexto a la sesión cacheada de ese mismo RUT, que es de
+      // otra instancia y sigue en uso.
+      let sesion: T | undefined;
       try {
-        const sesion = await this.crear(clave);
+        sesion = await this.crear(clave);
         return await fn(sesion);
       } finally {
-        this.instancias.delete(clave);
+        if (sesion) this.destruirSeguro(sesion);
         finalizar();
       }
     });

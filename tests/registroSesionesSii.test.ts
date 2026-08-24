@@ -72,13 +72,54 @@ describe('crearRegistroSesionesSii', () => {
     const contextos: string[] = [];
     const registro = crearRegistroSesionesSii(
       new CredencialesEnMemoria([configA, configB]),
-      rut => { contextos.push(rut); return new MockBrowser(); }
+      id => { contextos.push(id); return new MockBrowser(); }
     );
 
     await registro.ejecutar('11111111-1', async s => s);
     await registro.ejecutar('22222222-2', async s => s);
 
-    expect(contextos).toEqual(['111111111', '222222222']);
+    // El id lleva el RUT (para poder rastrear el contexto) más un correlativo
+    // que lo hace único: la unicidad no puede depender del RUT, porque varias
+    // sesiones del mismo RUT tampoco deben compartir contexto.
+    expect(contextos).toHaveLength(2);
+    expect(contextos[0]).toContain('111111111');
+    expect(contextos[1]).toContain('222222222');
+    expect(contextos[0]).not.toBe(contextos[1]);
+  });
+
+  // El bug que esto cierra: con `--session <rut>` a secas, la sesión que
+  // `ejecutarPassThrough` crea nueva por request comparte contexto —o sea
+  // cookies— con la cacheada del mismo RUT. Así, un `validar-clave` le borraba
+  // la sesión viva a la instancia cacheada (que seguía creyéndose autenticada
+  // 2h, con el jar vacío y sin ningún error), y el chequeo de login de una podía
+  // ver las cookies de la otra.
+  it('no comparte contexto entre dos sesiones del mismo RUT', async () => {
+    const contextos: string[] = [];
+    const registro = crearRegistroSesionesSii(
+      new CredencialesEnMemoria([configA]),
+      id => { contextos.push(id); return new MockBrowser(); }
+    );
+
+    await registro.ejecutar('11111111-1', async s => s);
+    await registro.ejecutarPassThrough('11111111-1', () => {}, () => {}, async s => s);
+
+    expect(contextos).toHaveLength(2);
+    expect(contextos[0]).not.toBe(contextos[1]);
+    // Y los dos siguen identificando al RUT, para que el contexto sea rastreable.
+    for (const id of contextos) expect(id).toContain('111111111');
+  });
+
+  it('cierra el contexto de la sesión del pase al terminar', async () => {
+    const navegadores: Browser[] = [];
+    const registro = crearRegistroSesionesSii(
+      new CredencialesEnMemoria([configA]),
+      () => { const b = new MockBrowser(); navegadores.push(b); return b; }
+    );
+
+    await registro.ejecutarPassThrough('11111111-1', () => {}, () => {}, async s => s);
+
+    expect(navegadores).toHaveLength(1);
+    expect(navegadores[0].close).toHaveBeenCalled();
   });
 
   it('propaga el error del proveedor cuando el RUT no está registrado', async () => {
