@@ -35,8 +35,46 @@ async function conTimers<T>(fn: () => Promise<T>): Promise<T> {
   return promesa;
 }
 
+// Cookies que el SII sólo emite cuando el login autenticó de verdad. Son la
+// evidencia en la que se basa el chequeo de éxito (ver comentario en
+// assertLoginPorClaveExitoso): la URL no sirve, porque un rechazo por clave
+// incorrecta también sale del formulario y sigue en sii.cl.
+const COOKIES_CON_SESION = ['TS0161cd2b', 'TOKEN', 'CSESSIONID', 'RUT_NS', 'DV_NS'];
+// Lo único que queda tras un login rechazado: el WAF y la cola de espera.
+const COOKIES_SIN_SESION = ['TS0161cd2b', 'QueueITAccepted-SDFrts345E-V3_autenticacionmisii'];
+
+// Las mismas, con la ubicación que reporta el CLI: es lo que se necesita para
+// borrarlas donde viven de verdad.
+const ubicadas = (nombres: string[]) =>
+  nombres.map(name => ({ name, domain: '.sii.cl', path: '/', tieneValor: true }));
+
+// Simula el jar del contexto: `borrarCookies` quita de verdad lo que se le pide.
+// Es necesario, no cosmético — loginConClave VERIFICA el borrado y aborta si
+// quedó alguna cookie de sesión viva, así que un mock que devuelva siempre lo
+// mismo haría fallar todo login.
+function conJarSimulado(browser: Browser, inicial: string[], trasElSubmit = inicial): void {
+  let jar = ubicadas(inicial);
+  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => jar);
+  (browser.borrarCookies as jest.Mock).mockImplementation((aBorrar: Array<{ name: string }>) => {
+    const nombres = new Set(aBorrar.map(c => c.name));
+    jar = jar.filter(c => !nombres.has(c.name));
+  });
+  // El SII repone las cookies al autenticar; el mock lo hace cuando ve el
+  // requestSubmit, que es el momento en que el portal procesa el login.
+  const evalPrevio = (browser.eval as jest.Mock).getMockImplementation();
+  (browser.eval as jest.Mock).mockImplementation((js: string) => {
+    if (js.includes('requestSubmit')) jar = ubicadas(trasElSubmit);
+    return evalPrevio ? evalPrevio(js) : '';
+  });
+}
+
 function crearBrowserMock(): Browser {
-  return new MockBrowser();
+  const browser = new MockBrowser();
+  // Default: el login autentica. El éxito se decide por las cookies de sesión
+  // del SII (ver assertLoginPorClaveExitoso), así que sin este mock TODO login
+  // fallaría; los tests de rechazo lo sobreescriben con COOKIES_SIN_SESION.
+  conJarSimulado(browser, COOKIES_CON_SESION);
+  return browser;
 }
 
 const configClave: SiiConfig = {
@@ -72,8 +110,8 @@ function mockearEvalFormulario(browser: Browser, formularioAparece = true): void
   });
 }
 
-// Login por clave exitoso: el formulario aparece y la URL final queda fuera
-// del login, en un dominio sii.cl.
+// Login por clave exitoso: el formulario aparece y el contexto queda con las
+// cookies de sesión del SII.
 function mockearLoginExitoso(
   browser: Browser,
   snapshotEmpresa: string,
@@ -81,6 +119,7 @@ function mockearLoginExitoso(
 ): void {
   mockearEvalFormulario(browser, true);
   (browser.getUrl as jest.Mock).mockReturnValue(urlFinal);
+  conJarSimulado(browser, COOKIES_CON_SESION);
   (browser.snapshot as jest.Mock).mockReturnValue(snapshotEmpresa);
 }
 
@@ -156,15 +195,20 @@ describe('SessionManager.login', () => {
     await expect(conTimers(() => mgr.login())).rejects.toThrow('SII_EMPRESA_RUT');
   });
 
-  // Bug real en prod: el SII no manda ningún error ante clave incorrecta acá
-  // (a diferencia del CGI de certificado) — sólo vuelve a renderizar la MISMA
-  // página de login, que se detecta porque la URL sigue conteniendo el
-  // recurso del formulario (IngresoRutClave).
-  it('clave rechazada: la URL sigue en IngresoRutClave, lanza error clasificable', async () => {
+  // REGRESIÓN, verificada contra el portal real: con una clave incorrecta el
+  // SII postea a CAutInicio.cgi y renderiza ahí "La Clave Tributaria ingresada
+  // no es correcta". Esa URL NO contiene IngresoRutClave y SÍ es sii.cl, así
+  // que el criterio anterior (basado en la URL) la daba por éxito: validar-clave
+  // respondía ok:true con cualquier clave y el gate de Tributy no protegía nada.
+  it('clave rechazada en CAutInicio.cgi: sin cookies de sesión, lanza error clasificable', async () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
-    (browser.getUrl as jest.Mock).mockReturnValue(
-      'https://homer.sii.cl/cgi-bin/IngresoRutClave.cgi'
+    (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_SIN_SESION));
+    (browser.eval as jest.Mock).mockImplementation((js: string) =>
+      js.includes('innerText')
+        ? 'La Clave Tributaria ingresada no es correcta, verifique que su teclado...'
+        : 'SI'
     );
 
     const mgr = new SessionManager(configClave, browser);
@@ -172,17 +216,194 @@ describe('SessionManager.login', () => {
     await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
   });
 
-  // Login lento pero exitoso: la URL sigue en el login en los primeros polls
-  // (el SII todavía está procesando el submit) y recién en uno posterior sale
-  // a un dominio sii.cl. No debe clasificarse como rechazo sólo porque no
-  // salió en el primer poll.
-  it('clave válida con login lento: sale del form recién en un poll posterior, no rechaza', async () => {
+  // El contexto de agent-browser PERSISTE entre invocaciones (`--session <rut>`)
+  // y logout() sólo navega a la URL de término. Sin limpiar las cookies antes de
+  // intentar el login, una TOKEN de un login anterior haría que una clave
+  // incorrecta se reporte como válida: el mismo falso positivo, por otra puerta.
+  it('limpia las cookies antes de enviar el formulario, para no ver una sesión vieja', async () => {
+    const browser = crearBrowserMock();
+    mockearLoginExitoso(browser, empresaUnicaSnapshot);
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login());
+
+    expect(browser.borrarCookies).toHaveBeenCalled();
+    // Sólo las de sesión del SII, no todo el jar: ahí viven el token del WAF y
+    // el de la cola de espera, y tirarlos re-encola cada login.
+    const [aBorrar] = (browser.borrarCookies as jest.Mock).mock.calls[0];
+    const nombres = (aBorrar as Array<{ name: string }>).map(c => c.name);
+    expect(nombres).toContain('TOKEN');
+    expect(nombres).toContain('CSESSIONID');
+    // Y el token del WAF sobrevive: borrarlo re-encola cada login.
+    expect(nombres).not.toContain('TS0161cd2b');
+    // Y antes de navegar al portal, no después de autenticar (que borraría la
+    // sesión recién obtenida).
+    const ordenLimpiar = (browser.borrarCookies as jest.Mock).mock.invocationCallOrder[0];
+    const ordenOpen = (browser.open as jest.Mock).mock.invocationCallOrder[0];
+    expect(ordenLimpiar).toBeLessThan(ordenOpen);
+  });
+
+  // El diseño es allowlist inversa: se va todo lo del SII salvo WAF y cola.
+  // Nadie más atrapa una regresión que vacíe el jar completo, que re-encolaría
+  // cada login y puede hacer fallar uno con credenciales válidas.
+  it('no borra las cookies del WAF ni de la cola de espera', async () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
-    (browser.getUrl as jest.Mock)
-      .mockReturnValueOnce('https://homer.sii.cl/cgi-bin/IngresoRutClave.cgi')
-      .mockReturnValueOnce('https://homer.sii.cl/cgi-bin/IngresoRutClave.cgi')
-      .mockReturnValue('https://mipyme.sii.cl/');
+    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
+    conJarSimulado(browser, [
+      'TOKEN', 'TS0161cd2b', 'QueueITAccepted-SDFrts345E-V3_autenticacionmisii',
+    ]);
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login());
+
+    const [aBorrar] = (browser.borrarCookies as jest.Mock).mock.calls[0];
+    expect((aBorrar as Array<{ name: string }>).map(c => c.name)).toEqual(['TOKEN']);
+  });
+
+  // Con un prefijo laxo (`/^TS[0-9a-f]/`), `TSESSION` contaría como
+  // infraestructura —la `e` es hex— y sobreviviría al borrado: justo el residuo
+  // de sesión que todo esto existe para evitar.
+  it('no confunde una cookie de sesión con el token del WAF por el prefijo TS', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
+    conJarSimulado(browser, [
+      'TOKEN', 'TSESSION', 'TSAuth',
+      // Las tres formas que emite F5. Si alguna se borrara, cada login volvería
+      // a la cola o al challenge del WAF, en silencio.
+      'TS0161cd2b', 'TS01a1b2c3_28', 'TSPD_101',
+    ]);
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login());
+
+    const [aBorrar] = (browser.borrarCookies as jest.Mock).mock.calls[0];
+    const nombres = (aBorrar as Array<{ name: string }>).map(c => c.name);
+    expect(nombres).toEqual(expect.arrayContaining(['TOKEN', 'TSESSION', 'TSAuth']));
+    expect(nombres).not.toContain('TS0161cd2b');
+    expect(nombres).not.toContain('TS01a1b2c3_28');
+    expect(nombres).not.toContain('TSPD_101');
+  });
+
+  // El mensaje del portal puede cambiar de copy; el código de mensaje que
+  // imprime debajo es la señal estable del mismo caso.
+  it('reconoce la clave incorrecta por el código de mensaje, sin el texto', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_SIN_SESION));
+    (browser.eval as jest.Mock).mockImplementation((js: string) => {
+      if (js.includes('innerText')) return 'El código de este mensaje es 01.01.217.500.720.20';
+      return js.includes("getElementById('myform')") && js.includes('SI') ? 'SI' : '';
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
+  });
+
+  // Si no se puede limpiar, no se puede confiar en las cookies que aparezcan
+  // después: se corta antes de intentar, con un mensaje propio.
+  it('si no puede limpiar la sesión previa, no intenta el login', async () => {
+    const browser = crearBrowserMock();
+    mockearLoginExitoso(browser, empresaUnicaSnapshot);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => {
+      throw new Error('respuesta no parseable del CLI');
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow(/no se pudo limpiar la sesión anterior/i);
+    expect(browser.open).not.toHaveBeenCalled();
+  });
+
+  // El contexto es persistente por RUT: una cookie de sesión que el borrado
+  // selectivo no logre sacar dejaría a ese RUT sin poder autenticar nunca más,
+  // ni con la clave correcta. Vaciar el jar cuesta re-encolarse una vez; quedar
+  // bloqueado no tiene salida.
+  it('si el borrado selectivo no saca la sesión, vacía el jar completo y sigue', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
+
+    // El borrado selectivo no logra sacar TOKEN (atributos que no matchean);
+    // sólo el vaciado total lo consigue.
+    let jar = ubicadas(['TOKEN']);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => jar);
+    (browser.borrarCookies as jest.Mock).mockReturnValue(0);
+    (browser.vaciarCookies as jest.Mock).mockImplementation(() => { jar = []; });
+    const evalFormulario = (browser.eval as jest.Mock).getMockImplementation()!;
+    (browser.eval as jest.Mock).mockImplementation((js: string) => {
+      if (js.includes('requestSubmit')) jar = ubicadas(['TOKEN', 'CSESSIONID']);
+      return evalFormulario(js);
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login());
+
+    expect(browser.vaciarCookies).toHaveBeenCalled();
+  });
+
+  it('si ni vaciar el jar saca la sesión, ahí sí aborta', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    // TOKEN sobrevive a todo: no hay forma de confiar en el chequeo posterior.
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(['TOKEN']));
+    (browser.borrarCookies as jest.Mock).mockReturnValue(0);
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow(/no se pudo limpiar la sesión anterior/i);
+    expect(browser.vaciarCookies).toHaveBeenCalled();
+    expect(browser.open).not.toHaveBeenCalled();
+  });
+
+  // El escenario completo del bug, no sólo el orden de las llamadas: el contexto
+  // ya traía TOKEN de un login anterior y la clave de ahora es incorrecta. Sin
+  // el borrado previo, el primer poll vería esa cookie vieja y reportaría
+  // ok:true. Si alguien mueve el borrado a logout(), este test se cae.
+  it('con un TOKEN viejo en el contexto, una clave incorrecta se rechaza igual', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
+
+    // El contexto arranca con la sesión anterior puesta y sólo queda sin ella
+    // después de que loginConClave la borre.
+    let cookies = COOKIES_CON_SESION;
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => ubicadas(cookies));
+    (browser.borrarCookies as jest.Mock).mockImplementation(() => { cookies = COOKIES_SIN_SESION; });
+    
+    (browser.eval as jest.Mock).mockImplementation((js: string) => {
+      if (js.includes('innerText')) return 'La Clave Tributaria ingresada no es correcta';
+      return js.includes("getElementById('myform')") && js.includes('SI') ? 'SI' : '';
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
+  });
+
+  // Login lento pero exitoso: las cookies todavía no están en los primeros
+  // polls (el SII sigue procesando el submit) y aparecen en uno posterior. No
+  // debe clasificarse como rechazo sólo porque no estaban al principio.
+  it('clave válida con login lento: las cookies aparecen en un poll posterior', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    // El submit deja el jar sin sesión y sólo la tercera lectura la ve: simula
+    // al SII procesando el login más lento que el primer poll.
+    conJarSimulado(browser, COOKIES_CON_SESION, COOKIES_SIN_SESION);
+    let lecturas = 0;
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => {
+      lecturas += 1;
+      // Las dos primeras lecturas del poll (la del borrado no cuenta) todavía no
+      // ven la sesión.
+      return lecturas <= 3 ? ubicadas(COOKIES_SIN_SESION) : ubicadas(COOKIES_CON_SESION);
+    });
     (browser.snapshot as jest.Mock).mockReturnValue(empresaUnicaSnapshot);
 
     const mgr = new SessionManager(configClave, browser);
@@ -191,18 +412,109 @@ describe('SessionManager.login', () => {
     expect(session.empresaRut).toBe('11111111-1');
   });
 
-  // Cubre el caso que este mismo criterio podía introducir: la URL ya no
-  // contiene IngresoRutClave, pero tampoco es un dominio sii.cl — una página
-  // de error o mantención ajena. Sin este chequeo, cualquier interstitial
-  // fuera del login volvería a reportar éxito con credenciales inválidas.
-  it('la URL sale del login pero el destino no es sii.cl: rechaza igual', async () => {
+  // Sin sesión y sin el mensaje de clave incorrecta no se puede afirmar que la
+  // credencial esté mal: puede ser la cola de espera, una caída o un bloqueo
+  // temporal. Se rechaza igual, pero con un mensaje que NO clasifica como
+  // credencial inválida — si no, el tenant borraría una clave que sí servía.
+  // Con paso fijo de 1s, agotar los 15s daba 15 vueltas; con el backoff capado
+  // en 2s son 8 (1+2+2+2+2+2+2+2 = 15s). Se cuentan las lecturas de cookies: 8
+  // del poll más las 2 de la limpieza previa. (Cada vuelta gasta además un
+  // `eval` para leer el motivo, así que el total de procesos es mayor — ver el
+  // comentario en assertLoginPorClaveExitoso.) Sin este test, un `step *= 2` mal
+  // editado vuelve a las 15 vueltas sin que nada se caiga.
+  it('el poll usa backoff: agotar el tiempo da 8 vueltas, no 15', async () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
-    (browser.getUrl as jest.Mock).mockReturnValue('https://error-generico.example.com/');
+    (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_SIN_SESION));
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login()).catch(() => {});
+
+    expect((browser.cookiesDelSiiConUbicacion as jest.Mock).mock.calls.length).toBe(10);
+  });
+
+  // El rechazo por clave incorrecta es definitivo: esperar los 15s completos
+  // regala tiempo en un endpoint síncrono, y si el portal navega en el medio el
+  // mensaje desaparece y el fallo se reportaría como transitorio.
+  it('corta en el primer poll cuando el portal ya dijo que la clave es incorrecta', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    conJarSimulado(browser, COOKIES_SIN_SESION);
+    const evalFormulario = (browser.eval as jest.Mock).getMockImplementation()!;
+    (browser.eval as jest.Mock).mockImplementation((js: string) =>
+      js.includes('innerText')
+        ? 'La Clave Tributaria ingresada no es correcta'
+        : evalFormulario(js)
+    );
 
     const mgr = new SessionManager(configClave, browser);
 
     await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
+    // Una sola vuelta del poll (más las 2 lecturas de la limpieza previa), no las 8.
+    expect((browser.cookiesDelSiiConUbicacion as jest.Mock).mock.calls.length).toBe(3);
+  });
+
+  // La URL es sólo para el log: si su lectura falla, la clasificación no puede
+  // degradarse a ERROR — el tenant guardaría una clave inválida por un fallo de
+  // logging.
+  it('clasifica la clave incorrecta aunque falle la lectura de la URL', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    conJarSimulado(browser, COOKIES_SIN_SESION);
+    (browser.getUrl as jest.Mock).mockImplementation(() => {
+      throw new Error('agent-browser falló al ejecutar get');
+    });
+    const evalFormulario = (browser.eval as jest.Mock).getMockImplementation()!;
+    (browser.eval as jest.Mock).mockImplementation((js: string) =>
+      js.includes('innerText')
+        ? 'La Clave Tributaria ingresada no es correcta'
+        : evalFormulario(js)
+    );
+
+    const mgr = new SessionManager(configClave, browser);
+
+    await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
+  });
+
+  it('sin cookies y sin motivo reconocible: rechaza sin culpar a la credencial', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_SIN_SESION));
+    (browser.eval as jest.Mock).mockImplementation((js: string) =>
+      js.includes('innerText') ? 'Servicio temporalmente no disponible' : 'SI'
+    );
+
+    const mgr = new SessionManager(configClave, browser);
+
+    const error = await conTimers(() => mgr.login()).catch((e: Error) => e);
+    expect((error as Error).message).toMatch(/no estableció una sesión/);
+    expect((error as Error).message).not.toMatch(/rechazó la autenticación/);
+  });
+
+  // La lectura de cookies es la única evidencia de éxito: si el CLI devuelve
+  // algo ilegible, eso NO es "no hay sesión" — pero tampoco alcanza para
+  // afirmar que hay. Se rechaza, y el mensaje dice que no se pudo verificar en
+  // vez de culpar a la credencial (que puede ser perfectamente válida).
+  it('si no se pueden leer las cookies, no da el login por bueno ni culpa a la clave', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
+    // La limpieza previa funciona (primeras dos lecturas) y la lectura falla
+    // recién después, al verificar si el login estableció la sesión.
+    let lecturas = 0;
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => {
+      lecturas += 1;
+      if (lecturas <= 2) return [];
+      throw new Error('respuesta no parseable del CLI');
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+
+    const error = await conTimers(() => mgr.login()).catch((e: Error) => e);
+    expect((error as Error).message).toMatch(/No se pudo verificar/);
+    expect((error as Error).message).not.toMatch(/rechazó la autenticación/);
   });
 });
 

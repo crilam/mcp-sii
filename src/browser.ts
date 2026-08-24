@@ -34,6 +34,28 @@ export class ErrorDeBrowser extends Error {
   }
 }
 
+// Una cookie identificada por dónde vive, que es lo que hace falta para
+// borrarla. Sin el valor: es una credencial de sesión y no tiene por qué
+// circular ni terminar en un log.
+export interface CookieUbicada {
+  name: string;
+  domain: string;
+  path: string;
+  // Si la cookie tiene contenido. NO el contenido: alcanza para distinguir una
+  // cookie viva de una que quedó con valor vacío, que es lo que pasa cuando el
+  // borrado por expiración no la remueve del todo (los atributos no matchean
+  // exacto: host-only contra `.sii.cl`, Secure, HttpOnly). Un nombre presente
+  // con valor vacío no prueba ninguna sesión.
+  tieneValor: boolean;
+}
+
+// `includes('sii.cl')` daría por buenos `notsii.cl` o `sii.cl.evil.com`: el
+// dominio tiene que ser el del SII o un subdominio suyo.
+function esDominioDelSii(dominio: string): boolean {
+  const d = dominio.replace(/^\./, '').toLowerCase();
+  return d === 'sii.cl' || d.endsWith('.sii.cl');
+}
+
 export class Browser {
   constructor(private sessionId?: string) {}
 
@@ -166,6 +188,103 @@ export class Browser {
   // llevan secretos y pueden seguir usando `eval()` por argv.
   evalPrivado(js: string): string {
     return this.runPorStdin(['eval', js]);
+  }
+
+  // Va por el comando dedicado del CLI y no por `eval('document.cookie')`: el
+  // comando lee el jar del CONTEXTO, que es lo que hace falta —`document.cookie`
+  // depende de la página cargada y no ve las cookies marcadas HttpOnly, así que
+  // un chequeo de "¿hay sesión?" basado en eso sería frágil justo cuando importa.
+  // (Medido contra el portal: hoy TOKEN y CSESSIONID vienen con httpOnly=false y
+  // valor de 13 caracteres, pero el criterio no depende de que eso siga así.)
+  //
+  // Nunca devuelve los valores: son credenciales de sesión, y para saber si hay
+  // sesión alcanza con el nombre y un booleano de "tiene contenido".
+  // Se relanza SIN la salida del CLI. `run()` mete stderr+stdout en el mensaje y
+  // en la prop `salida`, y acá eso es peligroso: si el comando falla con código
+  // ≠ 0 pero alcanzó a imprimir JSON, ese JSON trae los VALORES de
+  // TOKEN/CSESSIONID. Ese mensaje se loguea aguas arriba, así que sin este
+  // filtro los tokens de sesión terminarían en CloudWatch.
+  private leerCookiesCrudas(): string {
+    try {
+      return this.run(['cookies', 'get', '--json']);
+    } catch (e) {
+      // Se descarta la SALIDA del CLI (puede traer los valores de las cookies),
+      // pero no todo: el código del fallo y la clase del error no llevan datos y
+      // son lo único que le dice al operador si fue un timeout, un CLI ausente o
+      // algo más. Con una cadena vacía, los tres casos se veían igual.
+      const codigo = e instanceof ErrorDeBrowser && e.code ? e.code : 'sin código';
+      const clase = e instanceof Error ? e.constructor.name : typeof e;
+      throw new ErrorDeBrowser('cookies get', `salida omitida (${clase}, ${codigo})`);
+    }
+  }
+
+  // Las cookies de dominio SII con el dominio y el path que reporta el CLI, que
+  // es lo que hace falta para BORRAR una: una emitida host-only por
+  // `zeusr.sii.cl`, o con un path específico, no se borra apuntándole a
+  // `.sii.cl` con path `/`. Nunca devuelve los valores.
+  cookiesDelSiiConUbicacion(): CookieUbicada[] {
+    const salida = this.leerCookiesCrudas();
+    let cookies: unknown;
+    try {
+      // Forma verificada contra el CLI: {"success":true,"data":{"cookies":[…]}}.
+      cookies = JSON.parse(salida)?.data?.cookies;
+    } catch {
+      throw new ErrorDeBrowser('cookies get', 'respuesta no parseable del CLI');
+    }
+    // Un JSON válido con OTRA forma no es "no hay cookies": es que no se pudo
+    // saber. Devolver [] acá sería el peor resultado posible — quien pregunta
+    // usa esto para decidir si el login autenticó, así que un array vacío
+    // silencioso haría fallar todo login con clave válida. Se lanza, igual que
+    // si el JSON no parseara.
+    if (!Array.isArray(cookies)) {
+      throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
+    }
+    return cookies
+      .filter((c): c is { name?: string; domain?: string; path?: string; value?: string } =>
+        esDominioDelSii(String((c as { domain?: string })?.domain ?? '')))
+      .map(c => ({
+        name: String(c?.name ?? ''),
+        domain: String(c?.domain ?? ''),
+        path: String(c?.path ?? '/') || '/',
+        // El valor se convierte a booleano acá mismo y no sale de este método.
+        tieneValor: String(c?.value ?? '') !== '',
+      }))
+      // Una cookie sin nombre no sirve para nada y en el camino de borrado
+      // produciría `cookies set '' '' --domain …`, una llamada basura que puede
+      // fallar y abortar el login entero.
+      .filter(c => c.name !== '');
+  }
+
+  // Vacía TODO el jar del contexto. Es el último recurso: se lleva también el
+  // token del WAF y el de la cola de espera, así que el intento siguiente vuelve
+  // a encolarse. Sólo tiene sentido cuando el borrado selectivo no logró sacar
+  // una cookie de sesión, porque dejarla es peor (ver `loginConClave`).
+  vaciarCookies(): void {
+    this.run(['cookies', 'clear']);
+  }
+
+  // Borra las cookies indicadas, y sólo esas, expirándolas en el pasado
+  // (verificado contra el CLI: una cookie con `--expires 1` desaparece del
+  // contexto). No usa `cookies clear` —eso es `vaciarCookies`, el último
+  // recurso— porque en el jar también viven el token del WAF y el de la cola de
+  // espera del SII, y tirarlos manda cada login de vuelta a la cola, que bajo
+  // carga puede hacer fallar un login con credenciales perfectamente válidas.
+  //
+  // Devuelve cuántas no se pudieron borrar. Un `set` que falla NO aborta el
+  // resto: si una cookie del jar tiene un nombre o dominio que el CLI rechaza,
+  // cortar ahí dejaría sin borrar todas las siguientes —incluidas las que sí
+  // importan— y haría fallar el login entero sin salida. Quien llama decide qué
+  // hacer; la garantía real es re-leer y verificar, no que cada `set` funcione.
+  borrarCookies(cookies: CookieUbicada[]): number {
+    let fallidas = 0;
+    for (const { name, domain, path } of cookies) {
+      try {
+        this.run(['cookies', 'set', name, '', '--domain', domain, '--path', path, '--expires', '1']);
+      } catch {
+        fallidas += 1;
+      }
+    }
+    return fallidas;
   }
 
   press(key: string): void {

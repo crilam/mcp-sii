@@ -241,6 +241,143 @@ describe('Browser', () => {
   // BLOQUEANTE 3 del pr-review: evalPrivado manda el JS por stdin de
   // agent-browser (modo batch --json) en vez de por argv, para que la clave
   // tributaria no quede visible en ps/`/proc/<pid>/cmdline` del contenedor.
+  // El login por clave decide si autenticó según estas cookies, así que un
+  // parseo que falle en silencio rompe TODO login válido (o, peor, da por bueno
+  // uno inválido).
+  describe('cookiesDelSiiConUbicacion', () => {
+    // Forma real del CLI, verificada contra agent-browser.
+    function salidaDelCli(cookies: unknown[]) {
+      return Buffer.from(JSON.stringify({ success: true, data: { cookies } }));
+    }
+
+    it('pide las cookies por el comando dedicado y devuelve sus nombres', () => {
+      mockExec.mockReturnValue(salidaDelCli([
+        { name: 'TOKEN', value: 'v1', domain: '.sii.cl', path: '/' },
+        { name: 'CSESSIONID', value: 'v2', domain: 'misiir.sii.cl', path: '/' },
+      ]));
+
+      expect(browser.cookiesDelSiiConUbicacion().map(c => c.name)).toEqual(['TOKEN', 'CSESSIONID']);
+      expect(mockExec).toHaveBeenCalledWith(
+        'agent-browser',
+        ['cookies', 'get', '--json'],
+        expect.any(Object)
+      );
+    });
+
+    // Sólo los nombres: los valores son credenciales de sesión y no hacen falta
+    // para saber si hay sesión.
+    it('no devuelve los valores de las cookies', () => {
+      mockExec.mockReturnValue(salidaDelCli([
+        { name: 'TOKEN', value: 'VALOR_SECRETO', domain: '.sii.cl', path: '/' },
+      ]));
+
+      expect(JSON.stringify(browser.cookiesDelSiiConUbicacion())).not.toContain('VALOR_SECRETO');
+    });
+
+    it('descarta las cookies de otros dominios', () => {
+      mockExec.mockReturnValue(salidaDelCli([
+        { name: 'TOKEN', domain: '.sii.cl' },
+        { name: 'AJENA', domain: 'notsii.cl' },
+        { name: 'IMPOSTORA', domain: 'sii.cl.evil.com' },
+        { name: 'OTRA', domain: '.google.com' },
+      ]));
+
+      expect(browser.cookiesDelSiiConUbicacion().map(c => c.name)).toEqual(['TOKEN']);
+    });
+
+    // Un JSON válido con otra forma NO es "no hay cookies": es que no se pudo
+    // saber. Devolver [] haría fallar todo login con clave correcta.
+    it('lanza si el JSON parsea pero no trae data.cookies como arreglo', () => {
+      mockExec.mockReturnValue(Buffer.from(JSON.stringify({ success: true, data: {} })));
+
+      expect(() => browser.cookiesDelSiiConUbicacion()).toThrow(ErrorDeBrowser);
+    });
+
+    it('lanza si la salida no es JSON', () => {
+      mockExec.mockReturnValue(Buffer.from('no soy json'));
+
+      expect(() => browser.cookiesDelSiiConUbicacion()).toThrow(ErrorDeBrowser);
+    });
+  });
+
+  // No usa `cookies clear`: eso borraría también el token del WAF y el de la
+  // cola de espera del SII, y re-encolar cada login puede hacer fallar uno con
+  // credenciales válidas. Se expira cada cookie nombrada, una por una.
+  it('borrarCookies expira sólo las cookies indicadas, sin vaciar el jar', () => {
+    mockExec.mockReturnValue(Buffer.from(''));
+
+    browser.borrarCookies([
+      { name: 'TOKEN', domain: '.sii.cl', path: '/', tieneValor: true },
+      { name: 'CSESSIONID', domain: '.sii.cl', path: '/', tieneValor: true },
+    ]);
+
+    expect(mockExec).toHaveBeenCalledTimes(2);
+    expect(mockExec).toHaveBeenNthCalledWith(
+      1,
+      'agent-browser',
+      ['cookies', 'set', 'TOKEN', '', '--domain', '.sii.cl', '--path', '/', '--expires', '1'],
+      expect.any(Object)
+    );
+    const argv = mockExec.mock.calls.flatMap(([, args]) => args as string[]);
+    expect(argv).not.toContain('clear');
+  });
+
+  // Cortar en la primera que falla dejaría sin borrar todas las siguientes,
+  // incluidas las que sí importan, y haría fallar el login entero sin salida.
+  // La garantía real es la verificación posterior, no que cada `set` funcione.
+  it('borrarCookies sigue con las demás si una falla, y reporta cuántas', () => {
+    mockExec.mockImplementation((_cmd, args) => {
+      if ((args as string[]).includes('RARA')) throw new Error('el CLI la rechazó');
+      return Buffer.from('');
+    });
+
+    const fallidas = browser.borrarCookies([
+      { name: 'RARA', domain: '.sii.cl', path: '/', tieneValor: true },
+      { name: 'TOKEN', domain: '.sii.cl', path: '/', tieneValor: true },
+    ]);
+
+    expect(fallidas).toBe(1);
+    // Y la que importa se intentó igual, después de la que falló.
+    const argv = mockExec.mock.calls.flatMap(([, args]) => args as string[]);
+    expect(argv).toContain('TOKEN');
+  });
+
+  // El hueco que reabría el falso positivo: una cookie host-only de
+  // zeusr.sii.cl, o con un path propio, no se borra apuntándole a `.sii.cl` con
+  // path `/` — pero sí la ve el chequeo de sesión. Hay que borrarla donde vive.
+  it('borrarCookies respeta el dominio y el path reales de cada cookie', () => {
+    mockExec.mockReturnValue(Buffer.from(''));
+
+    browser.borrarCookies([
+      { name: 'TOKEN', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000', tieneValor: true },
+    ]);
+
+    expect(mockExec).toHaveBeenCalledWith(
+      'agent-browser',
+      ['cookies', 'set', 'TOKEN', '', '--domain', 'zeusr.sii.cl', '--path', '/cgi_AUT2000', '--expires', '1'],
+      expect.any(Object)
+    );
+  });
+
+  it('cookiesDelSiiConUbicacion devuelve dónde vive cada cookie, sin su valor', () => {
+    mockExec.mockReturnValue(Buffer.from(JSON.stringify({
+      success: true,
+      data: {
+        cookies: [
+          { name: 'TOKEN', value: 'VALOR_SECRETO', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000' },
+          { name: 'AJENA', value: 'x', domain: 'notsii.cl', path: '/' },
+        ],
+      },
+    })));
+
+    const cookies = browser.cookiesDelSiiConUbicacion();
+
+    expect(cookies).toEqual([
+      { name: 'TOKEN', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000', tieneValor: true },
+    ]);
+    expect(JSON.stringify(cookies)).not.toContain('VALOR_SECRETO');
+  });
+
   describe('evalPrivado', () => {
     it('manda el comando por stdin via batch --json, no por argv', () => {
       mockExec.mockReturnValue(Buffer.from(JSON.stringify([

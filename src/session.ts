@@ -21,11 +21,6 @@ const SII_MIPYME_URL = 'https://mipyme.sii.cl/';
 // esa raíz devuelve 404 (y sus subrutas, un rechazo del WAF). La selección de
 // empresa vive en el CGI del portal.
 const SII_SEL_EMPRESA_URL = 'https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi';
-// Formulario de autenticación por clave. NO se navega directo (abierto de
-// frente devuelve una página en blanco): se llega por redirect desde una
-// página privada. El nombre del recurso se usa como marcador para detectar que
-// seguimos en el login, o sea que la credencial fue rechazada.
-const SII_LOGIN_RECURSO = 'IngresoRutClave';
 // Página privada del portal que se usa como PUERTA de entrada al login por
 // clave: navegar acá hace que el SII redirija al formulario (que abierto de
 // frente no rinde) y deja la referencia de vuelta. Ver loginConClave.
@@ -39,7 +34,37 @@ const SEL_EMPRESA_MARKERS = ['SELECCIÓN DE EMPRESA', '- option "'];
 const SII_LOCEXP_COOKIE = 'NETSCAPE_LIVEWIRE.locexp';
 const LOCEXP_TTL_MS = 7_200_000;
 
-// Nombres de cookies de sesión que el SII establece tras autenticación.
+// Subconjunto de SII_SESSION_COOKIES que PRUEBA que hay sesión: son las que usa
+// el resto del flujo (el cookie jar de curl y `conversationId`). Alcanza con
+// cualquiera de las dos; exigir las 13 de la lista completa ataría el chequeo de
+// login a que el SII no deje de emitir ninguna.
+const COOKIES_QUE_PRUEBAN_SESION = ['TOKEN', 'CSESSIONID'];
+
+// Cookies del SII que NO son de sesión sino de la infraestructura que hay
+// delante: el WAF F5 (`TS…`) y la cola de espera de Queue-it. Se preservan al
+// limpiar antes de un login, porque tirarlas manda el intento de vuelta a la
+// cola. Verificado en vivo: son exactamente las dos que sobreviven al borrado.
+// Las del WAF van ancladas a las formas que emite F5: `TS<hex>` (la observada es
+// `TS0161cd2b`), la misma con sufijo numérico (`TS01a1b2c3_28`) y las `TSPD*`.
+// Ancladas y no por prefijo laxo: con `/^TS[0-9a-f]/`, nombres como `TSESSION`,
+// `TSEC` o `TSAuth` —la `e` es hex— contarían como infraestructura y NO se
+// borrarían, que es justo el residuo de sesión que este arreglo evita. Pero
+// tampoco de más: una forma real del WAF que quede afuera se borra en cada
+// login y devuelve el intento a la cola o al challenge, en silencio.
+const COOKIES_DE_INFRAESTRUCTURA = [
+  /^TS[0-9a-f]{6,}(_\d+)?$/i,
+  /^TSPD/i,
+  /^QueueITAccepted/i,
+];
+
+function esCookieDeInfraestructura(nombre: string): boolean {
+  return COOKIES_DE_INFRAESTRUCTURA.some(patron => patron.test(nombre));
+}
+
+// Nombres de cookies de sesión que el SII establece tras autenticación. Las que
+// prueban la sesión entran por spread, no repetidas a mano: así el "subconjunto
+// de" del comentario de arriba es cierto por construcción y no puede
+// desincronizarse si alguna de las dos listas cambia.
 const SII_SESSION_COOKIES = [
   'NETSCAPE_LIVEWIRE.rut',
   'NETSCAPE_LIVEWIRE.rutm',
@@ -50,8 +75,7 @@ const SII_SESSION_COOKIES = [
   'NETSCAPE_LIVEWIRE.exp',
   'NETSCAPE_LIVEWIRE.sec',
   'NETSCAPE_LIVEWIRE.lms',
-  'TOKEN',
-  'CSESSIONID',
+  ...COOKIES_QUE_PRUEBAN_SESION,
   'DV_NS',
   'RUT_NS',
 ];
@@ -518,6 +542,86 @@ export class SessionManager {
   // verificador, `dv` aparte) que el usuario nunca tipea: los completa el
   // propio JS del SII al validar, y acá se replica.
   private async loginConClave(): Promise<void> {
+    // Se limpia el contexto ANTES de intentar el login, y no es higiene
+    // opcional: el éxito se decide por la presencia de las cookies de sesión
+    // del SII, y el contexto de agent-browser PERSISTE entre invocaciones
+    // (`new Browser(rut)` usa `--session <rut>`, ver restServerIndex.ts).
+    // `logout()` sólo navega a la URL de término y su error se descarta a
+    // propósito en validar-clave, así que un TOKEN/CSESSIONID de un login
+    // anterior puede seguir ahí. Sin este borrado, una clave INCORRECTA vería
+    // esa cookie vieja en el primer poll y se reportaría como válida — el mismo
+    // falso positivo que este chequeo vino a cerrar, entrando por otra puerta.
+    //
+    // Se borra por ALLOWLIST, no por lista de nombres conocidos: se van todas
+    // las cookies de dominio SII salvo las de infraestructura (WAF y cola de
+    // espera). Con una denylist por nombre, una cookie de sesión que el SII
+    // renombre o agregue quedaría sin borrar y volvería a habilitar el falso
+    // positivo; con allowlist, lo peor que pasa si el SII agrega algo nuevo es
+    // volver a la cola de espera. El riesgo queda del lado seguro.
+    //
+    // Y se borran con el dominio y el path que reporta el CLI, no con `.sii.cl`
+    // fijo: una cookie host-only de `zeusr.sii.cl` no se borra apuntándole a
+    // `.sii.cl`, pero sí la vería el chequeo de sesión — justo la asimetría que
+    // reabría el agujero.
+    try {
+      const aBorrar = this.browser
+        .cookiesDelSiiConUbicacion()
+        .filter(c => !esCookieDeInfraestructura(c.name));
+      // Los fallos individuales no cortan: lo que decide es la verificación de
+      // abajo. Si alguna cookie que importa quedó viva, ahí se detecta; y si las
+      // que fallaron eran irrelevantes, abortar habría sido un falso bloqueo.
+      const fallidas = this.browser.borrarCookies(aBorrar);
+      if (fallidas > 0) {
+        console.error(`Login SII: ${fallidas} de ${aBorrar.length} cookies no se pudieron borrar.`);
+      }
+
+      // Se VERIFICA el borrado en vez de confiar en él. Expirar una cookie
+      // depende de acertarle a sus atributos (dominio host-only, path, Secure):
+      // si el `set` no matchea, crea otra entrada y la original sobrevive. Y una
+      // cookie de sesión sobreviviente es exactamente lo que hace que una clave
+      // incorrecta se reporte como válida, así que acá no alcanza con intentar.
+      //
+      // Se verifica SÓLO lo que el chequeo de éxito mira. Exigir que no
+      // sobreviva ninguna cookie no-infraestructura era demasiado: el portal
+      // tiene JS de analítica (AMCV_*, de Adobe) que se vuelve a escribir sola
+      // apenas la página corre, y eso abortaba todos los logins — verificado en
+      // vivo. Esas cookies no prueban ninguna sesión, así que su presencia es
+      // irrelevante para lo que acá se está protegiendo.
+      const sobrevivientes = this.sesionResidual();
+      if (sobrevivientes.length > 0) {
+        // Último recurso antes de rendirse: vaciar el jar completo. Cuesta el
+        // token del WAF y el de la cola, o sea que este intento probablemente se
+        // re-encole — pero la alternativa es peor de manera permanente: el
+        // contexto es persistente por RUT (`--session <rut>`), así que una cookie
+        // de sesión que el borrado selectivo no logre sacar dejaría a ese RUT sin
+        // poder autenticar NUNCA MÁS, ni con la clave correcta. Re-encolarse es
+        // caro una vez; un tenant bloqueado para siempre no tiene salida.
+        console.error(
+          `Login SII: el borrado selectivo dejó ${sobrevivientes.join(', ')}; se vacía el jar completo.`
+        );
+        this.browser.vaciarCookies();
+
+        const tercos = this.sesionResidual();
+        if (tercos.length > 0) {
+          throw new Error(
+            `quedaron cookies de la sesión anterior sin borrar incluso tras vaciar el jar: ${tercos.join(', ')}`
+          );
+        }
+      }
+    } catch (e) {
+      // Sin poder limpiar no se puede confiar en las cookies que aparezcan
+      // después: una de un login anterior daría por válida una clave que no lo
+      // es. Se corta acá, y con un mensaje propio — si dijera lo mismo que el
+      // fallo del chequeo posterior, en el log serían indistinguibles.
+      console.error(
+        `Login SII: no se pudo limpiar la sesión previa. detalle=${e instanceof Error ? e.message : e}`
+      );
+      throw new Error(
+        'No se pudo limpiar la sesión anterior del navegador, así que no se ' +
+        'puede verificar de forma confiable si la clave es correcta. Reintentá.'
+      );
+    }
+
     this.browser.open(SII_PORTAL_PRIVADO);
     await this.esperarFormularioDeLogin();
 
@@ -572,17 +676,157 @@ export class SessionManager {
   // SII es peor que tardar un poco más en detectar un rechazo genuino — a los
   // consumidores les llega como CREDENCIALES_INVALIDAS y se lo muestran al
   // usuario final.
-  private async assertLoginPorClaveExitoso(maxMs = 15_000, step = 1_000): Promise<void> {
-    let url = '';
-    for (let esperado = 0; esperado < maxMs; esperado += step) {
-      await new Promise(resolve => setTimeout(resolve, step));
-      url = this.leerUrlActual();
-      if (!url.includes(SII_LOGIN_RECURSO) && /^https:\/\/([^/?]+\.)?sii\.cl(\/|\?|$)/.test(url)) return;
+  // El éxito se decide por la EVIDENCIA de que hay sesión —las cookies que el
+  // SII sólo emite cuando autenticó— y no por la URL.
+  //
+  // Basarlo en la URL fue un falso positivo grave, verificado contra el portal:
+  // con una clave incorrecta el SII postea a `CAutInicio.cgi` y renderiza ahí
+  // mismo "La Clave Tributaria ingresada no es correcta" (código de mensaje
+  // 01.01.217.500.720.20). Esa URL no es `IngresoRutClave` y sí es `sii.cl`, o
+  // sea que cumplía las dos condiciones del chequeo viejo: `validar-clave`
+  // devolvía ok:true para CUALQUIER clave, y el gate que Tributy usa para no
+  // guardar credenciales inválidas no protegía nada.
+  //
+  // Las cookies no admiten esa ambigüedad: el login rechazado deja sólo las del
+  // WAF y la cola (TS01…, QueueITAccepted), mientras el exitoso deja TOKEN,
+  // CSESSIONID y las NETSCAPE_LIVEWIRE.* (17 en la corrida verificada).
+  //
+  // Nota: al no mirar la URL, un login que autenticó pero quedó parado en un
+  // interstitial del portal (aviso, cambio de clave obligatorio) cuenta como
+  // éxito. Para `validar-clave` es lo correcto —la credencial ES válida—, y en
+  // el `login()` completo lo atrapa después la lectura del combo de empresas,
+  // que falla explícitamente si la página no rinde.
+  private async assertLoginPorClaveExitoso(maxMs = 15_000, stepInicial = 1_000): Promise<void> {
+    let falloDeLectura: string | undefined;
+    // Backoff con techo de 2s: 8 vueltas para cubrir los 15s, en vez de 15.
+    //
+    // Cuidado con la contabilidad: cada vuelta spawnea DOS procesos de
+    // agent-browser (el `cookies get` del chequeo de sesión y el `eval` que lee
+    // el motivo de rechazo), así que agotar el tiempo cuesta ~16 procesos —
+    // ninguna mejora contra los 15 del criterio viejo. El backoff no está acá
+    // por ahorro: está para no repreguntar 15 veces cuando el portal claramente
+    // se está tomando su tiempo. Lo que sí ahorra de verdad es el corte
+    // temprano por CLAVE_INCORRECTA de más abajo, medido en 3,7s contra 15.
+    //
+    // El techo en 2s, y no un backoff libre, es lo que evita que un login que
+    // autentica a los 3,1s se detecte recién a los 7: `validar-clave` es
+    // síncrono para Tributy.
+    const stepMaximo = 2_000;
+    for (
+      let esperado = 0, step = stepInicial;
+      esperado < maxMs;
+      esperado += step, step = Math.min(step * 2, stepMaximo)
+    ) {
+      await new Promise(resolve => setTimeout(resolve, Math.min(step, maxMs - esperado)));
+      try {
+        if (this.tieneCookiesDeSesion()) return;
+        falloDeLectura = undefined;
+      } catch (e) {
+        // No se pudo leer el estado de las cookies. Se sigue intentando (puede
+        // ser transitorio), pero se recuerda: si el login termina fallando por
+        // esto, el motivo real es "no se pudo verificar", no "no hay sesión".
+        falloDeLectura = e instanceof Error ? e.message : String(e);
+      }
+
+      // El rechazo por clave incorrecta se busca DENTRO del loop, no al final.
+      // Dos razones: es definitivo, así que esperar los 15s completos regala
+      // tiempo en un endpoint que Tributy llama sincrónicamente; y el mensaje
+      // vive en la página, así que si el portal navega mientras esperamos (un
+      // interstitial, un redirect lento) el texto desaparece, el motivo saldría
+      // `undefined` y una clave que nunca va a servir se reportaría como fallo
+      // transitorio para que el tenant la reintente.
+      if (this.leerMotivoDeRechazo() === 'CLAVE_INCORRECTA') {
+        this.logearRechazo('CLAVE_INCORRECTA');
+        // Este texto es el que clasificarErrorCredenciales mapea a
+        // CREDENCIALES_INVALIDAS; no cambiarlo sin actualizar esa función.
+        throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+      }
     }
-    console.error(
-      `Login SII: no salió del formulario de autenticación. url=${this.sanearUrlParaLog(url)}`
+
+    if (falloDeLectura) {
+      console.error(`Login SII: no se pudo leer el estado de las cookies. detalle=${falloDeLectura}`);
+      throw new Error(
+        'No se pudo verificar si el SII estableció la sesión (falló la lectura de ' +
+        'cookies del navegador), así que no se da el login por bueno. Reintentá.'
+      );
+    }
+
+    // Se agotó el tiempo sin sesión y sin que la página dijera nunca que la
+    // clave era incorrecta (eso ya habría salido dentro del loop).
+    this.logearRechazo(undefined);
+    throw new Error(
+      'El SII no estableció una sesión y no informó que la clave sea incorrecta. ' +
+      'Puede ser una caída del portal, la cola de espera o un bloqueo temporal; reintentá.'
     );
-    throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+  }
+
+  // Las cookies que todavía probarían una sesión. Es exactamente el conjunto que
+  // mira `tieneCookiesDeSesion`: si acá queda alguna después de limpiar, el
+  // chequeo de éxito la vería y daría por válida cualquier clave.
+  private sesionResidual(): string[] {
+    return this.browser
+      .cookiesDelSiiConUbicacion()
+      .filter(c => c.tieneValor && COOKIES_QUE_PRUEBAN_SESION.includes(c.name))
+      .map(c => c.name);
+  }
+
+  private logearRechazo(motivo: string | undefined): void {
+    // La URL es sólo para el log, así que su lectura no puede tumbar la
+    // clasificación: si `getUrl` falla justo acá, el error que se propagaría es
+    // el del CLI, y `validar-clave` devolvería ERROR en vez de
+    // CREDENCIALES_INVALIDAS — o sea el tenant guardaría una clave inválida por
+    // un fallo de logging. Mismo blindaje que ya tiene leerMotivoDeRechazo.
+    let urlParaLog = '(no se pudo leer)';
+    try {
+      urlParaLog = this.sanearUrlParaLog(this.leerUrlActual());
+    } catch { /* el log pierde la URL; la clasificación sigue en pie */ }
+    console.error(
+      `Login SII: no se establecieron cookies de sesión. url=${urlParaLog}` +
+      `${motivo ? ` motivo=${motivo}` : ''}`
+    );
+  }
+
+  // Lanza si no se puede leer el estado: quien llama distingue "no hay sesión"
+  // de "no se pudo saber", que son cosas distintas para el tenant.
+  private tieneCookiesDeSesion(): boolean {
+    // Se exige que la cookie TENGA VALOR, no sólo que el nombre esté. El borrado
+    // funciona expirando con valor vacío, y si el CLI no llega a removerla
+    // —pasa cuando los atributos no matchean exacto: host-only contra `.sii.cl`,
+    // Secure, HttpOnly— el nombre sobrevive con valor vacío. Mirando sólo el
+    // nombre, esa cookia muerta daría por válida cualquier clave: el mismo falso
+    // positivo por una tercera puerta. Así el chequeo no depende de que el
+    // borrado haya sido perfecto.
+    const conValor = new Set(
+      this.browser.cookiesDelSiiConUbicacion().filter(c => c.tieneValor).map(c => c.name)
+    );
+    return COOKIES_QUE_PRUEBAN_SESION.some(nombre => conValor.has(nombre));
+  }
+
+  // Devuelve un motivo normalizado o undefined si no se reconoce. Sólo se
+  // afirma lo que el portal dice con estas palabras: inventar una causa haría
+  // que un fallo transitorio se reporte como credencial inválida, y el tenant
+  // borraría una clave que en realidad servía.
+  private leerMotivoDeRechazo(): 'CLAVE_INCORRECTA' | undefined {
+    try {
+      // Se lee la página completa, no los primeros 2000 caracteres: el portal
+      // imprime el aviso y su código DEBAJO del header, el menú y la navegación,
+      // y la página de CAutInicio.cgi pesa ~17 KB. Con el corte corto, el bloque
+      // podía quedar afuera, ninguna de las dos señales matcheaba, el fallo salía
+      // como ERROR y el tenant guardaba una clave inválida. Es una lectura local
+      // del DOM: no cuesta red.
+      const texto = this.browser.eval('document.body ? document.body.innerText : ""');
+      // Dos señales, no una: el texto y el código de mensaje que el propio
+      // portal imprime debajo ("El código de este mensaje es …"). Si el SII
+      // cambia el copy, el código sigue identificando el caso; si mostrara el
+      // código sin texto, tampoco se perdería. El tercer grupo del código varía
+      // entre respuestas (se vieron 217 y 225), así que no se fija.
+      return /Clave Tributaria ingresada no es correcta/i.test(texto) ||
+        /01\.01\.\d+\.500\.720\.20\b/.test(texto)
+        ? 'CLAVE_INCORRECTA'
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   // Sólo origin + pathname: el query string puede traer el RUT, un token de

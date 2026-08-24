@@ -72,6 +72,40 @@ describe('validarClave', () => {
     await expect(credenciales.para('11.111.111-1')).rejects.toThrow();
   });
 
+  // El mensaje EXACTO que produce session.ts cuando el portal dice que la clave
+  // no es correcta. El test de arriba usa un texto parecido pero inventado: si
+  // alguien cambia el mensaje real y rompe la clasificación, este lo atrapa.
+  it('el mensaje real de clave incorrecta clasifica como CREDENCIALES_INVALIDAS', async () => {
+    const authenticateOnly = jest.fn().mockRejectedValue(
+      new Error('El SII rechazó la autenticación: RUT o clave incorrectos.')
+    );
+    const registro = armarRegistro({ authenticateOnly, logout: jest.fn().mockResolvedValue(undefined) });
+
+    const resultado = await validarClave(
+      '11.111.111-1', 'mala', registro, new ProveedorCredencialesRuntime());
+
+    expect(resultado).toEqual({ ok: false, error: 'CREDENCIALES_INVALIDAS' });
+  });
+
+  // Cuando no se pudo VERIFICAR la sesión (cola de espera, caída del portal,
+  // lectura de cookies fallida), la clave puede ser perfectamente válida. Tiene
+  // que salir como ERROR: con CREDENCIALES_INVALIDAS el tenant borraría una
+  // credencial que servía.
+  it('no poder verificar la sesión responde ERROR, no CREDENCIALES_INVALIDAS', async () => {
+    const authenticateOnly = jest.fn().mockRejectedValue(
+      new Error(
+        'El SII no estableció una sesión y no informó que la clave sea incorrecta. ' +
+        'Puede ser una caída del portal, la cola de espera o un bloqueo temporal; reintentá.'
+      )
+    );
+    const registro = armarRegistro({ authenticateOnly, logout: jest.fn().mockResolvedValue(undefined) });
+
+    const resultado = await validarClave(
+      '11.111.111-1', 'buena', registro, new ProveedorCredencialesRuntime());
+
+    expect(resultado).toEqual({ ok: false, error: 'ERROR' });
+  });
+
   it('fallo de infraestructura: responde ERROR y limpia igual', async () => {
     const authenticateOnly = jest.fn().mockRejectedValue(new Error('ETIMEDOUT'));
     const logout = jest.fn().mockResolvedValue(undefined);

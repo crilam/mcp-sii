@@ -41,7 +41,7 @@ describe('crearRegistroSesionesSii', () => {
   it('entrega un SessionManager armado con la credencial del RUT pedido', async () => {
     const registro = crearRegistroSesionesSii(
       new CredencialesEnMemoria([configA]),
-      new MockBrowser()
+      () => new MockBrowser()
     );
 
     const sesion = await registro.ejecutar('11111111-1', async s => s);
@@ -54,7 +54,7 @@ describe('crearRegistroSesionesSii', () => {
   it('da SessionManagers distintos para RUTs distintos', async () => {
     const registro = crearRegistroSesionesSii(
       new CredencialesEnMemoria([configA, configB]),
-      new MockBrowser()
+      () => new MockBrowser()
     );
 
     const a = await registro.ejecutar('11111111-1', async s => s);
@@ -64,10 +64,27 @@ describe('crearRegistroSesionesSii', () => {
     expect(await a.rutaCookieJar()).not.toBe(await b.rutaCookieJar());
   });
 
+  // Compartir un Browser entre RUTs comparte el contexto, o sea las COOKIES de
+  // sesión del SII. Con eso, el login de un RUT podía ver la sesión de otro y
+  // darse por exitoso con una credencial inválida, y su limpieza previa borraba
+  // la sesión viva del otro sin que nada avisara.
+  it('le da a cada RUT su propio contexto de navegador', async () => {
+    const contextos: string[] = [];
+    const registro = crearRegistroSesionesSii(
+      new CredencialesEnMemoria([configA, configB]),
+      rut => { contextos.push(rut); return new MockBrowser(); }
+    );
+
+    await registro.ejecutar('11111111-1', async s => s);
+    await registro.ejecutar('22222222-2', async s => s);
+
+    expect(contextos).toEqual(['111111111', '222222222']);
+  });
+
   it('propaga el error del proveedor cuando el RUT no está registrado', async () => {
     const registro = crearRegistroSesionesSii(
       new CredencialesEnMemoria([configA]),
-      new MockBrowser()
+      () => new MockBrowser()
     );
 
     // El registro normaliza el RUT antes de pedir la credencial, así que el
