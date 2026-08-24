@@ -27,6 +27,17 @@ export function registerSesionTools(
         await registro.ejecutar(rut, sesion => sesion.authenticateOnly());
       } catch (e) {
         credenciales.borrar(rut);
+        // Y se desaloja la sesión fallida. Sin esto quedaba cacheada con la
+        // config vieja —`crear` captura la credencial al construir la sesión—,
+        // así que reintentar con la clave corregida reusaba la instancia con la
+        // clave mala y fallaba para siempre, hasta un `sii_cerrar_sesion`. Y
+        // desde que cada sesión tiene su propio contexto de navegador, cada
+        // intento fallido dejaba además un proceso y un perfil en disco que
+        // nadie cerraba.
+        //
+        // Se cierra sin logout: no hay sesión que cerrar del lado del SII
+        // justamente porque la autenticación falló.
+        await registro.cerrarYOlvidar(rut, async () => {});
         const error = clasificarErrorCredenciales(e);
         return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }] };
       }

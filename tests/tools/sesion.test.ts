@@ -18,7 +18,7 @@ describe('sii_iniciar_sesion / sii_cerrar_sesion', () => {
     const authenticateOnly = jest.fn().mockResolvedValue(undefined);
     const registro = {
       ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly, logout: jest.fn() }),
-      olvidar: jest.fn(),
+      cerrarYOlvidar: jest.fn(),
     } as unknown as RegistroSesiones<any>;
 
     const { tools } = armar(registro, proveedor);
@@ -34,7 +34,7 @@ describe('sii_iniciar_sesion / sii_cerrar_sesion', () => {
     const authenticateOnly = jest.fn().mockRejectedValue(new Error('El SII rechazó la autenticación: clave incorrecta'));
     const registro = {
       ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly, logout: jest.fn() }),
-      olvidar: jest.fn(),
+      cerrarYOlvidar: jest.fn(),
     } as unknown as RegistroSesiones<any>;
 
     const { tools } = armar(registro, proveedor);
@@ -44,6 +44,28 @@ describe('sii_iniciar_sesion / sii_cerrar_sesion', () => {
     expect(parsed).toEqual({ ok: false, error: 'CREDENCIALES_INVALIDAS' });
     // Credencial rechazada: no debe quedar guardada.
     await expect(proveedor.para('11.111.111-1')).rejects.toThrow();
+  });
+
+  // Sin desalojar, la sesión fallida quedaba cacheada con la clave mala (la
+  // config se captura al construir la sesión), así que reintentar con la clave
+  // corregida seguía fallando hasta un sii_cerrar_sesion. Y desde que cada
+  // sesión tiene contexto propio, cada intento fallido dejaba además un proceso
+  // y un perfil en disco sin dueño.
+  it('un login fallido desaloja la sesión, para que el reintento no reuse la clave mala', async () => {
+    const proveedor = new ProveedorCredencialesRuntime();
+    const authenticateOnly = jest.fn().mockRejectedValue(
+      new Error('El SII rechazó la autenticación: RUT o clave incorrectos.')
+    );
+    const cerrarYOlvidar = jest.fn();
+    const registro = {
+      ejecutar: (_rut: string, fn: any) => fn({ authenticateOnly, logout: jest.fn() }),
+      cerrarYOlvidar,
+    } as unknown as RegistroSesiones<any>;
+
+    const { tools } = armar(registro, proveedor);
+    await tools['sii_iniciar_sesion'].handler({ rut: '11.111.111-1', clave: 'mala' });
+
+    expect(cerrarYOlvidar).toHaveBeenCalledWith('11.111.111-1', expect.any(Function));
   });
 
   it('cerrar sesión hace logout y borra la credencial del proveedor', async () => {

@@ -52,6 +52,22 @@ export interface CookieUbicada {
   tieneValor: boolean;
 }
 
+// Dónde deja agent-browser los perfiles de sesión. Verificado contra el CLI: por
+// defecto son `<id>.config`/`.engine`/`.pid`/… en `~/.agent-browser`, y con
+// `AGENT_BROWSER_NAMESPACE` seteada van a `namespaces/<ns>/run` dentro de ese
+// mismo directorio. Se devuelven las dos rutas y se limpian ambas: mirar sólo la
+// base haría que con un namespace configurado el borrado no encontrara nada y
+// fallara en silencio, que es el modo de falla más caro acá.
+//
+// No hay variable para mover el directorio raíz (`AGENT_BROWSER_HOME` no existe
+// en el CLI; las que hay son CONFIG, SESSION, NAMESPACE, RESTORE y
+// RESTORE_SAVE), así que la base va fija.
+function directoriosDePerfiles(): string[] {
+  const raiz = path.join(os.homedir(), '.agent-browser');
+  const ns = process.env.AGENT_BROWSER_NAMESPACE;
+  return ns ? [raiz, path.join(raiz, 'namespaces', ns, 'run')] : [raiz];
+}
+
 // `includes('sii.cl')` daría por buenos `notsii.cl` o `sii.cl.evil.com`: el
 // dominio tiene que ser el del SII o un subdominio suyo.
 function esDominioDelSii(dominio: string): boolean {
@@ -348,7 +364,12 @@ export class Browser {
       // El proceso pudo haber muerto solo; el perfil se borra igual.
     }
     if (!this.sessionId) return;
-    const base = process.env.AGENT_BROWSER_HOME ?? path.join(os.homedir(), '.agent-browser');
+    for (const base of directoriosDePerfiles()) {
+      this.borrarPerfilEn(base);
+    }
+  }
+
+  private borrarPerfilEn(base: string): void {
     try {
       for (const entrada of fs.readdirSync(base)) {
         // `<id>.algo` y nada más: un `startsWith(id)` pelado borraría el perfil
