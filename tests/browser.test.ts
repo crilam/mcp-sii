@@ -241,6 +241,77 @@ describe('Browser', () => {
   // BLOQUEANTE 3 del pr-review: evalPrivado manda el JS por stdin de
   // agent-browser (modo batch --json) en vez de por argv, para que la clave
   // tributaria no quede visible en ps/`/proc/<pid>/cmdline` del contenedor.
+  // El login por clave decide si autenticó según estas cookies, así que un
+  // parseo que falle en silencio rompe TODO login válido (o, peor, da por bueno
+  // uno inválido).
+  describe('cookiesDelSii', () => {
+    // Forma real del CLI, verificada contra agent-browser.
+    function salidaDelCli(cookies: unknown[]) {
+      return Buffer.from(JSON.stringify({ success: true, data: { cookies } }));
+    }
+
+    it('pide las cookies por el comando dedicado y devuelve sus nombres', () => {
+      mockExec.mockReturnValue(salidaDelCli([
+        { name: 'TOKEN', value: 'v1', domain: '.sii.cl', path: '/' },
+        { name: 'CSESSIONID', value: 'v2', domain: 'misiir.sii.cl', path: '/' },
+      ]));
+
+      expect(browser.cookiesDelSii()).toEqual(['TOKEN', 'CSESSIONID']);
+      expect(mockExec).toHaveBeenCalledWith(
+        'agent-browser',
+        ['cookies', 'get', '--json'],
+        expect.any(Object)
+      );
+    });
+
+    // Sólo los nombres: los valores son credenciales de sesión y no hacen falta
+    // para saber si hay sesión.
+    it('no devuelve los valores de las cookies', () => {
+      mockExec.mockReturnValue(salidaDelCli([
+        { name: 'TOKEN', value: 'VALOR_SECRETO', domain: '.sii.cl', path: '/' },
+      ]));
+
+      expect(JSON.stringify(browser.cookiesDelSii())).not.toContain('VALOR_SECRETO');
+    });
+
+    it('descarta las cookies de otros dominios', () => {
+      mockExec.mockReturnValue(salidaDelCli([
+        { name: 'TOKEN', domain: '.sii.cl' },
+        { name: 'AJENA', domain: 'notsii.cl' },
+        { name: 'IMPOSTORA', domain: 'sii.cl.evil.com' },
+        { name: 'OTRA', domain: '.google.com' },
+      ]));
+
+      expect(browser.cookiesDelSii()).toEqual(['TOKEN']);
+    });
+
+    // Un JSON válido con otra forma NO es "no hay cookies": es que no se pudo
+    // saber. Devolver [] haría fallar todo login con clave correcta.
+    it('lanza si el JSON parsea pero no trae data.cookies como arreglo', () => {
+      mockExec.mockReturnValue(Buffer.from(JSON.stringify({ success: true, data: {} })));
+
+      expect(() => browser.cookiesDelSii()).toThrow(ErrorDeBrowser);
+    });
+
+    it('lanza si la salida no es JSON', () => {
+      mockExec.mockReturnValue(Buffer.from('no soy json'));
+
+      expect(() => browser.cookiesDelSii()).toThrow(ErrorDeBrowser);
+    });
+  });
+
+  it('limpiarCookies usa el comando clear del CLI', () => {
+    mockExec.mockReturnValue(Buffer.from(''));
+
+    browser.limpiarCookies();
+
+    expect(mockExec).toHaveBeenCalledWith(
+      'agent-browser',
+      ['cookies', 'clear'],
+      expect.any(Object)
+    );
+  });
+
   describe('evalPrivado', () => {
     it('manda el comando por stdin via batch --json, no por argv', () => {
       mockExec.mockReturnValue(Buffer.from(JSON.stringify([

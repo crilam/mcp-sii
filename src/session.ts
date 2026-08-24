@@ -39,6 +39,12 @@ const SEL_EMPRESA_MARKERS = ['SELECCIÓN DE EMPRESA', '- option "'];
 const SII_LOCEXP_COOKIE = 'NETSCAPE_LIVEWIRE.locexp';
 const LOCEXP_TTL_MS = 7_200_000;
 
+// Subconjunto de SII_SESSION_COOKIES que PRUEBA que hay sesión: son las que usa
+// el resto del flujo (el cookie jar de curl y `conversationId`). Alcanza con
+// cualquiera de las dos; exigir las 13 de la lista completa ataría el chequeo de
+// login a que el SII no deje de emitir ninguna.
+const COOKIES_QUE_PRUEBAN_SESION = ['TOKEN', 'CSESSIONID'];
+
 // Nombres de cookies de sesión que el SII establece tras autenticación.
 const SII_SESSION_COOKIES = [
   'NETSCAPE_LIVEWIRE.rut',
@@ -518,6 +524,17 @@ export class SessionManager {
   // verificador, `dv` aparte) que el usuario nunca tipea: los completa el
   // propio JS del SII al validar, y acá se replica.
   private async loginConClave(): Promise<void> {
+    // Se limpia el contexto ANTES de intentar el login, y no es higiene
+    // opcional: el éxito se decide por la presencia de las cookies de sesión
+    // del SII, y el contexto de agent-browser PERSISTE entre invocaciones
+    // (`new Browser(rut)` usa `--session <rut>`, ver restServerIndex.ts).
+    // `logout()` sólo navega a la URL de término y su error se descarta a
+    // propósito en validar-clave, así que un TOKEN/CSESSIONID de un login
+    // anterior puede seguir ahí. Sin este borrado, una clave INCORRECTA vería
+    // esa cookie vieja en el primer poll y se reportaría como válida — el mismo
+    // falso positivo que este chequeo vino a cerrar, entrando por otra puerta.
+    this.browser.limpiarCookies();
+
     this.browser.open(SII_PORTAL_PRIVADO);
     await this.esperarFormularioDeLogin();
 
@@ -587,9 +604,26 @@ export class SessionManager {
   // WAF y la cola (TS01…, QueueITAccepted), mientras el exitoso deja TOKEN,
   // CSESSIONID y las NETSCAPE_LIVEWIRE.* (17 en la corrida verificada).
   private async assertLoginPorClaveExitoso(maxMs = 15_000, step = 1_000): Promise<void> {
+    let falloDeLectura: string | undefined;
     for (let esperado = 0; esperado < maxMs; esperado += step) {
       await new Promise(resolve => setTimeout(resolve, step));
-      if (this.tieneCookiesDeSesion()) return;
+      try {
+        if (this.tieneCookiesDeSesion()) return;
+        falloDeLectura = undefined;
+      } catch (e) {
+        // No se pudo leer el estado de las cookies. Se sigue intentando (puede
+        // ser transitorio), pero se recuerda: si el login termina fallando por
+        // esto, el motivo real es "no se pudo verificar", no "no hay sesión".
+        falloDeLectura = e instanceof Error ? e.message : String(e);
+      }
+    }
+
+    if (falloDeLectura) {
+      console.error(`Login SII: no se pudo leer el estado de las cookies. detalle=${falloDeLectura}`);
+      throw new Error(
+        'No se pudo verificar si el SII estableció la sesión (falló la lectura de ' +
+        'cookies del navegador), así que no se da el login por bueno. Reintentá.'
+      );
     }
 
     // Sin sesión. El motivo lo dice la página, y distinguirlo importa: una clave
@@ -611,19 +645,11 @@ export class SessionManager {
     );
   }
 
+  // Lanza si no se puede leer el estado: quien llama distingue "no hay sesión"
+  // de "no se pudo saber", que son cosas distintas para el tenant.
   private tieneCookiesDeSesion(): boolean {
-    try {
-      const presentes = new Set(this.browser.cookiesDelSii());
-      // TOKEN y CSESSIONID son las que usa el resto del flujo (el cookie jar de
-      // curl y `conversationId`). Con cualquiera de las dos hay sesión; exigir
-      // las 13 de SII_SESSION_COOKIES ataría el chequeo a que el SII no cambie
-      // ninguna.
-      return presentes.has('TOKEN') || presentes.has('CSESSIONID');
-    } catch {
-      // No se pudo leer: se trata como "todavía no" y lo resuelve el próximo
-      // poll, o el error final si nunca se puede.
-      return false;
-    }
+    const presentes = new Set(this.browser.cookiesDelSii());
+    return COOKIES_QUE_PRUEBAN_SESION.some(nombre => presentes.has(nombre));
   }
 
   // Devuelve un motivo normalizado o undefined si no se reconoce. Sólo se

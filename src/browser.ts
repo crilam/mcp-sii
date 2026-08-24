@@ -34,6 +34,13 @@ export class ErrorDeBrowser extends Error {
   }
 }
 
+// `includes('sii.cl')` daría por buenos `notsii.cl` o `sii.cl.evil.com`: el
+// dominio tiene que ser el del SII o un subdominio suyo.
+function esDominioDelSii(dominio: string): boolean {
+  const d = dominio.replace(/^\./, '').toLowerCase();
+  return d === 'sii.cl' || d.endsWith('.sii.cl');
+}
+
 export class Browser {
   constructor(private sessionId?: string) {}
 
@@ -176,18 +183,30 @@ export class Browser {
   // los valores son credenciales de sesión que no tienen por qué circular.
   cookiesDelSii(): string[] {
     const salida = this.run(['cookies', 'get', '--json']);
+    let cookies: unknown;
     try {
-      const cookies = JSON.parse(salida)?.data?.cookies;
-      if (!Array.isArray(cookies)) return [];
-      return cookies
-        .filter((c: { domain?: string }) => String(c?.domain ?? '').includes('sii.cl'))
-        .map((c: { name?: string }) => String(c?.name ?? ''));
+      // Forma verificada contra el CLI: {"success":true,"data":{"cookies":[…]}}.
+      cookies = JSON.parse(salida)?.data?.cookies;
     } catch {
-      // Una salida que no es el JSON esperado no es "no hay cookies": es que no
-      // se pudo saber. Se propaga para no confundir un fallo de lectura con una
-      // sesión ausente, que es justo la distinción que este chequeo cuida.
       throw new ErrorDeBrowser('cookies get', 'respuesta no parseable del CLI');
     }
+    // Un JSON válido con OTRA forma no es "no hay cookies": es que no se pudo
+    // saber. Devolver [] acá sería el peor resultado posible — quien pregunta
+    // usa esto para decidir si el login autenticó, así que un array vacío
+    // silencioso haría fallar todo login con clave válida. Se lanza, igual que
+    // si el JSON no parseara.
+    if (!Array.isArray(cookies)) {
+      throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
+    }
+    return cookies
+      .filter((c: { domain?: string }) => esDominioDelSii(String(c?.domain ?? '')))
+      .map((c: { name?: string }) => String(c?.name ?? ''));
+  }
+
+  // Borra TODAS las cookies del contexto. Se usa antes de un login para no
+  // arrastrar la sesión anterior — ver el comentario en `loginConClave`.
+  limpiarCookies(): void {
+    this.run(['cookies', 'clear']);
   }
 
   press(key: string): void {

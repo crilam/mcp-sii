@@ -191,6 +191,25 @@ describe('SessionManager.login', () => {
     await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
   });
 
+  // El contexto de agent-browser PERSISTE entre invocaciones (`--session <rut>`)
+  // y logout() sólo navega a la URL de término. Sin limpiar las cookies antes de
+  // intentar el login, una TOKEN de un login anterior haría que una clave
+  // incorrecta se reporte como válida: el mismo falso positivo, por otra puerta.
+  it('limpia las cookies antes de enviar el formulario, para no ver una sesión vieja', async () => {
+    const browser = crearBrowserMock();
+    mockearLoginExitoso(browser, empresaUnicaSnapshot);
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login());
+
+    expect(browser.limpiarCookies).toHaveBeenCalled();
+    // Y antes de navegar al portal, no después de autenticar (que borraría la
+    // sesión recién obtenida).
+    const ordenLimpiar = (browser.limpiarCookies as jest.Mock).mock.invocationCallOrder[0];
+    const ordenOpen = (browser.open as jest.Mock).mock.invocationCallOrder[0];
+    expect(ordenLimpiar).toBeLessThan(ordenOpen);
+  });
+
   // Login lento pero exitoso: las cookies todavía no están en los primeros
   // polls (el SII sigue procesando el submit) y aparecen en uno posterior. No
   // debe clasificarse como rechazo sólo porque no estaban al principio.
@@ -232,8 +251,9 @@ describe('SessionManager.login', () => {
 
   // La lectura de cookies es la única evidencia de éxito: si el CLI devuelve
   // algo ilegible, eso NO es "no hay sesión" — pero tampoco alcanza para
-  // afirmar que hay. Se agota el poll y se rechaza sin culpar a la credencial.
-  it('si no se pueden leer las cookies, no da el login por bueno', async () => {
+  // afirmar que hay. Se rechaza, y el mensaje dice que no se pudo verificar en
+  // vez de culpar a la credencial (que puede ser perfectamente válida).
+  it('si no se pueden leer las cookies, no da el login por bueno ni culpa a la clave', async () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
@@ -243,7 +263,9 @@ describe('SessionManager.login', () => {
 
     const mgr = new SessionManager(configClave, browser);
 
-    await expect(conTimers(() => mgr.login())).rejects.toThrow(/no estableció una sesión/);
+    const error = await conTimers(() => mgr.login()).catch((e: Error) => e);
+    expect((error as Error).message).toMatch(/No se pudo verificar/);
+    expect((error as Error).message).not.toMatch(/rechazó la autenticación/);
   });
 });
 
