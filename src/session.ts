@@ -45,6 +45,16 @@ const LOCEXP_TTL_MS = 7_200_000;
 // login a que el SII no deje de emitir ninguna.
 const COOKIES_QUE_PRUEBAN_SESION = ['TOKEN', 'CSESSIONID'];
 
+// Cookies del SII que NO son de sesión sino de la infraestructura que hay
+// delante: el WAF F5 (`TS…`) y la cola de espera de Queue-it. Se preservan al
+// limpiar antes de un login, porque tirarlas manda el intento de vuelta a la
+// cola. Verificado en vivo: son exactamente las dos que sobreviven al borrado.
+const COOKIES_DE_INFRAESTRUCTURA = [/^TS[0-9a-f]/i, /^QueueITAccepted/i];
+
+function esCookieDeInfraestructura(nombre: string): boolean {
+  return COOKIES_DE_INFRAESTRUCTURA.some(patron => patron.test(nombre));
+}
+
 // Nombres de cookies de sesión que el SII establece tras autenticación. Las que
 // prueban la sesión entran por spread, no repetidas a mano: así el "subconjunto
 // de" del comentario de arriba es cierto por construcción y no puede
@@ -536,10 +546,21 @@ export class SessionManager {
     // esa cookie vieja en el primer poll y se reportaría como válida — el mismo
     // falso positivo que este chequeo vino a cerrar, entrando por otra puerta.
     //
-    // Se borran SÓLO las cookies de sesión del SII, no todo el jar: ahí también
-    // están el token del WAF y el de la cola de espera, y tirarlos manda cada
-    // login de vuelta a la cola.
-    this.browser.borrarCookies(SII_SESSION_COOKIES);
+    // Se borra por ALLOWLIST, no por lista de nombres conocidos: se van todas
+    // las cookies de dominio SII salvo las de infraestructura (WAF y cola de
+    // espera). Con una denylist por nombre, una cookie de sesión que el SII
+    // renombre o agregue quedaría sin borrar y volvería a habilitar el falso
+    // positivo; con allowlist, lo peor que pasa si el SII agrega algo nuevo es
+    // volver a la cola de espera. El riesgo queda del lado seguro.
+    //
+    // Y se borran con el dominio y el path que reporta el CLI, no con `.sii.cl`
+    // fijo: una cookie host-only de `zeusr.sii.cl` no se borra apuntándole a
+    // `.sii.cl`, pero sí la vería el chequeo de sesión — justo la asimetría que
+    // reabría el agujero.
+    const aBorrar = this.browser
+      .cookiesDelSiiConUbicacion()
+      .filter(c => !esCookieDeInfraestructura(c.name));
+    this.browser.borrarCookies(aBorrar);
 
     this.browser.open(SII_PORTAL_PRIVADO);
     await this.esperarFormularioDeLogin();
@@ -609,10 +630,14 @@ export class SessionManager {
   // Las cookies no admiten esa ambigüedad: el login rechazado deja sólo las del
   // WAF y la cola (TS01…, QueueITAccepted), mientras el exitoso deja TOKEN,
   // CSESSIONID y las NETSCAPE_LIVEWIRE.* (17 en la corrida verificada).
-  private async assertLoginPorClaveExitoso(maxMs = 15_000, step = 1_000): Promise<void> {
+  private async assertLoginPorClaveExitoso(maxMs = 15_000, stepInicial = 1_000): Promise<void> {
     let falloDeLectura: string | undefined;
-    for (let esperado = 0; esperado < maxMs; esperado += step) {
-      await new Promise(resolve => setTimeout(resolve, step));
+    // Backoff: cada poll spawnea un `agent-browser cookies get`, y con paso fijo
+    // de 1s un login que agota los 15s cuesta 15 procesos. Duplicando la espera,
+    // el mismo techo de 15s cuesta 4 — y el caso rápido (la sesión aparece en el
+    // primer segundo) no se paga más caro.
+    for (let esperado = 0, step = stepInicial; esperado < maxMs; esperado += step, step *= 2) {
+      await new Promise(resolve => setTimeout(resolve, Math.min(step, maxMs - esperado)));
       try {
         if (this.tieneCookiesDeSesion()) return;
         falloDeLectura = undefined;

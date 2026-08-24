@@ -31,6 +31,8 @@ function armar() {
   // del SII. Sin este mock, el poll de assertLoginPorClaveExitoso agota sus 15
   // segundos con tiempo real y el test muere por timeout.
   (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID']);
+  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(
+    [{ name: 'TOKEN', domain: '.sii.cl', path: '/' }]);
   const autenticaciones = jest.spyOn(session, 'authenticateOnly');
   const http = {
     get: jest.fn(),

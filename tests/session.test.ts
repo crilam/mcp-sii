@@ -43,12 +43,18 @@ const COOKIES_CON_SESION = ['TS0161cd2b', 'TOKEN', 'CSESSIONID', 'RUT_NS', 'DV_N
 // Lo único que queda tras un login rechazado: el WAF y la cola de espera.
 const COOKIES_SIN_SESION = ['TS0161cd2b', 'QueueITAccepted-SDFrts345E-V3_autenticacionmisii'];
 
+// Las mismas, con la ubicación que reporta el CLI: es lo que se necesita para
+// borrarlas donde viven de verdad.
+const ubicadas = (nombres: string[]) =>
+  nombres.map(name => ({ name, domain: '.sii.cl', path: '/' }));
+
 function crearBrowserMock(): Browser {
   const browser = new MockBrowser();
   // Default: el login autentica. El éxito se decide por las cookies de sesión
   // del SII (ver assertLoginPorClaveExitoso), así que sin este mock TODO login
   // fallaría; los tests de rechazo lo sobreescriben con COOKIES_SIN_SESION.
   (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_CON_SESION);
+  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_CON_SESION));
   return browser;
 }
 
@@ -95,6 +101,7 @@ function mockearLoginExitoso(
   mockearEvalFormulario(browser, true);
   (browser.getUrl as jest.Mock).mockReturnValue(urlFinal);
   (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_CON_SESION);
+  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_CON_SESION));
   (browser.snapshot as jest.Mock).mockReturnValue(snapshotEmpresa);
 }
 
@@ -205,9 +212,12 @@ describe('SessionManager.login', () => {
     expect(browser.borrarCookies).toHaveBeenCalled();
     // Sólo las de sesión del SII, no todo el jar: ahí viven el token del WAF y
     // el de la cola de espera, y tirarlos re-encola cada login.
-    const [nombres] = (browser.borrarCookies as jest.Mock).mock.calls[0];
+    const [aBorrar] = (browser.borrarCookies as jest.Mock).mock.calls[0];
+    const nombres = (aBorrar as Array<{ name: string }>).map(c => c.name);
     expect(nombres).toContain('TOKEN');
     expect(nombres).toContain('CSESSIONID');
+    // Y el token del WAF sobrevive: borrarlo re-encola cada login.
+    expect(nombres).not.toContain('TS0161cd2b');
     // Y antes de navegar al portal, no después de autenticar (que borraría la
     // sesión recién obtenida).
     const ordenLimpiar = (browser.borrarCookies as jest.Mock).mock.invocationCallOrder[0];
@@ -227,6 +237,7 @@ describe('SessionManager.login', () => {
     // El contexto arranca con la sesión anterior puesta y sólo queda sin ella
     // después de que loginConClave la borre.
     let cookies = COOKIES_CON_SESION;
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockImplementation(() => ubicadas(cookies));
     (browser.borrarCookies as jest.Mock).mockImplementation(() => { cookies = COOKIES_SIN_SESION; });
     (browser.cookiesDelSii as jest.Mock).mockImplementation(() => cookies);
     (browser.eval as jest.Mock).mockImplementation((js: string) => {

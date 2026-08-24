@@ -34,6 +34,15 @@ export class ErrorDeBrowser extends Error {
   }
 }
 
+// Una cookie identificada por dónde vive, que es lo que hace falta para
+// borrarla. Sin el valor: es una credencial de sesión y no tiene por qué
+// circular ni terminar en un log.
+export interface CookieUbicada {
+  name: string;
+  domain: string;
+  path: string;
+}
+
 // `includes('sii.cl')` daría por buenos `notsii.cl` o `sii.cl.evil.com`: el
 // dominio tiene que ser el del SII o un subdominio suyo.
 function esDominioDelSii(dominio: string): boolean {
@@ -181,21 +190,24 @@ export class Browser {
   // ve, y basar en eso un chequeo de "¿hay sesión?" daría siempre que no.
   // Se devuelven sólo los NOMBRES: para saber si hay sesión alcanza con eso, y
   // los valores son credenciales de sesión que no tienen por qué circular.
-  cookiesDelSii(): string[] {
-    let salida: string;
+  // Se relanza SIN la salida del CLI. `run()` mete stderr+stdout en el mensaje y
+  // en la prop `salida`, y acá eso es peligroso: si el comando falla con código
+  // ≠ 0 pero alcanzó a imprimir JSON, ese JSON trae los VALORES de
+  // TOKEN/CSESSIONID. Ese mensaje se loguea aguas arriba, así que sin este
+  // filtro los tokens de sesión terminarían en CloudWatch.
+  private leerCookiesCrudas(): string {
     try {
-      salida = this.run(['cookies', 'get', '--json']);
+      return this.run(['cookies', 'get', '--json']);
     } catch (e) {
-      // Se relanza SIN la salida del CLI. `run()` mete stderr+stdout en el
-      // mensaje y en `salida`, y acá eso es peligroso: si el comando falla con
-      // código ≠ 0 pero alcanzó a imprimir JSON, ese JSON trae los VALORES de
-      // TOKEN/CSESSIONID. Ese mensaje se loguea aguas arriba, así que sin este
-      // filtro los tokens de sesión terminarían en CloudWatch.
-      throw new ErrorDeBrowser(
-        'cookies get',
-        e instanceof ErrorDeBrowser && e.code ? `code=${e.code}` : ''
-      );
+      const codigo = e instanceof ErrorDeBrowser && e.code ? e.code : 'sin código';
+      // Categoría fija además del código: distingue "falló sin código" de "no
+      // se sabe qué pasó", que con una cadena vacía se veían igual.
+      throw new ErrorDeBrowser('cookies get', `salida omitida (${codigo})`);
     }
+  }
+
+  cookiesDelSii(): string[] {
+    const salida = this.leerCookiesCrudas();
     let cookies: unknown;
     try {
       // Forma verificada contra el CLI: {"success":true,"data":{"cookies":[…]}}.
@@ -211,9 +223,36 @@ export class Browser {
     if (!Array.isArray(cookies)) {
       throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
     }
+    return this.soloDelSii(cookies).map(c => c.name);
+  }
+
+  // Igual que `cookiesDelSii` pero con el dominio y el path que reporta el CLI,
+  // que es lo que hace falta para BORRAR una cookie: una emitida host-only por
+  // `zeusr.sii.cl`, o con un path específico, no se borra apuntándole a
+  // `.sii.cl` con path `/`. Sigue sin devolver los valores.
+  cookiesDelSiiConUbicacion(): CookieUbicada[] {
+    const salida = this.leerCookiesCrudas();
+    let cookies: unknown;
+    try {
+      cookies = JSON.parse(salida)?.data?.cookies;
+    } catch {
+      throw new ErrorDeBrowser('cookies get', 'respuesta no parseable del CLI');
+    }
+    if (!Array.isArray(cookies)) {
+      throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
+    }
+    return this.soloDelSii(cookies);
+  }
+
+  private soloDelSii(cookies: unknown[]): CookieUbicada[] {
     return cookies
-      .filter((c: { domain?: string }) => esDominioDelSii(String(c?.domain ?? '')))
-      .map((c: { name?: string }) => String(c?.name ?? ''));
+      .filter((c): c is { name?: string; domain?: string; path?: string } =>
+        esDominioDelSii(String((c as { domain?: string })?.domain ?? '')))
+      .map(c => ({
+        name: String(c?.name ?? ''),
+        domain: String(c?.domain ?? ''),
+        path: String(c?.path ?? '/') || '/',
+      }));
   }
 
   // Borra las cookies indicadas, y sólo esas, expirándolas en el pasado
@@ -222,9 +261,9 @@ export class Browser {
   // viven el token del WAF y el de la cola de espera del SII (`QueueITAccepted`),
   // y tirarlos manda cada login de vuelta a la cola, que bajo carga puede hacer
   // fallar un login con credenciales perfectamente válidas.
-  borrarCookies(nombres: string[], dominio = '.sii.cl'): void {
-    for (const nombre of nombres) {
-      this.run(['cookies', 'set', nombre, '', '--domain', dominio, '--path', '/', '--expires', '1']);
+  borrarCookies(cookies: CookieUbicada[]): void {
+    for (const { name, domain, path } of cookies) {
+      this.run(['cookies', 'set', name, '', '--domain', domain, '--path', path, '--expires', '1']);
     }
   }
 

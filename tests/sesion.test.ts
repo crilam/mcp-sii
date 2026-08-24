@@ -53,6 +53,8 @@ function makeSession() {
   // del SII, no por la URL: un rechazo por clave incorrecta también sale del
   // formulario y sigue en sii.cl (ver assertLoginPorClaveExitoso).
   (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID', 'RUT_NS']);
+  (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(
+    ['TOKEN', 'CSESSIONID', 'RUT_NS'].map(name => ({ name, domain: '.sii.cl', path: '/' })));
   return { browser, session: new SessionManager(config, browser) };
 }
 
@@ -96,6 +98,8 @@ describe('SessionManager.listEmpresasDisponibles', () => {
     );
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
     (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID']);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(
+      [{ name: 'TOKEN', domain: '.sii.cl', path: '/' }]);
     const session = new SessionManager(config, browser);
 
     await conTimers(() => session.listEmpresasDisponibles());
@@ -114,6 +118,8 @@ describe('SessionManager: página de empresas que no rinde', () => {
     (browser.snapshot as jest.Mock).mockReturnValue('- generic\n  - StaticText "Cargando"');
     (browser.getUrl as jest.Mock).mockReturnValue('https://mipyme.sii.cl/');
     (browser.cookiesDelSii as jest.Mock).mockReturnValue(['TOKEN', 'CSESSIONID']);
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(
+      [{ name: 'TOKEN', domain: '.sii.cl', path: '/' }]);
     const session = new SessionManager(config, browser);
 
     await expect(conTimers(() => session.listEmpresasDisponibles())).rejects.toThrow(/no terminó de cargar/);

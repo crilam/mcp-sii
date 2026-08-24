@@ -306,7 +306,10 @@ describe('Browser', () => {
   it('borrarCookies expira sólo las cookies indicadas, sin vaciar el jar', () => {
     mockExec.mockReturnValue(Buffer.from(''));
 
-    browser.borrarCookies(['TOKEN', 'CSESSIONID']);
+    browser.borrarCookies([
+      { name: 'TOKEN', domain: '.sii.cl', path: '/' },
+      { name: 'CSESSIONID', domain: '.sii.cl', path: '/' },
+    ]);
 
     expect(mockExec).toHaveBeenCalledTimes(2);
     expect(mockExec).toHaveBeenNthCalledWith(
@@ -317,6 +320,42 @@ describe('Browser', () => {
     );
     const argv = mockExec.mock.calls.flatMap(([, args]) => args as string[]);
     expect(argv).not.toContain('clear');
+  });
+
+  // El hueco que reabría el falso positivo: una cookie host-only de
+  // zeusr.sii.cl, o con un path propio, no se borra apuntándole a `.sii.cl` con
+  // path `/` — pero sí la ve el chequeo de sesión. Hay que borrarla donde vive.
+  it('borrarCookies respeta el dominio y el path reales de cada cookie', () => {
+    mockExec.mockReturnValue(Buffer.from(''));
+
+    browser.borrarCookies([
+      { name: 'TOKEN', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000' },
+    ]);
+
+    expect(mockExec).toHaveBeenCalledWith(
+      'agent-browser',
+      ['cookies', 'set', 'TOKEN', '', '--domain', 'zeusr.sii.cl', '--path', '/cgi_AUT2000', '--expires', '1'],
+      expect.any(Object)
+    );
+  });
+
+  it('cookiesDelSiiConUbicacion devuelve dónde vive cada cookie, sin su valor', () => {
+    mockExec.mockReturnValue(Buffer.from(JSON.stringify({
+      success: true,
+      data: {
+        cookies: [
+          { name: 'TOKEN', value: 'VALOR_SECRETO', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000' },
+          { name: 'AJENA', value: 'x', domain: 'notsii.cl', path: '/' },
+        ],
+      },
+    })));
+
+    const cookies = browser.cookiesDelSiiConUbicacion();
+
+    expect(cookies).toEqual([
+      { name: 'TOKEN', domain: 'zeusr.sii.cl', path: '/cgi_AUT2000' },
+    ]);
+    expect(JSON.stringify(cookies)).not.toContain('VALOR_SECRETO');
   });
 
   describe('evalPrivado', () => {
