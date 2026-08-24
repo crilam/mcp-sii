@@ -78,7 +78,23 @@ describe('BheScraper.informeAnual', () => {
  xml_values['tot5']= "105";
 </script></body></html>`);
 
-    await expect(scraper.informeAnual(2025)).rejects.toThrow(/montos para el mes 1/);
+    await expect(scraper.informeAnual(2025)).rejects.toThrow(/datos para el mes 1/);
+  });
+
+  // La deteccion no depende del honorario bruto: un mes de puras boletas
+  // anuladas tiene montos en cero y aun asi tuvo emisiones.
+  it('falla tambien si el unico dato del mes son emisiones anuladas', async () => {
+    const { scraper } = makeScraper(`<html><body><script>
+ xml_values['anio_consulta'] = "2025";
+ xml_values['rut_arrastre'] = "11111111";
+ xml_values['dv_arrastre'] = "1";
+ xml_values['ene7']= "3";
+ xml_values['ene4']= "";
+ xml_values['tot4']= "101";
+ xml_values['tot5']= "105";
+</script></body></html>`);
+
+    await expect(scraper.informeAnual(2025)).rejects.toThrow(/datos para el mes 1/);
   });
 
   // Y un mes REALMENTE vacio se sigue omitiendo: asi informa el SII los meses

@@ -521,13 +521,19 @@ export class BheScraper {
       // emisiones y el consumidor las tomaría como cero. Un motor contable que
       // escribe "mes importado, sin emisiones" sobre un mes que sí tuvo es peor
       // que un error, porque nadie vuelve a mirarlo. Se corta acá.
-      const conMontos = [1, 2, 3, 6, 7]
+      // Todas las columnas del mes menos la 4, que es la que falta. Incluye la 5
+      // (folio final): un mes con folio final y sin folio inicial tuvo
+      // emisiones, aunque sus montos estén en cero — omitirlo sería la misma
+      // mentira. Los montos en cero con folios presentes pasan de verdad: un mes
+      // de puras boletas anuladas.
+      const conDatos = [1, 2, 3, 5, 6, 7]
         .some(col => (this.toInt(values[`${prefijo}${col}`]) ?? 0) !== 0);
-      if (conMontos) {
+      if (conDatos) {
         throw new LimitacionConocida(
-          `El informe anual trae montos para el mes ${mes} pero ningún folio inicial ` +
-          'legible, así que no se puede saber si hubo emisiones. Omitirlo lo haría ' +
-          'pasar por un mes sin actividad. Consultá el año desde el portal.'
+          `El informe anual trae datos para el mes ${mes} pero ningún folio inicial ` +
+          'legible, así que no se puede saber si hubo emisiones. Omitir ese mes lo ' +
+          'haría pasar por uno sin actividad, así que no se devuelve NINGÚN mes del ' +
+          'año: el año no está vacío, no se pudo leer. Consultalo desde el portal.'
         );
       }
       return null;

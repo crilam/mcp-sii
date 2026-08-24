@@ -168,6 +168,22 @@ describe('registrarRutasBhe', () => {
     });
   });
 
+  // `resumen` es la ruta que estrena el throw nuevo del informe anual, asi que
+  // se cubre por separado de `list-recibidas`.
+  it('resumen: un limite conocido tambien sale como LIMITE_CONOCIDO', async () => {
+    (core.resumen as jest.Mock).mockRejectedValue(
+      new LimitacionConocida('El informe anual trae datos para el mes 3 pero ningun folio')
+    );
+    const rutas = armarRouter();
+
+    const respuesta = await rutas.get('POST /v1/bhe/resumen')!({
+      rut: '11.111.111-1', clave: 'secreta', anio: 2026,
+    });
+
+    expect((respuesta.body as { error: string }).error).toBe('LIMITE_CONOCIDO');
+    expect((respuesta.body as { detalle?: string }).detalle).toMatch(/mes 3/);
+  });
+
   // RecursoNoEncontrado extiende LimitacionConocida, asi que el orden de los
   // `instanceof` decide: el caso mas especifico tiene que ganar.
   it('una boleta inexistente sigue siendo NO_ENCONTRADO, no LIMITE_CONOCIDO', async () => {
