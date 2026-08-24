@@ -199,10 +199,13 @@ export class Browser {
     try {
       return this.run(['cookies', 'get', '--json']);
     } catch (e) {
+      // Se descarta la SALIDA del CLI (puede traer los valores de las cookies),
+      // pero no todo: el código del fallo y la clase del error no llevan datos y
+      // son lo único que le dice al operador si fue un timeout, un CLI ausente o
+      // algo más. Con una cadena vacía, los tres casos se veían igual.
       const codigo = e instanceof ErrorDeBrowser && e.code ? e.code : 'sin código';
-      // Categoría fija además del código: distingue "falló sin código" de "no
-      // se sabe qué pasó", que con una cadena vacía se veían igual.
-      throw new ErrorDeBrowser('cookies get', `salida omitida (${codigo})`);
+      const clase = e instanceof Error ? e.constructor.name : typeof e;
+      throw new ErrorDeBrowser('cookies get', `salida omitida (${clase}, ${codigo})`);
     }
   }
 
@@ -238,7 +241,11 @@ export class Browser {
         name: String(c?.name ?? ''),
         domain: String(c?.domain ?? ''),
         path: String(c?.path ?? '/') || '/',
-      }));
+      }))
+      // Una cookie sin nombre no sirve para nada y en el camino de borrado
+      // produciría `cookies set '' '' --domain …`, una llamada basura que puede
+      // fallar y abortar el login entero.
+      .filter(c => c.name !== '');
   }
 
   // Borra las cookies indicadas, y sólo esas, expirándolas en el pasado

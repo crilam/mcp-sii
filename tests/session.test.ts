@@ -324,6 +324,21 @@ describe('SessionManager.login', () => {
   // credencial esté mal: puede ser la cola de espera, una caída o un bloqueo
   // temporal. Se rechaza igual, pero con un mensaje que NO clasifica como
   // credencial inválida — si no, el tenant borraría una clave que sí servía.
+  // Cada poll spawnea un proceso `agent-browser cookies get`. Con paso fijo de
+  // 1s, agotar los 15s costaba 15 procesos; con backoff son 4. Sin este test, un
+  // `step *= 2` mal editado vuelve a los 15 sin que se caiga nada.
+  it('el poll usa backoff: agotar el tiempo cuesta 4 lecturas, no 15', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
+    (browser.cookiesDelSii as jest.Mock).mockReturnValue(COOKIES_SIN_SESION);
+
+    const mgr = new SessionManager(configClave, browser);
+    await conTimers(() => mgr.login()).catch(() => {});
+
+    expect((browser.cookiesDelSii as jest.Mock).mock.calls.length).toBeLessThanOrEqual(4);
+  });
+
   it('sin cookies y sin motivo reconocible: rechaza sin culpar a la credencial', async () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);

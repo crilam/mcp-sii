@@ -644,6 +644,12 @@ export class SessionManager {
   // Las cookies no admiten esa ambigüedad: el login rechazado deja sólo las del
   // WAF y la cola (TS01…, QueueITAccepted), mientras el exitoso deja TOKEN,
   // CSESSIONID y las NETSCAPE_LIVEWIRE.* (17 en la corrida verificada).
+  //
+  // Nota: al no mirar la URL, un login que autenticó pero quedó parado en un
+  // interstitial del portal (aviso, cambio de clave obligatorio) cuenta como
+  // éxito. Para `validar-clave` es lo correcto —la credencial ES válida—, y en
+  // el `login()` completo lo atrapa después la lectura del combo de empresas,
+  // que falla explícitamente si la página no rinde.
   private async assertLoginPorClaveExitoso(maxMs = 15_000, stepInicial = 1_000): Promise<void> {
     let falloDeLectura: string | undefined;
     // Backoff: cada poll spawnea un `agent-browser cookies get`, y con paso fijo
@@ -703,9 +709,13 @@ export class SessionManager {
   // borraría una clave que en realidad servía.
   private leerMotivoDeRechazo(): 'CLAVE_INCORRECTA' | undefined {
     try {
-      const texto = this.browser.eval(
-        'document.body ? document.body.innerText.slice(0, 2000) : ""'
-      );
+      // Se lee la página completa, no los primeros 2000 caracteres: el portal
+      // imprime el aviso y su código DEBAJO del header, el menú y la navegación,
+      // y la página de CAutInicio.cgi pesa ~17 KB. Con el corte corto, el bloque
+      // podía quedar afuera, ninguna de las dos señales matcheaba, el fallo salía
+      // como ERROR y el tenant guardaba una clave inválida. Es una lectura local
+      // del DOM: no cuesta red.
+      const texto = this.browser.eval('document.body ? document.body.innerText : ""');
       // Dos señales, no una: el texto y el código de mensaje que el propio
       // portal imprime debajo ("El código de este mensaje es …"). Si el SII
       // cambia el copy, el código sigue identificando el caso; si mostrara el
