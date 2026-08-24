@@ -1,4 +1,7 @@
 import { execFileSync, execSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // maxBuffer explícito: el default de Node (1 MB) lo revienta un snapshot
 // grande del árbol de accesibilidad de una página con muchos elementos.
@@ -47,6 +50,22 @@ export interface CookieUbicada {
   // exacto: host-only contra `.sii.cl`, Secure, HttpOnly). Un nombre presente
   // con valor vacío no prueba ninguna sesión.
   tieneValor: boolean;
+}
+
+// Dónde deja agent-browser los perfiles de sesión. Verificado contra el CLI: por
+// defecto son `<id>.config`/`.engine`/`.pid`/… en `~/.agent-browser`, y con
+// `AGENT_BROWSER_NAMESPACE` seteada van a `namespaces/<ns>/run` dentro de ese
+// mismo directorio. Se devuelven las dos rutas y se limpian ambas: mirar sólo la
+// base haría que con un namespace configurado el borrado no encontrara nada y
+// fallara en silencio, que es el modo de falla más caro acá.
+//
+// No hay variable para mover el directorio raíz (`AGENT_BROWSER_HOME` no existe
+// en el CLI; las que hay son CONFIG, SESSION, NAMESPACE, RESTORE y
+// RESTORE_SAVE), así que la base va fija.
+function directoriosDePerfiles(): string[] {
+  const raiz = path.join(os.homedir(), '.agent-browser');
+  const ns = process.env.AGENT_BROWSER_NAMESPACE;
+  return ns ? [raiz, path.join(raiz, 'namespaces', ns, 'run')] : [raiz];
 }
 
 // `includes('sii.cl')` daría por buenos `notsii.cl` o `sii.cl.evil.com`: el
@@ -324,5 +343,44 @@ export class Browser {
 
   close(): void {
     this.run(['close']);
+  }
+
+  // Cierra el contexto Y borra su perfil del disco.
+  //
+  // Hacen falta las dos cosas: `close` termina el proceso pero DEJA el perfil
+  // (verificado — tras cerrar sobreviven `<id>.config`, `.engine`, `.pid`,
+  // `.version` en el directorio de agent-browser). Como cada sesión usa un id
+  // único, no borrarlos convierte la fuga de procesos en una de disco, que en un
+  // contenedor es peor: se llena el disco efímero de la task. En la máquina de
+  // desarrollo este directorio ya había juntado 356 MB en 97 entradas.
+  //
+  // El acoplamiento con el layout interno del CLI es deliberado y acotado: se
+  // toca SÓLO lo que empieza con el id de esta sesión, y cualquier fallo se
+  // ignora — es limpieza, no puede tumbar la operación que ya terminó.
+  cerrarYBorrarPerfil(): void {
+    try {
+      this.close();
+    } catch {
+      // El proceso pudo haber muerto solo; el perfil se borra igual.
+    }
+    if (!this.sessionId) return;
+    for (const base of directoriosDePerfiles()) {
+      this.borrarPerfilEn(base);
+    }
+  }
+
+  private borrarPerfilEn(base: string): void {
+    try {
+      for (const entrada of fs.readdirSync(base)) {
+        // `<id>.algo` y nada más: un `startsWith(id)` pelado borraría el perfil
+        // de una sesión cuyo id empiece igual (`rut-1` contra `rut-10`).
+        if (entrada.startsWith(`${this.sessionId}.`)) {
+          fs.rmSync(path.join(base, entrada), { recursive: true, force: true });
+        }
+      }
+    } catch {
+      // El directorio puede no existir (nunca se lanzó el navegador) o no ser
+      // legible. No hay nada que hacer al respecto acá.
+    }
   }
 }

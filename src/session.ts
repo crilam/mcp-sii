@@ -285,6 +285,17 @@ export class SessionManager {
     }
   }
 
+  // Cierra el contexto del navegador de ESTA sesión. Es distinto de `logout()`:
+  // logout cierra la sesión del lado del SII, esto libera el proceso y el perfil
+  // en disco del lado nuestro. Lo llama el registro al desalojar una sesión —
+  // sin esto, un servidor de larga vida acumula un contexto por cada RUT y por
+  // cada request pass-through, sin techo.
+  cerrarContexto(): void {
+    // Cierra Y borra el perfil: cada sesión usa un contexto propio, así que
+    // dejar el perfil en disco cambiaría una fuga de procesos por una de disco.
+    this.browser.cerrarYBorrarPerfil();
+  }
+
   // Orden de resolución de la empresa: el parámetro de la llamada gana siempre
   // (es la intención explícita de quien invoca la tool); si no vino, cae a
   // SII_EMPRESA_RUT; si tampoco hay, selectEmpresa() resuelve sola cuando la
@@ -669,15 +680,13 @@ export class SessionManager {
     );
   }
 
-  // Éxito = el SII nos devolvió a una página del portal (fuera del formulario
-  // de autenticación). Con clave incorrecta el CGI vuelve a renderizar el
-  // login, así que seguir en IngresoRutClave al agotar la espera ES el rechazo.
-  // 15s es generoso a propósito: un falso "clave incorrecta" por latencia del
-  // SII es peor que tardar un poco más en detectar un rechazo genuino — a los
-  // consumidores les llega como CREDENCIALES_INVALIDAS y se lo muestran al
-  // usuario final.
   // El éxito se decide por la EVIDENCIA de que hay sesión —las cookies que el
   // SII sólo emite cuando autenticó— y no por la URL.
+  //
+  // La espera es generosa a propósito: un falso "clave incorrecta" por latencia
+  // del SII es peor que tardar en detectar un rechazo genuino, porque al
+  // consumidor le llega como CREDENCIALES_INVALIDAS y se lo muestra al usuario
+  // final.
   //
   // Basarlo en la URL fue un falso positivo grave, verificado contra el portal:
   // con una clave incorrecta el SII postea a `CAutInicio.cgi` y renderiza ahí
