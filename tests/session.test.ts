@@ -416,11 +416,13 @@ describe('SessionManager.login', () => {
   // credencial esté mal: puede ser la cola de espera, una caída o un bloqueo
   // temporal. Se rechaza igual, pero con un mensaje que NO clasifica como
   // credencial inválida — si no, el tenant borraría una clave que sí servía.
-  // Cada lectura spawnea un proceso `agent-browser cookies get`. Con paso fijo
-  // de 1s, agotar los 15s costaba 15 polls; con backoff capado en 2s son 8
-  // (1+2+2+2+2+2+2+2 = 15s), más las 2 de la limpieza previa: 10 en total. Sin
-  // este test, un `step *= 2` mal editado vuelve a las 15 sin que nada se caiga.
-  it('el poll usa backoff: agotar el tiempo cuesta 10 lecturas, no 17', async () => {
+  // Con paso fijo de 1s, agotar los 15s daba 15 vueltas; con el backoff capado
+  // en 2s son 8 (1+2+2+2+2+2+2+2 = 15s). Se cuentan las lecturas de cookies: 8
+  // del poll más las 2 de la limpieza previa. (Cada vuelta gasta además un
+  // `eval` para leer el motivo, así que el total de procesos es mayor — ver el
+  // comentario en assertLoginPorClaveExitoso.) Sin este test, un `step *= 2` mal
+  // editado vuelve a las 15 vueltas sin que nada se caiga.
+  it('el poll usa backoff: agotar el tiempo da 8 vueltas, no 15', async () => {
     const browser = crearBrowserMock();
     mockearEvalFormulario(browser, true);
     (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');

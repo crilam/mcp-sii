@@ -698,12 +698,19 @@ export class SessionManager {
   // que falla explícitamente si la página no rinde.
   private async assertLoginPorClaveExitoso(maxMs = 15_000, stepInicial = 1_000): Promise<void> {
     let falloDeLectura: string | undefined;
-    // Backoff con techo: cada poll spawnea un `agent-browser cookies get`, y con
-    // paso fijo de 1s agotar los 15s cuesta 15 procesos. Duplicando, cuesta 4 —
-    // pero sin cap el cuarto poll cae a los 15s, así que un login que autentica a
-    // los 3,1s tardaría 7s en detectarse, y `validar-clave` es síncrono para
-    // Tributy. Con el cap en 2s son 8 lecturas: la mitad de procesos que antes,
-    // sin regalarle segundos al caso feliz.
+    // Backoff con techo de 2s: 8 vueltas para cubrir los 15s, en vez de 15.
+    //
+    // Cuidado con la contabilidad: cada vuelta spawnea DOS procesos de
+    // agent-browser (el `cookies get` del chequeo de sesión y el `eval` que lee
+    // el motivo de rechazo), así que agotar el tiempo cuesta ~16 procesos —
+    // ninguna mejora contra los 15 del criterio viejo. El backoff no está acá
+    // por ahorro: está para no repreguntar 15 veces cuando el portal claramente
+    // se está tomando su tiempo. Lo que sí ahorra de verdad es el corte
+    // temprano por CLAVE_INCORRECTA de más abajo, medido en 3,7s contra 15.
+    //
+    // El techo en 2s, y no un backoff libre, es lo que evita que un login que
+    // autentica a los 3,1s se detecte recién a los 7: `validar-clave` es
+    // síncrono para Tributy.
     const stepMaximo = 2_000;
     for (
       let esperado = 0, step = stepInicial;
