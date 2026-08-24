@@ -302,8 +302,22 @@ export class Browser {
       c.name,
       c.value,
     ].join('\t'));
-    // mode 0600: son credenciales de sesión y el directorio es compartido.
-    fs.writeFileSync(ruta, `${lineas.join('\n')}\n`, { mode: 0o600 });
+    // Se BORRA y se crea con `wx`, en vez de sobrescribir con `{ mode: 0o600 }`.
+    // Dos motivos, los dos concretos porque la ruta es predecible y vive en un
+    // directorio compartido (`os.tmpdir()/sii_cookies_<rut>`):
+    //
+    //  - `mode` sólo se aplica al CREAR el archivo. Si ya existía —por ejemplo
+    //    el jar que dejó `curl -c` en una corrida con certificado— se reescribía
+    //    conservando sus permisos, que pueden ser abiertos.
+    //  - `writeFileSync` sigue symlinks. Otro usuario local podía pre-crear
+    //    `/tmp/sii_cookies_<rut>` apuntando a donde quisiera y las cookies de
+    //    sesión del SII —credenciales completas— se escribían ahí.
+    //
+    // `rmSync` borra el symlink en sí (no su destino) y `wx` falla si el archivo
+    // existe, así que el que queda lo creamos nosotros con 0600. Mismo patrón
+    // que `credencialesRuntime.guardarCertificado` para el .pfx.
+    fs.rmSync(ruta, { force: true });
+    fs.writeFileSync(ruta, `${lineas.join('\n')}\n`, { flag: 'wx', mode: 0o600 });
     return lineas.length;
   }
 

@@ -337,6 +337,31 @@ describe('Browser', () => {
     expect(contenido).toContain('TOKEN\tabc123');
     expect(contenido).not.toContain('AJENA');
     expect(contenido).not.toContain('VACIA');
+    // 0600: son credenciales de sesión en un directorio compartido.
+    expect(fs.statSync(ruta).mode & 0o777).toBe(0o600);
+    fs.unlinkSync(ruta);
+  });
+
+  // `mode` sólo aplica al CREAR: sobrescribir un jar que ya existía —el que deja
+  // `curl -c` en una corrida con certificado— conservaba sus permisos. Y
+  // `writeFileSync` sigue symlinks, así que en /tmp otro usuario podía
+  // pre-crear la ruta apuntando a donde quisiera y quedarse con las cookies.
+  it('escribirCookieJar reemplaza un archivo preexistente con permisos abiertos', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    jest.unmock('fs');
+    mockExec.mockReturnValue(Buffer.from(JSON.stringify({
+      success: true,
+      data: { cookies: [{ name: 'TOKEN', value: 'abc', domain: '.sii.cl', path: '/' }] },
+    })));
+    const ruta = path.join(os.tmpdir(), `jar-perm-${Date.now()}.txt`);
+    fs.writeFileSync(ruta, 'basura vieja', { mode: 0o644 });
+
+    browser.escribirCookieJar(ruta);
+
+    expect(fs.statSync(ruta).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(ruta, 'utf-8')).not.toContain('basura vieja');
     fs.unlinkSync(ruta);
   });
 
