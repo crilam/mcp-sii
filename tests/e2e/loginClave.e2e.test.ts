@@ -88,7 +88,12 @@ describeConCredenciales('login por clave contra el SII real', () => {
   // no puede autenticar no debe reportarse como autenticado, pase lo que pase.
   it('un login que no puede tener éxito NO se reporta como exitoso', async () => {
     await conSesion({ rut: RUT_SIN_CUENTA, clave: 'ClaveInventada-9999' }, async sesion => {
-      await expect(sesion.authenticateOnly()).rejects.toThrow();
+      // Con patrón, no un `toThrow()` pelado: sin él, un `agent-browser`
+      // ausente, un timeout de red o la cola del SII pintarían el test de verde
+      // sin haber ejercitado nada. Se aceptan las dos formas legítimas de
+      // rechazo — el portal no informó sesión, o informó credencial inválida.
+      await expect(sesion.authenticateOnly())
+        .rejects.toThrow(/no estableció una sesión|rechazó la autenticación/);
     });
   }, TIMEOUT_MS);
 
