@@ -274,6 +274,63 @@ export class Browser {
       .filter(c => c.name !== '');
   }
 
+  // Escribe las cookies del SII a `ruta`, en el formato Netscape que consume
+  // `curl -b`. Devuelve cuántas escribió.
+  //
+  // Vive acá y no en quien llama porque es el único punto del código que puede
+  // ver los VALORES de las cookies: son credenciales de sesión, y el resto del
+  // sistema trabaja con nombres y un booleano de "tiene valor" justamente para
+  // que no circulen. Acá tienen que viajar al archivo, así que el valor entra y
+  // sale del método sin pasar por nadie más.
+  //
+  // Detalles del formato, los tres verificados contra curl:
+  //  - 7 campos separados por TAB: dominio, flag de subdominios, path, secure,
+  //    expiración, nombre, valor;
+  //  - expiración 0 significa "cookie de sesión", que es lo que son;
+  //  - NO se usa el prefijo `#HttpOnly_` que escribe `curl -c`. Nuestro propio
+  //    `parseCookieFile` (session.ts) saltea las líneas que empiezan con `#`,
+  //    así que con ese prefijo la cookie TOKEN se volvía invisible y el
+  //    conversationId de las apps SDI dejaba de resolverse.
+  escribirCookieJar(ruta: string): number {
+    const cookies = this.cookiesConValor();
+    const lineas = cookies.map(c => [
+      c.domain,
+      c.domain.startsWith('.') ? 'TRUE' : 'FALSE',
+      c.path || '/',
+      'TRUE',
+      '0',
+      c.name,
+      c.value,
+    ].join('\t'));
+    // mode 0600: son credenciales de sesión y el directorio es compartido.
+    fs.writeFileSync(ruta, `${lineas.join('\n')}\n`, { mode: 0o600 });
+    return lineas.length;
+  }
+
+  // Único lector de valores de cookie del proyecto. Privado a propósito.
+  private cookiesConValor(): Array<{ name: string; domain: string; path: string; value: string }> {
+    const salida = this.leerCookiesCrudas();
+    let cookies: unknown;
+    try {
+      cookies = JSON.parse(salida)?.data?.cookies;
+    } catch {
+      throw new ErrorDeBrowser('cookies get', 'respuesta no parseable del CLI');
+    }
+    if (!Array.isArray(cookies)) {
+      throw new ErrorDeBrowser('cookies get', 'el CLI no devolvió data.cookies como arreglo');
+    }
+    return cookies
+      .filter((c): c is { name?: string; domain?: string; path?: string; value?: string } =>
+        esDominioDelSii(String((c as { domain?: string })?.domain ?? '')))
+      .map(c => ({
+        name: String(c?.name ?? ''),
+        domain: String(c?.domain ?? ''),
+        path: String(c?.path ?? '/') || '/',
+        value: String(c?.value ?? ''),
+      }))
+      .filter(c => c.name !== '' && c.value !== '');
+  }
+
   // Vacía TODO el jar del contexto. Es el último recurso: se lleva también el
   // token del WAF y el de la cola de espera, así que el intento siguiente vuelve
   // a encolarse. Sólo tiene sentido cuando el borrado selectivo no logró sacar

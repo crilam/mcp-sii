@@ -364,20 +364,38 @@ export class SessionManager {
   // que este guard existe para evitar. El llamador no necesita conocer las
   // estrategias de autenticación: sólo pregunta si esta sesión puede servirlo.
   assertPuedeEntregarCookieJar(): void {
-    // Sólo `loginWithCert` escribe el cookie jar (curl -c). Con estrategia de
-    // clave la autenticación pasa por el navegador y el archivo nunca existe,
-    // así que devolver la ruta igual haría que curl salga sin cookies y el
-    // fallo se reporte como "la sesión pudo expirar", que apunta al lugar
-    // equivocado. Peor: si en esta máquina hubo antes una corrida con
-    // certificado, el archivo quedó en $TMPDIR y curl -b mandaría cookies de
-    // una sesión anterior, que es justo lo que dispara el bloqueo del SII
-    // 01.01.190.500.720.27. Se falla antes de tocar la red.
+    // Las DOS estrategias pueden producir el cookie jar, así que ya no hay nada
+    // que rechazar acá. Se conserva el método —y lo siguen llamando los scrapers
+    // antes de autenticar— porque la pregunta que hace sigue siendo la correcta:
+    // "¿esta sesión puede darme el jar?". Si mañana aparece una estrategia que
+    // no pueda, este es el lugar donde se rechaza, y hacerlo ANTES de
+    // `authenticateOnly()` evita abrir en el SII una sesión que después no se va
+    // a poder usar y que igual cuenta para el límite de sesiones simultáneas.
+    //
+    // Antes exigía certificado, con este razonamiento: "sólo loginWithCert
+    // escribe el jar (curl -c); con clave la autenticación corre en el navegador
+    // y el archivo nunca existe". La primera mitad era cierta, la conclusión no:
+    // el navegador TIENE las cookies, sólo que nadie las estaba escribiendo.
+    // Verificado contra el portal exportándolas a un jar y consultando los CGI
+    // de BHE, que respondieron con datos reales. Eso lo hace ahora
+    // `loginConClave` al terminar (ver `escribirCookieJar`).
+    //
+    // El riesgo que ese guard también cubría —que quedara en $TMPDIR el jar de
+    // una corrida vieja y curl mandara cookies de otra sesión, disparando el
+    // bloqueo 01.01.190.500.720.27— sigue cubierto, pero por otro lado: el jar
+    // se reescribe completo en cada login, y su ruta es por RUT.
+  }
+
+  // Lo que SÍ exige certificado digital: firmar. El SII no acepta una clave
+  // tributaria para emitir un DTE, porque la firma electrónica avanzada sale del
+  // certificado. Se separa del jar a propósito — son dos capacidades distintas y
+  // confundirlas fue lo que dejó las consultas bloqueadas para clave sin motivo.
+  assertPuedeFirmar(): void {
     if (this.config.strategy !== AuthStrategy.Certificate) {
       throw new RequiereCertificado(
-        'Las consultas por HTTP (boletas de honorarios) requieren autenticación con ' +
-        'certificado digital: la autenticación con clave tributaria corre en el navegador ' +
-        'y no produce el archivo de cookies que necesita curl. ' +
-        'Configurá SII_CERT_PATH y SII_CERT_PASSWORD.'
+        'Firmar documentos tributarios requiere certificado digital: la clave ' +
+        'tributaria autentica, pero no firma. Configurá SII_CERT_PATH y ' +
+        'SII_CERT_PASSWORD.'
       );
     }
   }
@@ -652,6 +670,25 @@ export class SessionManager {
     this.browser.eval("document.getElementById('myform').requestSubmit()");
 
     await this.assertLoginPorClaveExitoso();
+
+    // Se exporta la sesión del navegador al cookie jar que consume curl. Sin
+    // esto, todas las consultas por HTTP (BHE, RCV, DTE, renta, mipyme) quedaban
+    // fuera del alcance de la clave tributaria: el navegador tenía las cookies y
+    // nadie las escribía. Va DESPUÉS de verificar el login, porque exportar el
+    // jar de un login rechazado escribiría un archivo con las cookies del WAF y
+    // nada más, y el fallo aparecería después como "la sesión expiró".
+    const escritas = this.browser.escribirCookieJar(this.cookieJar);
+    if (escritas === 0) {
+      // El login se verificó exitoso, así que si acá no hay cookies es que algo
+      // se rompió entre medio. Fallar es mejor que dejar un jar vacío: con el
+      // archivo presente pero sin cookies, curl sale sin autenticación y el
+      // error termina reportado como sesión caducada, apuntando al lugar
+      // equivocado (es exactamente el modo de falla que el guard viejo temía).
+      throw new Error(
+        'El login por clave fue exitoso pero no se pudo exportar ninguna cookie ' +
+        'de sesión al archivo que usan las consultas por HTTP. Reintentá.'
+      );
+    }
   }
 
   // El form sólo existe si el SII redirigió: si tras la espera no aparece,

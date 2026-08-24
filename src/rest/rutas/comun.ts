@@ -13,6 +13,64 @@ export const zodCredencialCert = {
   certificado_password: z.string().min(1),
 };
 
+// Credencial de un request: clave tributaria O certificado digital. Las dos
+// autentican y las dos producen el cookie jar que usan las consultas por HTTP
+// (verificado contra el portal), así que la ruta no tiene por qué imponer una.
+//
+// Se aceptan las DOS en vez de migrar de certificado a clave: los tenants que ya
+// mandan certificado seguirían funcionando igual, y quien custodia claves —el
+// caso de Tributy, que guarda un secreto de texto por contribuyente— puede
+// consumir lo mismo sin construir un flujo de certificados. Mismo criterio que
+// apigateway, que expone `auth.pass` y `auth.cert`.
+//
+// Exactamente una: mandar las dos es un error del llamador, no algo a resolver
+// con una prioridad implícita. Ya nos pasó al revés en `env.ts`, donde
+// `certPath ? cert : clave` elegía sin que nadie lo pidiera y era imposible
+// saber con qué se había autenticado una consulta.
+const camposCredencial = {
+  clave: z.string().min(1).optional(),
+  certificado_base64: z.string().min(1)
+    .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'certificado_base64 inválido').optional(),
+  certificado_password: z.string().min(1).optional(),
+};
+
+export type Credencial =
+  | { tipo: 'clave'; clave: string }
+  | { tipo: 'certificado'; base64: string; password: string };
+
+// Envuelve el schema de una ruta agregándole la credencial y la validación de
+// que venga exactamente una.
+export function conCredencial<T extends z.ZodRawShape>(shape: T) {
+  return z.object({ ...shape, ...camposCredencial }).refine(
+    // El cast es necesario porque con un shape genérico zod no puede probar que
+    // las claves de `camposCredencial` sobreviven al merge, aunque estén ahí.
+    // `!==` sobre dos booleanos es "exactamente uno": con ninguna da false
+    // (falta la credencial) y con las dos también (sobra).
+    (d: Record<string, unknown>) =>
+      Boolean(d.clave) !== Boolean(d.certificado_base64 && d.certificado_password),
+    {
+      message: 'Mandá `clave`, o `certificado_base64` junto con ' +
+        '`certificado_password`. Exactamente una de las dos.',
+    }
+  );
+}
+
+// Traduce el body validado a la credencial que corresponde. Devolver un tipo
+// discriminado, y no los campos crudos, hace que quien arma el ejecutor no pueda
+// olvidarse de un caso.
+export function credencialDe(d: {
+  clave?: string;
+  certificado_base64?: string;
+  certificado_password?: string;
+}): Credencial {
+  if (d.clave) return { tipo: 'clave', clave: d.clave };
+  return {
+    tipo: 'certificado',
+    base64: d.certificado_base64!,
+    password: d.certificado_password!,
+  };
+}
+
 export interface RespuestaRuta {
   status: number;
   body: unknown;
