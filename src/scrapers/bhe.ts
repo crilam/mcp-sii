@@ -147,6 +147,10 @@ const ENTIDADES: Record<string, string> = {
 // de dominio. Se importan de ahí, sin re-exportar desde acá.
 
 export class BheScraper {
+  // Filas que el informe listó sin folio y se descartaron. Se cuenta para poder
+  // decir en el error si la cuenta no cierra por eso o por la paginación.
+  private filasDescartadas = 0;
+
   constructor(
     private http: SiiHttpClient,
     private session: SessionManager
@@ -248,6 +252,7 @@ export class BheScraper {
 
     // Primera página: además de sus filas, trae el total del mes, que es lo que
     // dice cuántas páginas hay.
+    this.filasDescartadas = 0;
     const primera = await this.pedirPagina(anio, mes, recibidas, 0);
     const total = this.toInt(primera.values['total_boletas']) ?? 0;
     const esquema = recibidas ? ESQUEMA_RECIBIDAS : ESQUEMA_EMITIDAS;
@@ -291,18 +296,33 @@ export class BheScraper {
     // completo entra al motor contable del consumidor como un total real. Es el
     // modo de falla silencioso que el error explícito anterior evitaba, así que
     // no se cambia por confianza: se verifica.
-    const foliosUnicos = new Set(boletas.map(b => b.folio)).size;
-    if (boletas.length !== total || foliosUnicos !== total) {
-      // Se miran las DOS cosas. Sólo con el conteo, un CGI que ignorara
-      // `pagina_solicitada` y devolviera dos veces la misma página pasaría
-      // inadvertido en un mes de exactamente 200: serían 200 filas, 200 == 200,
-      // y el consumidor recibiría 100 boletas duplicadas como si fueran el mes
-      // completo. Los folios únicos son lo que detecta esa repetición.
+    // Se miran las DOS cosas. Sólo con el conteo, un CGI que ignorara
+    // `pagina_solicitada` y devolviera dos veces la misma página pasaría
+    // inadvertido en un mes de exactamente 200: serían 200 filas, 200 == 200, y
+    // el consumidor recibiría 100 boletas duplicadas como si fueran el mes
+    // completo.
+    //
+    // La clave de unicidad es el CÓDIGO DE BARRAS y no el folio. En emitidas el
+    // folio alcanzaría (hay un solo emisor), pero en recibidas el folio es del
+    // EMISOR: dos emisores distintos pueden mandarte su boleta folio 1 el mismo
+    // mes, y con el folio como clave un mes perfectamente legítimo se caía
+    // entero. El código de barras identifica al documento y es único en los dos
+    // informes.
+    const codigosUnicos = new Set(boletas.map(b => b.codigoBarras)).size;
+    if (boletas.length !== total || codigosUnicos !== total) {
+      const descartadas = this.filasDescartadas;
       throw new Error(
         `El SII informó ${total} boletas para ${String(mes).padStart(2, '0')}/${anio} ` +
-        `pero se recuperaron ${boletas.length} (${foliosUnicos} folios distintos) ` +
-        `en ${totalPaginas} página(s). No se devuelve un listado incompleto ni con ` +
-        'duplicados; reintentá.'
+        `pero se recuperaron ${boletas.length} (${codigosUnicos} documentos distintos) ` +
+        `en ${totalPaginas} página(s)` +
+        // Se nombra la causa probable cuando la hay: una fila sin folio es un
+        // problema del parser o del informe, y una cuenta que no cierra sin
+        // filas descartadas apunta a la paginación. Sin esta distinción, el
+        // mismo mensaje culpaba a la paginación en los dos casos.
+        (descartadas > 0
+          ? `, con ${descartadas} fila(s) descartada(s) por venir sin folio`
+          : '') +
+        '. No se devuelve un listado incompleto ni con duplicados; reintentá.'
       );
     }
 
@@ -555,8 +575,12 @@ export class BheScraper {
     for (let i = 1; i <= filas; i++) {
       const folio = this.toInt(arr[`nroboleta_${i}`]);
       // Un indice sin folio significa que el SII devolvio menos filas de las
-      // que anuncio: se omite en vez de inventar una boleta vacia.
-      if (folio === null) continue;
+      // que anuncio: se omite en vez de inventar una boleta vacia, y se cuenta
+      // para que el chequeo de integridad pueda nombrar la causa.
+      if (folio === null) {
+        this.filasDescartadas += 1;
+        continue;
+      }
 
       const estado = (arr[`estado_${i}`] ?? '').trim();
       const fechaAnulacion = (arr[`fechaanulacion_${i}`] ?? '').trim();
@@ -602,6 +626,18 @@ export class BheScraper {
   // Cantidad de filas de la página, que el CGI declara en su JS como
   // `CantidadFilas=N;` (fuera de `xml_values`, por eso tiene su propio parser).
   private cantidadFilas(html: string): number {
-    return this.toInt(/CantidadFilas\s*=\s*(\d+)/.exec(html)?.[1]) ?? 0;
+    // Anclado al inicio de línea: sin eso, un `TotalCantidadFilas=` u otra
+    // variable que termine igual matchearía y devolvería el número equivocado.
+    const match = /^CantidadFilas\s*=\s*(\d+)/m.exec(html);
+    if (!match) {
+      // Devolver 0 haría que el mes salga vacío y el error apareciera después
+      // como un descuadre de conteo, culpando a la paginación en vez de al
+      // parser. Si el CGI renombra la variable, esto lo dice donde pasa.
+      throw new Error(
+        'El informe del SII no declara CantidadFilas, así que no se sabe cuántas ' +
+        'filas trae la página. El formato del CGI pudo cambiar.'
+      );
+    }
+    return this.toInt(match[1]) ?? 0;
   }
 }

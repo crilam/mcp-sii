@@ -281,6 +281,7 @@ describe('BheScraper.informeMensual con más de una página', () => {
   function paginaCon(totalMes: number, folios: number[]): string {
     const filas = folios.map((folio, i) => `
  arr_informe_mensual['nroboleta_${i + 1}'] = "${folio}";
+ arr_informe_mensual['codigobarras_${i + 1}'] = "COD${folio}";
  arr_informe_mensual['totalhonorarios_${i + 1}'] = formatMiles("1000",'.');`).join('');
     return `<html><script>
  xml_values['anio_consulta'] = "2025";
@@ -352,7 +353,7 @@ ${filas}
     (http.postForm as jest.Mock).mockResolvedValue(paginaCon(200, pagina));
 
     await expect(scraper.informeMensual(2025, 5))
-      .rejects.toThrow(/200 \(100 folios distintos\)/);
+      .rejects.toThrow(/200 \(100 documentos distintos\)/);
   });
 
   // Los dos CGI paginan distinto: el de recibidas es 1-based y navega con

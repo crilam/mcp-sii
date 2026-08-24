@@ -586,6 +586,12 @@ export class MipymeHttpScraper {
     detalle: string;
   }> {
     this.session.assertPuedeEntregarCookieJar();
+    // Firma un XML de verdad contra el SII (no emite, pero firma), así que exige
+    // certificado por el mismo motivo que `emitirDte`: la clave tributaria
+    // autentica y no firma. Antes alcanzaba el guard del cookie jar porque ése
+    // exigía certificado; ahora que la clave también lo produce, hay que pedirlo
+    // acá explícitamente.
+    this.session.assertPuedeFirmar();
 
     return this.session.conEmpresaExclusiva(async () => {
       const previa = await this.prepararYEmitir(params, false);

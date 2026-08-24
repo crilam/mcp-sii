@@ -61,13 +61,22 @@ export function conCredencial<T extends z.ZodRawShape>(shape: T) {
   return z.object({ ...shape, ...camposCredencial }).refine(
     // El cast es necesario porque con un shape genérico zod no puede probar que
     // las claves de `camposCredencial` sobreviven al merge, aunque estén ahí.
-    // `!==` sobre dos booleanos es "exactamente uno": con ninguna da false
-    // (falta la credencial) y con las dos también (sobra).
-    (d: Record<string, unknown>) =>
-      Boolean(d.clave) !== Boolean(d.certificado_base64 && d.certificado_password),
+    (d: Record<string, unknown>) => {
+      const conClave = Boolean(d.clave);
+      // Cualquier campo de certificado cuenta como "intención de certificado",
+      // no sólo el par completo. Con `clave && certificado_base64` pero sin
+      // password, comparar contra el par completo daba `true !== false` → pasaba,
+      // y `credencialDe` elegía la clave descartando el certificado en silencio:
+      // justo la prioridad implícita que esto viene a evitar.
+      const algoDeCert = Boolean(d.certificado_base64) || Boolean(d.certificado_password);
+      const certCompleto = Boolean(d.certificado_base64 && d.certificado_password);
+      if (conClave && algoDeCert) return false;
+      return conClave || certCompleto;
+    },
     {
       message: 'Mandá `clave`, o `certificado_base64` junto con ' +
-        '`certificado_password`. Exactamente una de las dos.',
+        '`certificado_password`. Exactamente una de las dos, y el certificado ' +
+        'con sus dos campos.',
     }
   );
 }

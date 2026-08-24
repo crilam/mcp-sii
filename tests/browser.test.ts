@@ -300,6 +300,46 @@ describe('Browser', () => {
     });
   });
 
+  // El formato Netscape es exactamente lo que rompió antes: con el prefijo
+  // `#HttpOnly_` que escribe `curl -c`, nuestro propio parseCookieFile saltea la
+  // línea (ignora las que empiezan con `#`) y la cookie TOKEN se volvía
+  // invisible. Se escribe a un archivo real y se lee con el parser de verdad.
+  it('escribirCookieJar produce un jar que parseCookieFile puede leer', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    // El mock global de child_process no alcanza: acá hace falta el fs real.
+    jest.unmock('fs');
+    mockExec.mockReturnValue(Buffer.from(JSON.stringify({
+      success: true,
+      data: {
+        cookies: [
+          { name: 'TOKEN', value: 'abc123', domain: '.sii.cl', path: '/' },
+          { name: 'CSESSIONID', value: 'def456', domain: 'misiir.sii.cl', path: '/cgi' },
+          // Sin valor: no sirve para autenticar y no debe ensuciar el jar.
+          { name: 'VACIA', value: '', domain: '.sii.cl', path: '/' },
+          { name: 'AJENA', value: 'x', domain: 'otrositio.cl', path: '/' },
+        ],
+      },
+    })));
+    const ruta = path.join(os.tmpdir(), `jar-test-${Date.now()}.txt`);
+
+    const escritas = browser.escribirCookieJar(ruta);
+
+    expect(escritas).toBe(2);
+    const contenido = fs.readFileSync(ruta, 'utf-8');
+    // Ninguna línea comentada: con `#` adelante, el parser las saltea.
+    expect(contenido).not.toContain('#');
+    // 7 campos separados por TAB, que es lo que curl espera.
+    for (const linea of contenido.trim().split('\n')) {
+      expect(linea.split('\t')).toHaveLength(7);
+    }
+    expect(contenido).toContain('TOKEN\tabc123');
+    expect(contenido).not.toContain('AJENA');
+    expect(contenido).not.toContain('VACIA');
+    fs.unlinkSync(ruta);
+  });
+
   // No usa `cookies clear`: eso borraría también el token del WAF y el de la
   // cola de espera del SII, y re-encolar cada login puede hacer fallar uno con
   // credenciales válidas. Se expira cada cookie nombrada, una por una.

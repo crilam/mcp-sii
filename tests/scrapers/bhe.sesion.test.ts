@@ -83,8 +83,12 @@ describe('BheScraper con estrategia de clave tributaria', () => {
   ])('%s consulta el SII en vez de rechazar por falta de certificado', async (_nombre, invocar) => {
     const { scraper, autenticaciones, http } = armar();
     // Respuesta mínima con la cabecera que el parser exige.
+    // `CantidadFilas` es obligatorio: el parser itera por las filas de la
+    // página y ahora falla explícito si el informe no la declara.
     const informe = `<html><script>xml_values['anio_consulta'] = "2025";
-      xml_values['total_boletas'] = "0";</script></html>`;
+ xml_values['total_boletas'] = "0";
+CantidadFilas=0;
+</script></html>`;
     (http.get as jest.Mock).mockResolvedValue(informe);
     (http.postForm as jest.Mock).mockResolvedValue(informe);
 
