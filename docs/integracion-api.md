@@ -115,7 +115,7 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 | `CREDENCIALES_INVALIDAS` | 200 | no | El SII rechazó la clave o el certificado. | No. Pedí credenciales nuevas. |
 | `NO_ENCONTRADO` | 200 | **sí** | El SII confirmó que el dato no existe. | No, es permanente. |
 | `LIMITE_CONOCIDO` | 200 | **sí** | Límite conocido de lo que se puede leer del portal (ver §7). | No, es permanente. |
-| `BAD_REQUEST` | 400 | casi siempre | El body no valida. El `detalle` nombra el campo. | No, arreglá el request. |
+| `BAD_REQUEST` | 400 | **sí** | El body no valida. El `detalle` nombra el campo. | No, arreglá el request. |
 | `CONFIRMAR_NO_SOPORTADO` | 400 | no | Mandaste `confirmar:true` a `emitir-dte`. | No, ver §6.5. |
 | `UNAUTHORIZED` | 401 | no | Falta el header, no es `Bearer`, o la key es desconocida o está revocada. | No. |
 | `PAYLOAD_TOO_LARGE` | 413 | no | Body de más de 64 KiB. | No. |

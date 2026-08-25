@@ -48,4 +48,40 @@ describe('registrarRutasDte', () => {
     const respuesta = await rutas.get('POST /v1/dte/list-documentos-emitidos')!({ rut: '1', certificado_base64: 'xxx', certificado_password: 'yyy' });
     expect(respuesta.status).toBe(400);
   });
+  // Estas rutas exigían certificado y ahora aceptan clave, igual que BHE.
+  // Verificado contra el SII con clave real antes de relajar el schema.
+  it('acepta clave tributaria y llama al core', async () => {
+    (core.listar as jest.Mock).mockResolvedValue({});
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/dte/list-documentos-emitidos')!({ rut: '11.111.111-1', clave: 'secreta', periodo: '202607' });
+
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    expect(core.listar).toHaveBeenCalled();
+  });
+
+  // Exactamente una credencial: mezclarlas es ambiguo y adivinar sería peor que
+  // rechazar, porque el caller creería que usó la que no se usó.
+  it('rechaza clave junto con certificado sin llamar al core', async () => {
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/dte/list-documentos-emitidos')!({
+      ...{ rut: '11.111.111-1', clave: 'secreta', periodo: '202607' }, certificado_base64: 'eHh4', certificado_password: 'yyy',
+    });
+
+    expect(r.status).toBe(400);
+    expect(core.listar).not.toHaveBeenCalled();
+  });
+
+  it('rechaza un body sin ninguna credencial sin llamar al core', async () => {
+    const rutas = armarRouter();
+    const sinCred = { ...{ rut: '11.111.111-1', clave: 'secreta', periodo: '202607' } } as Record<string, unknown>;
+    delete sinCred.clave;
+
+    const r = await rutas.get('POST /v1/dte/list-documentos-emitidos')!(sinCred);
+
+    expect(r.status).toBe(400);
+    expect(core.listar).not.toHaveBeenCalled();
+  });
 });

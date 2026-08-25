@@ -3,7 +3,7 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { RutaHandler } from './comun';
+import { RutaHandler, badRequest } from './comun';
 
 const zodValidarClave = z.object({ rut: z.string().min(1), clave: z.string().min(1) });
 
@@ -70,7 +70,7 @@ export function registrarRutasSesion(
 ): void {
   rutas.set('POST /v1/sesion/validar-clave', async body => {
     const parseo = zodValidarClave.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
+    if (!parseo.success) return badRequest(parseo.error);
     const { rut, clave } = parseo.data;
     const resultado = await validarClave(rut, clave, registro, credenciales);
     return { status: 200, body: resultado };

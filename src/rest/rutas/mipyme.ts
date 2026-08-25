@@ -16,6 +16,17 @@ const zodListEmpresas = conCredencial(schemaListEmpresas);
 const zodListDteEmitidos = conCredencial(schemaListDteEmitidos);
 const zodEmitirDte = z.object(schemaEmitirDte).extend({
   ...zodCredencialCert,
+  // `clave` se RECHAZA explícitamente, no se ignora. Sin esto, un body que
+  // trajera clave y certificado pasaba la validación, zod descartaba la clave en
+  // silencio y se firmaba con el certificado: el caller creía haber usado una
+  // credencial y se usó la otra, en la única ruta que firma. Todas las demás
+  // rutas rechazan esa mezcla vía `conCredencial`, y acá tiene que valer lo
+  // mismo aunque el régimen sea sólo-certificado.
+  clave: z.undefined({
+    error:
+      'emitir-dte no acepta clave tributaria: firmar un DTE requiere certificado digital. ' +
+      'Mandá certificado_base64 y certificado_password, sin clave.',
+  }).optional(),
   confirmar: z.boolean().default(false)
     .describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento — NO SOPORTADO vía REST todavía, ver limitación conocida de la spec.'),
 });
@@ -53,7 +64,7 @@ export function registrarRutasMipyme(
   // certificado digital en la memoria del proyecto.
   rutas.set('POST /v1/mipyme/emitir-dte', async body => {
     const parseo = zodEmitirDte.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
+    if (!parseo.success) return badRequest(parseo.error);
     const datos = parseo.data;
     if (datos.confirmar) {
       return { status: 400, body: { error: 'CONFIRMAR_NO_SOPORTADO' } };
