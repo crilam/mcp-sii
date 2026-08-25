@@ -22,7 +22,11 @@ const zodEmitirDte = z.object(schemaEmitirDte).extend({
   // credencial y se usó la otra, en la única ruta que firma. Todas las demás
   // rutas rechazan esa mezcla vía `conCredencial`, y acá tiene que valer lo
   // mismo aunque el régimen sea sólo-certificado.
-  clave: z.undefined({
+  // `z.never()` y no `z.undefined()`: con undefined, un body que trajera
+  // `"clave": null` pasaba igual —null no es undefined— y se firmaba con el
+  // certificado, que es exactamente el caso que esto viene a cerrar. Con never,
+  // la presencia de la clave con CUALQUIER valor se rechaza.
+  clave: z.never({
     error:
       'emitir-dte no acepta clave tributaria: firmar un DTE requiere certificado digital. ' +
       'Mandá certificado_base64 y certificado_password, sin clave.',

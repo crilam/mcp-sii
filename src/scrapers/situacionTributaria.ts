@@ -22,7 +22,16 @@ const URL_GETSTC = 'https://zeus.sii.cl/cvc_cgi/stc/getstc';
 // Título de la página del informe, que el CGI emite tenga o no datos el
 // contribuyente. Sirve como evidencia de que la respuesta ES este informe y no
 // una página de error: ver el uso en `parsearSituacionTributaria`.
-const MARCA_INFORME = /Consultar\s+Situaci(?:&oacute;|ó)n\s+Tributaria/i;
+//
+// La marca es ASCII PURO a propósito: "Tributaria de Terceros", sin la `ó` de
+// "Situación". Verificado en los bytes crudos del CGI que el título viene con la
+// entidad `&oacute;` y no con el byte 0xF3 de latin1, así que hoy cualquiera de
+// las dos formas funcionaría — pero si mañana el SII manda el byte crudo y la
+// decodificación falla, ese carácter se vuelve U+FFFD y la marca dejaría de
+// matchear. Entonces una respuesta BUENA se reportaría como "el SII no devolvió
+// la página", que es el error opuesto al que este chequeo existe para evitar.
+// Anclando a ASCII, el chequeo no depende de que la decodificación salga bien.
+const MARCA_INFORME = /Tributaria\s+de\s+Terceros/i;
 
 const TIMEOUT_MS = 25_000;
 const MAX_RESPUESTA_BYTES = 2 * 1024 * 1024;
@@ -281,21 +290,60 @@ export function transporteCurl(): TransporteSituacion {
 // Se verifica TLS (curl acá iba con `-k`). Comprobado en vivo que zeus.sii.cl
 // presenta cadena válida: desactivar la verificación en un dato que se usa para
 // decidir con quién se factura permitiría que un MITM inyecte una razón social.
+// El handshake TLS de `getstc` falla de forma intermitente: medido 3 de 12
+// intentos con ERR_SSL_LAST_OCTET_INVALID, mientras el endpoint del captcha no
+// falló ninguna vez. Parece un servidor detrás del balanceador con la cadena
+// mal armada, y explica por qué la versión con curl usaba `-k`: enmascaraba
+// esto a costa de aceptar cualquier certificado.
+//
+// No se desactiva la verificación: este dato se usa para decidir con quién se
+// factura, y un MITM podría inyectar una razón social. Se reintenta, que
+// mantiene la verificación y cubre el fallo — con ~25% de fallo por intento,
+// tres intentos dejan un residuo de ~1,5%.
+//
+// Sólo se reintentan los fallos de CONEXIÓN (el handshake nunca llegó a mandar
+// el POST, así que el captcha sigue sin consumirse). Un status HTTP de error no
+// se reintenta acá: lo decide quien llama, y reintentar un 500 del portal sólo
+// multiplica la carga sobre un servicio que ya está en problemas.
+const INTENTOS_CONEXION = 3;
+
+async function fetchConReintento(url: string, cuerpo: string): Promise<Response> {
+  let ultimo: unknown;
+  for (let intento = 1; intento <= INTENTOS_CONEXION; intento++) {
+    try {
+      return await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: cuerpo,
+        redirect: 'follow',
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (e) {
+      ultimo = e;
+      // Un timeout no se reintenta: si el portal tardó más de TIMEOUT_MS, pedirle
+      // lo mismo dos veces más sólo suma esa espera de nuevo.
+      if ((e as Error)?.name === 'TimeoutError') break;
+    }
+  }
+
+  // No se propaga el mensaje original: puede traer la URL con el cuerpo del
+  // POST y termina en el log central. Mismo criterio que http.ts.
+  const causa = (ultimo as Error)?.name === 'TimeoutError'
+    ? 'expiró el tiempo de espera'
+    : `falló la conexión tras ${INTENTOS_CONEXION} intento(s)`;
+  throw new Error(`No se pudo consultar el SII: ${causa}.`);
+}
+
 async function postear(url: string, cuerpo: string): Promise<{ contenido: Buffer; contentType: string }> {
-  let resp: Response;
-  try {
-    resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: cuerpo,
-      redirect: 'follow',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (e) {
-    // No se propaga el mensaje original: puede traer la URL con el cuerpo del
-    // POST y termina en el log central. Mismo criterio que http.ts.
-    const causa = (e as Error)?.name === 'TimeoutError' ? 'expiró el tiempo de espera' : 'falló la conexión';
-    throw new Error(`No se pudo consultar el SII: ${causa}.`);
+  const resp = await fetchConReintento(url, cuerpo);
+
+  // El status se chequea ANTES de leer el cuerpo. `curl` devolvía el body de un
+  // 500 sin distinguirlo de una respuesta buena, y aunque el chequeo de
+  // MARCA_INFORME lo atrapa igual, el operador perdía el dato más útil para
+  // diagnosticar: que el portal contestó un error, y cuál.
+  if (!resp.ok) {
+    await resp.body?.cancel();
+    throw new Error(`El SII respondió ${resp.status} a la consulta de situación tributaria.`);
   }
 
   // El cuerpo se lee por chunks con un techo, no con `arrayBuffer()`: una
@@ -307,6 +355,9 @@ async function postear(url: string, cuerpo: string): Promise<{ contenido: Buffer
     for await (const trozo of resp.body as unknown as AsyncIterable<Uint8Array>) {
       total += trozo.byteLength;
       if (total > MAX_RESPUESTA_BYTES) {
+        // Se cancela el body antes de lanzar: sin esto la conexión queda sin
+        // drenar y el socket colgado hasta que el runtime lo recoja.
+        await resp.body?.cancel();
         throw new LimitacionConocida(
           `La respuesta del SII superó ${MAX_RESPUESTA_BYTES} bytes, así que se cortó sin parsearla.`,
           { codigo: 'RESPUESTA_GRANDE' }

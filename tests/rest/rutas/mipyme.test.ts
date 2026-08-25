@@ -103,4 +103,19 @@ describe('registrarRutasMipyme', () => {
     expect(r.status).toBe(400);
     expect(core.emitirDte).not.toHaveBeenCalled();
   });
+  // `null` no es `undefined`: con `z.undefined()` este body pasaba y se firmaba
+  // con el certificado. Un consumidor que serializa sus campos vacíos como null
+  // caía justo acá.
+  it('emitir-dte: rechaza clave en null junto con certificado', async () => {
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/mipyme/emitir-dte')!({
+      rut: '11.111.111-1', clave: null,
+      certificado_base64: 'eHh4', certificado_password: 'yyy',
+      tipo_dte: 33, ...RECEPTOR_MINIMO, lineas: [LINEA_MINIMA],
+    });
+
+    expect(r.status).toBe(400);
+    expect(core.emitirDte).not.toHaveBeenCalled();
+  });
 });

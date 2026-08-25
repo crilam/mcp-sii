@@ -26,13 +26,22 @@ const TTL_MS = 24 * 60 * 60 * 1000;
 // por RUT, así que 5000 son ~1 MB. Al llenarse se descarta la entrada más
 // antigua (los Map de JS iteran en orden de inserción, así que la primera clave
 // es la más vieja).
-const MAX_ENTRADAS = 5000;
+export const MAX_ENTRADAS = 5000;
 
 const cache = new Map<string, { valor: SituacionTributaria; expira: number }>();
+
+// Consultas EN VUELO, para no pegarle N veces al SII por el mismo RUT cuando
+// llegan N pedidos antes de que el primero resuelva. El caché de resultados no
+// cubre ese caso —todavía no hay resultado que cachear— y es justo el escenario
+// que motiva el caché: varios tenants preguntando por la misma empresa a la vez.
+// Se guarda la PROMESA y se borra en cuanto se asienta, así un fallo no queda
+// pegado para los que vengan después.
+const enVuelo = new Map<string, Promise<SituacionTributaria>>();
 
 // Para los tests: el caché es estado de módulo y filtraría entre casos.
 export function limpiarCacheSituacionTributaria(): void {
   cache.clear();
+  enVuelo.clear();
 }
 
 export async function situacionTributaria(
@@ -53,13 +62,28 @@ export async function situacionTributaria(
   const ahora = Date.now();
   if (clave) {
     const guardado = cache.get(clave);
-    if (guardado && guardado.expira > ahora) return guardado.valor;
+    if (guardado && guardado.expira > ahora) return copiar(guardado.valor);
     // Vencida: se borra acá y no sólo se ignora, así una entrada que nadie
     // vuelve a pedir no queda ocupando lugar para siempre.
     if (guardado) cache.delete(clave);
+
+    // Ya hay una consulta en curso para este RUT: se espera esa en vez de abrir
+    // otra.
+    const yaEnCurso = enVuelo.get(clave);
+    if (yaEnCurso) return copiar(await yaEnCurso);
   }
 
-  const valor = await consultarSituacionTributaria(rut, transporte);
+  const pedido = consultarSituacionTributaria(rut, transporte);
+  if (clave) {
+    enVuelo.set(clave, pedido);
+  }
+
+  let valor: SituacionTributaria;
+  try {
+    valor = await pedido;
+  } finally {
+    if (clave) enVuelo.delete(clave);
+  }
 
   // Sólo se cachea el éxito. Un fallo puede ser transitorio (el portal caído),
   // y guardarlo convertiría un error de un momento en la respuesta de todo el
@@ -73,5 +97,13 @@ export async function situacionTributaria(
     cache.set(clave, { valor, expira: ahora + TTL_MS });
   }
 
-  return valor;
+  return copiar(valor);
+}
+
+// Se devuelve una COPIA y no la entrada del caché: un consumidor que ordene o
+// filtre `actividades` in-place estaría mutando lo que van a leer todos los
+// demás durante las próximas 24 horas, y el bug aparecería en un tenant que no
+// tocó nada.
+function copiar(valor: SituacionTributaria): SituacionTributaria {
+  return structuredClone(valor);
 }
