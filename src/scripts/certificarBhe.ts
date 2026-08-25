@@ -26,10 +26,20 @@ const money = (n: number | null) =>
   n === null ? 'null' : n.toLocaleString('es-CL');
 
 async function main() {
-  const rut = process.env.SII_RUT!;
+  // Se valida ANTES de abrir sesión, y el directorio de salida también: sin
+  // esto, una variable ausente o un directorio inexistente se descubre recién
+  // como error de login o al escribir el volcado, o sea después de haber gastado
+  // una sesión del SII — que limita las simultáneas por RUT.
+  const rut = process.env.SII_RUT;
+  const clave = process.env.SII_CLAVE;
+  if (!rut || !clave) {
+    throw new Error('Faltan SII_RUT y/o SII_CLAVE en el entorno (van en el .env del proyecto).');
+  }
+  fs.mkdirSync(DIR, { recursive: true });
+
   const browser = new Browser(`cert-${Date.now()}`);
   const sesion = new SessionManager(
-    { rut, clave: process.env.SII_CLAVE!, strategy: AuthStrategy.Clave }, browser);
+    { rut, clave, strategy: AuthStrategy.Clave }, browser);
   const ej = ejecutorDe(sesion);
 
   const salida: string[] = [];

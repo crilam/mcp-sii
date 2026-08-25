@@ -248,7 +248,7 @@ export class BheScraper {
     // interpretar una ausencia: "no emitió" y "no se pudo leer" se veían igual, y
     // un motor contable que toma el hueco por dato real escribe un año
     // incompleto sin que nadie lo note.
-    const meses = MESES.map((prefijo, i) => this.parseMes(values, prefijo, i + 1));
+    const meses = MESES.map((prefijo, i) => this.parseMes(values, prefijo, i + 1, recibidas));
 
     return {
       anio: this.toInt(values['anio_consulta']) ?? anio,
@@ -546,17 +546,18 @@ export class BheScraper {
   private parseMes(
     values: Record<string, string>,
     prefijo: string,
-    mes: number
+    mes: number,
+    recibidas: boolean
   ): MesBhe {
     const folioInicial = this.toInt(values[`${prefijo}4`]);
     if (folioInicial === null) {
-      // Sin folio inicial el mes se omite, y quien consume lee esa ausencia como
-      // "no emitió". Eso es correcto para un mes vacío, que es como el SII
-      // informa los meses sin actividad.
+      // Sin folio inicial el mes se devuelve en cero, y quien consume lee esos
+      // ceros como "no hubo boletas". Eso es correcto para un mes vacío, que es
+      // como el SII informa los meses sin actividad.
       //
-      // Pero si el mes trae MONTOS y no folio, la ausencia mentiría: habría
-      // emisiones y el consumidor las tomaría como cero. Un motor contable que
-      // escribe "mes importado, sin emisiones" sobre un mes que sí tuvo es peor
+      // Pero si el mes trae MONTOS y no folio, los ceros mentirían: hubo
+      // boletas y el consumidor las tomaría como cero. Un motor contable que
+      // escribe "mes importado, sin boletas" sobre un mes que sí tuvo es peor
       // que un error, porque nadie vuelve a mirarlo. Se corta acá.
       // Todas las columnas del mes menos la 4, que es la que falta. Incluye la 5
       // (folio final): un mes con folio final y sin folio inicial tuvo
@@ -566,12 +567,17 @@ export class BheScraper {
       const conDatos = [1, 2, 3, 5, 6, 7]
         .some(col => (this.toInt(values[`${prefijo}${col}`]) ?? 0) !== 0);
       if (conDatos) {
+        // El sustantivo se parametriza porque el mismo parser sirve a los dos
+        // CGI: en el anual de recibidas las boletas las emitieron terceros, y un
+        // error que hable de "tus emisiones" manda a buscar el problema al lado
+        // equivocado del informe.
+        const que = recibidas ? 'boletas recibidas' : 'emisiones';
         throw new LimitacionConocida(
-          `El informe anual trae datos para el mes ${mes} pero ningún folio inicial ` +
-          'legible, así que no se puede saber si hubo emisiones. Devolverlo en cero ' +
-          'lo haría pasar por un mes sin actividad, así que no se devuelve NINGÚN ' +
-          'mes del año: el año no está vacío, no se pudo leer. Consultalo desde el ' +
-          'portal.'
+          `El informe anual de ${recibidas ? 'recibidas' : 'emitidas'} trae datos ` +
+          `para el mes ${mes} pero ningún folio inicial legible, así que no se ` +
+          `puede saber si hubo ${que}. Devolverlo en cero lo haría pasar por un ` +
+          'mes sin actividad, así que no se devuelve NINGÚN mes del año: el año ' +
+          'no está vacío, no se pudo leer. Consultalo desde el portal.'
         );
       }
 
