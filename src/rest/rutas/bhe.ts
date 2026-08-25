@@ -26,6 +26,16 @@ export function registrarRutasBhe(
     return ejecutar(() => core.resumen(ejecutor, rut, anio));
   });
 
+  // Ruta aparte y no un flag en /v1/bhe/resumen: el anual de recibidas sale de
+  // otro CGI y trae la retención que el mensual de recibidas no muestra.
+  rutas.set('POST /v1/bhe/resumen-recibidas', async body => {
+    const parseo = zodResumen.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, anio } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(() => core.resumenRecibidas(ejecutor, rut, anio));
+  });
+
   rutas.set('POST /v1/bhe/list-emitidas', async body => {
     const parseo = zodMes.safeParse(body);
     if (!parseo.success) return badRequest(parseo.error);
