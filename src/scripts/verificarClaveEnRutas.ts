@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { RegistroSesiones } from '../registroSesiones';
+import { cerrarSesionDeScript } from './cerrarSesionDeScript';
 import { SessionManager } from '../session';
 import { Browser } from '../browser';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
@@ -21,13 +22,25 @@ const ANIO = Number(process.env.VERIF_ANIO ?? 2025);
 
 function armarRutas(): Map<string, RutaHandler> {
   const rutas = new Map<string, RutaHandler>();
-  // Se arma el registro EXACTAMENTE como restServerIndex.ts, para que lo que se
-  // verifica sea el camino de producción y no una variante parecida.
+  // Se arma el registro como restServerIndex.ts, para que lo que se verifica sea
+  // el camino de producción y no una variante parecida — con UNA diferencia
+  // deliberada: acá se pasa `destruir`.
+  //
+  // El registro llama `destruirSeguro` al terminar cada pase, pero ese método no
+  // hace nada si no se le dio un `destruir`, así que sin esto cada consulta
+  // dejaba el proceso del navegador vivo y el cookie jar —credenciales de sesión
+  // del SII— en disco. Medido: 7 archivos por RUT después de una corrida.
+  //
+  // OJO: restServerIndex.ts tampoco lo pasa, así que la misma fuga existe en el
+  // servidor de producción. Se arregla aparte para no mezclarlo con este cambio.
   const credenciales = new ProveedorCredencialesRuntime();
-  const registro = new RegistroSesiones<SessionManager>(async rut => {
-    const config = await credenciales.para(rut);
-    return new SessionManager(config, new Browser(rut));
-  });
+  const registro = new RegistroSesiones<SessionManager>(
+    async rut => {
+      const config = await credenciales.para(rut);
+      return new SessionManager(config, new Browser(rut));
+    },
+    sesion => cerrarSesionDeScript(sesion)
+  );
   registrarRutasRcv(rutas, registro, credenciales);
   registrarRutasDte(rutas, registro, credenciales);
   registrarRutasRenta(rutas, registro, credenciales);
