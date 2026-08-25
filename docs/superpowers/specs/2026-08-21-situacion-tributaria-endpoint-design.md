@@ -35,7 +35,7 @@ tenant** como el resto del adaptador REST.
 
 **Body:**
 ```json
-{ "rut": "76632059-7" }
+{ "rut": "22222222-2" }
 ```
 (sin `clave`)
 
@@ -44,18 +44,34 @@ tenant** como el resto del adaptador REST.
 cableado del lado Tributy sea trivial:
 ```json
 {
-  "rut": "76632059-7",
-  "razonSocial": "INFOSEC SERVICIOS DE SEGURIDAD INFORMATICA SPA",
+  "rut": "22222222-2",
+  "razonSocial": "EMPRESA DE EJEMPLO SPA",
   "inicioActividades": true,
   "fechaInicioActividades": "08-07-2016",
   "proPyme": true,
   "monedaExtranjera": false,
   "actividades": [
     { "codigo": 262000, "giro": "FABRICACION DE COMPUTADORES...", "categoria": 1, "afectaIva": true }
-  ],
-  "observaciones": []
+  ]
 }
 ```
+
+**Fuera de alcance por ahora: `observaciones` y `documentos_timbrados`.**
+
+Esta versión NO los emite, y es deliberado. La única captura que tenemos del
+informe (el fixture de `22222222-2`) no trae ninguna de las dos secciones: ese
+contribuyente no tiene observaciones ni documentos timbrados que mostrar, así
+que no hay HTML real contra el que escribir el parseo. Escribirlo a ciegas es lo
+que este repo evita en todas partes — un parser adivinado devuelve datos
+plausibles y nadie los vuelve a revisar.
+
+Emitir `observaciones: []` fijo tampoco sirve: diría "este contribuyente no
+tiene observaciones" cuando la verdad es "no las leemos". Es la misma mentira
+que un mes en cero sobre un informe que no se pudo leer, y el consumidor no
+tiene forma de distinguirlas.
+
+Para incorporarlas hace falta la captura de un RUT que sí las tenga. Cuando
+aparezca, se agregan los campos y este párrafo se reemplaza.
 
 **Errores:**
 - `400 { error: "RUT_INVALIDO" }` — RUT mal formado o DV inválido.
@@ -104,8 +120,10 @@ exacta de lo que hace apigateway.
   `"Contribuyente es Empresa de Menor Tama..."`
 - `aut_moneda_extranjera` (→ `monedaExtranjera`): `span`
   `"...declarar y pagar sus impuestos en moneda extranjera:"`
-- `documentos_timbrados`: la tabla `class="tabla"` que sigue al `<strong>` con
-  texto `"Documentos Timbrados"`.
+- `documentos_timbrados` (SIN IMPLEMENTAR, ver "Fuera de alcance" más arriba):
+  la tabla `class="tabla"` que sigue al `<strong>` con texto
+  `"Documentos Timbrados"`. La nota se conserva porque es el relevamiento que
+  hay que respetar cuando se implemente.
   **Trampa real:** la página tiene varias tablas `class="tabla"`; anclar al
   `<strong>` correcto. Un `//table[@class='tabla']/tr` genérico mezcla filas de
   la tabla de "autorización no electrónica" y entran rangos de fecha como
