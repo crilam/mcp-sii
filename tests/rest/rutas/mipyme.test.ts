@@ -52,4 +52,55 @@ describe('registrarRutasMipyme', () => {
     expect(respuesta).toEqual({ status: 400, body: { error: 'CONFIRMAR_NO_SOPORTADO' } });
     expect(core.emitirDte).not.toHaveBeenCalled();
   });
+  // Las dos LECTURAS pasaron a aceptar clave tributaria (verificado contra el
+  // portal: list-empresas devolvió las cinco empresas de la persona).
+  it('list-empresas: acepta clave tributaria', async () => {
+    (core.listEmpresas as jest.Mock).mockResolvedValue([{ rut: '1-9', nombre: 'X' }]);
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/mipyme/list-empresas')!({ rut: '11.111.111-1', clave: 'secreta' });
+
+    expect(r).toEqual({ status: 200, body: { ok: true, datos: [{ rut: '1-9', nombre: 'X' }] } });
+  });
+
+  it('list-dte-emitidos: acepta clave tributaria', async () => {
+    (core.listDteEmitidos as jest.Mock).mockResolvedValue({ documentos: [] });
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/mipyme/list-dte-emitidos')!({ rut: '11.111.111-1', clave: 'secreta' });
+
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+  });
+
+  // La emisión NO cambió: firmar un DTE requiere el certificado de verdad, no
+  // basta una sesión autenticada. Este test es el que impide que un futuro
+  // "unifiquemos todo con conCredencial" habilite firmar con clave.
+  it('emitir-dte: rechaza clave tributaria sin llamar al core', async () => {
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/mipyme/emitir-dte')!({
+      rut: '11.111.111-1', clave: 'secreta', tipo_dte: 33,
+      ...RECEPTOR_MINIMO, lineas: [LINEA_MINIMA],
+    });
+
+    expect(r.status).toBe(400);
+    expect(core.emitirDte).not.toHaveBeenCalled();
+  });
+
+  // Y tampoco la mezcla. Sin el rechazo explícito de `clave`, este body pasaba
+  // la validación, zod descartaba la clave en silencio y se FIRMABA con el
+  // certificado: el caller creía haber usado una credencial y se usó la otra.
+  it('emitir-dte: rechaza clave junto con certificado, sin firmar con el certificado', async () => {
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/mipyme/emitir-dte')!({
+      rut: '11.111.111-1', clave: 'secreta',
+      certificado_base64: 'eHh4', certificado_password: 'yyy',
+      tipo_dte: 33, ...RECEPTOR_MINIMO, lineas: [LINEA_MINIMA],
+    });
+
+    expect(r.status).toBe(400);
+    expect(core.emitirDte).not.toHaveBeenCalled();
+  });
 });
