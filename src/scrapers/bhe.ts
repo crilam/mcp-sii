@@ -7,6 +7,13 @@ export interface MesBhe {
   honorarioBruto: number;
   retencionTerceros: number;
   retencionContribuyente: number;
+  // Lo que el contribuyente efectivamente recibe en el mes. El CGI NO lo manda:
+  // lo calcula el JS del propio informe, y esta es su fórmula literal
+  //   xml_values['sumjul'] = Number(jul1) - Number(jul2) - Number(jul3)
+  // o sea bruto menos las dos retenciones. Se replica en vez de omitirlo porque
+  // es la columna "(*)TOTAL LIQUIDO" que el portal muestra, y sin ella la
+  // respuesta de la API no se puede contrastar con la pantalla.
+  totalLiquido: number;
   folioInicial: number | null;
   folioFinal: number | null;
   emisionesVigentes: number;
@@ -50,6 +57,9 @@ export interface BoletaBhe {
   // Si la contraparte es sociedad profesional. Cambia el tratamiento tributario,
   // así que se expone en vez de descartarlo: el CGI ya lo manda.
   sociedadProfesional: boolean;
+  // Quién emitió la boleta, tal como lo muestra la columna "Usuario" del
+  // informe mensual. Vacío en recibidas, donde el CGI no lo manda.
+  usuarioEmisor: string;
   honorarioBruto: number;
   // El informe de recibidas no trae la retención del emisor (el receptor no la
   // ve). null es "el SII no lo informa", distinto de un cero que sí informó.
@@ -61,6 +71,11 @@ export interface BoletaBhe {
 
 const BASE = 'https://loa.sii.cl/cgi_IMT';
 const CGI_ANUAL = `${BASE}/TMBCOC_InformeAnualBhe.cgi`;
+// El anual de recibidas emite exactamente las mismas claves que el de emitidas
+// (`jul1` bruto, `jul2` retención de terceros, `jul3` retención contribuyente,
+// `jul4`/`jul5` folios, `jul6`/`jul7` vigentes/anuladas), así que lo parsea el
+// mismo código. Verificado contra el portal para 2026.
+const CGI_ANUAL_RECIBIDAS = `${BASE}/TMBCOC_InformeAnualBheRec.cgi`;
 const CGI_MENSUAL = `${BASE}/TMBCOC_InformeMensualBhe.cgi`;
 const CGI_MENSUAL_REC = `${BASE}/TMBCOC_InformeMensualBheRec.cgi`;
 // Ojo con el prefijo: los informes son TMBCO*C*_, el PDF es TMBCO*T*_. La URL
@@ -107,6 +122,7 @@ interface EsquemaBoletas {
   // informe cambió de forma.
   fechaEmision: string | null;
   emailEnvio: string | null;
+  usuarioEmisor: string | null;
 }
 
 const ESQUEMA_EMITIDAS: EsquemaBoletas = {
@@ -124,6 +140,7 @@ const ESQUEMA_EMITIDAS: EsquemaBoletas = {
   retencionEmisor: 'retencion_emisor',
   fechaEmision: 'fechaemision',
   emailEnvio: 'email_envio',
+  usuarioEmisor: 'usuemisor',
 };
 
 const ESQUEMA_RECIBIDAS: EsquemaBoletas = {
@@ -136,6 +153,7 @@ const ESQUEMA_RECIBIDAS: EsquemaBoletas = {
   retencionEmisor: null,
   fechaEmision: null,
   emailEnvio: null,
+  usuarioEmisor: null,
 };
 
 // Entidades HTML que el SII emite en razones sociales (respuesta ISO-8859-1).
@@ -193,18 +211,21 @@ export class BheScraper {
     this.session.assertPuedeEntregarCookieJar();
   }
 
-  async informeAnual(anio: number): Promise<InformeAnualBhe> {
-    return this.conSesionFresca(() => this.intentarInformeAnual(anio));
+  async informeAnual(anio: number, recibidas = false): Promise<InformeAnualBhe> {
+    return this.conSesionFresca(() => this.intentarInformeAnual(anio, recibidas));
   }
 
-  private async intentarInformeAnual(anio: number): Promise<InformeAnualBhe> {
+  private async intentarInformeAnual(
+    anio: number,
+    recibidas: boolean
+  ): Promise<InformeAnualBhe> {
     this.assertConsultaHttpPosible();
     // No requiere seleccionar empresa: la BHE es de la persona natural.
     await this.session.authenticateOnly();
     const { rut, dv } = this.session.identidad();
     // El formulario del portal manda estos dos campos ocultos en cada consulta.
     // La spike los envió y funcionó; omitirlos no está verificado.
-    const html = await this.http.get(CGI_ANUAL, {
+    const html = await this.http.get(recibidas ? CGI_ANUAL_RECIBIDAS : CGI_ANUAL, {
       rut_arrastre: rut,
       dv_arrastre: dv,
       cbanoinformeanual: String(anio),
@@ -221,9 +242,13 @@ export class BheScraper {
       );
     }
 
-    const meses = MESES
-      .map((prefijo, i) => this.parseMes(values, prefijo, i + 1))
-      .filter((m): m is MesBhe => m !== null);
+    // SIEMPRE los doce meses, en orden, incluidos los que no tuvieron actividad
+    // (con ceros y sin folios). Es lo que muestra el informe del portal, y
+    // devolver sólo los meses con emisiones obligaba a cada consumidor a
+    // interpretar una ausencia: "no emitió" y "no se pudo leer" se veían igual, y
+    // un motor contable que toma el hueco por dato real escribe un año
+    // incompleto sin que nadie lo note.
+    const meses = MESES.map((prefijo, i) => this.parseMes(values, prefijo, i + 1, recibidas));
 
     return {
       anio: this.toInt(values['anio_consulta']) ?? anio,
@@ -294,8 +319,20 @@ export class BheScraper {
     // scrapean el mismo CGI, es muy probable que ése sea el mecanismo real:
     // pedir la página siguiente mandando el código que devolvió la anterior, en
     // vez de un índice. Encaja con que este informe emita `pagina_sig_codigo`,
-    // que el de emitidas no tiene. Igual hay que verificarlo con un mes real de
-    // más de 100 recibidas antes de implementarlo.
+    // que el de emitidas no tiene.
+    //
+    // Volcado real de un mes de 4 recibidas (07/2026), que confirma el esquema y
+    // agrega una variable más:
+    //   pagina_solicitada="1"  pagina_actual="1"
+    //   pagina_sig_codigo="00000000000000"  pagina_ant_codigo=""  pagina_med_codigo=""
+    //   pagina_lista="00000000000000;"
+    // O sea: 1-based, con códigos de continuación, y una `pagina_lista` separada
+    // por `;`. Falta lo único que decide la implementación: con una sola página
+    // no se puede distinguir si `pagina_lista` enumera TODAS las páginas del mes
+    // (implementarla sería recorrerla) o sólo la actual (habría que encadenar
+    // `pagina_sig_codigo` hasta el centinela). Elegir mal devuelve un mes
+    // truncado que parece completo, así que sigue fallando explícito hasta tener
+    // la captura de un mes con más de 100 recibidas.
     if (recibidas && totalPaginas > 1) {
       throw new LimitacionConocida(
         `El SII informa ${total} boletas recibidas para ${String(mes).padStart(2, '0')}/${anio}, ` +
@@ -509,17 +546,18 @@ export class BheScraper {
   private parseMes(
     values: Record<string, string>,
     prefijo: string,
-    mes: number
-  ): MesBhe | null {
+    mes: number,
+    recibidas: boolean
+  ): MesBhe {
     const folioInicial = this.toInt(values[`${prefijo}4`]);
     if (folioInicial === null) {
-      // Sin folio inicial el mes se omite, y quien consume lee esa ausencia como
-      // "no emitió". Eso es correcto para un mes vacío, que es como el SII
-      // informa los meses sin actividad.
+      // Sin folio inicial el mes se devuelve en cero, y quien consume lee esos
+      // ceros como "no hubo boletas". Eso es correcto para un mes vacío, que es
+      // como el SII informa los meses sin actividad.
       //
-      // Pero si el mes trae MONTOS y no folio, la ausencia mentiría: habría
-      // emisiones y el consumidor las tomaría como cero. Un motor contable que
-      // escribe "mes importado, sin emisiones" sobre un mes que sí tuvo es peor
+      // Pero si el mes trae MONTOS y no folio, los ceros mentirían: hubo
+      // boletas y el consumidor las tomaría como cero. Un motor contable que
+      // escribe "mes importado, sin boletas" sobre un mes que sí tuvo es peor
       // que un error, porque nadie vuelve a mirarlo. Se corta acá.
       // Todas las columnas del mes menos la 4, que es la que falta. Incluye la 5
       // (folio final): un mes con folio final y sin folio inicial tuvo
@@ -529,21 +567,46 @@ export class BheScraper {
       const conDatos = [1, 2, 3, 5, 6, 7]
         .some(col => (this.toInt(values[`${prefijo}${col}`]) ?? 0) !== 0);
       if (conDatos) {
+        // El sustantivo se parametriza porque el mismo parser sirve a los dos
+        // CGI: en el anual de recibidas las boletas las emitieron terceros, y un
+        // error que hable de "tus emisiones" manda a buscar el problema al lado
+        // equivocado del informe.
+        const que = recibidas ? 'boletas recibidas' : 'emisiones';
         throw new LimitacionConocida(
-          `El informe anual trae datos para el mes ${mes} pero ningún folio inicial ` +
-          'legible, así que no se puede saber si hubo emisiones. Omitir ese mes lo ' +
-          'haría pasar por uno sin actividad, así que no se devuelve NINGÚN mes del ' +
-          'año: el año no está vacío, no se pudo leer. Consultalo desde el portal.'
+          `El informe anual de ${recibidas ? 'recibidas' : 'emitidas'} trae datos ` +
+          `para el mes ${mes} pero ningún folio inicial legible, así que no se ` +
+          `puede saber si hubo ${que}. Devolverlo en cero lo haría pasar por un ` +
+          'mes sin actividad, así que no se devuelve NINGÚN mes del año: el año ' +
+          'no está vacío, no se pudo leer. Consultalo desde el portal.'
         );
       }
-      return null;
+
+      // Mes sin actividad: ceros y folios en null, que es como lo muestra el
+      // portal. `null` en los folios y no 0 porque no hubo folio, y un 0 ahí
+      // sería un número de folio inventado.
+      return {
+        mes,
+        honorarioBruto: 0,
+        retencionTerceros: 0,
+        retencionContribuyente: 0,
+        totalLiquido: 0,
+        folioInicial: null,
+        folioFinal: null,
+        emisionesVigentes: 0,
+        emisionesAnuladas: 0,
+      };
     }
+
+    const honorarioBruto = this.toInt(values[`${prefijo}1`]) ?? 0;
+    const retencionTerceros = this.toInt(values[`${prefijo}2`]) ?? 0;
+    const retencionContribuyente = this.toInt(values[`${prefijo}3`]) ?? 0;
 
     return {
       mes,
-      honorarioBruto: this.toInt(values[`${prefijo}1`]) ?? 0,
-      retencionTerceros: this.toInt(values[`${prefijo}2`]) ?? 0,
-      retencionContribuyente: this.toInt(values[`${prefijo}3`]) ?? 0,
+      honorarioBruto,
+      retencionTerceros,
+      retencionContribuyente,
+      totalLiquido: honorarioBruto - retencionTerceros - retencionContribuyente,
       folioInicial,
       folioFinal: this.toInt(values[`${prefijo}5`]),
       emisionesVigentes: this.toInt(values[`${prefijo}6`]) ?? 0,
@@ -661,6 +724,9 @@ export class BheScraper {
           ? ''
           : (arr[`${esquema.emailEnvio}_${i}`] ?? '').trim(),
         sociedadProfesional: socProfesional === 'SI',
+        usuarioEmisor: esquema.usuarioEmisor === null
+          ? ''
+          : (arr[`${esquema.usuarioEmisor}_${i}`] ?? '').trim(),
         contraparteRol: esquema.rol,
         contraparteRut: `${arr[`${esquema.rut}_${i}`] ?? ''}-${arr[`${esquema.dv}_${i}`] ?? ''}`,
         contraparteNombre: (arr[`${esquema.nombre}_${i}`] ?? '').trim(),

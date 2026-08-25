@@ -37,17 +37,35 @@ describe('BheScraper.informeAnual', () => {
     expect(informe.nombreContribuyente).toBe('JUAN PEREZ SOTO');
   });
 
-  it('parsea los meses con actividad y omite los vacíos', async () => {
+  // El informe cubre el año calendario completo, así que se devuelven los doce
+  // meses siempre: un mes sin actividad son ceros, no una fila ausente. Así el
+  // consumidor indexa por mes sin tener que reconstruir los huecos.
+  it('devuelve los doce meses, con ceros en los que no tuvieron actividad', async () => {
     const { scraper } = makeScraper(fixture('bhe-informe-anual.html'));
 
     const informe = await scraper.informeAnual(2025);
 
-    expect(informe.meses).toHaveLength(2);
+    expect(informe.meses).toHaveLength(12);
+    expect(informe.meses.map(m => m.mes)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(informe.meses[2]).toEqual({
+      mes: 3,
+      honorarioBruto: 0,
+      retencionTerceros: 0,
+      retencionContribuyente: 0,
+      totalLiquido: 0,
+      folioInicial: null,
+      folioFinal: null,
+      emisionesVigentes: 0,
+      emisionesAnuladas: 0,
+    });
     expect(informe.meses[0]).toEqual({
       mes: 1,
       honorarioBruto: 1000000,
       retencionTerceros: 145000,
       retencionContribuyente: 0,
+      // El CGI no manda el líquido: lo calcula su propio JS como
+      // bruto - retTerceros - retContribuyente. 1000000 - 145000 - 0.
+      totalLiquido: 855000,
       folioInicial: 101,
       folioFinal: 102,
       emisionesVigentes: 2,
@@ -81,6 +99,26 @@ describe('BheScraper.informeAnual', () => {
     await expect(scraper.informeAnual(2025)).rejects.toThrow(/datos para el mes 1/);
   });
 
+  // El mismo parser sirve a los dos CGI. En recibidas las boletas las emitieron
+  // terceros, así que un error que hable de "emisiones" manda a buscar el
+  // problema al lado equivocado del informe.
+  it('el error de un mes ilegible nombra el origen correcto', async () => {
+    const html = `<html><body><script>
+ xml_values['anio_consulta'] = "2025";
+ xml_values['rut_arrastre'] = "11111111";
+ xml_values['dv_arrastre'] = "1";
+ xml_values['ene1']= "1.500.000";
+ xml_values['ene4']= "N/A";
+ xml_values['tot4']= "101";
+ xml_values['tot5']= "105";
+</script></body></html>`;
+
+    await expect(makeScraper(html).scraper.informeAnual(2025, true))
+      .rejects.toThrow(/anual de recibidas[\s\S]*hubo boletas recibidas/);
+    await expect(makeScraper(html).scraper.informeAnual(2025, false))
+      .rejects.toThrow(/anual de emitidas[\s\S]*hubo emisiones/);
+  });
+
   // La deteccion no depende del honorario bruto: un mes de puras boletas
   // anuladas tiene montos en cero y aun asi tuvo emisiones.
   it('falla tambien si el unico dato del mes son emisiones anuladas', async () => {
@@ -99,7 +137,7 @@ describe('BheScraper.informeAnual', () => {
 
   // Y un mes REALMENTE vacio se sigue omitiendo: asi informa el SII los meses
   // sin actividad, y convertirlos en error rompria todos los años incompletos.
-  it('sigue omitiendo un mes sin folio y sin montos', async () => {
+  it('emite ceros para un mes sin folio y sin montos', async () => {
     const { scraper } = makeScraper(`<html><body><script>
  xml_values['anio_consulta'] = "2025";
  xml_values['rut_arrastre'] = "11111111";
@@ -112,7 +150,32 @@ describe('BheScraper.informeAnual', () => {
 
     const informe = await scraper.informeAnual(2025);
 
-    expect(informe.meses).toEqual([]);
+    expect(informe.meses).toHaveLength(12);
+    expect(informe.meses.every(m => m.honorarioBruto === 0 && m.folioInicial === null)).toBe(true);
+  });
+
+  // La formula es la del propio JS del informe:
+  //   xml_values['sumene'] = Number(ene1) - Number(ene2) - Number(ene3)
+  // Verificada contra la columna "(*)TOTAL LIQUIDO" del portal para los 8 meses
+  // con actividad de 2026, incluido el total del año (42.735.336).
+  it('calcula el total liquido como bruto menos las dos retenciones', async () => {
+    const { scraper } = makeScraper(`<html><body><script>
+ xml_values['anio_consulta'] = "2026";
+ xml_values['rut_arrastre'] = "11111111";
+ xml_values['dv_arrastre'] = "1";
+ xml_values['ene1']= "4391291";
+ xml_values['ene2']= "669672";
+ xml_values['ene3']= "0";
+ xml_values['ene4']= "324";
+ xml_values['ene5']= "324";
+ xml_values['ene6']= "1";
+ xml_values['tot4']= "324";
+ xml_values['tot5']= "324";
+</script></body></html>`);
+
+    const informe = await scraper.informeAnual(2026);
+
+    expect(informe.meses[0].totalLiquido).toBe(3721619);
   });
 
   it('expone el rango de folios del año', async () => {
@@ -125,12 +188,13 @@ describe('BheScraper.informeAnual', () => {
   });
 
   // Un año sin boletas es una respuesta legítima, no un fallo.
-  it('devuelve lista vacía cuando el año no tiene boletas', async () => {
+  it('devuelve los doce meses en cero cuando el año no tiene boletas', async () => {
     const { scraper } = makeScraper(fixture('bhe-informe-anual-vacio.html'));
 
     const informe = await scraper.informeAnual(2019);
 
-    expect(informe.meses).toEqual([]);
+    expect(informe.meses).toHaveLength(12);
+    expect(informe.meses.every(m => m.emisionesVigentes === 0)).toBe(true);
     // La respuesta real de un año sin boletas trae tot4/tot5 en "0", no
     // ausentes: el informe existe, sólo que sin folios emitidos.
     expect(informe.folioInicial).toBe(0);
@@ -154,6 +218,67 @@ describe('BheScraper.informeAnual', () => {
     expect(params.cbanoinformeanual).toBe('2025');
     expect(params.rut_arrastre).toBe('11111111');
     expect(params.dv_arrastre).toBe('1');
+  });
+
+  // El anual de emitidas y el de recibidas son CGI distintos con el MISMO
+  // esquema de claves, así que el único riesgo real es pedirle al equivocado.
+  it('consulta el CGI anual de recibidas cuando se piden recibidas', async () => {
+    const { scraper, http } = makeScraper(fixture('bhe-informe-anual.html'));
+
+    await scraper.informeAnual(2025, true);
+
+    const [url] = (http.get as jest.Mock).mock.calls[0];
+    expect(url).toContain('TMBCOC_InformeAnualBheRec.cgi');
+  });
+
+  // Contra una respuesta real del CGI de recibidas, no sólo contra la URL: el
+  // informe anual de recibidas trae una retención del contribuyente que el
+  // informe MENSUAL de recibidas no muestra, así que este parseo es la única
+  // fuente de ese dato y no se puede verificar sumando list-recibidas.
+  // Contrastado campo por campo con la UI del portal para 2026.
+  it('parsea el informe anual de recibidas', async () => {
+    const { scraper } = makeScraper(fixture('bhe-informe-anual-recibidas.html'));
+
+    const informe = await scraper.informeAnual(2026, true);
+
+    expect(informe.meses[6]).toEqual({
+      mes: 7,
+      honorarioBruto: 134200,
+      retencionTerceros: 0,
+      retencionContribuyente: 19063,
+      totalLiquido: 115137,
+      folioInicial: 4435,
+      folioFinal: 15964516,
+      emisionesVigentes: 4,
+      emisionesAnuladas: 0,
+    });
+    const suma = (f: (m: typeof informe.meses[0]) => number) =>
+      informe.meses.reduce((a, m) => a + f(m), 0);
+    expect(suma(m => m.honorarioBruto)).toBe(802700);
+    expect(suma(m => m.retencionContribuyente)).toBe(118952);
+    expect(suma(m => m.totalLiquido)).toBe(683748);
+    expect(suma(m => m.emisionesVigentes)).toBe(18);
+  });
+
+  // El CGI asigna las claves de montos dos veces: primero vacías y después con
+  // los valores reales. Quedarse con la primera asignación devolvería el año
+  // entero en cero pero con los folios correctos — un año que parece leído y
+  // está vacío, que es justo el modo de falla silencioso que este archivo evita.
+  it('se queda con la última asignación cuando el CGI reescribe una clave', async () => {
+    const { scraper } = makeScraper(fixture('bhe-informe-anual-recibidas.html'));
+
+    const informe = await scraper.informeAnual(2026, true);
+
+    expect(informe.meses[2].retencionContribuyente).toBe(16013);
+  });
+
+  it('consulta el CGI de emitidas por defecto', async () => {
+    const { scraper, http } = makeScraper(fixture('bhe-informe-anual.html'));
+
+    await scraper.informeAnual(2025);
+
+    const [url] = (http.get as jest.Mock).mock.calls[0];
+    expect(url).not.toContain('Rec.cgi');
   });
 
   it('autentica sin exigir selección de empresa', async () => {
@@ -235,6 +360,7 @@ describe('BheScraper.informeMensual', () => {
       fechaEmision: '22/05/2025',
       emailEnvio: 'receptor@ejemplo.cl',
       sociedadProfesional: false,
+      usuarioEmisor: 'JUAN PEREZ SOTO ANDRADE',
       contraparteRol: 'receptor',
       contraparteRut: '22222222-2',
       contraparteNombre: 'EMPRESA EJEMPLO SPA',
@@ -359,6 +485,8 @@ describe('BheScraper.informeMensual de recibidas', () => {
       fechaEmision: '',
       emailEnvio: '',
       sociedadProfesional: false,
+      // El informe de recibidas no trae quién emitió como "usuario".
+      usuarioEmisor: '',
       contraparteRol: 'emisor',
       contraparteRut: '33333333-3',
       contraparteNombre: 'PEDRO GOMEZ LARRAIN',

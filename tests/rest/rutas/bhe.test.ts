@@ -15,12 +15,21 @@ function armarRouter() {
 describe('registrarRutasBhe', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 4 rutas bajo /v1/bhe', () => {
+  it('registra las 5 rutas bajo /v1/bhe', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
-      'POST /v1/bhe/resumen', 'POST /v1/bhe/list-emitidas',
+      'POST /v1/bhe/resumen', 'POST /v1/bhe/resumen-recibidas',
+      'POST /v1/bhe/list-emitidas',
       'POST /v1/bhe/list-recibidas', 'POST /v1/bhe/pdf',
     ]);
+  });
+
+  it('resumen-recibidas: llama al core de recibidas, no al de emitidas', async () => {
+    (core.resumenRecibidas as jest.Mock).mockResolvedValue({ meses: [] });
+    const rutas = armarRouter();
+    const respuesta = await rutas.get('POST /v1/bhe/resumen-recibidas')!({ rut: '11.111.111-1', clave: 'secreta', anio: 2026 });
+    expect(respuesta).toEqual({ status: 200, body: { ok: true, meses: [] } });
+    expect(core.resumen).not.toHaveBeenCalled();
   });
 
   it('resumen: body válido llama al core y devuelve {ok:true, ...datos}', async () => {

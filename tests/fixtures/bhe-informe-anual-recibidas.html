@@ -1,0 +1,60 @@
+<html><head><title>INFORME ANUAL DE BOLETAS DE HONORARIOS ELECTRONICAS RECIBIDAS</title></head>
+<body>
+<script language="JavaScript">
+// Recorte de una respuesta real de TMBCOC_InformeAnualBheRec.cgi (2026), con el
+// RUT y el nombre del contribuyente reemplazados. Se conserva la estructura tal
+// cual la emite el CGI, incluidas dos cosas que el parser tiene que tolerar:
+//
+//   1. El CGI asigna las claves de montos DOS VECES. El primer bloque las deja
+//      vacías y el segundo las reescribe con los valores reales. Un parser que
+//      se quedara con la primera asignación devolvería el año entero en cero
+//      con los folios correctos — un año que parece leído y está vacío.
+//   2. Las columnas sin dato vienen como "" y no ausentes.
+//
+// Los montos son los del período certificado contra la UI del portal: julio
+// informa 134.200 de bruto y 19.063 de retención del contribuyente, que es
+// justamente el dato que el informe MENSUAL de recibidas no muestra.
+var xml_values = new Array();
+xml_values['nombre_contribuyente']      = "NOMBRE APELLIDO APELLIDO ";
+xml_values['rut_arrastre']        = "11111111";
+xml_values['dv_arrastre']         = "1";
+xml_values['anio_consulta']  = "2026";
+
+xml_values['ene4']= "";  xml_values['feb4']= "";  xml_values['mar4']= "4135";
+xml_values['abr4']= "4224";  xml_values['may4']= "4307";  xml_values['jun4']= "4359";
+xml_values['jul4']= "4435";  xml_values['ago4']= "4514";
+
+xml_values['ene5']= "";  xml_values['feb5']= "";  xml_values['mar5']= "4135";
+xml_values['abr5']= "114459";  xml_values['may5']= "117243";  xml_values['jun5']= "9261";
+xml_values['jul5']= "15964516";  xml_values['ago5']= "15992909";
+
+xml_values['ene6']= "";  xml_values['feb6']= "";  xml_values['mar6']= "1";
+xml_values['abr6']= "4";  xml_values['may6']= "2";  xml_values['jun6']= "2";
+xml_values['jul6']= "4";  xml_values['ago6']= "5";
+
+xml_values['ene7']= "";  xml_values['feb7']= "";  xml_values['mar7']= "";
+xml_values['abr7']= "";  xml_values['may7']= "";  xml_values['jun7']= "";
+xml_values['jul7']= "";  xml_values['ago7']= "";
+
+// Primera pasada: montos vacíos.
+xml_values['ene1']= "";  xml_values['ene2']= "";  xml_values['ene3']= "";
+xml_values['feb1']= "";  xml_values['feb2']= "";  xml_values['feb3']= "";
+xml_values['mar1']= "105000";  xml_values['mar2']= "";  xml_values['mar3']= "";
+xml_values['abr1']= "161000";  xml_values['abr2']= "";  xml_values['abr3']= "";
+xml_values['may1']= "110000";  xml_values['may2']= "";  xml_values['may3']= "";
+xml_values['jun1']= "167000";  xml_values['jun2']= "";  xml_values['jun3']= "";
+xml_values['jul1']= "134200";  xml_values['jul2']= "";  xml_values['jul3']= "";
+xml_values['ago1']= "125500";  xml_values['ago2']= "";  xml_values['ago3']= "";
+
+// Segunda pasada: los valores que el portal termina mostrando.
+xml_values['mar1']= "105000";  xml_values['mar2']= "0";  xml_values['mar3']= "16013";
+xml_values['abr1']= "161000";  xml_values['abr2']= "0";  xml_values['abr3']= "24552";
+xml_values['may1']= "110000";  xml_values['may2']= "0";  xml_values['may3']= "16775";
+xml_values['jun1']= "167000";  xml_values['jun2']= "0";  xml_values['jun3']= "25468";
+xml_values['jul1']= "134200";  xml_values['jul2']= "0";  xml_values['jul3']= "19063";
+xml_values['ago1']= "125500";  xml_values['ago2']= "0";  xml_values['ago3']= "17081";
+
+xml_values['tot4']= "4135";
+xml_values['tot5']= "15992909";
+</script>
+</body></html>

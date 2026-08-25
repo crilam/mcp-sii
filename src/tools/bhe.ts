@@ -8,9 +8,16 @@ import { schemaResumen, schemaMes } from '../core/schemas/bhe';
 export function registerBheTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
     'sii_bhe_resumen',
-    'Resumen anual de las boletas de honorarios electrónicas emitidas por el RUT persona autenticado en el SII. Devuelve, por cada mes con actividad, el honorario bruto, la retención de terceros y del contribuyente, el rango de folios y cuántas boletas están vigentes o anuladas. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
+    'Resumen anual de las boletas de honorarios electrónicas EMITIDAS por el RUT persona autenticado en el SII. Devuelve siempre los doce meses del año, en orden: el honorario bruto, la retención de terceros y del contribuyente, el rango de folios y cuántas boletas están vigentes o anuladas. Un mes sin actividad viene en cero y con los folios en null. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
     schemaResumen,
     async ({ rut, anio }) => envolverParaMcp(() => core.resumen(registro, rut, anio))
+  );
+
+  server.tool(
+    'sii_bhe_resumen_recibidas',
+    'Resumen anual de las boletas de honorarios electrónicas RECIBIDAS por el RUT persona autenticado. Mismos campos y misma forma que sii_bhe_resumen, y también los doce meses siempre. Ojo: no equivale a sumar sii_bhe_list_recibidas — el SII informa acá una retención del contribuyente que el listado mensual de recibidas no muestra.',
+    schemaResumen,
+    async ({ rut, anio }) => envolverParaMcp(() => core.resumenRecibidas(registro, rut, anio))
   );
 
   server.tool(
