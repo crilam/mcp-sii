@@ -1,6 +1,7 @@
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { partirRut } from '../rut';
+import { LimitacionConocida } from '../erroresConsulta';
 
 // Consultas DTE (`consemitidosinternetui`) por HTTP directo.
 //
@@ -274,8 +275,12 @@ export class DteScraper {
     // hay nada que filtrar. Antes se ignoraban en silencio y la respuesta era el
     // resumen COMPLETO del período — que el consumidor atribuía a la contraparte
     // que había pedido. Se falla en vez de devolver otra cosa parecida.
+    // LimitacionConocida y no Error pelado: `ejecutar` mapea el Error genérico a
+    // ERROR, que es el único código que el contrato REST declara reintentable, y
+    // esto es determinístico — el mismo request falla igual siempre. Un
+    // consumidor que respete el contrato reintentaría para siempre.
     if (!detallePedido && (opciones.contraparteRut !== undefined || opciones.limit !== undefined)) {
-      throw new Error(
+      throw new LimitacionConocida(
         'Los filtros contraparteRut y limit se aplican sobre el detalle, así que requieren ' +
         'incluirDetalle=true. Sin detalle la respuesta sería el resumen completo del período, ' +
         'no lo filtrado: se falla para no devolver un resultado que se lee como si el filtro ' +

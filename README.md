@@ -180,8 +180,26 @@ Todas reciben `rut` como primer parámetro — ver
 |---|---|
 | `sii_bhe_list_emitidas` | Boletas de honorarios emitidas |
 | `sii_bhe_list_recibidas` | Boletas de honorarios recibidas |
-| `sii_bhe_resumen` | Resumen anual de boletas |
+| `sii_bhe_resumen` | Resumen anual de boletas emitidas |
+| `sii_bhe_resumen_recibidas` | Resumen anual de boletas recibidas |
 | `sii_persona_list_bienes_raices` | Bienes raíces de la persona |
+
+Los dos resúmenes anuales devuelven **siempre los doce meses**, en orden: un mes
+sin actividad viene en cero y con los folios en `null`. Devolver sólo los meses
+con boletas obligaba a interpretar una ausencia, y "no tuvo" se veía igual que
+"no se pudo leer".
+
+`sii_bhe_resumen_recibidas` **no** equivale a sumar `sii_bhe_list_recibidas`:
+son dos CGI distintos del SII, y el anual informa una retención del
+contribuyente que el informe mensual de recibidas no muestra. Para 07/2026 el
+anual da 19.063 de retención y el mensual muestra "Retenido 0" en las cuatro
+boletas — en la UI del portal y en la API por igual. Si necesitás la retención
+de las boletas recibidas, sale de ahí y de ningún otro lado.
+
+`sii_bhe_list_recibidas` falla con `LIMITE_CONOCIDO` cuando un mes tiene más de
+100 boletas recibidas: ese CGI pagina distinto del de emitidas y el esquema no
+está cerrado, así que no se devuelve un mes truncado que parezca completo. El
+detalle de lo relevado está en el comentario de `src/scrapers/bhe.ts`.
 
 `sii_persona_list_bienes_raices` funciona hoy con la sesión que abre
 `sii_iniciar_sesion` (clave, por navegador). Las demás de esta sección y las

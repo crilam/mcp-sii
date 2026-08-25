@@ -45,6 +45,29 @@ async function main() {
   const salida: string[] = [];
   const p = (linea: string) => { salida.push(linea); console.log(linea); };
 
+  // El try/finally cubre TODO lo que sigue: cada corrida abre un perfil de
+  // navegador propio (`cert-<timestamp>`) y escribe un cookie jar con la sesión
+  // viva del SII. Sin cerrar el contexto, el proceso y esos archivos sobreviven
+  // al script, así que correr la certificación varias veces va dejando procesos
+  // colgados y credenciales de sesión en disco. También importa en el camino
+  // feliz, no sólo cuando algo falla.
+  try {
+    await certificar(p, ej, rut);
+  } finally {
+    await sesion.cerrarContexto();
+    // El volcado también va en el finally: si la certificación se cae a mitad,
+    // lo relevado hasta ahí es justamente lo que interesa mirar — dejarlo fuera
+    // hacía que el fallo se llevara puesta la evidencia.
+    fs.writeFileSync(`${DIR}/certificacion-bhe.txt`, salida.join('\n'));
+    console.log(`\n--- volcado en ${DIR}/certificacion-bhe.txt ---`);
+  }
+}
+
+async function certificar(
+  p: (linea: string) => void,
+  ej: EjecutorSesion<SessionManager>,
+  rut: string
+) {
   p(`RUT consultado: ${rut}   |   período: ${String(MES).padStart(2, '0')}/${ANIO}`);
 
   // 1. RESUMEN ANUAL
@@ -117,8 +140,5 @@ async function main() {
   } else {
     p('(sin boletas emitidas con código de barras en el mes)');
   }
-
-  fs.writeFileSync(`${DIR}/certificacion-bhe.txt`, salida.join('\n'));
-  console.log(`\n--- volcado en ${DIR}/certificacion-bhe.txt ---`);
 }
 main().catch(e => { console.error('ERROR:', e.message); process.exit(1); });

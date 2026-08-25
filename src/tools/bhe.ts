@@ -15,7 +15,7 @@ export function registerBheTools(server: McpServer, registro: RegistroSesiones<S
 
   server.tool(
     'sii_bhe_resumen_recibidas',
-    'Resumen anual de las boletas de honorarios electrónicas RECIBIDAS por el RUT persona autenticado. Mismos campos y misma forma que sii_bhe_resumen, y también los doce meses siempre. Ojo: no equivale a sumar sii_bhe_list_recibidas — el SII informa acá una retención del contribuyente que el listado mensual de recibidas no muestra.',
+    'Resumen anual de las boletas de honorarios electrónicas RECIBIDAS por el RUT persona autenticado. Mismos campos y misma forma que sii_bhe_resumen, y también los doce meses siempre, salvo que folioInicial y folioFinal vienen siempre en null: el portal no muestra folios en este informe, y un rango no significaría nada porque cada boleta la folió un emisor distinto. Ojo: no equivale a sumar sii_bhe_list_recibidas — el SII informa acá una retención del contribuyente que el listado mensual de recibidas no muestra.',
     schemaResumen,
     async ({ rut, anio }) => envolverParaMcp(() => core.resumenRecibidas(registro, rut, anio))
   );

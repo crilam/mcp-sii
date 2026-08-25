@@ -247,8 +247,13 @@ describe('BheScraper.informeAnual', () => {
       retencionTerceros: 0,
       retencionContribuyente: 19063,
       totalLiquido: 115137,
-      folioInicial: 4435,
-      folioFinal: 15964516,
+      // Nulos aunque el CGI mande 4435 y 15964516 en las columnas 4 y 5: el
+      // portal no dibuja esas columnas en el informe de recibidas, y lo que
+      // traen es el número de boleta más chico y el más grande del mes, de
+      // emisores DISTINTOS. Publicarlo como rango de folios sugeriría una
+      // continuidad que no existe.
+      folioInicial: null,
+      folioFinal: null,
       emisionesVigentes: 4,
       emisionesAnuladas: 0,
     });
@@ -258,6 +263,20 @@ describe('BheScraper.informeAnual', () => {
     expect(suma(m => m.retencionContribuyente)).toBe(118952);
     expect(suma(m => m.totalLiquido)).toBe(683748);
     expect(suma(m => m.emisionesVigentes)).toBe(18);
+    // Tampoco a nivel de año: tot4/tot5 vienen con datos y se descartan igual.
+    expect(informe.folioInicial).toBeNull();
+    expect(informe.folioFinal).toBeNull();
+  });
+
+  // El mismo fixture leído como emitidas SÍ expone los folios: lo que cambia es
+  // la semántica del informe, no el parseo.
+  it('los folios sí salen cuando el informe es de emitidas', async () => {
+    const { scraper } = makeScraper(fixture('bhe-informe-anual-recibidas.html'));
+
+    const informe = await scraper.informeAnual(2026, false);
+
+    expect(informe.meses[6].folioInicial).toBe(4435);
+    expect(informe.folioFinal).toBe(15992909);
   });
 
   // El CGI asigna las claves de montos dos veces: primero vacías y después con
