@@ -216,7 +216,7 @@ Los folios van en `null` y no en `0` porque no hubo folio: un `0` ahí sería un
 
 #### `POST /v1/bhe/resumen-recibidas` — informe anual de recibidas
 
-Mismos campos y misma forma de respuesta que `/v1/bhe/resumen`.
+Mismos campos y misma forma de respuesta que `/v1/bhe/resumen`, con una excepción: **`folioInicial` y `folioFinal` vienen siempre en `null`**, tanto por mes como del año. El portal no muestra folios en el informe de recibidas, y un rango no significaría nada ahí: cada boleta la folió un emisor distinto.
 
 > **No equivale a sumar `list-recibidas`, y no se puede derivar de ahí.** Son dos informes distintos del SII, y el anual informa una `retencionContribuyente` que el informe mensual de recibidas no muestra. Caso real de 07/2026: el anual da **19.063** de retención, y las cuatro boletas del mensual muestran **"Retenido 0"** — en el portal y en esta API por igual. Si necesitás la retención de boletas recibidas, sale de este endpoint y de ningún otro.
 

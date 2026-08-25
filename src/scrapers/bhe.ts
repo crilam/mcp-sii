@@ -255,8 +255,11 @@ export class BheScraper {
       rut: `${values['rut_arrastre'] ?? ''}-${values['dv_arrastre'] ?? ''}`,
       nombreContribuyente: (values['nombre_contribuyente'] ?? '').trim(),
       meses,
-      folioInicial: this.toInt(values['tot4']),
-      folioFinal: this.toInt(values['tot5']),
+      // Nulos en recibidas por lo mismo que los folios de cada mes: el portal no
+      // los muestra en este informe, y un rango sobre folios de emisores
+      // distintos no significa nada. Ver el comentario de `parseMes`.
+      folioInicial: recibidas ? null : this.toInt(values['tot4']),
+      folioFinal: recibidas ? null : this.toInt(values['tot5']),
     };
   }
 
@@ -607,8 +610,24 @@ export class BheScraper {
       retencionTerceros,
       retencionContribuyente,
       totalLiquido: honorarioBruto - retencionTerceros - retencionContribuyente,
-      folioInicial,
-      folioFinal: this.toInt(values[`${prefijo}5`]),
+      // En RECIBIDAS los folios se anulan a propósito, aunque las columnas 4 y 5
+      // vengan con datos. Dos razones, y la segunda sola ya alcanza:
+      //
+      //   1. El portal NO las muestra en este informe. Su JS calcula las claves
+      //      pero sólo dibuja 1, 2, 3, 6, 7 y el líquido — verificado contra el
+      //      HTML del CGI y contra la tabla del portal, que no tiene columna de
+      //      folios. Exponerlas sería inventar una semántica que el SII no da.
+      //   2. Aunque se mostraran, un "rango de folios" no significa nada en
+      //      recibidas: cada boleta la folió un emisor distinto. Lo que traen
+      //      esas columnas es el número de boleta más chico y el más grande del
+      //      mes (07/2026: 4435 y 15964516, de emisores distintos), y leerlo
+      //      como rango sugiere una continuidad que no existe.
+      //
+      // La detección de "mes sin actividad" de más arriba sigue mirando la
+      // columna 4, que existe en los dos informes: se anula la salida, no el
+      // parseo.
+      folioInicial: recibidas ? null : folioInicial,
+      folioFinal: recibidas ? null : this.toInt(values[`${prefijo}5`]),
       emisionesVigentes: this.toInt(values[`${prefijo}6`]) ?? 0,
       emisionesAnuladas: this.toInt(values[`${prefijo}7`]) ?? 0,
     };

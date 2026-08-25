@@ -55,10 +55,12 @@ async function main() {
     await certificar(p, ej, rut);
   } finally {
     await sesion.cerrarContexto();
+    // El volcado también va en el finally: si la certificación se cae a mitad,
+    // lo relevado hasta ahí es justamente lo que interesa mirar — dejarlo fuera
+    // hacía que el fallo se llevara puesta la evidencia.
+    fs.writeFileSync(`${DIR}/certificacion-bhe.txt`, salida.join('\n'));
+    console.log(`\n--- volcado en ${DIR}/certificacion-bhe.txt ---`);
   }
-
-  fs.writeFileSync(`${DIR}/certificacion-bhe.txt`, salida.join('\n'));
-  console.log(`\n--- volcado en ${DIR}/certificacion-bhe.txt ---`);
 }
 
 async function certificar(
