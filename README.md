@@ -196,6 +196,10 @@ anual da 19.063 de retención y el mensual muestra "Retenido 0" en las cuatro
 boletas — en la UI del portal y en la API por igual. Si necesitás la retención
 de las boletas recibidas, sale de ahí y de ningún otro lado.
 
+En ese informe, además, `folioInicial` y `folioFinal` vienen **siempre en
+`null`**, por mes y del año. El portal no muestra folios ahí, y un rango no
+significaría nada: cada boleta la folió un emisor distinto.
+
 `sii_bhe_list_recibidas` falla con `LIMITE_CONOCIDO` cuando un mes tiene más de
 100 boletas recibidas: ese CGI pagina distinto del de emitidas y el esquema no
 está cerrado, así que no se devuelve un mes truncado que parezca completo. El

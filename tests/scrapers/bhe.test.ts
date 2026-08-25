@@ -275,7 +275,12 @@ describe('BheScraper.informeAnual', () => {
 
     const informe = await scraper.informeAnual(2026, false);
 
+    // Los cuatro campos, no dos: es el test que demuestra que lo que cambia
+    // entre los dos informes es la semántica y no el parseo, así que dejar la
+    // mitad sin verificar deja abierta justo la duda que viene a cerrar.
     expect(informe.meses[6].folioInicial).toBe(4435);
+    expect(informe.meses[6].folioFinal).toBe(15964516);
+    expect(informe.folioInicial).toBe(4135);
     expect(informe.folioFinal).toBe(15992909);
   });
 

@@ -5,6 +5,7 @@ import { SessionManager } from '../session';
 import { AuthStrategy } from '../env';
 import { RegistroSesiones, EjecutorSesion } from '../registroSesiones';
 import * as core from '../core/bhe';
+import { cerrarSesionDeScript } from './cerrarSesionDeScript';
 
 // Certificación de las 4 operaciones de BHE contra el SII real, para contrastar
 // con la UI de sii.cl. Ejercita el MISMO core que llaman las rutas REST (queda
@@ -46,20 +47,22 @@ async function main() {
   const p = (linea: string) => { salida.push(linea); console.log(linea); };
 
   // El try/finally cubre TODO lo que sigue: cada corrida abre un perfil de
-  // navegador propio (`cert-<timestamp>`) y escribe un cookie jar con la sesión
-  // viva del SII. Sin cerrar el contexto, el proceso y esos archivos sobreviven
-  // al script, así que correr la certificación varias veces va dejando procesos
-  // colgados y credenciales de sesión en disco. También importa en el camino
-  // feliz, no sólo cuando algo falla.
+  // navegador propio (`cert-<timestamp>`), escribe un cookie jar con la sesión
+  // viva del SII y deja una sesión abierta del lado del portal. Sin cerrar,
+  // correr la certificación varias veces va dejando procesos colgados,
+  // credenciales de sesión en disco y sesiones del SII vivas hasta que expiran
+  // —y el SII limita las simultáneas por RUT, así que la tercera corrida se
+  // topa con el bloqueo. También importa en el camino feliz, no sólo al fallar.
   try {
     await certificar(p, ej, rut);
   } finally {
-    await sesion.cerrarContexto();
-    // El volcado también va en el finally: si la certificación se cae a mitad,
-    // lo relevado hasta ahí es justamente lo que interesa mirar — dejarlo fuera
-    // hacía que el fallo se llevara puesta la evidencia.
+    // Va en el finally porque si la certificación se cae a mitad, lo relevado
+    // hasta ahí es justamente lo que interesa mirar. Y va primero porque es la
+    // evidencia: lo que este bloque existe para salvar se escribe antes que
+    // cualquier otra cosa.
     fs.writeFileSync(`${DIR}/certificacion-bhe.txt`, salida.join('\n'));
     console.log(`\n--- volcado en ${DIR}/certificacion-bhe.txt ---`);
+    await cerrarSesionDeScript(sesion);
   }
 }
 
