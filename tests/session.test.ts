@@ -1,3 +1,4 @@
+import { SesionesSimultaneas } from '../src/erroresConsulta';
 import { SessionManager } from '../src/session';
 import { Browser } from '../src/browser';
 import { AuthStrategy, SiiConfig } from '../src/env';
@@ -309,6 +310,30 @@ describe('SessionManager.login', () => {
     const mgr = new SessionManager(configClave, browser);
 
     await expect(conTimers(() => mgr.login())).rejects.toThrow('El SII rechazó la autenticación');
+  });
+
+  // El bloqueo por demasiadas sesiones abiertas usa el mismo formato de código
+  // que el rechazo por clave, terminado en .27 en vez de .20. Sin distinguirlo,
+  // salía como un fallo genérico y quien integra buscaba el problema donde no
+  // estaba — un timeout, la red, su propio código.
+  it('reconoce el bloqueo por sesiones simultáneas y no lo confunde con clave incorrecta', async () => {
+    const browser = crearBrowserMock();
+    mockearEvalFormulario(browser, true);
+    (browser.getUrl as jest.Mock).mockReturnValue('https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi');
+    (browser.cookiesDelSiiConUbicacion as jest.Mock).mockReturnValue(ubicadas(COOKIES_SIN_SESION));
+    (browser.eval as jest.Mock).mockImplementation((js: string) => {
+      if (js.includes('innerText')) return 'El código de este mensaje es 01.01.190.500.720.27';
+      return js.includes("getElementById('myform')") && js.includes('SI') ? 'SI' : '';
+    });
+
+    const mgr = new SessionManager(configClave, browser);
+
+    const fallo = conTimers(() => mgr.login());
+    await expect(fallo).rejects.toThrow(SesionesSimultaneas);
+    // Y NO como credencial inválida: la clave es correcta, y reportarla como
+    // inválida haría que el tenant borrara una clave que sirve.
+    await expect(conTimers(() => new SessionManager(configClave, browser).login()))
+      .rejects.not.toThrow('El SII rechazó la autenticación');
   });
 
   // Si no se puede limpiar, no se puede confiar en las cookies que aparezcan

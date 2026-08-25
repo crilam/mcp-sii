@@ -285,7 +285,15 @@ Lo que un consumidor necesita saber de cada código es **si reintentar sirve**:
 | `CREDENCIALES_INVALIDAS` | No | El portal dijo explícitamente que la clave es incorrecta |
 | `NO_ENCONTRADO` | No | El SII confirmó que el dato no existe. Trae `detalle` |
 | `LIMITE_CONOCIDO` | No | Un límite que ya conocemos: un mes de recibidas con más de 100 boletas, un descuadre entre lo que el SII informa y lo que se recupera, o un cambio de formato de un CGI. Trae `detalle` |
+| `SESIONES_SIMULTANEAS` | **Sí**, tras esperar | El RUT ya tiene demasiadas sesiones abiertas en el SII. Trae `detalle` |
 | `ERROR` | **Sí** | Todo lo demás: cola de espera del SII, portal caído, fallo de red |
+
+`SESIONES_SIMULTANEAS` se comporta igual que `ERROR` —reintentar sirve— y
+existe por lo que permite **decirle a la persona**. Con `ERROR` sólo cabe "probá
+de nuevo en unos minutos"; con éste se le puede decir que hay otra consulta en
+curso sobre el mismo contribuyente, que es accionable: sabe que dejó otra
+pestaña abierta o que un colega está mirando el mismo caso. Salía mezclado en
+`ERROR` y eso mandaba a diagnosticar timeouts y problemas de red que no existían.
 
 Los dos códigos con "no" que podrían confundirse:
 

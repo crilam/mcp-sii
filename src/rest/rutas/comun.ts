@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { LimitacionConocida, RecursoNoEncontrado } from '../../erroresConsulta';
+import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas } from '../../erroresConsulta';
 
 // Fragmento zod para la única ruta que recibe SÓLO certificado digital:
 // `/v1/mipyme/emitir-dte`, porque firmar un DTE necesita el certificado de
@@ -179,6 +179,19 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
     // el orden decide, y el caso más específico tiene que ganar.
     if (e instanceof LimitacionConocida) {
       return { status: 200, body: { ok: false, error: 'LIMITE_CONOCIDO', detalle: e.message } };
+    }
+    // El RUT ya tiene demasiadas sesiones abiertas en el SII. A diferencia de los
+    // dos de arriba, esto SÍ se arregla reintentando —igual que ERROR—, así que
+    // el comportamiento correcto del consumidor no cambia. Lo que cambia es lo
+    // que le puede decir a la persona: con ERROR sólo cabe "probá de nuevo en
+    // unos minutos"; con este código puede decirle que hay otra consulta en
+    // curso sobre el mismo contribuyente, y eso es accionable —sabe que dejó
+    // otra pestaña abierta, o que un colega está mirando el mismo caso.
+    //
+    // Va con `detalle` porque el mensaje lo redacta la sesión, no es un error
+    // crudo de subproceso.
+    if (e instanceof SesionesSimultaneas) {
+      return { status: 200, body: { ok: false, error: 'SESIONES_SIMULTANEAS', detalle: e.message } };
     }
     const error = clasificarErrorCredenciales(e);
     // Un error que no es rechazo de credenciales es un bug (del scraper, de
