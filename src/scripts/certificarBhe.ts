@@ -56,12 +56,10 @@ async function main() {
   try {
     await certificar(p, ej, rut);
   } finally {
-    // El volcado va PRIMERO, antes de cerrar nada. Va en el finally porque si la
-    // certificación se cae a mitad, lo relevado hasta ahí es justamente lo que
-    // interesa mirar. Y va primero porque el cierre puede lanzar
-    // (`cerrarYBorrarPerfil` no está blindado del lado de la sesión): dejarlo
-    // después hacía que un fallo al cerrar se llevara puesta la evidencia que
-    // este bloque existe para salvar.
+    // Va en el finally porque si la certificación se cae a mitad, lo relevado
+    // hasta ahí es justamente lo que interesa mirar. Y va primero porque es la
+    // evidencia: lo que este bloque existe para salvar se escribe antes que
+    // cualquier otra cosa.
     fs.writeFileSync(`${DIR}/certificacion-bhe.txt`, salida.join('\n'));
     console.log(`\n--- volcado en ${DIR}/certificacion-bhe.txt ---`);
     await cerrarSesionDeScript(sesion);
