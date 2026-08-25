@@ -1,7 +1,5 @@
 import 'dotenv/config';
-import { Browser } from './browser';
-import { RegistroSesiones } from './registroSesiones';
-import { SessionManager } from './session';
+import { crearRegistroSesionesSii } from './registroSesionesSii';
 import { ProveedorCredencialesRuntime } from './credencialesRuntime';
 import { crearRestServer } from './restServer';
 import { getPool } from './db';
@@ -10,10 +8,11 @@ const pool = getPool();
 const port = Number(process.env.PORT ?? 8790);
 
 const credenciales = new ProveedorCredencialesRuntime();
-const registro = new RegistroSesiones<SessionManager>(async rut => {
-  const config = await credenciales.para(rut);
-  return new SessionManager(config, new Browser(rut));
-});
+// Se usa la factory compartida y NO se arma el registro acá: cuando esto era una
+// copia, se desincronizó y quedó sin `destruir` ni id único por sesión — o sea
+// un navegador vivo y un cookie jar en disco por request. El porqué de cada
+// garantía está en `registroSesionesSii.ts`.
+const registro = crearRegistroSesionesSii(credenciales);
 
 const server = crearRestServer(pool, registro, credenciales);
 server.listen(port, () => {

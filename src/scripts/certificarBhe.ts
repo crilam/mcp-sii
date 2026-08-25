@@ -5,7 +5,7 @@ import { SessionManager } from '../session';
 import { AuthStrategy } from '../env';
 import { RegistroSesiones, EjecutorSesion } from '../registroSesiones';
 import * as core from '../core/bhe';
-import { cerrarSesionDeScript } from './cerrarSesionDeScript';
+import { cerrarSesionSii } from '../cerrarSesionSii';
 
 // Certificación de las 4 operaciones de BHE contra el SII real, para contrastar
 // con la UI de sii.cl. Ejercita el MISMO core que llaman las rutas REST (queda
@@ -62,7 +62,7 @@ async function main() {
     // cualquier otra cosa.
     fs.writeFileSync(`${DIR}/certificacion-bhe.txt`, salida.join('\n'));
     console.log(`\n--- volcado en ${DIR}/certificacion-bhe.txt ---`);
-    await cerrarSesionDeScript(sesion);
+    await cerrarSesionSii(sesion);
   }
 }
 

@@ -3,6 +3,7 @@ import { Browser } from './browser';
 import { ProveedorCredenciales } from './credenciales';
 import { RegistroSesiones } from './registroSesiones';
 import { SessionManager } from './session';
+import { cerrarSesionSii } from './cerrarSesionSii';
 
 // Arma el registro multi-tenant de sesiones del SII: una `SessionManager` por
 // RUT, construida con la credencial que entrega el proveedor. Es el punto donde
@@ -29,8 +30,14 @@ import { SessionManager } from './session';
 //    problema del punto 1 volvía a aparecer dentro del mismo RUT: un
 //    `validar-clave` le borraba la sesión viva a la instancia cacheada.
 //
-// El registro cierra cada contexto al desalojar la sesión (`cerrarContexto`),
-// porque con un contexto por sesión, no cerrarlos los acumula sin techo.
+// Al desalojar, el registro hace el cierre COMPLETO (`cerrarSesionSii`): logout
+// del lado del SII y después el contexto local. Antes cerraba sólo el contexto,
+// y eso era la mitad de la limpieza: liberaba el proceso y el perfil de disco,
+// pero dejaba la sesión VIVA en el portal hasta que expirara. Como el SII limita
+// las sesiones simultáneas por RUT (error 01.01.190.500.720.27), un consumidor
+// que recorre un año —doce consultas del mismo RUT— iba acumulando sesiones
+// abiertas hasta toparse con el bloqueo, y el fallo aparecía como un error
+// intermitente sin relación aparente con lo que se estaba pidiendo.
 //
 // El id único lo arma ESTA función y la factory sólo lo recibe, en vez de
 // dejar que la factory lo derive del RUT: así la unicidad no depende de quién
@@ -54,6 +61,6 @@ export function crearRegistroSesionesSii(
       // herencia de jar que esto viene a eliminar, colándose por el reinicio.
       return new SessionManager(config, browserPara(`${rut}-${randomUUID()}`));
     },
-    sesion => sesion.cerrarContexto()
+    sesion => cerrarSesionSii(sesion)
   );
 }

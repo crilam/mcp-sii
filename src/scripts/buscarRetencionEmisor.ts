@@ -4,7 +4,7 @@ import { SessionManager } from '../session';
 import { AuthStrategy } from '../env';
 import { EjecutorSesion } from '../registroSesiones';
 import * as core from '../core/bhe';
-import { cerrarSesionDeScript } from './cerrarSesionDeScript';
+import { cerrarSesionSii } from '../cerrarSesionSii';
 
 // La convención de `retencionEmisor` quedó verificada a medias: en recibidas es
 // null (el SII no lo informa) y en emitidas, en todos los meses mirados hasta
@@ -108,7 +108,7 @@ async function main() {
           `La convención sigue sin poder confirmarse con este RUT.${colaNull}`
     );
   } finally {
-    await cerrarSesionDeScript(sesion);
+    await cerrarSesionSii(sesion);
   }
 }
 main().catch(e => { console.error('ERROR:', e.message); process.exit(1); });
