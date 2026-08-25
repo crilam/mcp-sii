@@ -46,8 +46,8 @@ Hay tres regímenes según la ruta, y mezclarlos es el error de integración má
 
 | Régimen | Rutas | Qué acepta |
 |---|---|---|
-| **Clave o certificado** | las 5 de `/v1/bhe/*` | `clave`, **o** `certificado_base64` + `certificado_password`. Exactamente una de las dos. |
-| **Sólo certificado** | `/v1/rcv/*`, `/v1/renta/*`, `/v1/dte/*`, `/v1/mipyme/*` | `certificado_base64` + `certificado_password`, ambos obligatorios. |
+| **Clave o certificado** | casi todas: `/v1/bhe/*`, `/v1/rcv/*`, `/v1/renta/*`, `/v1/dte/*`, y las dos lecturas de `/v1/mipyme/*` | `clave`, **o** `certificado_base64` + `certificado_password`. Exactamente una de las dos. |
+| **Sólo certificado** | `/v1/mipyme/emitir-dte` | `certificado_base64` + `certificado_password`, ambos obligatorios. Firmar un DTE necesita el certificado de verdad, no basta una sesión autenticada. |
 | **Sólo clave** | `/v1/persona/bienes-raices`, `/v1/sesion/validar-clave` | `clave` obligatoria. No acepta certificado. |
 
 En el régimen mixto, la validación rechaza:
@@ -115,7 +115,7 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 | `CREDENCIALES_INVALIDAS` | 200 | no | El SII rechazó la clave o el certificado. | No. Pedí credenciales nuevas. |
 | `NO_ENCONTRADO` | 200 | **sí** | El SII confirmó que el dato no existe. | No, es permanente. |
 | `LIMITE_CONOCIDO` | 200 | **sí** | Límite conocido de lo que se puede leer del portal (ver §7). | No, es permanente. |
-| `BAD_REQUEST` | 400 | en BHE | El body no valida. | No, arreglá el request. |
+| `BAD_REQUEST` | 400 | casi siempre | El body no valida. El `detalle` nombra el campo. | No, arreglá el request. |
 | `CONFIRMAR_NO_SOPORTADO` | 400 | no | Mandaste `confirmar:true` a `emitir-dte`. | No, ver §6.5. |
 | `UNAUTHORIZED` | 401 | no | Falta el header, no es `Bearer`, o la key es desconocida o está revocada. | No. |
 | `PAYLOAD_TOO_LARGE` | 413 | no | Body de más de 64 KiB. | No. |
@@ -299,7 +299,7 @@ Si pedís una boleta **recibida** con `recibida:false` (o al revés), el SII res
 
 ### 6.2 Registro de compras y ventas (RCV)
 
-**Sólo certificado.** Campos comunes:
+**Clave o certificado.** Campos comunes:
 
 | Campo | Tipo | |
 |---|---|---|
@@ -370,7 +370,7 @@ Trampas de este endpoint:
 
 ### 6.3 Documentos tributarios electrónicos (DTE)
 
-**Sólo certificado.**
+**Clave o certificado.**
 
 #### `POST /v1/dte/list-documentos-emitidos` y `.../list-documentos-recibidos`
 
@@ -406,7 +406,7 @@ Campos de la respuesta que dicen algo que no es obvio:
 
 ### 6.4 Renta
 
-**Sólo certificado.**
+**Clave o certificado.**
 
 #### `POST /v1/renta/estado-declaracion`
 
@@ -437,7 +437,7 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
 ### 6.5 Mipyme
 
-**Sólo certificado.**
+**Clave o certificado.**
 
 - **`POST /v1/mipyme/list-empresas`** — sólo `rut`. Devuelve `{"ok":true,"datos":[{"rut","nombre"}]}`.
 - **`POST /v1/mipyme/list-dte-emitidos`** — `rut` obligatorio; opcionales `empresa_rut`, `tipo_dte`, `fecha_desde` y `fecha_hasta` (`AAAA-MM-DD`), `receptor_rut`, `folio`, y `pagina` (default `1`, 100 documentos por página).

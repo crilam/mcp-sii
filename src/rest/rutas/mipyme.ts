@@ -4,11 +4,16 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
 import { schemaListEmpresas, schemaListDteEmitidos, schemaEmitirDte } from '../../core/schemas/mipyme';
-import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
+import { ejecutorPara, ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
+import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCredencialCert } from './comun';
 
-const zodListEmpresas = z.object(schemaListEmpresas).extend(zodCredencialCert);
-const zodListDteEmitidos = z.object(schemaListDteEmitidos).extend(zodCredencialCert);
+// Las dos LECTURAS aceptan clave tributaria O certificado, igual que BHE:
+// verificado contra el SII con clave real (list-empresas devolvió las cinco
+// empresas de la persona). `emitir-dte` NO cambia y sigue exigiendo certificado
+// —ver el comentario de su ruta más abajo—: firmar un DTE necesita el
+// certificado de verdad, no sólo una sesión autenticada.
+const zodListEmpresas = conCredencial(schemaListEmpresas);
+const zodListDteEmitidos = conCredencial(schemaListDteEmitidos);
 const zodEmitirDte = z.object(schemaEmitirDte).extend({
   ...zodCredencialCert,
   confirmar: z.boolean().default(false)
@@ -22,17 +27,17 @@ export function registrarRutasMipyme(
 ): void {
   rutas.set('POST /v1/mipyme/list-empresas', async body => {
     const parseo = zodListEmpresas.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, certificado_base64, certificado_password } = parseo.data;
-    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(() => core.listEmpresas(ejecutor, rut));
   });
 
   rutas.set('POST /v1/mipyme/list-dte-emitidos', async body => {
     const parseo = zodListDteEmitidos.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, certificado_base64, certificado_password, empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, folio, pagina } = parseo.data;
-    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, empresa_rut, tipo_dte, fecha_desde, fecha_hasta, receptor_rut, folio, pagina } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(() => core.listDteEmitidos(ejecutor, rut, {
       empresaRut: empresa_rut, tipoDte: tipo_dte, fechaDesde: fecha_desde,
       fechaHasta: fecha_hasta, receptorRut: receptor_rut, folio, pagina,
