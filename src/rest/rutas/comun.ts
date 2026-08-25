@@ -2,9 +2,13 @@ import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
 import { LimitacionConocida, RecursoNoEncontrado } from '../../erroresConsulta';
 
-// Fragmento zod compartido por las rutas REST que reciben SÓLO certificado
-// digital (renta, dte, mipyme; las de BHE usan `conCredencial`, que acepta
-// también clave).
+// Fragmento zod para la única ruta que recibe SÓLO certificado digital:
+// `/v1/mipyme/emitir-dte`, porque firmar un DTE necesita el certificado de
+// verdad y no basta con una sesión autenticada. Todas las demás usan
+// `conCredencial`, que acepta clave tributaria o certificado —se verificó
+// contra el portal que las consultas de rcv, dte, renta y mipyme funcionan con
+// clave, así que exigir certificado ahí era herencia de cuando era la única
+// estrategia que sabía autenticar, no un requisito del SII.
 //
 // Se valida el alfabeto base64 ANTES de intentar decodificar: un base64 con
 // basura no falla en `Buffer.from` —que decodifica "lo mejor que puede"— sino
