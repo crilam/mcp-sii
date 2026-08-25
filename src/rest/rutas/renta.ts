@@ -4,11 +4,15 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/renta';
 import { schemaEstadoDeclaracion, schemaF22 } from '../../core/schemas/renta';
-import { ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar, zodCredencialCert } from './comun';
+import { ejecutorPara } from '../ejecutorPassThrough';
+import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from './comun';
 
-const zodEstadoDeclaracion = z.object(schemaEstadoDeclaracion).extend(zodCredencialCert);
-const zodF22 = z.object(schemaF22).extend(zodCredencialCert);
+// Clave tributaria O certificado, igual que BHE. La renta cuelga de la persona,
+// así que la clave alcanza; el certificado se exigía por herencia de cuando era
+// la única estrategia que sabía autenticar. Verificado contra el SII con clave
+// real (dos declaraciones leídas para 2025).
+const zodEstadoDeclaracion = conCredencial(schemaEstadoDeclaracion);
+const zodF22 = conCredencial(schemaF22);
 
 export function registrarRutasRenta(
   rutas: Map<string, RutaHandler>,
@@ -17,17 +21,17 @@ export function registrarRutasRenta(
 ): void {
   rutas.set('POST /v1/renta/estado-declaracion', async body => {
     const parseo = zodEstadoDeclaracion.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, certificado_base64, certificado_password, anio } = parseo.data;
-    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, anio } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(() => core.estadoDeclaracion(ejecutor, rut, anio));
   });
 
   rutas.set('POST /v1/renta/f22', async body => {
     const parseo = zodF22.safeParse(body);
-    if (!parseo.success) return { status: 400, body: { error: 'BAD_REQUEST' } };
-    const { rut, certificado_base64, certificado_password, anio, folio } = parseo.data;
-    const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, rut, certificado_base64, certificado_password);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, anio, folio } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(() => core.f22Completo(ejecutor, rut, anio, folio));
   });
 }

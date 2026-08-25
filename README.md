@@ -205,14 +205,39 @@ significaría nada: cada boleta la folió un emisor distinto.
 está cerrado, así que no se devuelve un mes truncado que parezca completo. El
 detalle de lo relevado está en el comentario de `src/scrapers/bhe.ts`.
 
-`sii_persona_list_bienes_raices` funciona hoy con la sesión que abre
-`sii_iniciar_sesion` (clave, por navegador). Las demás de esta sección y las
-de las secciones anteriores (Consultas DTE, Impuestos y registros, y las dos
-tools de listado de mipyme) consultan por HTTP y hoy necesitan certificado
-digital para tener el cookie jar que esa vía requiere — ver la limitación
-anotada en
-[Autenticación: sesión por RUT](#autenticación-sesión-por-rut).
-`sii_mipyme_emitir_dte` sigue corriendo por navegador y acepta clave.
+`sii_persona_list_bienes_raices` funciona con la sesión que abre
+`sii_iniciar_sesion` (clave, por navegador). El resto de las consultas por HTTP
+—Consultas DTE, Impuestos y registros, boletas de honorarios y los listados de
+mipyme— aceptan **clave tributaria o certificado digital**: las dos producen el
+cookie jar que esa vía necesita. La única que sigue exigiendo certificado es
+`sii_mipyme_emitir_dte` cuando firma, porque firmar un DTE necesita el
+certificado de verdad y no basta una sesión autenticada.
+
+### Situación tributaria de terceros
+
+`POST /v1/contribuyente/situacion-tributaria` con `{ rut }`. Es la única ruta del
+adaptador que **no lleva credencial del contribuyente**: el SII publica esta
+consulta abierta, así que se puede preguntar por cualquier RUT. Sigue pasando por
+el auth de tenant y el rate-limit del servidor, como todas.
+
+Devuelve razón social, si presenta inicio de actividades y desde cuándo, si es
+empresa de menor tamaño (pro-pyme), si declara en moneda extranjera, y las
+actividades económicas vigentes con su código, giro, categoría y si afectan IVA.
+
+Tres cosas que conviene saber:
+
+- **El dígito verificador se valida** antes de consultar. El SII resuelve por el
+  cuerpo del RUT, así que un DV mal escrito devolvería los datos del
+  contribuyente con el DV corregido — o sea que un RUT inválido saldría como
+  válido. Con DV incorrecto la respuesta es `400`, y el `detalle` dice cuál era
+  el que correspondía.
+- **Hay caché en memoria de 24 horas por RUT.** Esta consulta le pega dos veces a
+  `zeus.sii.cl` (captcha más informe) y el dato casi no cambia. Sólo se cachean
+  los éxitos: un fallo del portal, o un RUT que todavía no tiene datos, se
+  vuelven a consultar.
+- **`observaciones` y `documentos_timbrados` no se emiten todavía**: no hay una
+  captura del informe que los traiga, y escribir el parseo a ciegas devolvería
+  datos plausibles que nadie revisaría. Está anotado en la spec del endpoint.
 
 ### Cambios recientes que rompen contrato
 

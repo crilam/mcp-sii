@@ -35,7 +35,7 @@ tenant** como el resto del adaptador REST.
 
 **Body:**
 ```json
-{ "rut": "76632059-7" }
+{ "rut": "22222222-2" }
 ```
 (sin `clave`)
 
@@ -44,23 +44,50 @@ tenant** como el resto del adaptador REST.
 cableado del lado Tributy sea trivial:
 ```json
 {
-  "rut": "76632059-7",
-  "razonSocial": "INFOSEC SERVICIOS DE SEGURIDAD INFORMATICA SPA",
+  "rut": "22222222-2",
+  "razonSocial": "EMPRESA DE EJEMPLO SPA",
   "inicioActividades": true,
   "fechaInicioActividades": "08-07-2016",
   "proPyme": true,
   "monedaExtranjera": false,
   "actividades": [
     { "codigo": 262000, "giro": "FABRICACION DE COMPUTADORES...", "categoria": 1, "afectaIva": true }
-  ],
-  "observaciones": []
+  ]
 }
 ```
 
+**Fuera de alcance por ahora: `observaciones` y `documentos_timbrados`.**
+
+Esta versión NO los emite, y es deliberado. La única captura que tenemos del
+informe (el fixture de `22222222-2`) no trae ninguna de las dos secciones: ese
+contribuyente no tiene observaciones ni documentos timbrados que mostrar, así
+que no hay HTML real contra el que escribir el parseo. Escribirlo a ciegas es lo
+que este repo evita en todas partes — un parser adivinado devuelve datos
+plausibles y nadie los vuelve a revisar.
+
+Emitir `observaciones: []` fijo tampoco sirve: diría "este contribuyente no
+tiene observaciones" cuando la verdad es "no las leemos". Es la misma mentira
+que un mes en cero sobre un informe que no se pudo leer, y el consumidor no
+tiene forma de distinguirlas.
+
+Para incorporarlas hace falta la captura de un RUT que sí las tenga. Cuando
+aparezca, se agregan los campos y este párrafo se reemplaza.
+
 **Errores:**
-- `400 { error: "RUT_INVALIDO" }` — RUT mal formado o DV inválido.
-- `404 { error: "NO_ENCONTRADO" }` — el SII no devuelve datos para ese RUT.
-- `502 { error: "FUENTE_NO_DISPONIBLE" }` — zeus.sii.cl caído o HTML inesperado.
+Los códigos son los del contrato general del adaptador, no propios de esta
+ruta: inventarle códigos nuevos obligaría a cada consumidor a manejar dos
+vocabularios distintos según el endpoint.
+
+- `400 { error: "BAD_REQUEST", detalle }` — RUT mal formado, o con dígito
+  verificador inválido. El `detalle` dice cuál era el DV que correspondía.
+- `200 { ok: false, error: "NO_ENCONTRADO", detalle }` — el SII devolvió su
+  informe y ahí no hay datos para ese RUT. Va con status 200 porque en este
+  contrato el status habla del servicio y `ok` habla de la consulta; ver la
+  sección de errores del README.
+- `200 { ok: false, error: "ERROR" }` — zeus.sii.cl caído, HTML inesperado, o
+  una respuesta que no es este informe. Es el único código reintentable, y por
+  eso importa que un portal caído NO caiga en `NO_ENCONTRADO`: sería un
+  "no existe" permanente sobre un fallo pasajero.
 - `401/429` de tenant igual que el resto.
 
 ## Mecanismo real contra el SII (2 requests, sin login)
@@ -104,8 +131,10 @@ exacta de lo que hace apigateway.
   `"Contribuyente es Empresa de Menor Tama..."`
 - `aut_moneda_extranjera` (→ `monedaExtranjera`): `span`
   `"...declarar y pagar sus impuestos en moneda extranjera:"`
-- `documentos_timbrados`: la tabla `class="tabla"` que sigue al `<strong>` con
-  texto `"Documentos Timbrados"`.
+- `documentos_timbrados` (SIN IMPLEMENTAR, ver "Fuera de alcance" más arriba):
+  la tabla `class="tabla"` que sigue al `<strong>` con texto
+  `"Documentos Timbrados"`. La nota se conserva porque es el relevamiento que
+  hay que respetar cuando se implemente.
   **Trampa real:** la página tiene varias tablas `class="tabla"`; anclar al
   `<strong>` correcto. Un `//table[@class='tabla']/tr` genérico mezcla filas de
   la tabla de "autorización no electrónica" y entran rangos de fecha como

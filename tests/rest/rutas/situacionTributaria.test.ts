@@ -11,8 +11,8 @@ function armarRouter() {
 }
 
 const SITUACION = {
-  rut: '76632059-7',
-  razonSocial: 'INFOSEC SERVICIOS DE SEGURIDAD INFORMATICA SPA',
+  rut: '22222222-2',
+  razonSocial: 'EMPRESA DE EJEMPLO SPA',
   inicioActividades: true,
   fechaInicioActividades: '08-07-2016',
   proPyme: true,
@@ -29,9 +29,9 @@ describe('registrarRutasContribuyente', () => {
 
   it('body válido llama al core y envuelve en {ok:true}', async () => {
     (core.situacionTributaria as jest.Mock).mockResolvedValue(SITUACION);
-    const respuesta = await armarRouter().get('POST /v1/contribuyente/situacion-tributaria')!({ rut: '76632059-7' });
+    const respuesta = await armarRouter().get('POST /v1/contribuyente/situacion-tributaria')!({ rut: '22222222-2' });
     expect(respuesta).toEqual({ status: 200, body: { ok: true, ...SITUACION } });
-    expect(core.situacionTributaria).toHaveBeenCalledWith('76632059-7');
+    expect(core.situacionTributaria).toHaveBeenCalledWith('22222222-2');
   });
 
   it('sin rut → 400 BAD_REQUEST sin tocar el core', async () => {
@@ -53,5 +53,39 @@ describe('registrarRutasContribuyente', () => {
     expect(respuesta.status).toBe(200);
     expect((respuesta.body as any).ok).toBe(false);
     expect((respuesta.body as any).error).toBe('NO_ENCONTRADO');
+  });
+  // El SII resuelve la consulta por el CUERPO del RUT, así que un DV mal escrito
+  // devolvía los datos del contribuyente igual, con el DV ya corregido: la API
+  // validaba como bueno un RUT que el SII rechaza después. `partirRut` sólo mira
+  // la forma, así que el módulo 11 se chequea acá.
+  it('rechaza un DV inválido sin consultar al SII', async () => {
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/contribuyente/situacion-tributaria')!({ rut: '22222222-9' });
+
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe('BAD_REQUEST');
+    // El detalle dice cuál era el correcto: es un typo, y saberlo lo resuelve.
+    expect(r.body.detalle).toMatch(/d.gito verificador/i);
+    expect(core.situacionTributaria).not.toHaveBeenCalled();
+  });
+
+  it('acepta un RUT con DV correcto', async () => {
+    (core.situacionTributaria as jest.Mock).mockResolvedValue({ rut: '22222222-2' });
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/contribuyente/situacion-tributaria')!({ rut: '22222222-2' });
+
+    expect(r.status).toBe(200);
+    expect(core.situacionTributaria).toHaveBeenCalled();
+  });
+
+  it('acepta el RUT sin guion y con puntos', async () => {
+    (core.situacionTributaria as jest.Mock).mockResolvedValue({ rut: '22222222-2' });
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/contribuyente/situacion-tributaria')!({ rut: '22.222.222-2' });
+
+    expect(r.status).toBe(200);
   });
 });

@@ -14,14 +14,14 @@ function fixture(nombre: string): string {
   return fs.readFileSync(path.join(__dirname, '../fixtures', nombre), 'latin1');
 }
 
-const HTML = fixture('situacion-tributaria-76632059.html');
+const HTML = fixture('situacion-tributaria.html');
 
 describe('parsearSituacionTributaria', () => {
-  const sit = parsearSituacionTributaria(HTML, '76632059-7');
+  const sit = parsearSituacionTributaria(HTML, '22222222-2');
 
   it('extrae identificación y razón social', () => {
-    expect(sit.rut).toBe('76632059-7');
-    expect(sit.razonSocial).toBe('INFOSEC SERVICIOS DE SEGURIDAD INFORMATICA SPA');
+    expect(sit.rut).toBe('22222222-2');
+    expect(sit.razonSocial).toBe('EMPRESA DE EJEMPLO SPA');
   });
 
   it('extrae inicio de actividades, fecha, pro-pyme y moneda', () => {
@@ -46,9 +46,32 @@ describe('parsearSituacionTributaria', () => {
     expect(sit.actividades).toHaveLength(3);
   });
 
+  // El HTML lleva el título del informe: un RUT que el SII no reconoce SÍ
+  // devuelve esta página, sólo que sin los campos del contribuyente.
   it('RUT no reconocido → RecursoNoEncontrado', () => {
-    expect(() => parsearSituacionTributaria('<html><body>sin datos</body></html>', '11111111-1'))
+    const sinDatos = '<html><title>Consultar Situaci&oacute;n Tributaria de Terceros</title><body>' +
+      'El RUT consultado no presenta informaci&oacute;n</body></html>';
+    expect(() => parsearSituacionTributaria(sinDatos, '11111111-1'))
       .toThrow(RecursoNoEncontrado);
+  });
+
+  // Éste es el que importa: sin la marca del informe, una página de mantención o
+  // un rediseño del CGI se reportaban como NO_ENCONTRADO, o sea el SII caído era
+  // indistinguible de "este RUT no existe". El consumidor archivaba un "no
+  // existe" permanente sobre un fallo transitorio y nadie volvía a mirarlo.
+  it('respuesta que no es el informe → Error genérico, no NO_ENCONTRADO', () => {
+    const mantencion = '<html><body>Servicio temporalmente no disponible</body></html>';
+    expect(() => parsearSituacionTributaria(mantencion, '11111111-1'))
+      .toThrow(/no devolvió la página de situación tributaria/);
+    expect(() => parsearSituacionTributaria(mantencion, '11111111-1'))
+      .not.toThrow(RecursoNoEncontrado);
+  });
+
+  // Con el DV equivocado el SII resuelve por el cuerpo y devuelve los datos con
+  // SU dígito: comparar sólo el cuerpo dejaba pasar un RUT inexistente como
+  // válido. Se compara cuerpo Y dígito.
+  it('mismo cuerpo con DV distinto → RecursoNoEncontrado', () => {
+    expect(() => parsearSituacionTributaria(HTML, '22222222-9')).toThrow(RecursoNoEncontrado);
   });
 
   it('RUT reportado distinto del pedido → RecursoNoEncontrado (no atribuir datos ajenos)', () => {
@@ -72,10 +95,10 @@ describe('consultarSituacionTributaria', () => {
       obtenerCaptcha: async () => captchaB64,
       consultarGetstc: async campos => { camposEnviados = campos; return HTML; },
     };
-    const sit = await consultarSituacionTributaria('76.632.059-7', transporte);
-    expect(sit.razonSocial).toBe('INFOSEC SERVICIOS DE SEGURIDAD INFORMATICA SPA');
+    const sit = await consultarSituacionTributaria('22.222.222-2', transporte);
+    expect(sit.razonSocial).toBe('EMPRESA DE EJEMPLO SPA');
     expect(camposEnviados).toEqual({
-      RUT: '76632059', DV: '7', PRG: 'STC', OPC: 'NOR', txt_code: 'AB12', txt_captcha: captchaB64,
+      RUT: '22222222', DV: '2', PRG: 'STC', OPC: 'NOR', txt_code: 'AB12', txt_captcha: captchaB64,
     });
   });
 });
