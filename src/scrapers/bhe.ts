@@ -71,10 +71,14 @@ export interface BoletaBhe {
 
 const BASE = 'https://loa.sii.cl/cgi_IMT';
 const CGI_ANUAL = `${BASE}/TMBCOC_InformeAnualBhe.cgi`;
-// El anual de recibidas emite exactamente las mismas claves que el de emitidas
-// (`jul1` bruto, `jul2` retención de terceros, `jul3` retención contribuyente,
-// `jul4`/`jul5` folios, `jul6`/`jul7` vigentes/anuladas), así que lo parsea el
-// mismo código. Verificado contra el portal para 2026.
+// El anual de recibidas emite las mismas claves que el de emitidas —`jul1`
+// bruto, `jul2` retención de terceros, `jul3` retención contribuyente,
+// `jul6`/`jul7` vigentes/anuladas— así que lo parsea el mismo código.
+// Verificado contra el portal para 2026.
+//
+// Las claves 4 y 5 son la excepción: vienen con datos pero el JS de ESTE
+// informe no las dibuja (sólo escribe 1, 2, 3, 6, 7 y el líquido), y el portal
+// no tiene columna de folios acá. Ver `parseMes`, que las descarta.
 const CGI_ANUAL_RECIBIDAS = `${BASE}/TMBCOC_InformeAnualBheRec.cgi`;
 const CGI_MENSUAL = `${BASE}/TMBCOC_InformeMensualBhe.cgi`;
 const CGI_MENSUAL_REC = `${BASE}/TMBCOC_InformeMensualBheRec.cgi`;
