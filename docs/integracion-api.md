@@ -233,11 +233,11 @@ Devuelven `{"ok":true,"datos":[...]}` con objetos así:
 ```json
 {
   "folio": 337,
-  "codigoBarras": "17270613000007FEB33E",
+  "codigoBarras": "22222222000004AB19C",
   "fecha": "08/07/2026",
   "fechaEmision": "08/07/2026",
   "contraparteRol": "receptor",
-  "contraparteRut": "96949020-K",
+  "contraparteRut": "22222222-2",
   "contraparteNombre": "RAZON SOCIAL SA",
   "emailEnvio": "",
   "sociedadProfesional": false,
@@ -283,9 +283,9 @@ Respuesta:
 ```json
 {
   "ok": true,
-  "codigo_barras": "17270613000007FEB33E",
+  "codigo_barras": "22222222000004AB19C",
   "content_type": "application/pdf",
-  "nombre_archivo": "bhe-17270613000007FEB33E.pdf",
+  "nombre_archivo": "bhe-22222222000004AB19C.pdf",
   "tamano_bytes": 8432,
   "pdf_base64": "JVBERi0xLjMK..."
 }
