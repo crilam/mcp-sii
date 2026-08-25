@@ -128,6 +128,8 @@ Dos precisiones que evitan bugs:
 
 - **`ERROR` y `SESIONES_SIMULTANEAS` son los dos que conviene reintentar.** `NO_ENCONTRADO` y `LIMITE_CONOCIDO` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII.
 - **`SESIONES_SIMULTANEAS` merece su propio mensaje al usuario.** Reintentar es correcto igual que con `ERROR`, así que el comportamiento no cambia — lo que cambia es lo que le podés decir a la persona. Con `ERROR` sólo cabe "probá de nuevo en unos minutos"; con éste podés decirle que hay **otra consulta en curso sobre el mismo contribuyente**, y eso es accionable: sabe que dejó otra pestaña abierta, o que un colega está mirando el mismo caso. Aparece cuando el RUT supera el límite de sesiones simultáneas del SII.
+
+  Con una salvedad: hoy se detecta al **abrir** la sesión, que es donde el portal lo informa. Si el bloqueo apareciera a mitad de una consulta ya en curso, todavía llega como `ERROR`. O sea que `SESIONES_SIMULTANEAS` confirma el caso, pero su ausencia no lo descarta.
 - **`detalle` es para humanos, no para parsear.** Es texto en castellano explicando qué pasó y qué se puede hacer. Mostralo; no ramifiques sobre su contenido.
 
 ---

@@ -45,6 +45,13 @@ export class RecursoNoEncontrado extends LimitacionConocida {}
 // El caso que lo motivó: la sesión que integra Tributy persiguió dos veces un
 // "timeout" que era en realidad otra cosa. Un error mal clasificado manda a
 // buscar el problema al lugar equivocado.
+//
+// ALCANCE, para no prometer de más: hoy se detecta SÓLO en el login, que es
+// donde el portal lo informa con su página de aviso. Si el bloqueo apareciera a
+// mitad de una sesión ya abierta —un CGI devolviendo esa misma página en vez de
+// los datos— sigue saliendo como el ERROR genérico. Cerrarlo pide relevar cómo
+// se ve ese caso en cada CGI, que no está capturado; escribir la detección a
+// ciegas daría falsos positivos sobre respuestas que no son ese bloqueo.
 export class SesionesSimultaneas extends Error {
   constructor(mensaje: string) {
     super(mensaje);

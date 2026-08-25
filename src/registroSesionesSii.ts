@@ -39,6 +39,15 @@ import { cerrarSesionSii } from './cerrarSesionSii';
 // abiertas hasta toparse con el bloqueo, y el fallo aparecía como un error
 // intermitente sin relación aparente con lo que se estaba pidiendo.
 //
+// El cierre corre fire-and-forget: `destruirSeguro` no espera la promesa, así
+// que en el camino pass-through la respuesta REST vuelve mientras el logout
+// todavía viaja. Es deliberado. Esperarlo agregaría la navegación del logout a
+// la latencia de CADA request —medido, hoy no cuesta nada justamente porque no
+// se espera— para cubrir sólo la ventana en que el proceso muera entre la
+// respuesta y el logout. Si eso pasa (un deploy con requests en vuelo), esas
+// sesiones quedan vivas hasta expirar solas, que es el comportamiento que había
+// antes de este cierre para TODAS las consultas.
+//
 // El id único lo arma ESTA función y la factory sólo lo recibe, en vez de
 // dejar que la factory lo derive del RUT: así la unicidad no depende de quién
 // inyecte la factory. Con la versión anterior, un consumidor (o un test) que
