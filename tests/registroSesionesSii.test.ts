@@ -135,4 +135,30 @@ describe('crearRegistroSesionesSii', () => {
     // mensaje de error llega con el formato normalizado (sin puntos ni guión).
     await expect(registro.ejecutar('99999999-9', async s => s)).rejects.toThrow(/999999999/);
   });
+  // El registro tiene que hacer el cierre COMPLETO al desalojar: logout del lado
+  // del SII y después el contexto local. Cerrar sólo el contexto es la mitad de
+  // la limpieza —libera el proceso y el perfil, pero deja la sesión viva en el
+  // portal— y el SII bloquea por sesiones simultáneas por RUT, así que un
+  // consumidor que recorre un año se topa con el bloqueo.
+  //
+  // Este test existe porque el bug ya ocurrió dos veces: el entrypoint del
+  // servidor armaba su propio registro y le faltaba el `destruir` entero, y al
+  // unificarlo se perdió el `logout` quedándose sólo con `cerrarContexto`.
+  it('al desalojar hace logout en el SII ANTES de cerrar el contexto local', async () => {
+    const registro = crearRegistroSesionesSii(
+      new CredencialesEnMemoria([configA]),
+      () => new MockBrowser()
+    );
+    const orden: string[] = [];
+
+    const sesion = await registro.ejecutar('11111111-1', async s => s);
+    jest.spyOn(sesion, 'logout').mockImplementation(async () => { orden.push('logout'); });
+    jest.spyOn(sesion, 'cerrarContexto').mockImplementation(() => { orden.push('contexto'); });
+
+    await registro.cerrarYOlvidar('11111111-1', async () => {});
+    // `destruir` corre de forma asíncrona dentro de destruirSeguro.
+    await new Promise(r => setImmediate(r));
+
+    expect(orden).toEqual(['logout', 'contexto']);
+  });
 });

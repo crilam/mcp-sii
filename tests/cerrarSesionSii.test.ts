@@ -1,5 +1,5 @@
-import { cerrarSesionDeScript } from '../../src/scripts/cerrarSesionDeScript';
-import { SessionManager } from '../../src/session';
+import { cerrarSesionSii } from '../src/cerrarSesionSii';
+import { SessionManager } from '../src/session';
 
 // El invariante que estos tests fijan es el que justifica que la función use DOS
 // try separados en vez de uno solo: la limpieza local no puede quedar
@@ -14,7 +14,7 @@ function sesionFalsa(over: Partial<Record<'logout' | 'cerrarContexto', jest.Mock
   } as unknown as SessionManager;
 }
 
-describe('cerrarSesionDeScript', () => {
+describe('cerrarSesionSii', () => {
   // Se silencia el console.error: los avisos de fallo son parte del diseño (la
   // función reporta y sigue), y ensuciarían la salida de la corrida.
   beforeEach(() => jest.spyOn(console, 'error').mockImplementation(() => {}));
@@ -27,7 +27,7 @@ describe('cerrarSesionDeScript', () => {
       cerrarContexto: jest.fn().mockImplementation(() => { orden.push('contexto'); }),
     });
 
-    await cerrarSesionDeScript(sesion);
+    await cerrarSesionSii(sesion);
 
     // El orden importa: `cerrarContexto` borra el perfil y el cookie jar, o sea
     // las credenciales con las que `logout` tiene que hablarle al SII.
@@ -43,7 +43,7 @@ describe('cerrarSesionDeScript', () => {
       cerrarContexto,
     });
 
-    await expect(cerrarSesionDeScript(sesion)).resolves.toBeUndefined();
+    await expect(cerrarSesionSii(sesion)).resolves.toBeUndefined();
 
     expect(cerrarContexto).toHaveBeenCalled();
   });
@@ -56,6 +56,6 @@ describe('cerrarSesionDeScript', () => {
       cerrarContexto: jest.fn().mockImplementation(() => { throw new Error('cierre falló'); }),
     });
 
-    await expect(cerrarSesionDeScript(sesion)).resolves.toBeUndefined();
+    await expect(cerrarSesionSii(sesion)).resolves.toBeUndefined();
   });
 });

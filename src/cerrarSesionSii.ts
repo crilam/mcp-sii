@@ -1,8 +1,11 @@
-import { SessionManager } from '../session';
+import { SessionManager } from './session';
 
-// Cierre de una sesión abierta por un script de diagnóstico, que son los que
-// autentican contra el SII real fuera del servidor. El orden importa y los dos
-// pasos van blindados por separado.
+// Cierre COMPLETO de una sesión del SII. Lo usan el servidor y los scripts: es
+// la única definición, porque cuando hubo dos (una acá y `cerrarContexto` suelto
+// en la factory del registro) el servidor terminó haciendo media limpieza sin
+// que nadie lo notara.
+//
+// El orden importa y los dos pasos van blindados por separado.
 //
 // `logout()` primero, porque es el que libera la sesión DEL LADO DEL SII: sin él
 // la sesión queda viva hasta que expira, y como el SII limita las simultáneas
@@ -18,7 +21,7 @@ import { SessionManager } from '../session';
 //
 // Nada de esto lanza: se llama desde un `finally`, y una excepción acá taparía
 // el error real que se estaba propagando.
-export async function cerrarSesionDeScript(sesion: SessionManager): Promise<void> {
+export async function cerrarSesionSii(sesion: SessionManager): Promise<void> {
   try {
     await sesion.logout();
   } catch (e) {
