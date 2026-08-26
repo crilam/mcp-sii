@@ -60,6 +60,8 @@ describe('RcvScraper.resumen', () => {
       montoExento: 0,
       montoIva: 19000000,
       montoTotal: 119000000,
+      montoIvaUsoComun: 0,
+      montoIvaNoRecuperable: 0,
       esNotaCredito: false,
       tipoDesconocido: false,
     });
@@ -81,6 +83,11 @@ describe('RcvScraper.resumen', () => {
       // 19.000.000 − 1.900.000.
       iva: 17100000,
       total: 108600000,
+      // El fixture no tiene IVA de uso común ni no recuperable, así que suman 0.
+      // Se listan igual: si mañana el fixture los trae y el signo de las notas
+      // de crédito no se aplicara, este test lo muestra.
+      ivaUsoComun: 0,
+      ivaNoRecuperable: 0,
     });
     // La suma ingenua (sin restar) daría estos otros valores.
     expect(resumen.totales.neto).not.toBe(110000000);
@@ -110,6 +117,8 @@ describe('RcvScraper.resumen', () => {
       montoExento: 0,
       montoIva: 380000,
       montoTotal: 2380000,
+      montoIvaUsoComun: 0,
+      montoIvaNoRecuperable: 0,
       esNotaCredito: false,
       tipoDesconocido: false,
     });
@@ -128,6 +137,8 @@ describe('RcvScraper.resumen', () => {
       exento: 100000,
       iva: 10830000,
       total: 66930000,
+      ivaUsoComun: 0,
+      ivaNoRecuperable: 0,
     });
     // La suma ingenua (sin restar la nota de crédito) daría estos otros.
     expect(resumen.totales.neto).not.toBe(58000000);
@@ -221,7 +232,7 @@ describe('RcvScraper.resumen', () => {
     expect(resumen.sinDatos).toBe(true);
     expect(resumen.filas).toEqual([]);
     expect(resumen.totalDocumentos).toBe(0);
-    expect(resumen.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0 });
+    expect(resumen.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0, ivaUsoComun: 0, ivaNoRecuperable: 0 });
   });
 
   // Código 2: error real. Tratarlo como vacío lo escondería detrás de un
@@ -255,7 +266,7 @@ describe('RcvScraper.resumen', () => {
 
     expect(resumen.sinDatos).toBe(true);
     expect(resumen.filas).toEqual([]);
-    expect(resumen.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0 });
+    expect(resumen.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0, ivaUsoComun: 0, ivaNoRecuperable: 0 });
     // El vacío se puede explicar: no es lo mismo que un mes reciente sin
     // actividad, que llega sin mensaje.
     expect(resumen.mensaje).toMatch(/mayor igual a 201705/);

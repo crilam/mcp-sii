@@ -68,6 +68,8 @@ async function mostrarDetalleCompleto(rutas: Map<string, RutaHandler>, cred: Rec
     console.log('    (sin documentos en el período para mostrar el detalle completo)');
     return;
   }
+  const tot = (b as { totales?: Record<string, unknown> }).totales;
+  if (tot) console.log(`    totales: ${JSON.stringify(tot)}`);
   console.log('    detalle completo del primer documento:');
   for (const [k, v] of Object.entries(doc)) {
     console.log(`       ${k.padEnd(30)} ${JSON.stringify(v)}`);
@@ -91,6 +93,7 @@ async function main() {
   await llamar(rutas, 'POST /v1/dte/list-documentos-recibidos', { ...cred, periodo: PERIODO });
   await llamar(rutas, 'POST /v1/renta/estado-declaracion', { ...cred, anio: ANIO });
   await llamar(rutas, 'POST /v1/mipyme/list-empresas', { ...cred });
+  await llamar(rutas, 'POST /v1/rcv/empresas-autorizadas', { ...cred });
   if (empresa) {
     await llamar(rutas, 'POST /v1/rcv/resumen', { ...cred, periodo: PERIODO, operacion: 'COMPRA', empresa_rut: empresa });
   }

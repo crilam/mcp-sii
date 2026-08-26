@@ -340,8 +340,26 @@ Si pedís una boleta **recibida** con `recibida:false` (o al revés), el SII res
 Tres campos que hay que mirar antes de usar los totales:
 
 - **`totalesConfiables: false`** significa que hay tipos de documento cuyo signo no conocemos, así que los totales pueden estar mal. Los tipos en cuestión están en `tiposDesconocidos`. **No presentes los totales como definitivos si esto es `false`.**
+- Cada fila trae además **`montoIvaUsoComun` y `montoIvaNoRecuperable`**, y los totales suman `ivaUsoComun` e `ivaNoRecuperable` con el mismo criterio de signo que el resto (las notas de crédito restan). Son los que faltaban para cuadrar un crédito fiscal.
 - **`sinDatos: true`** es un período legítimamente vacío, no un error.
 - **`esNotaCredito: true`** en una fila significa que **resta** del total.
+
+#### `POST /v1/rcv/empresas-autorizadas`
+
+Sólo `rut` más la credencial. Devuelve `{"ok":true,"datos":[…]}` con las
+empresas que ese RUT puede **consultar** en el registro de compras y ventas.
+
+> **No es lo mismo que `/v1/mipyme/list-empresas`.** Ésas son las empresas que
+> la persona puede **operar** en el portal de facturación gratuita; éstas, las
+> que puede **consultar** en el RCV. Un RUT puede estar en una lista y no en la
+> otra — en las pruebas, 5 en mipyme contra 17 acá. Confundirlas llevaría a
+> ofrecer facturar por una empresa que sólo se puede mirar.
+
+Cada entrada trae `rut` y, en `null`, `razonSocial`, `privilegios` y las dos
+fechas de desautorización: **el SII no informa esos datos por esta vía**. Van en
+`null` en vez de omitirse para que se vea que el dato existe y esta consulta no
+lo trae. Para el nombre de un RUT está `/v1/contribuyente/situacion-tributaria`,
+que además no pide credencial.
 
 #### `POST /v1/rcv/detalle`
 

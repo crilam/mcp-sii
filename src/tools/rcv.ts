@@ -3,7 +3,7 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/rcv';
-import { schemaResumen, schemaDetalle } from '../core/schemas/rcv';
+import { schemaResumen, schemaDetalle, schemaEmpresasAutorizadas } from '../core/schemas/rcv';
 
 export function registerRcvTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
@@ -61,5 +61,12 @@ export function registerRcvTools(server: McpServer, registro: RegistroSesiones<S
     schemaDetalle,
     async ({ rut, periodo, operacion, tipo_doc, empresa_rut }) =>
       envolverParaMcp(() => core.detalle(registro, rut, periodo, operacion, tipo_doc, empresa_rut))
+  );
+
+  server.tool(
+    'sii_rcv_empresas_autorizadas',
+    'Empresas que el RUT persona autenticado puede consultar en el Registro de Compras y Ventas. OJO: es un universo DISTINTO del de sii_mipyme_list_empresas, que son las empresas que puede OPERAR en el portal de facturación gratuita — un RUT puede estar en una lista y no en la otra. El SII no informa por esta vía la razón social ni los privilegios, así que vienen en null; para el nombre de un RUT se puede usar la consulta de situación tributaria.',
+    schemaEmpresasAutorizadas,
+    async ({ rut }) => envolverParaMcp(() => core.empresasAutorizadas(registro, rut))
   );
 }

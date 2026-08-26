@@ -83,7 +83,52 @@ cambiar el alcance entero:
 El spike va contra la empresa del `.env`, en una sola sesión, y con el cierre
 completo (`cerrarSesionSii`) en un `finally`.
 
-## Alcance propuesto (a confirmar tras la Fase 0)
+## Qué devuelve cada método (relevado 2026-08-26)
+
+Se llamó a los 16 de lectura en una sola sesión. `ingresarAceptacionReclamoDocs`
+NO se llamó: es escritura y un relevamiento no dispara actos tributarios.
+
+**Con datos, implementables:**
+
+| Método | Qué devuelve | Estado |
+|---|---|---|
+| `getResumen` | resumen por tipo de documento | ya estaba; **ampliado** con IVA uso común y no recuperable |
+| `getDetalleCompra` | detalle documento por documento | ya estaba; **ampliado** de 15 a 26 campos |
+| `getDcvEmpresasAutorizadas` | 17 RUT de empresas autorizadas | **implementado** como `/v1/rcv/empresas-autorizadas` |
+| `getResumenExport` | el mismo resumen en CSV de 8 columnas | no se implementa: sus dos columnas propias ya se sacaron del JSON, que es más robusto que partir strings por `;` |
+| `getDetalleCompraExport` | el mismo detalle en CSV de 26 columnas | ídem: sirvió para DESCUBRIR los campos que faltaban, no para consumirlos |
+| `getDetalleObsCompraExp` | CSV de 27 columnas, 1 fila | pendiente: hay que entender qué observación reporta antes de exponerla |
+
+**Existen y responden `codRespuesta: 0` pero vinieron VACÍOS** en el período
+probado, así que no hay con qué verificar el mapeo: `getCtrlAsync`,
+`getOtrosImpuestos`, `getDetalleIEC02`, `getDetallesObs`, `getResumenObsCruce`,
+`getResumenObservacionesRutTpoDoc`, `getDetalleObservacionRutDoc`,
+`getDetalleObservacionTpoDoc`.
+
+**No se implementan a ciegas.** Un array vacío no dice qué campos trae cada
+fila, y publicar una ruta cuyo parseo nadie verificó es exactamente cómo se
+llega a un endpoint que devuelve datos plausibles y mal. Para cerrarlos hace
+falta un período o una empresa que SÍ tenga esos datos — observaciones del
+registro, otros impuestos, o una solicitud async en curso.
+
+**Fallan o piden otros parámetros:** `getDatosInicio` y `getEventosDoc` no
+devuelven JSON con el scope de las demás; `getDetalleDTE` pide un folio
+concreto (`cod=3`, "no existe documento con estos parámetros");
+`getDetalleVentaExport` responde `cod=99` con el `estadoContab` de compras.
+
+### Lo que esto significa para el async
+
+El async **existe**, pero `getCtrlAsync` devuelve lista vacía y no hay
+solicitudes que consultar. Crear una es lo que falta, y el método que las crea
+no está entre los relevados con nombre evidente — `getDetalleCompraExport`
+devuelve el CSV en la misma respuesta, o sea que para este volumen el SII no
+usa el camino asíncrono. **Probablemente el async se active recién con
+volúmenes que esta empresa no tiene**, y forzarlo con datos que no lo disparan
+llevaría a implementar un flujo que nunca se ejercitó de verdad.
+
+Queda como lo primero a retomar con una empresa de mayor volumen.
+
+## Alcance propuesto (planteo original)
 
 ### 1. RCV asíncrono
 
