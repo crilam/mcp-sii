@@ -171,8 +171,33 @@ Todas reciben `rut` como primer parámetro — ver
 |---|---|
 | `sii_rcv_resumen` | Registro de Compras y Ventas, resumen del período |
 | `sii_rcv_detalle` | Registro de Compras y Ventas, documento por documento |
+| `sii_rcv_tipos_documento` | Catálogo de los 46 tipos de documento del registro |
+| `sii_rcv_empresas_autorizadas` | Empresas que el RUT puede **consultar** en el RCV |
 | `sii_renta_get_f22` | Formulario 22 completo de un año tributario |
 | `sii_renta_estado_declaracion` | Estado de la declaración de renta |
+
+`sii_rcv_detalle` devuelve **26 campos por documento**, no sólo los montos
+básicos: además de neto, exento, IVA y total, informa el IVA no recuperable con
+su código, el neto e IVA de activo fijo, el IVA de uso común, el impuesto sin
+derecho a crédito, el IVA no retenido, los tres montos de tabaco, las fechas de
+recepción y de acuse, y el tipo de transacción. Para cuadrar un F29 no son
+opcionales: el IVA no recuperable, el de uso común y el de activo fijo cambian el
+crédito fiscal. `sii_rcv_resumen` informa los dos primeros por tipo de documento
+y en los totales.
+
+Dos criterios al leer esos campos. **Los montos vienen en `0` y los códigos en
+`null`**: el SII manda 0 cuando el concepto no aplica al documento, y ahí el cero
+ES el dato, mientras un código en 0 no sería "código cero" sino "no hay". Y
+**`fechaRecepcion` trae hora y `fechaEmision` no** (`23/06/2026 12:51:37` contra
+`23/06/2026`): son dos formatos distintos en la misma fila, tal como los manda el
+SII, y no se normalizan para que la diferencia se vea en vez de descubrirse
+parseando.
+
+`sii_rcv_empresas_autorizadas` **no** es lo mismo que `sii_mipyme_list_empresas`:
+éstas son las empresas que el RUT puede **consultar** en el registro, y las de
+mipyme las que puede **operar** en el portal de facturación gratuita. Un RUT
+puede estar en una lista y no en la otra. Confundirlas llevaría a ofrecer
+facturar por una empresa que sólo se puede mirar.
 
 ### Boletas de honorarios y persona natural
 
@@ -286,7 +311,19 @@ Lo que un consumidor necesita saber de cada código es **si reintentar sirve**:
 | `NO_ENCONTRADO` | No | El SII confirmó que el dato no existe. Trae `detalle` |
 | `LIMITE_CONOCIDO` | No | Un límite que ya conocemos: un mes de recibidas con más de 100 boletas, un descuadre entre lo que el SII informa y lo que se recupera, o un cambio de formato de un CGI. Trae `detalle` |
 | `SESIONES_SIMULTANEAS` | **Sí**, tras esperar | El RUT ya tiene demasiadas sesiones abiertas en el SII. Trae `detalle` |
+| `LIMITE_SII` | **Sí, esperando de verdad** | El SII cortó las consultas por volumen (su propio error 429). Trae `detalle` |
 | `ERROR` | **Sí** | Todo lo demás: cola de espera del SII, portal caído, fallo de red |
+
+`LIMITE_SII` es el que más cambia qué hacer: el SII tiene rate limiting propio y,
+con muchas consultas al mismo portal en poco tiempo, corta ESE PORTAL ENTERO por
+un rato — para todos. Reintentar de inmediato es lo que mantiene el corte: hay
+que esperar minutos, no segundos, y bajar el ritmo. Los barridos internos ya van
+con pausa por esto mismo (`src/ritmoSii.ts`).
+
+Un detalle que cuesta diagnosticar: el SII **no** devuelve un status 429, devuelve
+una página HTML. Sin mirar el cuerpo es indistinguible del HTML del login —o sea
+de "la sesión expiró"— y las dos cosas piden lo contrario: una que esperes, la
+otra que reintentes reautenticando.
 
 `SESIONES_SIMULTANEAS` se comporta igual que `ERROR` —reintentar sirve— y
 existe por lo que permite **decirle a la persona**. Con `ERROR` sólo cabe "probá
