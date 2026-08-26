@@ -116,6 +116,7 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 | `ERROR` | 200 | no | Fallo no clasificado: timeout, red, portal caído. | **Sí.** El único reintentable. |
 | `CREDENCIALES_INVALIDAS` | 200 | no | El SII rechazó la clave o el certificado. | No. Pedí credenciales nuevas. |
 | `SESIONES_SIMULTANEAS` | 200 | **sí** | El RUT ya tiene demasiadas sesiones abiertas en el SII. | **Sí**, después de esperar. |
+| `LIMITE_SII` | 200 | **sí** | El SII cortó las consultas por volumen (su propio error 429). | **Sí, pero esperando de verdad.** |
 | `NO_ENCONTRADO` | 200 | **sí** | El SII confirmó que el dato no existe. | No, es permanente. |
 | `LIMITE_CONOCIDO` | 200 | **sí** | Límite conocido de lo que se puede leer del portal (ver §7). | No, es permanente. |
 | `BAD_REQUEST` | 400 | **sí** | El body no valida. El `detalle` nombra el campo. | No, arreglá el request. |
@@ -128,7 +129,8 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 
 Dos precisiones que evitan bugs:
 
-- **`ERROR` y `SESIONES_SIMULTANEAS` son los dos que conviene reintentar.** `NO_ENCONTRADO` y `LIMITE_CONOCIDO` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII.
+- **`LIMITE_SII` significa parar, no reintentar rápido.** El SII cortó por volumen de consultas. Reintentar de inmediato es lo que mantiene el corte: hay que esperar de verdad —minutos, no segundos— y bajar el ritmo. Aparece cuando se le hacen muchas consultas al mismo portal en poco tiempo, y afecta a ese portal entero mientras dura.
+- **`ERROR`, `SESIONES_SIMULTANEAS` y `LIMITE_SII` son los tres que conviene reintentar**, con esperas muy distintas. `NO_ENCONTRADO` y `LIMITE_CONOCIDO` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII.
 - **`SESIONES_SIMULTANEAS` merece su propio mensaje al usuario.** Reintentar es correcto igual que con `ERROR`, así que el comportamiento no cambia — lo que cambia es lo que le podés decir a la persona. Con `ERROR` sólo cabe "probá de nuevo en unos minutos"; con éste podés decirle que hay **otra consulta en curso sobre el mismo contribuyente**, y eso es accionable: sabe que dejó otra pestaña abierta, o que un colega está mirando el mismo caso. Aparece cuando el RUT supera el límite de sesiones simultáneas del SII.
 
   Con una salvedad: hoy se detecta al **abrir** la sesión, que es donde el portal lo informa. Si el bloqueo apareciera a mitad de una consulta ya en curso, todavía llega como `ERROR`. O sea que `SESIONES_SIMULTANEAS` confirma el caso, pero su ausencia no lo descarta.

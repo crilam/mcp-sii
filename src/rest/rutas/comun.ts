@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas } from '../../erroresConsulta';
+import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeConsultasSii } from '../../erroresConsulta';
 
 // Fragmento zod para la única ruta que recibe SÓLO certificado digital:
 // `/v1/mipyme/emitir-dte`, porque firmar un DTE necesita el certificado de
@@ -190,6 +190,13 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
     //
     // Va con `detalle` porque el mensaje lo redacta la sesión, no es un error
     // crudo de subproceso.
+    // El SII cortó por volumen (su error 429). Va con código propio y NO como
+    // ERROR por la misma razón que el de arriba: `ERROR` significa "reintentá", y
+    // reintentar de inmediato un corte por volumen es lo que lo mantiene. Con
+    // este código, quien integra sabe que tiene que esperar.
+    if (e instanceof LimiteDeConsultasSii) {
+      return { status: 200, body: { ok: false, error: 'LIMITE_SII', detalle: e.message } };
+    }
     if (e instanceof SesionesSimultaneas) {
       return { status: 200, body: { ok: false, error: 'SESIONES_SIMULTANEAS', detalle: e.message } };
     }

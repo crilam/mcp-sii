@@ -1,5 +1,5 @@
 import { ejecutar } from '../../../src/rest/rutas/comun';
-import { SesionesSimultaneas } from '../../../src/erroresConsulta';
+import { SesionesSimultaneas, LimiteDeConsultasSii } from '../../../src/erroresConsulta';
 
 describe('ejecutar', () => {
   it('objeto: spreadea flat junto a ok:true', async () => {
@@ -51,5 +51,28 @@ describe('ejecutar', () => {
 
     expect((respuesta.body as { error: string }).error).not.toBe('LIMITE_CONOCIDO');
     expect((respuesta.body as { error: string }).error).not.toBe('ERROR');
+  });
+  // El SII corta por volumen con su propio 429, y eso NO puede llegar como
+  // ERROR: `ERROR` significa "reintentá", y reintentar de inmediato un corte por
+  // volumen es exactamente lo que lo mantiene cortado.
+  it('LimiteDeConsultasSii sale como LIMITE_SII y no como ERROR', async () => {
+    const respuesta = await ejecutar(async () => {
+      throw new LimiteDeConsultasSii('El SII cortó las consultas por volumen');
+    });
+
+    expect(respuesta.status).toBe(200);
+    expect((respuesta.body as { error: string }).error).toBe('LIMITE_SII');
+    expect((respuesta.body as { detalle: string }).detalle).toMatch(/volumen/);
+  });
+
+  // Tampoco puede caer en LIMITE_CONOCIDO, que el contrato declara PERMANENTE:
+  // esto se arregla esperando, así que confundirlos haría que el consumidor
+  // abandone una consulta que iba a funcionar en unos minutos.
+  it('LimiteDeConsultasSii no se confunde con LIMITE_CONOCIDO', async () => {
+    const respuesta = await ejecutar(async () => {
+      throw new LimiteDeConsultasSii('corte por volumen');
+    });
+
+    expect((respuesta.body as { error: string }).error).not.toBe('LIMITE_CONOCIDO');
   });
 });

@@ -121,7 +121,7 @@ nuevo al proyecto, R5 y R7 son el lugar por donde empezar.
   firme. Ver corrección arriba.
 - Contrato `{ok, ...}` con status 200 para los errores de negocio. Códigos:
   `BAD_REQUEST` (400), `CREDENCIALES_INVALIDAS`, `NO_ENCONTRADO`,
-  `LIMITE_CONOCIDO`, `SESIONES_SIMULTANEAS`, `ERROR`. **`RUT_INVALIDO` no
+  `LIMITE_CONOCIDO`, `SESIONES_SIMULTANEAS`, `LIMITE_SII`, `ERROR`. **`RUT_INVALIDO` no
   existe** — la versión anterior de este roadmap lo listaba; un RUT mal formado
   es `BAD_REQUEST` con `detalle`.
 - Binarios (pdf/xml) como base64 + contentType, con validación de magic bytes.

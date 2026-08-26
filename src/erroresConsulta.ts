@@ -58,3 +58,23 @@ export class SesionesSimultaneas extends Error {
     this.name = new.target.name;
   }
 }
+
+// El SII cortó por volumen de consultas: su portal responde una página con
+// "Error 429: Se ha superado el límite". Es su rate limiting, no el nuestro.
+//
+// Tiene tipo y código propios por el mismo motivo que `SesionesSimultaneas`: con
+// el ERROR genérico, un corte por volumen se lee como "el portal falló, reintentá
+// ya", y reintentar de inmediato es exactamente lo que lo mantiene cortado. Con
+// un código propio, quien integra sabe que tiene que ESPERAR — y quien opera sabe
+// que el problema es de ritmo y no un bug.
+//
+// Se descubrió del peor modo posible: un relevamiento de este repo hizo más de
+// doscientas llamadas al portal del RCV en pocos minutos y ese portal empezó a
+// devolver 429 a TODO, incluidas las consultas de los tenants. Ver `ritmoSii.ts`,
+// que existe para que no vuelva a pasar.
+export class LimiteDeConsultasSii extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = new.target.name;
+  }
+}
