@@ -28,10 +28,13 @@ function registrar(rutRegistrado?: string) {
 describe('registerRcvTools', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra sii_rcv_resumen y sii_rcv_detalle', () => {
+  it('registra las 4 tools de rcv', () => {
     const { tools } = registrar();
 
-    expect(Object.keys(tools)).toEqual(['sii_rcv_resumen', 'sii_rcv_detalle']);
+    expect(Object.keys(tools)).toEqual([
+      'sii_rcv_resumen', 'sii_rcv_detalle', 'sii_rcv_empresas_autorizadas',
+      'sii_rcv_tipos_documento',
+    ]);
   });
 
   it('exige el rut de la sesión en el schema de las dos tools', () => {

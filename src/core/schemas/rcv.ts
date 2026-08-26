@@ -22,3 +22,15 @@ export const schemaDetalle = {
   tipo_doc: z.number().int().positive()
     .describe('Código del tipo de documento, obligatorio. Se obtiene de sii_rcv_resumen en filas[].tipoDocCodigo (33 factura electrónica, 61 nota de crédito, 46 factura de compra, 34 exenta, 110 exportación, 914 DIN, 56 nota de débito)'),
 };
+
+// Sólo el RUT: la lista de empresas autorizadas no depende de período ni de
+// operación.
+export const schemaEmpresasAutorizadas = {
+  rut: z.string().min(1).describe('RUT de la persona autenticada, con dígito verificador.'),
+};
+
+// Sólo el RUT: el catálogo de tipos de documento no depende de empresa ni de
+// período.
+export const schemaTiposDocumento = {
+  rut: z.string().min(1).describe('RUT de la persona autenticada, con dígito verificador.'),
+};

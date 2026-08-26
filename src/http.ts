@@ -1,6 +1,11 @@
 import { execFileSync } from 'child_process';
 import { SessionManager } from './session';
-import { LimitacionConocida } from './erroresConsulta';
+import { LimitacionConocida, LimiteDeConsultasSii } from './erroresConsulta';
+
+// Marca del corte por volumen del SII. Se busca el número junto al texto: un
+// "429" suelto podría ser cualquier cosa en un HTML (un monto, un folio), y el
+// texto solo podría cambiar de copy.
+const LIMITE_DE_CONSULTAS = /Error\s*429|superado el l[ií]mite/i;
 
 const TIMEOUT_MS = 30_000;
 
@@ -202,6 +207,16 @@ export class SiiHttpClient {
     try {
       return JSON.parse(salida);
     } catch {
+      // Antes del error genérico: el corte por volumen del SII se distingue.
+      // Llega como una PÁGINA HTML, no como un status 429, así que sin mirar el
+      // cuerpo es indistinguible de "la sesión expiró" — y las dos cosas piden
+      // lo contrario: una que esperes, la otra que reintentes.
+      if (LIMITE_DE_CONSULTAS.test(salida)) {
+        throw new LimiteDeConsultasSii(
+          'El SII cortó las consultas por volumen (su error 429). Hay que ESPERAR: ' +
+          'reintentar de inmediato mantiene el corte. Ver ritmoSii.ts.'
+        );
+      }
       // Una respuesta que no es JSON suele ser el HTML del login o de un error
       // del portal. Devolverla cruda al parser lo haría fallar mucho más lejos
       // de la causa, así que se corta acá con un extracto para diagnosticar.

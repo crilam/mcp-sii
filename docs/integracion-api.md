@@ -69,6 +69,8 @@ curl -X POST https://mcp-sii.redcomercio.cl/v1/sesion/validar-clave \
 
 Responde `{"ok":true}` o `{"ok":false,"error":"CREDENCIALES_INVALIDAS"}`. Sirve para no guardar una clave que el SII va a rechazar después.
 
+También puede responder `SESIONES_SIMULTANEAS`, y en esta ruta la distinción es la que más importa: **`ERROR` y `SESIONES_SIMULTANEAS` no significan "la clave es dudosa"**. La clave puede estar perfecta y el problema ser que hay otra consulta en curso sobre el mismo RUT. Sólo `CREDENCIALES_INVALIDAS` autoriza a descartar una clave; con los otros dos, reintentá.
+
 ---
 
 ## 3. El contrato de respuesta
@@ -114,6 +116,7 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 | `ERROR` | 200 | no | Fallo no clasificado: timeout, red, portal caído. | **Sí.** El único reintentable. |
 | `CREDENCIALES_INVALIDAS` | 200 | no | El SII rechazó la clave o el certificado. | No. Pedí credenciales nuevas. |
 | `SESIONES_SIMULTANEAS` | 200 | **sí** | El RUT ya tiene demasiadas sesiones abiertas en el SII. | **Sí**, después de esperar. |
+| `LIMITE_SII` | 200 | **sí** | El SII cortó las consultas por volumen (su propio error 429). | **Sí, pero esperando de verdad.** |
 | `NO_ENCONTRADO` | 200 | **sí** | El SII confirmó que el dato no existe. | No, es permanente. |
 | `LIMITE_CONOCIDO` | 200 | **sí** | Límite conocido de lo que se puede leer del portal (ver §7). | No, es permanente. |
 | `BAD_REQUEST` | 400 | **sí** | El body no valida. El `detalle` nombra el campo. | No, arreglá el request. |
@@ -126,7 +129,8 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 
 Dos precisiones que evitan bugs:
 
-- **`ERROR` y `SESIONES_SIMULTANEAS` son los dos que conviene reintentar.** `NO_ENCONTRADO` y `LIMITE_CONOCIDO` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII.
+- **`LIMITE_SII` significa parar, no reintentar rápido.** El SII cortó por volumen de consultas. Reintentar de inmediato es lo que mantiene el corte: hay que esperar de verdad —minutos, no segundos— y bajar el ritmo. Aparece cuando se le hacen muchas consultas al mismo portal en poco tiempo, y afecta a ese portal entero mientras dura.
+- **`ERROR`, `SESIONES_SIMULTANEAS` y `LIMITE_SII` son los tres que conviene reintentar**, con esperas muy distintas. `NO_ENCONTRADO` y `LIMITE_CONOCIDO` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII.
 - **`SESIONES_SIMULTANEAS` merece su propio mensaje al usuario.** Reintentar es correcto igual que con `ERROR`, así que el comportamiento no cambia — lo que cambia es lo que le podés decir a la persona. Con `ERROR` sólo cabe "probá de nuevo en unos minutos"; con éste podés decirle que hay **otra consulta en curso sobre el mismo contribuyente**, y eso es accionable: sabe que dejó otra pestaña abierta, o que un colega está mirando el mismo caso. Aparece cuando el RUT supera el límite de sesiones simultáneas del SII.
 
   Con una salvedad: hoy se detecta al **abrir** la sesión, que es donde el portal lo informa. Si el bloqueo apareciera a mitad de una consulta ya en curso, todavía llega como `ERROR`. O sea que `SESIONES_SIMULTANEAS` confirma el caso, pero su ausencia no lo descarta.
@@ -340,8 +344,26 @@ Si pedís una boleta **recibida** con `recibida:false` (o al revés), el SII res
 Tres campos que hay que mirar antes de usar los totales:
 
 - **`totalesConfiables: false`** significa que hay tipos de documento cuyo signo no conocemos, así que los totales pueden estar mal. Los tipos en cuestión están en `tiposDesconocidos`. **No presentes los totales como definitivos si esto es `false`.**
+- Cada fila trae además **`montoIvaUsoComun` y `montoIvaNoRecuperable`**, y los totales suman `ivaUsoComun` e `ivaNoRecuperable` con el mismo criterio de signo que el resto (las notas de crédito restan). Son los que faltaban para cuadrar un crédito fiscal.
 - **`sinDatos: true`** es un período legítimamente vacío, no un error.
 - **`esNotaCredito: true`** en una fila significa que **resta** del total.
+
+#### `POST /v1/rcv/empresas-autorizadas`
+
+Sólo `rut` más la credencial. Devuelve `{"ok":true,"datos":[…]}` con las
+empresas que ese RUT puede **consultar** en el registro de compras y ventas.
+
+> **No es lo mismo que `/v1/mipyme/list-empresas`.** Ésas son las empresas que
+> la persona puede **operar** en el portal de facturación gratuita; éstas, las
+> que puede **consultar** en el RCV. Un RUT puede estar en una lista y no en la
+> otra — en las pruebas, 5 en mipyme contra 17 acá. Confundirlas llevaría a
+> ofrecer facturar por una empresa que sólo se puede mirar.
+
+Cada entrada trae `rut` y, en `null`, `razonSocial`, `privilegios` y las dos
+fechas de desautorización: **el SII no informa esos datos por esta vía**. Van en
+`null` en vez de omitirse para que se vea que el dato existe y esta consulta no
+lo trae. Para el nombre de un RUT está `/v1/contribuyente/situacion-tributaria`,
+que además no pide credencial.
 
 #### `POST /v1/rcv/detalle`
 
@@ -362,6 +384,30 @@ Agrega `tipo_doc` (int positivo, obligatorio) a los campos comunes. Devuelve `do
   "eventoReceptor": null
 }
 ```
+
+**El detalle trae 26 campos, no 15.** Además de los de arriba, cada documento
+informa los datos tributarios que el portal muestra y que antes se descartaban:
+`fechaRecepcion`, `fechaAcuse`, `montoIvaNoRecuperable` con
+`codigoIvaNoRecuperable`, `montoNetoActivoFijo`, `montoIvaActivoFijo`,
+`montoIvaUsoComun`, `montoSinDerechoACredito`, `montoIvaNoRetenido`, los tres
+montos de tabaco y `tipoTransaccion`. Para armar un F29 no son opcionales: el
+IVA no recuperable, el de uso común y el de activo fijo cambian el crédito
+fiscal.
+
+Dos criterios que conviene tener claros al leerlos:
+
+- **Los montos vienen en `0` y los códigos en `null`.** El SII manda 0 cuando el
+  concepto no aplica al documento, y ahí el cero **es** el dato. Un código en 0
+  no sería "código cero" sino "no hay", así que va `null`.
+- **`fechaRecepcion` trae hora y `fechaEmision` no** (`23/06/2026 12:51:37`
+  contra `23/06/2026`). Son dos formatos distintos en la misma fila, tal como
+  los manda el SII; no los normalizamos para que la diferencia se vea en vez de
+  que la descubras parseando.
+
+Los "otros impuestos" (código, valor y tasa) que muestra el portal **todavía no
+se exponen**: los campos candidatos del SII no se pudieron verificar contra un
+documento que realmente tenga uno, y mapearlos a ciegas publicaría un impuesto
+inexistente en cada documento.
 
 Trampas de este endpoint:
 

@@ -13,6 +13,12 @@ export interface FilaResumenRcv {
   montoExento: number;
   montoIva: number;
   montoTotal: number;
+  // IVA de uso común e IVA no recuperable, que el SII informa por tipo de
+  // documento en la MISMA respuesta y antes se descartaban. Van acá por lo mismo
+  // que en el detalle: cambian el crédito fiscal, así que un resumen sin ellos
+  // no sirve para cuadrar un F29 aunque los otros montos estén bien.
+  montoIvaUsoComun: number;
+  montoIvaNoRecuperable: number;
   // Las notas de crédito restan del total del período (ver TIPOS_NOTA_CREDITO).
   esNotaCredito: boolean;
   // `true` si el tipo de documento no está en ninguna de las dos listas
@@ -25,6 +31,12 @@ export interface TotalesRcv {
   exento: number;
   iva: number;
   total: number;
+  // Se totalizan con el MISMO criterio de signo que los demás (las notas de
+  // crédito restan): si se sumaran en positivo, un período con notas de crédito
+  // daría un crédito fiscal inflado, que es justo el número que alguien lleva al
+  // F29.
+  ivaUsoComun: number;
+  ivaNoRecuperable: number;
 }
 
 export interface ResumenRcv {
@@ -133,6 +145,93 @@ export interface FilaDetalleRcv {
   // Estado de aceptación o reclamo del receptor, en texto del SII. `null` es lo
   // habitual: significa que no hubo evento registrado, no que fue aceptado.
   eventoReceptor: string | null;
+
+  // --- Campos tributarios que el SII informa y antes se descartaban ----------
+  //
+  // Estaban en la MISMA respuesta que ya pedíamos: el detalle salía con quince
+  // campos mientras el portal muestra veintiséis. Para quien arma un F29 no son
+  // opcionales —el IVA no recuperable, el de uso común y el de activo fijo
+  // cambian el crédito fiscal—, y un detalle al que le faltan no se distingue de
+  // uno completo.
+
+  // Fecha en que el SII recibió el documento, y fecha del acuse de recibo.
+  // Tal como las informa el SII y SIN convertir. Ojo: no tienen el mismo formato
+  // que `fechaEmision` —traen hora, "23/06/2026 12:51:37"— así que un consumidor
+  // que las parsee con el formato de la otra se lleva una sorpresa. Se dejan
+  // crudas justamente para que esa diferencia sea visible en vez de que la
+  // ocultemos normalizando. `null` si el SII no informa.
+  fechaRecepcion: string | null;
+  fechaAcuse: string | null;
+
+  // IVA que NO da derecho a crédito fiscal, con el código del SII que dice POR
+  // QUÉ no lo da. El código va crudo: traducirlo sería inventar una tabla que no
+  // tenemos, y el motivo cambia el tratamiento contable.
+  montoIvaNoRecuperable: number;
+  codigoIvaNoRecuperable: number | null;
+
+  // Compra de activo fijo: se declara aparte del gasto corriente.
+  montoNetoActivoFijo: number;
+  montoIvaActivoFijo: number;
+
+  // IVA de uso común (se prorratea entre operaciones afectas y exentas) e
+  // impuesto sin derecho a crédito.
+  montoIvaUsoComun: number;
+  montoSinDerechoACredito: number;
+
+  // IVA que correspondía retener y no se retuvo.
+  montoIvaNoRetenido: number;
+
+  // Impuestos específicos al tabaco, que el SII informa por categoría.
+  montoTabacoPuros: number;
+  montoTabacoCigarrillos: number;
+  montoTabacoElaborado: number;
+
+  // NO están los "otros impuestos" (código, valor y tasa) que sí muestra el
+  // export del portal, y es deliberado. Los candidatos del JSON son `detTpoImp`,
+  // `detTasaImp` y `totalDtoiMontoImp`, pero en los documentos relevados
+  // `detTpoImp` vale 1 con `detTasaImp` en null — o sea que el 1 parece ser
+  // "IVA normal" y no un código de otro impuesto. Mapearlo así publicaría un
+  // "otro impuesto código 1" en CADA documento, y alguien lo buscaría en una
+  // tabla donde no está.
+  //
+  // Para cerrarlo hace falta un documento que SÍ tenga otro impuesto —
+  // combustibles, bebidas alcohólicas— contra el cual verificar el mapeo. Sin
+  // ese caso, adivinar es peor que no publicarlo.
+
+  // Clasificación de la transacción que hace el SII (el "Tipo Compra" del
+  // portal). Código crudo por la misma razón que el de IVA no recuperable.
+  tipoTransaccion: number | null;
+}
+
+// Una empresa que el RUT autenticado puede consultar en el registro de compras
+// y ventas.
+export interface EmpresaAutorizadaRcv {
+  // RUT con dígito verificador, como lo informa el SII.
+  rut: string;
+  // El SII NO informa la razón social ni los privilegios por esta vía: vienen
+  // null en todas las filas relevadas, así que se exponen como null en vez de
+  // omitirse. Omitirlos daría a entender que el dato no existe; en null se ve
+  // que el dato existe y esta consulta no lo trae.
+  //
+  // Para el nombre hay otras vías (`/v1/contribuyente/situacion-tributaria`
+  // devuelve la razón social de cualquier RUT sin credencial).
+  razonSocial: string | null;
+  privilegios: string | null;
+  // Fechas de desautorización, si el SII las informa. `null` es lo normal y
+  // significa que la autorización sigue vigente.
+  fechaDesautorizacionUsuario: string | null;
+  fechaDesautorizacionEmpresa: string | null;
+}
+
+// Un tipo de documento del catálogo del RCV.
+export interface TipoDocumentoRcv {
+  codigo: number;
+  nombre: string;
+  // Cómo ingresó el documento al registro, en la nomenclatura del SII
+  // ("DET_ELE" electrónico, "DET_PAP" papel). Se expone crudo: es el valor con
+  // el que el propio portal distingue los dos mundos, y traducirlo sería
+  // inventar una taxonomía nuestra.
+  tipoIngreso: string | null;
 }
 
 export interface DetalleRcv {
@@ -163,6 +262,16 @@ const NAMESPACE = 'cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService
 // Constante del portal (ESTADO_CONTAB_REGISTRO). Existen otros estados que no
 // se relevaron, así que se manda siempre este.
 const ESTADO_CONTAB = 'REGISTRO';
+
+// El facade exige un período en TODAS sus llamadas, incluso donde no filtra nada
+// —como la lista de empresas autorizadas—. Tiene que ser uno con forma válida;
+// cuál es da igual, porque no filtra.
+//
+// Es una CONSTANTE y no el período en curso a propósito: con `new Date()` el
+// request al SII dependía del reloj, así que el mismo test pasaba o fallaba según
+// el día, y no había forma de fijar qué se manda. Un período fijo del pasado
+// cumple la única condición que el SII impone (que tenga forma de AAAAMM).
+const PERIODO_PARA_LLAMADAS_SIN_PERIODO = '202501';
 
 // Las notas de crédito **restan**: anulan o rebajan documentos ya emitidos. El
 // SII las devuelve como una fila más, con montos positivos, exactamente igual
@@ -280,7 +389,7 @@ export class RcvScraper {
         totalDocumentos: 0,
         actualizadoAl: null,
         filas: [],
-        totales: { neto: 0, exento: 0, iva: 0, total: 0 },
+        totales: { neto: 0, exento: 0, iva: 0, total: 0, ivaUsoComun: 0, ivaNoRecuperable: 0 },
         totalesConfiables: true,
         tiposDesconocidos: [],
         advertencias: [],
@@ -307,6 +416,71 @@ export class RcvScraper {
         'Revisá los totales antes de usarlos.'
       ),
     };
+  }
+
+  // Catálogo de tipos de documento del RCV: los 46 códigos que el registro
+  // conoce, con su nombre. Resuelve un problema concreto del consumidor —
+  // `detalle` EXIGE un `tipoDocCodigo` y no existe "el detalle del período
+  // entero", así que sin este catálogo hay que adivinar los códigos o sacarlos
+  // de un resumen que sólo lista los tipos CON movimiento en ese período.
+  //
+  // Ojo con lo que NO resuelve: el catálogo trae código y nombre, no el SIGNO
+  // del documento. Saber que existe el tipo 61 no dice que las notas de crédito
+  // resten, así que `TIPOS_NOTA_CREDITO` sigue siendo la fuente de eso y
+  // `totalesConfiables` sigue significando lo mismo.
+  //
+  // Va con `data` VACÍO, no con el scope de las otras llamadas: así lo llama el
+  // portal (`getDatosInicio({}, null)` en su bundle) y con el scope de las demás
+  // el SII no devuelve JSON. El catálogo no depende de empresa ni de período.
+  async tiposDocumento(): Promise<TipoDocumentoRcv[]> {
+    this.session.assertPuedeEntregarCookieJar();
+
+    const resp = await this.http.postSdi(BASE, NAMESPACE, 'getDatosInicio', {});
+    const filas = Array.isArray(resp?.data) ? resp.data : [];
+    return filas.map((f: any) => ({
+      codigo: Number(f.dcvCodigoDoc),
+      nombre: (f.dcvNombreDoc ?? '').trim(),
+      tipoIngreso: f.dcvTipoIngreso ?? null,
+    }));
+  }
+
+  // Empresas que el RUT autenticado puede consultar en el registro de compras y
+  // ventas. Es un universo DISTINTO del de `mipyme/list-empresas`: ése son las
+  // empresas que la persona puede operar en el portal de facturación gratuita, y
+  // éste las que puede consultar en el RCV. Un RUT puede estar en una lista y no
+  // en la otra, así que no se unifican.
+  //
+  // No lleva período ni operación: la autorización no depende de eso. Se mandan
+  // igual en el sobre porque el facade los pide en todas sus llamadas.
+  async empresasAutorizadas(): Promise<EmpresaAutorizadaRcv[]> {
+    this.session.assertPuedeEntregarCookieJar();
+    const { rut, dv } = this.session.identidad();
+
+    const resp = await this.http.postSdi(BASE, NAMESPACE, 'getDcvEmpresasAutorizadas', {
+      rutEmisor: rut,
+      dvEmisor: dv,
+      // El facade exige estos dos en todas sus llamadas aunque acá no filtren
+      // nada: sin ellos responde un error de parámetros, no una lista completa.
+      ptributario: PERIODO_PARA_LLAMADAS_SIN_PERIODO,
+      estadoContab: ESTADO_CONTAB,
+      operacion: 'COMPRA',
+    });
+
+    const filas = Array.isArray(resp?.data) ? resp.data : [];
+    return filas.map((f: any) => ({
+      // Se prefiere `usrEmpRutDv`, que el SII ya manda formateado, y se arma a
+      // mano sólo si no viene: repetir el formateo cuando el dato ya está
+      // formateado es una fuente de discrepancias tontas.
+      //
+      // Si no viene NINGUNA de las tres claves, el fallback daba la cadena "-",
+      // que viajaba hasta el consumidor como si fuera un RUT. Se devuelve cadena
+      // vacía: es evidentemente "sin dato" y no se confunde con un RUT.
+      rut: f.usrEmpRutDv ?? (f.usrEmpRut ? `${f.usrEmpRut}-${f.usrEmpDv ?? ''}` : ''),
+      razonSocial: f.razonSocONombreEmp ?? null,
+      privilegios: f.usrPrivilegios ?? null,
+      fechaDesautorizacionUsuario: f.usrFechaDesautorizacion ?? null,
+      fechaDesautorizacionEmpresa: f.empFechaDesautorizacion ?? null,
+    }));
   }
 
   // Detalle documento por documento. A diferencia del resumen, el SII exige el
@@ -424,6 +598,28 @@ export class RcvScraper {
       referenciaTipoDoc: d.detTipoDocRef ? Number(d.detTipoDocRef) : null,
       referenciaFolio: d.detFolioDocRef ? Number(d.detFolioDocRef) : null,
       eventoReceptor: d.detEventoReceptorLeyenda ?? null,
+
+      // Los montos van con `?? 0`: el SII manda 0 cuando el concepto no aplica,
+      // y ahí el cero ES el dato. Los CÓDIGOS van con `null`, porque un 0 en un
+      // código no es "código cero", es "no hay" — y publicarlo como número haría
+      // que alguien lo busque en una tabla donde no está.
+      fechaRecepcion: d.detFecRecepcion ?? null,
+      fechaAcuse: d.detFecAcuse ?? null,
+      montoIvaNoRecuperable: Number(d.detMntIVANoRec ?? 0),
+      codigoIvaNoRecuperable: d.detMntCodNoRec ? Number(d.detMntCodNoRec) : null,
+      montoNetoActivoFijo: Number(d.detMntActFijo ?? 0),
+      montoIvaActivoFijo: Number(d.detMntIVAActFijo ?? 0),
+      montoIvaUsoComun: Number(d.detIVAUsoComun ?? 0),
+      montoSinDerechoACredito: Number(d.detMntSinCredito ?? 0),
+      montoIvaNoRetenido: Number(d.detIVANoRetenido ?? 0),
+      montoTabacoPuros: Number(d.detTabPuros ?? 0),
+      montoTabacoCigarrillos: Number(d.detTabCigarrillos ?? 0),
+      montoTabacoElaborado: Number(d.detTabElaborado ?? 0),
+      // Truthy y no `!= null`, igual que los otros códigos: el SII manda cadena
+      // vacía en varios campos (`detTipoDocRef` entre ellos), y `Number("")` es
+      // 0 — o sea que con `!= null` se publicaba un "código cero" en documentos
+      // que no traen el dato, justo lo que el comentario de arriba dice evitar.
+      tipoTransaccion: d.detTipoTransaccion ? Number(d.detTipoTransaccion) : null,
     };
   }
 
@@ -437,6 +633,8 @@ export class RcvScraper {
       montoExento: Number(f.rsmnMntExe ?? 0),
       montoIva: Number(f.rsmnMntIVA ?? 0),
       montoTotal: Number(f.rsmnMntTotal ?? 0),
+      montoIvaUsoComun: Number(f.rsmnIVAUsoComun ?? 0),
+      montoIvaNoRecuperable: Number(f.rsmnMntIVANoRec ?? 0),
       esNotaCredito: TIPOS_NOTA_CREDITO.includes(tipoDocCodigo),
       tipoDesconocido:
         !TIPOS_NOTA_CREDITO.includes(tipoDocCodigo) &&
@@ -459,8 +657,10 @@ export class RcvScraper {
         exento: acc.exento + signo * f.montoExento,
         iva: acc.iva + signo * f.montoIva,
         total: acc.total + signo * f.montoTotal,
+        ivaUsoComun: acc.ivaUsoComun + signo * f.montoIvaUsoComun,
+        ivaNoRecuperable: acc.ivaNoRecuperable + signo * f.montoIvaNoRecuperable,
       };
-    }, { neto: 0, exento: 0, iva: 0, total: 0 });
+    }, { neto: 0, exento: 0, iva: 0, total: 0, ivaUsoComun: 0, ivaNoRecuperable: 0 });
   }
 
   // `true` si la respuesta trae datos, `false` si es un vacío legítimo. Todo lo

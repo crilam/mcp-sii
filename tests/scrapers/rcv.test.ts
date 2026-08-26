@@ -60,6 +60,8 @@ describe('RcvScraper.resumen', () => {
       montoExento: 0,
       montoIva: 19000000,
       montoTotal: 119000000,
+      montoIvaUsoComun: 0,
+      montoIvaNoRecuperable: 0,
       esNotaCredito: false,
       tipoDesconocido: false,
     });
@@ -81,6 +83,11 @@ describe('RcvScraper.resumen', () => {
       // 19.000.000 − 1.900.000.
       iva: 17100000,
       total: 108600000,
+      // El fixture no tiene IVA de uso común ni no recuperable, así que suman 0.
+      // Se listan igual: si mañana el fixture los trae y el signo de las notas
+      // de crédito no se aplicara, este test lo muestra.
+      ivaUsoComun: 0,
+      ivaNoRecuperable: 0,
     });
     // La suma ingenua (sin restar) daría estos otros valores.
     expect(resumen.totales.neto).not.toBe(110000000);
@@ -110,6 +117,8 @@ describe('RcvScraper.resumen', () => {
       montoExento: 0,
       montoIva: 380000,
       montoTotal: 2380000,
+      montoIvaUsoComun: 0,
+      montoIvaNoRecuperable: 0,
       esNotaCredito: false,
       tipoDesconocido: false,
     });
@@ -128,6 +137,8 @@ describe('RcvScraper.resumen', () => {
       exento: 100000,
       iva: 10830000,
       total: 66930000,
+      ivaUsoComun: 0,
+      ivaNoRecuperable: 0,
     });
     // La suma ingenua (sin restar la nota de crédito) daría estos otros.
     expect(resumen.totales.neto).not.toBe(58000000);
@@ -221,7 +232,7 @@ describe('RcvScraper.resumen', () => {
     expect(resumen.sinDatos).toBe(true);
     expect(resumen.filas).toEqual([]);
     expect(resumen.totalDocumentos).toBe(0);
-    expect(resumen.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0 });
+    expect(resumen.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0, ivaUsoComun: 0, ivaNoRecuperable: 0 });
   });
 
   // Código 2: error real. Tratarlo como vacío lo escondería detrás de un
@@ -255,7 +266,7 @@ describe('RcvScraper.resumen', () => {
 
     expect(resumen.sinDatos).toBe(true);
     expect(resumen.filas).toEqual([]);
-    expect(resumen.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0 });
+    expect(resumen.totales).toEqual({ neto: 0, exento: 0, iva: 0, total: 0, ivaUsoComun: 0, ivaNoRecuperable: 0 });
     // El vacío se puede explicar: no es lo mismo que un mes reciente sin
     // actividad, que llega sin mensaje.
     expect(resumen.mensaje).toMatch(/mayor igual a 201705/);
@@ -397,6 +408,26 @@ describe('RcvScraper.detalle', () => {
       referenciaTipoDoc: 33,
       referenciaFolio: 900000000,
       eventoReceptor: null,
+      // Campos tributarios que el SII ya mandaba en esta misma respuesta y antes
+      // se descartaban. Los ceros son dato: el SII manda 0 cuando el concepto no
+      // aplica al documento. Los códigos van en null porque un 0 ahí no es
+      // "código cero", es "no hay".
+      //
+      // `fechaRecepcion` trae HORA y `fechaEmision` no: son formatos distintos
+      // en la misma fila, y se dejan crudos para que la diferencia se vea.
+      fechaRecepcion: '23/06/2026 12:51:37',
+      fechaAcuse: null,
+      montoIvaNoRecuperable: 0,
+      codigoIvaNoRecuperable: null,
+      montoNetoActivoFijo: 0,
+      montoIvaActivoFijo: 0,
+      montoIvaUsoComun: 0,
+      montoSinDerechoACredito: 0,
+      montoIvaNoRetenido: 0,
+      montoTabacoPuros: 0,
+      montoTabacoCigarrillos: 0,
+      montoTabacoElaborado: 0,
+      tipoTransaccion: 1,
     });
   });
 
@@ -580,5 +611,114 @@ describe('RcvScraper.detalle', () => {
 
     await expect(scraper.detalle('202607', 'VENTA', 110)).rejects.toThrow(/certificado/);
     expect(http.postSdi).not.toHaveBeenCalled();
+  });
+  // El criterio que separa un cero informado de un dato ausente, y que es el que
+  // hace utilizable este detalle para armar un F29: los MONTOS van en 0 porque
+  // el SII manda 0 cuando el concepto no aplica —ahí el cero ES el dato—, y los
+  // CÓDIGOS van en null, porque un 0 en un código no es "código cero" sino "no
+  // hay", y publicarlo como número manda a buscarlo en una tabla donde no está.
+  it('distingue un monto en cero de un código ausente', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-compra.json'));
+
+    const detalle = await scraper.detalle('202606', 'COMPRA', 61, '22222222-2');
+    const doc = detalle.documentos[0];
+
+    expect(doc.montoIvaNoRecuperable).toBe(0);
+    expect(doc.montoIvaUsoComun).toBe(0);
+    expect(doc.codigoIvaNoRecuperable).toBeNull();
+  });
+
+  // Las dos fechas del documento NO comparten formato: la de emisión es
+  // DD/MM/AAAA y la de recepción trae hora. Se dejan crudas a propósito, así que
+  // esto lo fija — normalizar una de las dos escondería la diferencia y un
+  // consumidor que parsee las dos igual fallaría recién en producción.
+  it('conserva el formato de cada fecha tal como lo manda el SII', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-compra.json'));
+
+    const doc = (await scraper.detalle('202606', 'COMPRA', 61, '22222222-2')).documentos[0];
+
+    expect(doc.fechaEmision).toBe('23/06/2026');
+    expect(doc.fechaRecepcion).toBe('23/06/2026 12:51:37');
+  });
+});
+
+// Los dos parseos nuevos mapean claves crudas del SII, así que se testean contra
+// una respuesta real y no sólo mockeando el core: el propio spec de la ronda dice
+// que publicar una ruta cuyo parseo nadie verificó es cómo se llega a un endpoint
+// que devuelve datos plausibles y mal.
+describe('RcvScraper.empresasAutorizadas', () => {
+  it('mapea las claves del SII y conserva los null como null', async () => {
+    const { scraper } = makeScraper(fixture('rcv-empresas-autorizadas.json'));
+
+    const empresas = await scraper.empresasAutorizadas();
+
+    expect(empresas).toHaveLength(2);
+    // El SII no informa razón social ni privilegios en la mayoría de las filas:
+    // van en null y NO se omiten, para que se vea que el dato existe y esta
+    // consulta no lo trae.
+    expect(empresas[0]).toEqual({
+      rut: '22222222-2',
+      razonSocial: null,
+      privilegios: null,
+      fechaDesautorizacionUsuario: null,
+      fechaDesautorizacionEmpresa: null,
+    });
+  });
+
+  // Cuando el SII sí manda esos campos, se pasan tal cual: la fecha cruda, sin
+  // convertir, igual que en el resto del dominio.
+  it('expone privilegios y fecha de desautorización cuando vienen', async () => {
+    const { scraper } = makeScraper(fixture('rcv-empresas-autorizadas.json'));
+
+    const empresas = await scraper.empresasAutorizadas();
+
+    expect(empresas[1].privilegios).toBe('CONSULTA');
+    expect(empresas[1].fechaDesautorizacionEmpresa).toBe('01/01/2026');
+    expect(empresas[1].razonSocial).toBe('EMPRESA DE EJEMPLO SPA');
+  });
+
+  // El SII manda `usrEmpRutDv` ya formateado; armarlo a mano cuando el dato viene
+  // hecho es fuente de discrepancias tontas. El fallback existe sólo para cuando
+  // NO viene, y esto lo fija.
+  it('arma el RUT a mano sólo si el SII no lo manda formateado', async () => {
+    const { scraper } = makeScraper(fixture('rcv-empresas-autorizadas.json'));
+
+    const empresas = await scraper.empresasAutorizadas();
+
+    // La primera fila trae usrEmpRutDv y se usa tal cual.
+    expect(empresas[0].rut).toBe('22222222-2');
+    // La segunda lo trae en null, así que se arma con cuerpo y dígito.
+    expect(empresas[1].rut).toBe('33333333-3');
+  });
+});
+
+describe('RcvScraper.tiposDocumento', () => {
+  it('mapea el catálogo y limpia el nombre', async () => {
+    const { scraper } = makeScraper(fixture('rcv-tipos-documento.json'));
+
+    const tipos = await scraper.tiposDocumento();
+
+    expect(tipos).toHaveLength(3);
+    // El SII manda el nombre con espacios al final en algunas filas.
+    expect(tipos[1]).toEqual({
+      codigo: 33,
+      nombre: 'Factura Electrónica',
+      tipoIngreso: 'DET_ELE',
+    });
+    // `tipoIngreso` en null cuando el SII no lo informa: es el valor con el que
+    // el propio portal distingue electrónico de papel, así que no se inventa.
+    expect(tipos[2].tipoIngreso).toBeNull();
+  });
+
+  // El catálogo no depende de empresa ni de período, y el portal lo pide con
+  // `data` VACÍO: con el scope de las otras llamadas el SII no devuelve JSON.
+  it('pide el catálogo con data vacío', async () => {
+    const { scraper, http } = makeScraper(fixture('rcv-tipos-documento.json'));
+
+    await scraper.tiposDocumento();
+
+    const [, , metodo, data] = (http.postSdi as jest.Mock).mock.calls[0];
+    expect(metodo).toBe('getDatosInicio');
+    expect(data).toEqual({});
   });
 });

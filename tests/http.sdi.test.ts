@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import { SiiHttpClient } from '../src/http';
 import { SessionManager } from '../src/session';
+import { LimiteDeConsultasSii } from '../src/erroresConsulta';
 
 jest.mock('child_process');
 jest.mock('../src/session');
@@ -129,5 +130,43 @@ describe('SiiHttpClient.postSdi', () => {
 
     await expect(client.postSdi(BASE, NAMESPACE, 'buscaDeclVgte', {}))
       .rejects.toThrow(/no devolvió JSON/);
+  });
+});
+
+// El SII corta por volumen devolviendo una PÁGINA HTML, no un status 429, así
+// que sin mirar el cuerpo es indistinguible de "la sesión expiró". Y las dos
+// cosas piden lo contrario: una que esperes, la otra que reintentes ya.
+describe('SiiHttpClient.postSdi ante el corte por volumen del SII', () => {
+  it('distingue el error 429 del SII de una sesión expirada', async () => {
+    const { client } = makeClient();
+    mockExec.mockReturnValue(
+      '<html><body><div>Error 429: Se ha superado el límite de consultas</div></body></html>' as never
+    );
+
+    await expect(client.postSdi(BASE, NAMESPACE, 'getResumen', {}))
+      .rejects.toThrow(LimiteDeConsultasSii);
+  });
+
+  it('reconoce también la variante sin el número, por si cambia el copy', async () => {
+    const { client } = makeClient();
+    mockExec.mockReturnValue(
+      '<html><body>Se ha superado el limite permitido</body></html>' as never
+    );
+
+    await expect(client.postSdi(BASE, NAMESPACE, 'getResumen', {}))
+      .rejects.toThrow(LimiteDeConsultasSii);
+  });
+
+  // El HTML del login NO es un corte por volumen: ahí sí corresponde el error
+  // genérico, porque reintentar (reautenticando) es lo que arregla el caso.
+  it('el HTML del login sigue siendo el error genérico', async () => {
+    const { client } = makeClient();
+    mockExec.mockReturnValue(
+      '<html><body><form action="CAutInicio.cgi">Ingrese su clave</form></body></html>' as never
+    );
+
+    const fallo = client.postSdi(BASE, NAMESPACE, 'getResumen', {});
+    await expect(fallo).rejects.toThrow(/no devolvió JSON/);
+    await expect(fallo).rejects.not.toThrow(LimiteDeConsultasSii);
   });
 });

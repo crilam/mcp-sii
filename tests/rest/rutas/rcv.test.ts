@@ -19,9 +19,14 @@ function armarRouter() {
 describe('registrarRutasRcv', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra POST /v1/rcv/resumen y POST /v1/rcv/detalle', () => {
+  it('registra las 4 rutas bajo /v1/rcv', () => {
     const rutas = armarRouter();
-    expect([...rutas.keys()]).toEqual(['POST /v1/rcv/resumen', 'POST /v1/rcv/detalle']);
+    expect([...rutas.keys()]).toEqual([
+      'POST /v1/rcv/resumen',
+      'POST /v1/rcv/empresas-autorizadas',
+      'POST /v1/rcv/tipos-documento',
+      'POST /v1/rcv/detalle',
+    ]);
   });
 
   it('resumen: body válido llama al core y devuelve {ok:true, ...datos}', async () => {
@@ -152,5 +157,58 @@ describe('registrarRutasRcv', () => {
 
     expect(respuesta.status).toBe(400);
     expect(core.resumen).not.toHaveBeenCalled();
+  });
+  // Las empresas autorizadas del RCV NO son las mismas que las de mipyme: éstas
+  // son las que el RUT puede CONSULTAR en el registro, y las de mipyme las que
+  // puede OPERAR en el portal de facturación. Confundirlas haría que un
+  // consumidor ofrezca facturar por una empresa que sólo puede mirar.
+  it('empresas-autorizadas: llama al core y envuelve la lista en datos', async () => {
+    (core.empresasAutorizadas as jest.Mock).mockResolvedValue([
+      { rut: '22222222-2', razonSocial: null, privilegios: null,
+        fechaDesautorizacionUsuario: null, fechaDesautorizacionEmpresa: null },
+    ]);
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/rcv/empresas-autorizadas')!(
+      { rut: '11.111.111-1', clave: 'secreta' }
+    );
+
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+    // Se envuelve en `datos` porque el core devuelve un array: es el contrato
+    // general de `ejecutar`.
+    expect(r.body.datos).toHaveLength(1);
+  });
+
+  it('empresas-autorizadas: sin credencial no llama al core', async () => {
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/rcv/empresas-autorizadas')!({ rut: '11.111.111-1' });
+
+    expect(r.status).toBe(400);
+    expect(core.empresasAutorizadas).not.toHaveBeenCalled();
+  });
+  // El catálogo existe porque `detalle` exige un tipo de documento y no hay
+  // "detalle del período entero": sin esto el consumidor adivina los códigos.
+  it('tipos-documento: llama al core y envuelve el catálogo en datos', async () => {
+    (core.tiposDocumento as jest.Mock).mockResolvedValue([
+      { codigo: 33, nombre: 'Factura Electrónica', tipoIngreso: 'DET_ELE' },
+    ]);
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/rcv/tipos-documento')!(
+      { rut: '11.111.111-1', clave: 'secreta' }
+    );
+
+    expect(r.status).toBe(200);
+    expect(r.body.datos).toHaveLength(1);
+  });
+  it('tipos-documento: sin credencial no llama al core', async () => {
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/rcv/tipos-documento')!({ rut: '11.111.111-1' });
+
+    expect(r.status).toBe(400);
+    expect(core.tiposDocumento).not.toHaveBeenCalled();
   });
 });

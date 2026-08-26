@@ -1,3 +1,4 @@
+import { SesionesSimultaneas } from '../../../src/erroresConsulta';
 import { registrarRutasSesion, validarClave } from '../../../src/rest/rutas/sesion';
 import { RegistroSesiones } from '../../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
@@ -172,5 +173,22 @@ describe('validarClave', () => {
 
     // Y después de terminar, no queda nada guardado.
     await expect(credenciales.para('11.111.111-1')).rejects.toThrow();
+  });
+  // validar-clave es la ruta que Tributy llama sincrónicamente para decidir si
+  // GUARDA una clave, así que el bloqueo por sesiones simultáneas no puede salir
+  // como ERROR genérico: se leería como "no pudimos validar, la clave es dudosa"
+  // cuando la clave puede estar perfecta y lo que pasa es que hay otra consulta
+  // en curso sobre el mismo RUT.
+  it('el bloqueo por sesiones simultáneas sale con su propio código', async () => {
+    const authenticateOnly = jest.fn().mockRejectedValue(
+      new SesionesSimultaneas('el RUT ya tiene demasiadas sesiones abiertas')
+    );
+    const logout = jest.fn().mockResolvedValue(undefined);
+    const registro = armarRegistro({ authenticateOnly, logout });
+    const credenciales = new ProveedorCredencialesRuntime();
+
+    const resultado = await validarClave('11.111.111-1', 'secreta', registro, credenciales);
+
+    expect(resultado).toEqual({ ok: false, error: 'SESIONES_SIMULTANEAS' });
   });
 });

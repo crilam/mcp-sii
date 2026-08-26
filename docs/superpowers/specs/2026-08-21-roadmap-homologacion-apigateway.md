@@ -1,12 +1,17 @@
 # Roadmap — Homologación del catálogo apigateway.cl en mcp-sii
 
+> **Revisado el 2026-08-26.** La versión del 21-08 tenía dos supuestos que
+> dejaron de ser ciertos en cinco días; están corregidos abajo y marcados con
+> «CORRECCIÓN». Es el motivo por el que este roadmap NO especifica las rondas
+> lejanas: envejecen mal. Cada ronda se especifica al empezar.
+
 ## Objetivo
 
 Replicar en mcp-sii la FUNCIONALIDAD del catálogo de apigateway.cl (v1 legacy /
-v2), exponiéndola por REST (multi-tenant, pass-through de certificado) y MCP,
-sobre la arquitectura de sesión + scraping + `SiiHttpClient` existente. Formato
-propio de mcp-sii (`{ok, ...datos}`, rutas `/v1/<dominio>/<accion>`), no
-compatibilidad literal de rutas con apigateway (decisión previa del usuario).
+v2), exponiéndola por REST (multi-tenant) y MCP, sobre la arquitectura de
+sesión + scraping + `SiiHttpClient` existente. Formato propio de mcp-sii
+(`{ok, ...datos}`, rutas `/v1/<dominio>/<accion>`), no compatibilidad literal
+de rutas con apigateway (decisión previa del usuario).
 
 ## Universo (104 endpoints del catálogo v2, superset de v1)
 
@@ -14,81 +19,142 @@ SII: dte 16, rcv 12, mipyme 11, bienes_raices 10, bte 9, bhe 9, eboleta 7,
 indicadores 6, f29 5, vehiculos 4, rtc 4, misii 4, contribuyentes 3.
 No-SII: previred 3, connections 1 (infra del gateway, fuera de alcance).
 
+**El conteo es de segunda mano y conviene tratarlo como orientativo.** La
+documentación de apigateway es una SPA: no se puede enumerar por fetch, y los
+intentos de traerla devuelven el landing. Por eso **la primera tarea de cada
+ronda es relevar su dominio contra la documentación real** (con navegador) y
+ajustar el alcance antes de escribir código. Planificar sobre un conteo que
+nadie puede verificar es cómo se llega a una ronda que "faltaba la mitad".
+
+Tampoco hay correspondencia 1:1 con nuestras rutas: `/v1/bhe/resumen` cubre de
+una lo que allá son varias llamadas, y tenemos cosas que ese catálogo no
+tiene —renta (`f22`, estado de declaración) y `validar-clave`.
+
 ## Dos mundos por arquitectura
 
-**Mundo A — replicable con scraping del portal + certificado (lo que mcp-sii ya
-hace).** Consulta y escritura vía el portal web del SII. Es el grueso del
-roadmap.
+**Mundo A — replicable con scraping del portal (lo que mcp-sii ya hace).**
+Consulta y escritura vía el portal web del SII. Es el grueso del roadmap.
 
 **Mundo B — requiere un cliente de las APIs OFICIALES del SII con firma digital
 y folios CAF** (lo que apigateway construyó como LibreDTE). NO es scraping: es
 firmar XML DTE, solicitar/usar CAF, enviar al SII y consultar acuses. Es un
-proyecto del tamaño de un producto. Se especifica aparte, después del mundo A.
-Incluye: **dte/caf, dte emisión y envío, bte (emisión/recepción), eboleta
-(emisión), rtc/cesiones (factoring electrónico)**.
+proyecto del tamaño de un producto. Incluye: **dte/caf, dte emisión y envío,
+bte (emisión/recepción), eboleta (emisión), rtc/cesiones**.
+
+**CORRECCIÓN (2026-08-26) sobre el dominio `dte`:** la doc de apigateway lo
+describe como «verificación de DTE, obtención de archivo CAF, folios
+disponibles y anulación de folios». O sea que sus 16 endpoints son casi todos
+mundo B, y NO son el equivalente de nuestras rutas `/v1/dte/list-*`, que son
+consultas del portal. Por eso `dte` no abre las rondas pese a ser el dominio
+más grande: se ordena por tamaño **dentro del mundo A**.
 
 **Fuera de alcance permanente:** previred (fuente distinta al SII),
 connections (billing del propio gateway).
 
-## Prerrequisito — HECHO ✅
+## Estado real a 2026-08-26
 
-**Fase 0: pass-through de certificado** (PRs #41-#43, en prod y verificado).
-El REST recibe el `.pfx` en base64 + password por request y arma sesión por
-certificado. Arregló además el bug de prod (rutas por credencial no
-funcionaban). El clave pass-through se descartó (queue-it + F5 WAF, sin sesión
-reutilizable — ver spec del sub-proyecto 1).
+En producción, 19 rutas REST:
 
-## Sub-proyectos (orden de ejecución, lectura primero)
+| Dominio | Rutas hoy |
+|---|---|
+| bhe | resumen, resumen-recibidas, list-emitidas, list-recibidas, pdf |
+| dte | list-documentos-{emitidos,recibidos}, get-documento-{emitido,recibido} |
+| rcv | resumen, detalle |
+| renta | estado-declaracion, f22 |
+| mipyme | list-empresas, list-dte-emitidos, emitir-dte (sólo previsualización) |
+| persona | bienes-raices |
+| contribuyente | situacion-tributaria |
+| sesion | validar-clave |
 
-Cada uno = su propia spec + plan + ejecución SDD + PR(s) + deploy. Cada uno
-produce software funcionando y verificable en prod.
+**CORRECCIÓN (2026-08-26) — el pass-through por clave SÍ funciona.** La versión
+anterior decía que se había descartado (queue-it + F5 WAF, sin sesión
+reutilizable). Eso cambió: desde el PR #55, todas las rutas de consulta aceptan
+**clave tributaria O certificado**, verificado contra el SII real atravesando
+los handlers REST. El certificado quedó como requisito de una sola ruta,
+`mipyme/emitir-dte`, porque firmar necesita el certificado de verdad.
 
-### SP1 — Empresa/consulta (EN CURSO, Fase 0 hecha)
-Spec: `2026-08-21-homologacion-empresa-lectura-design.md`. Dominios: **rcv async,
-f29, mipyme lectura restante, contribuyentes públicos**. Mundo A, lectura.
-Estado: Fase 0 en prod; faltan los 4 dominios.
+Es la corrección que más afecta al roadmap: los dominios que se planificaban
+"sólo con certificado" pueden hacerse con clave, que es la credencial que los
+usuarios de Tributy ya tienen cargada. **Toda ronda nueva nace con
+`conCredencial` (clave o certificado), no con `zodCredencialCert`.**
 
-### SP2 — Persona/consulta
-**bhe lectura restante** (pdf, consultas_por_terceros), **misii**
-(representantes, representados, datos del contribuyente), **bienes_raices
-restante** (comunas, certificados de avalúo/antecedentes: data y pdf).
-Mundo A, lectura. Reusa el camino binario (getBuffer) de SP1.
+## Rondas (mundo A, por tamaño de dominio)
 
-### SP3 — Indicadores y catálogos públicos
-**indicadores** (uf, corrección monetaria, impuesto 2da categoría),
-**vehiculos** (tasación, categorías). Sin credencial (páginas públicas del SII).
-Mundo A, lectura. Los más simples; útiles como fuente única.
+Cada ronda = relevamiento + spec + plan + ejecución + PR(s) + deploy +
+verificación en prod + aviso a los consumidores si cambia el contrato.
 
-### SP4 — Escritura de portal (mundo A, escritura)
-Lo que se emite/modifica VÍA EL PORTAL con certificado, sin CAF:
-**mipyme borradores** (emitir/eliminar), **bhe emitidas** (emitir/anular),
-**rcv** (set_tipo_transaccion, set_resumen). Requiere idempotencia y
-confirmaciones explícitas (acto real e irreversible). Spec con cuidado extra.
+| # | Dominio | En catálogo | Hoy | Notas |
+|---|---|---:|---:|---|
+| **R1** | **rcv** | 12 | 2 | RCV asíncrono (el SII procesa detalles grandes en background) y escritura de registro. Ya especificado en parte, ver ronda 1. |
+| R2 | mipyme | 11 | 3 | Lectura restante (info-contribuyente, list-dte-recibidos, dte-pdf/xml) y borradores. |
+| R3 | bienes_raices | 10 | 1 | Comunas, certificados de avalúo y antecedentes (data y PDF). |
+| R4 | bhe | 9 | 5 | Consultas por terceros, y la paginación de recibidas >100 que hoy falla explícito. |
+| R5 | indicadores | 6 | 0 | UF, corrección monetaria, impuesto 2ª categoría. **Sin credencial**: páginas públicas. |
+| R6 | f29 | 5 | 0 | Ya especificado en parte en el spec de empresa-lectura. |
+| R7 | vehiculos | 4 | 0 | Tasación, categorías. Sin credencial. |
+| R8 | misii | 4 | 0 | Representantes, representados, datos del contribuyente. |
+| R9 | contribuyentes | 3 | 1 | Los dos restantes. |
+| R10 | dte (parte A) | ? | 4 | Sólo lo que sea consulta de portal. El resto pasa al mundo B. |
+| R11 | Escritura de portal | — | — | bhe emitir/anular, rcv set_tipo_transaccion/set_resumen, mipyme borradores. **Actos reales e irreversibles**: idempotencia y confirmación explícita. Spec con cuidado extra. |
 
-### SP5+ — Mundo B (APIs oficiales + firma + CAF) — spec y arquitectura aparte
-**dte/caf** (solicitud y uso de folios), **dte emisión/envío/acuses**, **bte**,
-**eboleta emisión**, **rtc/cesiones**. Cada uno es grande. Requiere: cliente de
-los web services del SII, firma de XML con el certificado, manejo de CAF,
-y probablemente un rediseño del modelo de credenciales (la firma server-side ya
-existe parcialmente en mipymeHttp para DTE de portal, pero las APIs oficiales
-son otro protocolo). Se decide si encararlo cuando termine el mundo A — puede
-que convenga integrar LibreDTE en vez de reimplementarlo.
+**RE — Evaluación del mundo B.** Antes de comprometer diseño: spike sobre las
+APIs oficiales del SII (firma XML, CAF), y decisión build-vs-integrar LibreDTE
+con criterios escritos. Sale de acá el alcance de las rondas siguientes.
 
-## Principios (heredados de SP1)
+**R12+ — Mundo B**, según lo que decida RE. ~30 endpoints: bte 9, eboleta 7,
+rtc 4, y la parte CAF/emisión de dte.
 
-- REST multi-tenant, pass-through de certificado, auth por API key + rate-limit
-  + auditoría (ya en prod).
-- Contrato `{ok, ...}`; errores `BAD_REQUEST`/`CREDENCIALES_INVALIDAS`/`ERROR`/
-  `NO_ENCONTRADO`/`RUT_INVALIDO`.
+### Por qué este orden, y cuándo romperlo
+
+El criterio es tamaño de dominio dentro del mundo A (decisión del usuario,
+2026-08-26). Tiene una consecuencia que conviene tener a la vista: **deja para
+el final lo más barato**. `indicadores` y `vehiculos` son 10 endpoints de
+páginas públicas, sin credencial ni sesión — las rondas más simples de todo el
+roadmap y las únicas que no tocan el modelo de sesión, que es la parte
+delicada. Si en algún momento hace falta mostrar avance rápido, o entra alguien
+nuevo al proyecto, R5 y R7 son el lugar por donde empezar.
+
+## Principios (heredados, actualizados)
+
+- REST multi-tenant, auth por API key + rate-limit + auditoría (ya en prod).
+- **Credencial: `conCredencial` (clave o certificado)**, salvo que la operación
+  firme. Ver corrección arriba.
+- Contrato `{ok, ...}` con status 200 para los errores de negocio. Códigos:
+  `BAD_REQUEST` (400), `CREDENCIALES_INVALIDAS`, `NO_ENCONTRADO`,
+  `LIMITE_CONOCIDO`, `SESIONES_SIMULTANEAS`, `LIMITE_SII`, `ERROR`. **`RUT_INVALIDO` no
+  existe** — la versión anterior de este roadmap lo listaba; un RUT mal formado
+  es `BAD_REQUEST` con `detalle`.
 - Binarios (pdf/xml) como base64 + contentType, con validación de magic bytes.
-- TDD, un PR por dominio, verificación e2e contra el REST DESPLEGADO (no solo
-  la cadena local — lección de la Fase 0: el body-limit y curl-ausente solo
-  aparecieron en prod).
+- TDD, un PR por dominio, verificación e2e contra el REST **desplegado**.
 - MCP + REST expuestos a la par.
+- **Ningún dato real versionado.** El repo tiene un chequeo de anonimización que
+  corre en CI; ya frenó un RUT de empresa real con su razón social en un
+  fixture. Los RUT de prueba son de dígito repetido.
+- **Los barridos van SUAVES. El SII bloquea a los scrapers.** No es teoría: un
+  relevamiento de la ronda 1 hizo más de doscientas llamadas al portal del RCV
+  en pocos minutos y ese portal terminó respondiendo error a TODO, mientras
+  otros portales del mismo SII seguían contestando bien — o sea que el bloqueo
+  es por servicio y por patrón de uso, no por credencial.
+
+  Y el costo no es sólo perder el relevamiento: un portal bloqueado deja al
+  SERVICIO sin poder consultarlo para los tenants reales. Un barrido descuidado
+  es una caída parcial de producción.
+
+  Las reglas, implementadas en `src/ritmoSii.ts`: en serie nunca en paralelo,
+  pausa de ~1,2 s entre llamadas, tope explícito por corrida, y aviso cuando el
+  tope corta —un barrido truncado en silencio se lee como "no hay datos" cuando
+  en realidad no se llegó a mirar. Si hace falta cubrir más combinaciones, se
+  corre varias veces con distintos parámetros en vez de subir el tope.
+
+  Vale más tardar veinte minutos y obtener el dato que barrer en dos y quedar
+  bloqueado.
+- **Un `null` significa "el SII no informa esto", nunca cero.** Y ante una
+  respuesta que no se puede leer con confianza, se falla explícito en vez de
+  devolver un dato incompleto que se lea como completo.
 
 ## Realidad de esfuerzo
 
-Mundo A (SP1-SP4): factible con la arquitectura actual, semanas de trabajo por
-sub-proyecto. Mundo B (SP5+): proyecto mayor, evaluar build vs integrar
-LibreDTE. "Todos los servicios de apigateway" ≠ una tarea: es este roadmap
-completo, y una parte (mundo B) compite con años de un producto comercial.
+Mundo A (R1-R11): factible con la arquitectura actual, semanas por ronda.
+Mundo B (R12+): proyecto mayor, y una parte compite con años de un producto
+comercial. "Todos los servicios de apigateway" ≠ una tarea: es este roadmap
+completo.
