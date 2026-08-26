@@ -69,7 +69,7 @@ curl -X POST https://mcp-sii.redcomercio.cl/v1/sesion/validar-clave \
 
 Responde `{"ok":true}` o `{"ok":false,"error":"CREDENCIALES_INVALIDAS"}`. Sirve para no guardar una clave que el SII va a rechazar después.
 
-También puede responder `SESIONES_SIMULTANEAS`, y en esta ruta la distinción es la que más importa: **`ERROR` y `SESIONES_SIMULTANEAS` no significan "la clave es dudosa"**. La clave puede estar perfecta y el problema ser que hay otra consulta en curso sobre el mismo RUT. Sólo `CREDENCIALES_INVALIDAS` autoriza a descartar una clave; con los otros dos, reintentá.
+También puede responder `SESIONES_SIMULTANEAS` o `LIMITE_SII`, y en esta ruta la distinción es la que más importa: **ninguno de los tres significa "la clave es dudosa"**. La clave puede estar perfecta y el problema ser que hay otra consulta en curso sobre el mismo RUT, o que el SII nos está cortando por volumen. **Sólo `CREDENCIALES_INVALIDAS` autoriza a descartar una clave**; con los otros tres, reintentá — y con `LIMITE_SII`, esperando minutos.
 
 ---
 
@@ -347,6 +347,20 @@ Tres campos que hay que mirar antes de usar los totales:
 - Cada fila trae además **`montoIvaUsoComun` y `montoIvaNoRecuperable`**, y los totales suman `ivaUsoComun` e `ivaNoRecuperable` con el mismo criterio de signo que el resto (las notas de crédito restan). Son los que faltaban para cuadrar un crédito fiscal.
 - **`sinDatos: true`** es un período legítimamente vacío, no un error.
 - **`esNotaCredito: true`** en una fila significa que **resta** del total.
+
+#### `POST /v1/rcv/tipos-documento`
+
+Sólo `rut` más la credencial. Devuelve `{"ok":true,"datos":[…]}` con los 46 tipos
+de documento que conoce el registro: `codigo`, `nombre` y `tipoIngreso`
+(`DET_ELE` electrónico, `DET_PAP` papel, `RESUMEN` para los totales de boletas —
+crudo, tal como lo llama el SII).
+
+Existe porque `/v1/rcv/detalle` **exige** un `tipo_doc` y no hay "detalle del
+período entero": sin este catálogo hay que adivinar los códigos, o sacarlos de un
+resumen que sólo lista los tipos con movimiento en ese período.
+
+> Trae código y nombre, **no el signo**. Que exista el tipo 61 no dice que las
+> notas de crédito resten: eso lo resuelve el resumen con `esNotaCredito`.
 
 #### `POST /v1/rcv/empresas-autorizadas`
 

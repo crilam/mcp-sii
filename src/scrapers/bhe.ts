@@ -1,6 +1,6 @@
 import { SiiHttpClient } from '../http';
 import { RequiereCertificado, SessionManager } from '../session';
-import { LimitacionConocida, RecursoNoEncontrado } from '../erroresConsulta';
+import { LimitacionConocida, RecursoNoEncontrado, LimiteDeConsultasSii } from '../erroresConsulta';
 
 export interface MesBhe {
   mes: number;
@@ -200,6 +200,15 @@ export class BheScraper {
       // futuro vuelve a pedir el cookie jar sin preguntar antes, el costo tiene
       // que quedar en una sesión, no en dos.
       if (e instanceof RequiereCertificado) throw e;
+      // El corte por volumen del SII tampoco se reintenta, y es el caso donde
+      // reintentar hace MÁS daño: `invalidate()` + `authenticateOnly()` abre una
+      // sesión nueva y repite la consulta contra un portal que justamente está
+      // cortando por exceso de consultas. O sea que el reintento prolonga el
+      // corte que provocó el error.
+      //
+      // No hereda de `LimitacionConocida` —eso lo haría permanente en el
+      // contrato, y esto se arregla esperando—, así que hay que nombrarlo acá.
+      if (e instanceof LimiteDeConsultasSii) throw e;
       this.session.invalidate();
       return intento();
     }

@@ -3,7 +3,7 @@ import * as path from 'path';
 import { BheScraper } from '../../src/scrapers/bhe';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
-import { LimitacionConocida } from '../../src/erroresConsulta';
+import { LimitacionConocida, LimiteDeConsultasSii } from '../../src/erroresConsulta';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -916,5 +916,27 @@ describe('BheScraper ante una sesión caída', () => {
 
     await expect(scraper.informeAnual(2025)).rejects.toThrow(/no devolvió un informe/);
     expect(session.invalidate).toHaveBeenCalledTimes(1);
+  });
+});
+
+// El caso que hacía que el arreglo del corte por volumen se volviera en contra:
+// `conSesionFresca` reintenta todo lo que no sea LimitacionConocida o
+// RequiereCertificado, invalidando la sesión y repitiendo la consulta. Ante un
+// corte por volumen eso abre una sesión nueva y vuelve a pegarle a un portal que
+// está cortando POR exceso de consultas — o sea que el reintento prolonga el
+// corte que provocó el error.
+describe('BheScraper ante el corte por volumen del SII', () => {
+  it('no reintenta ni invalida la sesión: propaga el corte', async () => {
+    const { scraper, session, http } = makeScraper('');
+    (http.get as jest.Mock).mockRejectedValue(
+      new LimiteDeConsultasSii('El SII cortó las consultas por volumen')
+    );
+
+    await expect(scraper.informeAnual(2026)).rejects.toThrow(LimiteDeConsultasSii);
+
+    // Una sola llamada: si hubiera reintentado serían dos, y la segunda contra un
+    // portal que ya está cortando.
+    expect((http.get as jest.Mock).mock.calls).toHaveLength(1);
+    expect(session.invalidate).not.toHaveBeenCalled();
   });
 });

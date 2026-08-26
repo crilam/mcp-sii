@@ -1,4 +1,4 @@
-import { SesionesSimultaneas } from '../../../src/erroresConsulta';
+import { SesionesSimultaneas, LimiteDeConsultasSii } from '../../../src/erroresConsulta';
 import { registrarRutasSesion, validarClave } from '../../../src/rest/rutas/sesion';
 import { RegistroSesiones } from '../../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
@@ -190,5 +190,21 @@ describe('validarClave', () => {
     const resultado = await validarClave('11.111.111-1', 'secreta', registro, credenciales);
 
     expect(resultado).toEqual({ ok: false, error: 'SESIONES_SIMULTANEAS' });
+  });
+  // El corte por volumen del SII, en la ruta donde la distinción más importa: si
+  // llega como ERROR, el tenant no sabe si la clave falló o si el SII nos está
+  // cortando — y en el segundo caso reintentar de inmediato empeora el corte.
+  it('el corte por volumen del SII sale como LIMITE_SII', async () => {
+    const authenticateOnly = jest.fn().mockRejectedValue(
+      new LimiteDeConsultasSii('El SII cortó las consultas por volumen')
+    );
+    const logout = jest.fn().mockResolvedValue(undefined);
+    const registro = armarRegistro({ authenticateOnly, logout });
+    const credenciales = new ProveedorCredencialesRuntime();
+
+    const resultado = await validarClave('11.111.111-1', 'secreta', registro, credenciales);
+
+    // Lo que NO puede pasar: que se lea como clave inválida y el tenant la borre.
+    expect(resultado).toEqual({ ok: false, error: 'LIMITE_SII' });
   });
 });

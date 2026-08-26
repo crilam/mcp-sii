@@ -7,6 +7,18 @@ import { LimitacionConocida, LimiteDeConsultasSii } from './erroresConsulta';
 // texto solo podría cambiar de copy.
 const LIMITE_DE_CONSULTAS = /Error\s*429|superado el l[ií]mite/i;
 
+// El corte llega como una PÁGINA, así que la marca sólo se busca en respuestas
+// que parezcan HTML. Sin este filtro, buscarla en CUALQUIER cuerpo decodificado
+// descartaba respuestas exitosas: los payloads del SII traen texto libre —glosas
+// de renta, razones sociales, nombres de tipo de documento— y una que dijera
+// "superado el límite" habría hecho tirar todo el resultado como si fuera un
+// corte. Un JSON legítimo no empieza con `<html`.
+function pareceCorteDelSii(texto: string): boolean {
+  const inicio = texto.slice(0, 400);
+  const esHtml = /<\s*(!doctype|html|head|body)\b/i.test(inicio);
+  return esHtml && LIMITE_DE_CONSULTAS.test(texto);
+}
+
 const TIMEOUT_MS = 30_000;
 
 // `execFileSync` corta la salida en 1 MiB por defecto y lanza ENOBUFS. Mientras
@@ -138,7 +150,28 @@ export class SiiHttpClient {
     params?: Record<string, string>
   ): Promise<{ contenido: Buffer; contentType: string }> {
     const query = params ? `?${this.encodeParams(params)}` : '';
-    return this.curlCrudo([`${url}${query}`]);
+    const resp = await this.curlCrudo([`${url}${query}`]);
+
+    // El corte por volumen también hay que detectarlo acá, y no alcanza con
+    // hacerlo en `curl()`: esta vía NO decodifica, así que el PDF de una boleta
+    // pasaba de largo y una página de corte llegaba al scraper como "esto no es
+    // un PDF" — que el envoltorio de BHE reintenta, y termina en ERROR genérico
+    // en vez de LIMITE_SII.
+    //
+    // Sólo se mira si el Content-Type NO es binario: decodificar un PDF para
+    // buscarle texto sería absurdo y caro, y el corte siempre llega como página.
+    if (!/pdf|octet-stream|image\//i.test(resp.contentType)) {
+      // Los primeros bytes alcanzan: la marca vive en el `<head>`/`<body>` de una
+      // página de error, no al final de un documento largo.
+      const inicio = resp.contenido.subarray(0, 2_000).toString('latin1');
+      if (pareceCorteDelSii(inicio)) {
+        throw new LimiteDeConsultasSii(
+          'El SII cortó las consultas por volumen (su error 429). Hay que ESPERAR: ' +
+          'reintentar de inmediato mantiene el corte. Ver ritmoSii.ts.'
+        );
+      }
+    }
+    return resp;
   }
 
   // `charset` decide cómo se percent-encodean los valores. El default UTF-8
@@ -207,16 +240,8 @@ export class SiiHttpClient {
     try {
       return JSON.parse(salida);
     } catch {
-      // Antes del error genérico: el corte por volumen del SII se distingue.
-      // Llega como una PÁGINA HTML, no como un status 429, así que sin mirar el
-      // cuerpo es indistinguible de "la sesión expiró" — y las dos cosas piden
-      // lo contrario: una que esperes, la otra que reintentes.
-      if (LIMITE_DE_CONSULTAS.test(salida)) {
-        throw new LimiteDeConsultasSii(
-          'El SII cortó las consultas por volumen (su error 429). Hay que ESPERAR: ' +
-          'reintentar de inmediato mantiene el corte. Ver ritmoSii.ts.'
-        );
-      }
+      // El corte por volumen ya se detectó en `curl()`, que es la vía
+      // compartida: acá sólo queda el fallo genérico.
       // Una respuesta que no es JSON suele ser el HTML del login o de un error
       // del portal. Devolverla cruda al parser lo haría fallar mucho más lejos
       // de la causa, así que se corta acá con un extracto para diagnosticar.
@@ -229,7 +254,20 @@ export class SiiHttpClient {
 
   private async curl(args: string[]): Promise<string> {
     const { contenido, contentType } = await this.curlCrudo(args);
-    return decodificarRespuesta(contenido, contentType);
+    const texto = decodificarRespuesta(contenido, contentType);
+
+    // El corte por volumen del SII se detecta ACÁ, en la vía compartida, y no en
+    // cada consulta. Antes vivía sólo en el catch de `postSdi`, así que los
+    // scrapers que leen HTML —BHE, bienes raíces, mipyme— veían el corte como un
+    // error genérico. Y el corte es POR PORTAL: si afecta a las consultas SDI de
+    // un portal, afecta también a sus páginas.
+    if (pareceCorteDelSii(texto)) {
+      throw new LimiteDeConsultasSii(
+        'El SII cortó las consultas por volumen (su error 429). Hay que ESPERAR: ' +
+        'reintentar de inmediato mantiene el corte. Ver ritmoSii.ts.'
+      );
+    }
+    return texto;
   }
 
   // Ejecuta curl y separa cuerpo de Content-Type SIN decodificar el cuerpo. Es

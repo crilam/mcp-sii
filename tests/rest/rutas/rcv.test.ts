@@ -21,12 +21,15 @@ describe('registrarRutasRcv', () => {
 
   it('registra las 4 rutas bajo /v1/rcv', () => {
     const rutas = armarRouter();
-    expect([...rutas.keys()]).toEqual([
+    // Se comparan los CONJUNTOS y no el orden: el orden de inserción en el Map
+    // no es contrato, así que fijarlo hace que agregar una ruta en medio rompa un
+    // test que no protege nada real.
+    expect(new Set(rutas.keys())).toEqual(new Set([
       'POST /v1/rcv/resumen',
       'POST /v1/rcv/empresas-autorizadas',
       'POST /v1/rcv/tipos-documento',
       'POST /v1/rcv/detalle',
-    ]);
+    ]));
   });
 
   it('resumen: body válido llama al core y devuelve {ok:true, ...datos}', async () => {
