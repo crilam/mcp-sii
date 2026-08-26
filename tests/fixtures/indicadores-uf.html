@@ -1,0 +1,61 @@
+<html><head><title>U.F. 2025</title></head><body>
+<!--
+  Recorte de la página real de la UF, con tres meses en vez de doce. Conserva
+  todo lo que el parser tiene que respetar:
+
+    1. Los meses van en ORDEN INVERSO (marzo, febrero, enero).
+    2. El año trae menos de doce meses cuando está en curso.
+    3. Cada fila tiene TRES pares día/valor (1-11-21, 2-12-22...).
+    4. Hay celdas VACÍAS para días que el SII no publicó.
+    5. Los valores usan punto de miles y coma decimal.
+    6. Después de la última tabla viene más contenido, incluida otra tabla:
+       por eso el bloque de cada mes tiene que cortarse en su `</table>` y no
+       al final del documento.
+-->
+<table class='table table-hover table-bordered'>
+<tbody>
+<tr><th colspan='6'><h2>Marzo</h2></th></tr>
+<tr>
+<th width='40'><strong>1</strong></th><td width='200'>39.100,10</td>
+<th width='40'><strong>11</strong></th><td width='200'>39.110,20</td>
+<th width='40'><strong>21</strong></th><td width='200'></td>
+</tr>
+<tr>
+<th width='40'><strong>2</strong></th><td width='200'>39.101,20</td>
+<th width='40'><strong>12</strong></th><td width='200'></td>
+<th width='40'><strong>22</strong></th><td width='200'></td>
+</tr>
+</tbody>
+</table>
+
+<table class='table table-hover table-bordered'>
+<tbody>
+<tr><th colspan='6'><h2>Febrero</h2></th></tr>
+<tr>
+<th width='40'><strong>1</strong></th><td width='200'>38.900,55</td>
+<th width='40'><strong>11</strong></th><td width='200'>38.910,65</td>
+<th width='40'><strong>21</strong></th><td width='200'>38.920,75</td>
+</tr>
+</tbody>
+</table>
+
+<table class='table table-hover table-bordered'>
+<tbody>
+<tr><th colspan='6'><h2>Enero</h2></th></tr>
+<tr>
+<th width='40'><strong>1</strong></th><td width='200'>38.384,41</td>
+<th width='40'><strong>11</strong></th><td width='200'>38.394,51</td>
+<th width='40'><strong>21</strong></th><td width='200'>38.404,61</td>
+</tr>
+</tbody>
+</table>
+
+<div class="pie">
+<p>Los valores de este informe son referenciales.</p>
+<table class='table'>
+<tbody>
+<tr><th>1</th><td>99.999,99</td><th>11</th><td>99.999,99</td><th>21</th><td>99.999,99</td></tr>
+</tbody>
+</table>
+</div>
+</body></html>

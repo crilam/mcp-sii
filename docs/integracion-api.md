@@ -524,6 +524,54 @@ Devuelve `resumen` (`totalBienesRaices`, `solicitudesEnCurso`, `solicitudesResue
 
 ---
 
+### 6.7 Indicadores y valores publicados
+
+Los **únicos** endpoints del servicio que no reciben `rut` ni credencial: el SII
+publica estas tablas abiertas y no hay sesión que abrir. Siguen pidiendo la API
+key del tenant y contando contra el rate-limit, como todos.
+
+Todos toman un solo campo: `anio` (entero, 1990–2100).
+
+| Endpoint | Devuelve |
+|---|---|
+| **`POST /v1/indicadores/uf`** | Una entrada por día: `mes`, `dia`, `valor` |
+| **`POST /v1/indicadores/dolar`** | Ídem, dólar observado; **sólo días hábiles** |
+| **`POST /v1/indicadores/utm`** | Una entrada por mes: `mes`, `valores` (lista) |
+| **`POST /v1/indicadores/correccion-monetaria`** | Ídem, factores por mes |
+| **`POST /v1/indicadores/impuesto-2da-categoria`** | Tramos del art. 43 |
+| **`POST /v1/indicadores/impuesto-2da-categoria-art52`** | Tramos del art. 52 bis |
+
+```json
+POST /v1/indicadores/uf   {"anio": 2025}
+{"ok": true, "datos": [{"mes": 1, "dia": 1, "valor": 38384.41}, ...]}
+```
+
+Cuatro cosas al integrarlas:
+
+- **Un día que el SII no publicó no aparece**, en vez de venir en cero: feriados
+  y fines de semana en el dólar, y los días que al año en curso todavía le faltan.
+  Recorrer el array por índice asumiendo `dia === indice + 1` se rompe; hay que
+  leer el campo `dia`.
+- **`utm` y `correccion-monetaria` devuelven `valores` como lista sin nombres.**
+  Las columnas cambian entre tablas, y ponerles nombre acá sería inventar
+  semántica: el orden es el de la tabla del portal. En corrección monetaria la
+  tabla es triangular, así que muchos vienen en `null`, y ese `null` significa
+  "no corresponde", no cero.
+- **En los tramos de 2ª categoría, el tramo exento trae `exento: true` con
+  `factor`, `rebaja` y `tasaMaxima` en `null`** — no en 0, porque un factor 0
+  daría el mismo impuesto por un camino que la tabla no afirma. El art. 43 trae
+  los cuatro períodos (`MENSUAL`, `QUINCENAL`, `SEMANAL`, `DIARIO`) y el art. 52
+  bis sólo `MENSUAL`. El último tramo de cada período no tiene tope superior:
+  `hasta` va en `null`.
+- **Un año que el SII no publica devuelve `NO_ENCONTRADO`**, no un array vacío.
+
+El servicio cachea por año e indicador: un año ya cerrado no se vuelve a
+consultar nunca, y el año en curso se revisa cada seis horas. Aun así, conviene
+pedir el año una vez y resolver los días en memoria: cada llamada baja una página
+completa del SII, y el SII corta por volumen (`LIMITE_SII`).
+
+---
+
 ## 7. Limitaciones conocidas
 
 Todas devuelven `200` con `{"ok":false,"error":"LIMITE_CONOCIDO","detalle":"..."}`. **Ninguna se arregla reintentando.**
