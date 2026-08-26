@@ -1,0 +1,8 @@
+{
+  "respEstado": { "codRespuesta": 0, "msgeRespuesta": null, "codError": null },
+  "data": [
+    { "dcvCodigoDoc": 29, "dcvNombreDoc": "Factura de Inicio", "dcvTipoIngreso": "DET_PAP" },
+    { "dcvCodigoDoc": 33, "dcvNombreDoc": "Factura Electrónica ", "dcvTipoIngreso": "DET_ELE" },
+    { "dcvCodigoDoc": 61, "dcvNombreDoc": "Nota de Crédito Electrónica", "dcvTipoIngreso": null }
+  ]
+}

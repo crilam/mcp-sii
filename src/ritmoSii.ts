@@ -18,13 +18,30 @@
 
 // Pausa por defecto entre llamadas de un barrido. Es deliberadamente lenta: el
 // portal del SII sirve a personas que hacen clic, y una llamada por segundo ya
-// es más rápido que cualquier humano. Se puede subir con RITMO_SII_MS para un
-// relevamiento largo, pero bajarla es pedir el bloqueo.
+// es más rápido que cualquier humano.
 const PAUSA_POR_DEFECTO_MS = 1_200;
 
+/**
+ * Pausa a usar. `RITMO_SII_MS` sólo puede hacerla MÁS lenta: el defecto es un
+ * piso, no una sugerencia.
+ *
+ * Dos formas de quedarse sin pausa que hay que cerrar explícitamente, porque las
+ * dos fallan en silencio y el síntoma aparece recién como portal bloqueado:
+ *
+ *   - `RITMO_SII_MS=""` — una variable definida y vacía es de lo más común en un
+ *     deploy, y `Number("")` es 0, no NaN. Un guard que sólo mire `isFinite` la
+ *     acepta y deja el barrido a toda velocidad.
+ *   - `RITMO_SII_MS=0` — alguien "apurando" un relevamiento. El piso lo ignora.
+ */
 export function pausaConfigurada(): number {
-  const crudo = Number(process.env.RITMO_SII_MS);
-  return Number.isFinite(crudo) && crudo >= 0 ? crudo : PAUSA_POR_DEFECTO_MS;
+  const crudo = process.env.RITMO_SII_MS;
+  if (crudo == null || crudo.trim() === '') return PAUSA_POR_DEFECTO_MS;
+
+  const ms = Number(crudo);
+  if (!Number.isFinite(ms)) return PAUSA_POR_DEFECTO_MS;
+  // El defecto es un PISO. Bajarlo es pedir el bloqueo, así que no se permite ni
+  // por variable de entorno.
+  return Math.max(ms, PAUSA_POR_DEFECTO_MS);
 }
 
 export function esperar(ms: number): Promise<void> {

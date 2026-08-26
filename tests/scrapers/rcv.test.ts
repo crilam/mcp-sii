@@ -641,3 +641,84 @@ describe('RcvScraper.detalle', () => {
     expect(doc.fechaRecepcion).toBe('23/06/2026 12:51:37');
   });
 });
+
+// Los dos parseos nuevos mapean claves crudas del SII, así que se testean contra
+// una respuesta real y no sólo mockeando el core: el propio spec de la ronda dice
+// que publicar una ruta cuyo parseo nadie verificó es cómo se llega a un endpoint
+// que devuelve datos plausibles y mal.
+describe('RcvScraper.empresasAutorizadas', () => {
+  it('mapea las claves del SII y conserva los null como null', async () => {
+    const { scraper } = makeScraper(fixture('rcv-empresas-autorizadas.json'));
+
+    const empresas = await scraper.empresasAutorizadas();
+
+    expect(empresas).toHaveLength(2);
+    // El SII no informa razón social ni privilegios en la mayoría de las filas:
+    // van en null y NO se omiten, para que se vea que el dato existe y esta
+    // consulta no lo trae.
+    expect(empresas[0]).toEqual({
+      rut: '22222222-2',
+      razonSocial: null,
+      privilegios: null,
+      fechaDesautorizacionUsuario: null,
+      fechaDesautorizacionEmpresa: null,
+    });
+  });
+
+  // Cuando el SII sí manda esos campos, se pasan tal cual: la fecha cruda, sin
+  // convertir, igual que en el resto del dominio.
+  it('expone privilegios y fecha de desautorización cuando vienen', async () => {
+    const { scraper } = makeScraper(fixture('rcv-empresas-autorizadas.json'));
+
+    const empresas = await scraper.empresasAutorizadas();
+
+    expect(empresas[1].privilegios).toBe('CONSULTA');
+    expect(empresas[1].fechaDesautorizacionEmpresa).toBe('01/01/2026');
+    expect(empresas[1].razonSocial).toBe('EMPRESA DE EJEMPLO SPA');
+  });
+
+  // El SII manda `usrEmpRutDv` ya formateado; armarlo a mano cuando el dato viene
+  // hecho es fuente de discrepancias tontas. El fallback existe sólo para cuando
+  // NO viene, y esto lo fija.
+  it('arma el RUT a mano sólo si el SII no lo manda formateado', async () => {
+    const { scraper } = makeScraper(fixture('rcv-empresas-autorizadas.json'));
+
+    const empresas = await scraper.empresasAutorizadas();
+
+    // La primera fila trae usrEmpRutDv y se usa tal cual.
+    expect(empresas[0].rut).toBe('22222222-2');
+    // La segunda lo trae en null, así que se arma con cuerpo y dígito.
+    expect(empresas[1].rut).toBe('33333333-3');
+  });
+});
+
+describe('RcvScraper.tiposDocumento', () => {
+  it('mapea el catálogo y limpia el nombre', async () => {
+    const { scraper } = makeScraper(fixture('rcv-tipos-documento.json'));
+
+    const tipos = await scraper.tiposDocumento();
+
+    expect(tipos).toHaveLength(3);
+    // El SII manda el nombre con espacios al final en algunas filas.
+    expect(tipos[1]).toEqual({
+      codigo: 33,
+      nombre: 'Factura Electrónica',
+      tipoIngreso: 'DET_ELE',
+    });
+    // `tipoIngreso` en null cuando el SII no lo informa: es el valor con el que
+    // el propio portal distingue electrónico de papel, así que no se inventa.
+    expect(tipos[2].tipoIngreso).toBeNull();
+  });
+
+  // El catálogo no depende de empresa ni de período, y el portal lo pide con
+  // `data` VACÍO: con el scope de las otras llamadas el SII no devuelve JSON.
+  it('pide el catálogo con data vacío', async () => {
+    const { scraper, http } = makeScraper(fixture('rcv-tipos-documento.json'));
+
+    await scraper.tiposDocumento();
+
+    const [, , metodo, data] = (http.postSdi as jest.Mock).mock.calls[0];
+    expect(metodo).toBe('getDatosInicio');
+    expect(data).toEqual({});
+  });
+});

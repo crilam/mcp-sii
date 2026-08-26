@@ -91,10 +91,29 @@ describe('pausaConfigurada', () => {
     expect(pausaConfigurada()).toBe(3000);
   });
 
-  // Un valor basura no debe dejar el barrido sin pausa: ahí es donde vuelve el
-  // bloqueo, y en silencio.
-  it('ignora un valor inválido y vuelve al defecto', () => {
+  // Las tres formas de quedarse sin pausa, que es lo único que este módulo no
+  // puede permitir: las tres fallan en silencio y el síntoma aparece recién como
+  // portal bloqueado.
+  it('un valor basura vuelve al defecto', () => {
     process.env.RITMO_SII_MS = 'rapido';
-    expect(pausaConfigurada()).toBeGreaterThanOrEqual(1000);
+    expect(pausaConfigurada()).toBe(1200);
+  });
+
+  // `Number("")` es 0, NO NaN: una variable definida y vacía —de lo más común en
+  // un deploy— pasaba un guard que sólo mirara isFinite y dejaba el barrido a
+  // toda velocidad.
+  it('una variable vacía vuelve al defecto y no deja el barrido sin pausa', () => {
+    process.env.RITMO_SII_MS = '';
+    expect(pausaConfigurada()).toBe(1200);
+    process.env.RITMO_SII_MS = '   ';
+    expect(pausaConfigurada()).toBe(1200);
+  });
+
+  // El defecto es un PISO: no se puede bajar ni queriendo.
+  it('no permite bajar la pausa por debajo del defecto', () => {
+    process.env.RITMO_SII_MS = '0';
+    expect(pausaConfigurada()).toBe(1200);
+    process.env.RITMO_SII_MS = '50';
+    expect(pausaConfigurada()).toBe(1200);
   });
 });

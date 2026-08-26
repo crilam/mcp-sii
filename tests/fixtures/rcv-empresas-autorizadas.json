@@ -1,0 +1,27 @@
+{
+  "respEstado": { "codRespuesta": 0, "msgeRespuesta": null, "codError": null },
+  "data": [
+    {
+      "usrEmpRut": 22222222,
+      "usrEmpDv": "2",
+      "usrUsuarioRut": null,
+      "usrUsuarioDv": null,
+      "usrPrivilegios": null,
+      "usrFechaDesautorizacion": null,
+      "empFechaDesautorizacion": null,
+      "usrEmpRutDv": "22222222-2",
+      "razonSocONombreEmp": null
+    },
+    {
+      "usrEmpRut": 33333333,
+      "usrEmpDv": "3",
+      "usrUsuarioRut": null,
+      "usrUsuarioDv": null,
+      "usrPrivilegios": "CONSULTA",
+      "usrFechaDesautorizacion": null,
+      "empFechaDesautorizacion": "01/01/2026",
+      "usrEmpRutDv": null,
+      "razonSocONombreEmp": "EMPRESA DE EJEMPLO SPA"
+    }
+  ]
+}

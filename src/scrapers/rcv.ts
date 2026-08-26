@@ -264,13 +264,14 @@ const NAMESPACE = 'cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService
 const ESTADO_CONTAB = 'REGISTRO';
 
 // El facade exige un período en TODAS sus llamadas, incluso donde no filtra nada
-// —como la lista de empresas autorizadas—. Se manda el período en curso porque
-// tiene que ser uno válido; da igual cuál, pero uno inexistente hace que el SII
-// responda un error de parámetros en vez de la lista.
-function periodoActual(): string {
-  const ahora = new Date();
-  return `${ahora.getFullYear()}${String(ahora.getMonth() + 1).padStart(2, '0')}`;
-}
+// —como la lista de empresas autorizadas—. Tiene que ser uno con forma válida;
+// cuál es da igual, porque no filtra.
+//
+// Es una CONSTANTE y no el período en curso a propósito: con `new Date()` el
+// request al SII dependía del reloj, así que el mismo test pasaba o fallaba según
+// el día, y no había forma de fijar qué se manda. Un período fijo del pasado
+// cumple la única condición que el SII impone (que tenga forma de AAAAMM).
+const PERIODO_PARA_LLAMADAS_SIN_PERIODO = '202501';
 
 // Las notas de crédito **restan**: anulan o rebajan documentos ya emitidos. El
 // SII las devuelve como una fila más, con montos positivos, exactamente igual
@@ -460,7 +461,7 @@ export class RcvScraper {
       dvEmisor: dv,
       // El facade exige estos dos en todas sus llamadas aunque acá no filtren
       // nada: sin ellos responde un error de parámetros, no una lista completa.
-      ptributario: periodoActual(),
+      ptributario: PERIODO_PARA_LLAMADAS_SIN_PERIODO,
       estadoContab: ESTADO_CONTAB,
       operacion: 'COMPRA',
     });
@@ -470,7 +471,11 @@ export class RcvScraper {
       // Se prefiere `usrEmpRutDv`, que el SII ya manda formateado, y se arma a
       // mano sólo si no viene: repetir el formateo cuando el dato ya está
       // formateado es una fuente de discrepancias tontas.
-      rut: f.usrEmpRutDv ?? `${f.usrEmpRut ?? ''}-${f.usrEmpDv ?? ''}`,
+      //
+      // Si no viene NINGUNA de las tres claves, el fallback daba la cadena "-",
+      // que viajaba hasta el consumidor como si fuera un RUT. Se devuelve cadena
+      // vacía: es evidentemente "sin dato" y no se confunde con un RUT.
+      rut: f.usrEmpRutDv ?? (f.usrEmpRut ? `${f.usrEmpRut}-${f.usrEmpDv ?? ''}` : ''),
       razonSocial: f.razonSocONombreEmp ?? null,
       privilegios: f.usrPrivilegios ?? null,
       fechaDesautorizacionUsuario: f.usrFechaDesautorizacion ?? null,
@@ -610,7 +615,11 @@ export class RcvScraper {
       montoTabacoPuros: Number(d.detTabPuros ?? 0),
       montoTabacoCigarrillos: Number(d.detTabCigarrillos ?? 0),
       montoTabacoElaborado: Number(d.detTabElaborado ?? 0),
-      tipoTransaccion: d.detTipoTransaccion != null ? Number(d.detTipoTransaccion) : null,
+      // Truthy y no `!= null`, igual que los otros códigos: el SII manda cadena
+      // vacía en varios campos (`detTipoDocRef` entre ellos), y `Number("")` es
+      // 0 — o sea que con `!= null` se publicaba un "código cero" en documentos
+      // que no traen el dato, justo lo que el comentario de arriba dice evitar.
+      tipoTransaccion: d.detTipoTransaccion ? Number(d.detTipoTransaccion) : null,
     };
   }
 

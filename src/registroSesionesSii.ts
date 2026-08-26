@@ -48,6 +48,11 @@ import { cerrarSesionSii } from './cerrarSesionSii';
 // sesiones quedan vivas hasta expirar solas, que es el comportamiento que había
 // antes de este cierre para TODAS las consultas.
 //
+// Y cuando eso pasa, el síntoma ya no es un misterio: las sesiones que quedan
+// vivas son exactamente las que después disparan `SesionesSimultaneas` (ver
+// `erroresConsulta.ts`), así que el consumidor recibe un código que le dice qué
+// esperar en vez del ERROR genérico.
+//
 // El id único lo arma ESTA función y la factory sólo lo recibe, en vez de
 // dejar que la factory lo derive del RUT: así la unicidad no depende de quién
 // inyecte la factory. Con la versión anterior, un consumidor (o un test) que

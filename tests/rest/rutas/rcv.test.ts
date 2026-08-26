@@ -203,4 +203,12 @@ describe('registrarRutasRcv', () => {
     expect(r.status).toBe(200);
     expect(r.body.datos).toHaveLength(1);
   });
+  it('tipos-documento: sin credencial no llama al core', async () => {
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/rcv/tipos-documento')!({ rut: '11.111.111-1' });
+
+    expect(r.status).toBe(400);
+    expect(core.tiposDocumento).not.toHaveBeenCalled();
+  });
 });

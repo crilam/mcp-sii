@@ -69,6 +69,8 @@ curl -X POST https://mcp-sii.redcomercio.cl/v1/sesion/validar-clave \
 
 Responde `{"ok":true}` o `{"ok":false,"error":"CREDENCIALES_INVALIDAS"}`. Sirve para no guardar una clave que el SII va a rechazar después.
 
+También puede responder `SESIONES_SIMULTANEAS`, y en esta ruta la distinción es la que más importa: **`ERROR` y `SESIONES_SIMULTANEAS` no significan "la clave es dudosa"**. La clave puede estar perfecta y el problema ser que hay otra consulta en curso sobre el mismo RUT. Sólo `CREDENCIALES_INVALIDAS` autoriza a descartar una clave; con los otros dos, reintentá.
+
 ---
 
 ## 3. El contrato de respuesta

@@ -3,13 +3,14 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
+import { SesionesSimultaneas } from '../../erroresConsulta';
 import { RutaHandler, badRequest } from './comun';
 
 const zodValidarClave = z.object({ rut: z.string().min(1), clave: z.string().min(1) });
 
 export type ResultadoValidacion =
   | { ok: true }
-  | { ok: false; error: 'CREDENCIALES_INVALIDAS' | 'ERROR' };
+  | { ok: false; error: 'CREDENCIALES_INVALIDAS' | 'SESIONES_SIMULTANEAS' | 'ERROR' };
 
 // Valida una clave tributaria contra el SII real, de una sola pasada: autentica,
 // confirma el resultado y cierra todo antes de devolver la respuesta — a
@@ -59,6 +60,19 @@ export async function validarClave(
     );
     return { ok: true };
   } catch (e) {
+    // El bloqueo por sesiones simultáneas se distingue ANTES de clasificar, y en
+    // esta ruta importa más que en ninguna: es la que Tributy llama
+    // sincrónicamente para decidir si GUARDA una clave. Con el ERROR genérico,
+    // un bloqueo del SII se lee como "no pudimos validar, la clave es dudosa"
+    // cuando la clave puede estar perfecta y el problema es que hay otra consulta
+    // en curso sobre el mismo RUT.
+    //
+    // `clasificarErrorCredenciales` no puede resolverlo: sólo devuelve
+    // CREDENCIALES_INVALIDAS o ERROR, y ensancharla obligaría a cada otro
+    // llamador —las tools MCP— a manejar un código que no le corresponde.
+    if (e instanceof SesionesSimultaneas) {
+      return { ok: false, error: 'SESIONES_SIMULTANEAS' };
+    }
     return { ok: false, error: clasificarErrorCredenciales(e) };
   }
 }
