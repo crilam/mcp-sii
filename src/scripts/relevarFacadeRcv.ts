@@ -5,6 +5,7 @@ import { AuthStrategy } from '../env';
 import { SiiHttpClient } from '../http';
 import { partirRut } from '../rut';
 import { cerrarSesionSii } from '../cerrarSesionSii';
+import { recorrerConRitmo } from '../ritmoSii';
 
 // Releva QUÉ DEVUELVE cada método de lectura del facade de RCV, en una sola
 // sesión. Los nombres salieron de `relevarMetodosSdi.ts`; esto contesta la otra
@@ -86,7 +87,9 @@ async function main() {
     const { rut: rutEmpresa, dv } = partirRut(empresa!, 'RUT de empresa');
     console.log(`empresa=${rutEmpresa}-${dv} periodo=${PERIODO} tipo_doc=${TIPO_DOC}\n`);
 
-    for (const { nombre, data } of metodos(rutEmpresa, dv)) {
+    // Con ritmo: son dieciséis llamadas seguidas al mismo portal, que sin pausa
+    // es un patrón que el SII bloquea (ver `ritmoSii.ts`).
+    await recorrerConRitmo(metodos(rutEmpresa, dv), async ({ nombre, data }) => {
       try {
         const r = await http.postSdi(BASE, NAMESPACE, nombre, data);
         console.log(`${nombre.padEnd(34)} ${describir(r)}`);
@@ -104,7 +107,7 @@ async function main() {
       } catch (e) {
         console.log(`${nombre.padEnd(34)} FALLA  ${(e as Error).message.slice(0, 70)}`);
       }
-    }
+    });
   } finally {
     await cerrarSesionSii(sesion);
   }

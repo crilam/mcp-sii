@@ -128,6 +128,23 @@ llevaría a implementar un flujo que nunca se ejercitó de verdad.
 
 Queda como lo primero a retomar con una empresa de mayor volumen.
 
+## Lección operativa de esta ronda: el SII bloquea a los scrapers
+
+El barrido de los métodos vacíos hizo más de doscientas llamadas al portal del
+RCV en pocos minutos —nueve métodos por cinco tipos de documento por tres
+períodos, más las corridas del otro relevador— y el portal terminó respondiendo
+error a TODAS las consultas de RCV, mientras mipyme seguía contestando bien. El
+bloqueo es por servicio y por patrón de uso.
+
+Lo que importa para las rondas que siguen: **un portal bloqueado deja al
+servicio sin poder consultarlo para los tenants reales**, así que un barrido
+descuidado es una caída parcial de producción, no sólo un relevamiento perdido.
+
+Queda implementado en `src/ritmoSii.ts` y anotado en los principios del
+roadmap: serie, pausa, tope y aviso al truncar. Los dos relevadores de esta
+ronda ya lo usan, y el barrido pasó de cinco tipos de documento a dos —cada
+tipo extra multiplica el total.
+
 ## Alcance propuesto (planteo original)
 
 ### 1. RCV asíncrono

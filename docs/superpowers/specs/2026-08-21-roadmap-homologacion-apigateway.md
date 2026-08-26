@@ -130,6 +130,24 @@ nuevo al proyecto, R5 y R7 son el lugar por donde empezar.
 - **Ningún dato real versionado.** El repo tiene un chequeo de anonimización que
   corre en CI; ya frenó un RUT de empresa real con su razón social en un
   fixture. Los RUT de prueba son de dígito repetido.
+- **Los barridos van SUAVES. El SII bloquea a los scrapers.** No es teoría: un
+  relevamiento de la ronda 1 hizo más de doscientas llamadas al portal del RCV
+  en pocos minutos y ese portal terminó respondiendo error a TODO, mientras
+  otros portales del mismo SII seguían contestando bien — o sea que el bloqueo
+  es por servicio y por patrón de uso, no por credencial.
+
+  Y el costo no es sólo perder el relevamiento: un portal bloqueado deja al
+  SERVICIO sin poder consultarlo para los tenants reales. Un barrido descuidado
+  es una caída parcial de producción.
+
+  Las reglas, implementadas en `src/ritmoSii.ts`: en serie nunca en paralelo,
+  pausa de ~1,2 s entre llamadas, tope explícito por corrida, y aviso cuando el
+  tope corta —un barrido truncado en silencio se lee como "no hay datos" cuando
+  en realidad no se llegó a mirar. Si hace falta cubrir más combinaciones, se
+  corre varias veces con distintos parámetros en vez de subir el tope.
+
+  Vale más tardar veinte minutos y obtener el dato que barrer en dos y quedar
+  bloqueado.
 - **Un `null` significa "el SII no informa esto", nunca cero.** Y ante una
   respuesta que no se puede leer con confianza, se falla explícito en vez de
   devolver un dato incompleto que se lea como completo.
