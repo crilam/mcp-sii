@@ -152,6 +152,20 @@ describe('extraerIpsSospechosas', () => {
 
     expect(extraerIpsSospechosas(contenido)).toEqual([]);
   });
+
+  // El User-Agent del scraper de indicadores trae `Chrome/126.0.0.0`, que tiene
+  // cuatro octetos en rango y no es la dirección de nadie.
+  it('no marca la versión del User-Agent como IP', () => {
+    const contenido = 'Chrome/126.0.0.0 Safari/537.36';
+
+    expect(extraerIpsSospechosas(contenido)).toEqual([]);
+  });
+
+  // La excepción es sólo para el cuádruple pegado a `nombre/`: una IP dentro de
+  // una URL sigue siendo una IP, y ahí es donde aparecería una real.
+  it('sigue marcando una IP pública dentro de una URL', () => {
+    expect(extraerIpsSospechosas('https://8.8.4.4/consulta')).toContain('8.8.4.4');
+  });
 });
 
 describe('extraerDatosPersonales', () => {

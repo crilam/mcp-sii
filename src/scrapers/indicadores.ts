@@ -1,5 +1,4 @@
-import { LimiteDeConsultasSii } from '../erroresConsulta';
-import { RecursoNoEncontrado } from '../erroresConsulta';
+import { LimiteDeConsultasSii, RecursoNoEncontrado } from '../erroresConsulta';
 
 // Indicadores y valores publicados por el SII: UF, UTM/UTA/IPC, dólar,
 // corrección monetaria e impuesto de segunda categoría.
@@ -10,6 +9,10 @@ import { RecursoNoEncontrado } from '../erroresConsulta';
 const BASE = 'https://www.sii.cl/valores_y_fechas';
 
 const TIMEOUT_MS = 20_000;
+
+const USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
+  + '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 // El corte por volumen del SII también llega acá: no hay credencial, pero el SII
 // cuenta las requests igual (el bloqueo del RCV fue por patrón de uso, no por
@@ -94,7 +97,13 @@ function assertNoEsCorte(html: string): void {
 async function bajar(ruta: string): Promise<string> {
   let resp: Response;
   try {
-    resp = await fetch(`${BASE}/${ruta}`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+    resp = await fetch(`${BASE}/${ruta}`, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      // `fetch` de Node se anuncia como `node`. El resto del repo llega al SII
+      // por navegador, y el bloqueo del portal es por patrón de uso: un tráfico
+      // que se declara script es exactamente el patrón que se quiere evitar.
+      headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'es-CL,es;q=0.9' },
+    });
   } catch (e) {
     const causa = (e as Error)?.name === 'TimeoutError' ? 'expiró el tiempo de espera' : 'falló la conexión';
     throw new Error(`No se pudo consultar el SII: ${causa}.`);
@@ -175,6 +184,11 @@ export function parsearValoresDiarios(html: string): ValorDiario[] {
       const c = celdas(fila);
       // Pares (día, valor). Una fila de cabecera no tiene números en la posición
       // del día, así que se descarta sola.
+      // Los pares se leen por posición, así que una fila con un número IMPAR de
+      // celdas correría todos los pares siguientes y dejaría cada valor en el día
+      // equivocado: números plausibles y mal, que es lo que este archivo trata de
+      // evitar. Se descarta la fila entera.
+      if (c.length % 2 !== 0) continue;
       for (let i = 0; i + 1 < c.length; i += 2) {
         const dia = Number(c[i].replace(/\D/g, ''));
         const valor = numeroChileno(c[i + 1]);

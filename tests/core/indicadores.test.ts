@@ -104,21 +104,81 @@ describe('caché de indicadores', () => {
     expect(scraperUf).toHaveBeenCalledTimes(2);
   });
 
+  // Sin deduplicar en vuelo, diez conversiones a UF lanzadas juntas bajan diez
+  // veces la misma página. Y el SII corta por volumen justo por eso.
+  it('consultas concurrentes del mismo año comparten una sola bajada', async () => {
+    let resolver!: (v: unknown) => void;
+    scraperUf.mockReturnValueOnce(new Promise(r => { resolver = r; }));
+
+    const todas = Promise.all([uf(2025), uf(2025), uf(2025)]);
+    resolver(VALORES);
+
+    expect(await todas).toEqual([VALORES, VALORES, VALORES]);
+    expect(scraperUf).toHaveBeenCalledTimes(1);
+  });
+
+  // Es el único dominio que NO pasa por la ColaPorClave de los tenants: sin la
+  // cola propia, varios tenants pidiendo años distintos barren el portal en
+  // paralelo — el patrón que ya bloqueó el RCV.
+  it('no consulta dos años en paralelo contra el portal', async () => {
+    let enVuelo = 0;
+    let maximo = 0;
+    scraperUf.mockImplementation(async () => {
+      enVuelo++;
+      maximo = Math.max(maximo, enVuelo);
+      await new Promise(r => setImmediate(r));
+      enVuelo--;
+      return VALORES;
+    });
+
+    await Promise.all([uf(2020), uf(2021), uf(2022), uf(2023)]);
+
+    expect(scraperUf).toHaveBeenCalledTimes(4);
+    expect(maximo).toBe(1);
+  });
+
+  // Un fallo no queda cacheado, pero quien ya está colgado de esa promesa tiene
+  // que recibir el error y no una promesa huérfana.
+  it('un fallo llega a todos los que esperaban y no queda en caché', async () => {
+    scraperUf.mockRejectedValueOnce(new Error('portal caído'));
+
+    const a = uf(2025);
+    const b = uf(2025);
+    await expect(a).rejects.toThrow('portal caído');
+    await expect(b).rejects.toThrow('portal caído');
+
+    await expect(uf(2025)).resolves.toEqual(VALORES);
+    expect(scraperUf).toHaveBeenCalledTimes(2);
+  });
+
+  // El desalojo es LRU y no FIFO: el año en curso es de los primeros que entran y
+  // el que más se repide, así que un FIFO puro botaba justo la entrada más usada.
+  it('un acierto renueva la antigüedad de la entrada', async () => {
+    for (let i = 0; i < MAX_ENTRADAS; i++) await uf(1990 + i);
+    // Toca la más antigua: pasa a ser la más reciente.
+    await uf(1990);
+    const llamadas = scraperUf.mock.calls.length;
+
+    // La nueva entrada desaloja a 1991, que ahora es la más vieja, no a 1990.
+    await uf(1900);
+    await uf(1990);
+    expect(scraperUf).toHaveBeenCalledTimes(llamadas + 1);
+    await uf(1991);
+    expect(scraperUf).toHaveBeenCalledTimes(llamadas + 2);
+  });
+
   // El techo evita que el caché sea una fuga de memoria en un servicio de larga
   // vida. Sin cobertura, un refactor que lo quite no lo nota nadie hasta el OOM.
-  it('al llenarse desaloja la entrada más antigua', async () => {
+  // El QUÉ se desaloja lo cubre el test de LRU de arriba; acá sólo que se desaloja.
+  it('al llenarse desaloja alguna entrada en vez de crecer sin techo', async () => {
     for (let i = 0; i < MAX_ENTRADAS; i++) await uf(1990 + i);
     const llamadas = scraperUf.mock.calls.length;
 
-    // La más antigua sigue en caché mientras no se pase el techo.
-    await uf(1990);
-    expect(scraperUf).toHaveBeenCalledTimes(llamadas);
-
-    // Una más pasa el techo y desaloja la primera que entró. El año va FUERA del
-    // rango que llenó el bucle (1990..1990+MAX): usar uno de adentro lo daba por
-    // cacheado y el test medía otra cosa.
+    // Una entrada nueva —el año va FUERA del rango que llenó el bucle— fuerza el
+    // desalojo, y entonces alguno de los años ya pedidos vuelve a consultarse.
     await uf(1900);
-    await uf(1990);
-    expect(scraperUf).toHaveBeenCalledTimes(llamadas + 2);
+    for (let i = 0; i < MAX_ENTRADAS; i++) await uf(1990 + i);
+
+    expect(scraperUf.mock.calls.length).toBeGreaterThan(llamadas + 1);
   });
 });

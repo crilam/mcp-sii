@@ -1,4 +1,5 @@
 import * as scraper from '../scrapers/indicadores';
+import { ColaPorClave } from '../colaPorClave';
 import { ValorDiario, ValorMensual, TramoImpuesto } from '../scrapers/indicadores';
 
 // Indicadores públicos del SII. No usa `EjecutorSesion` como el resto de los
@@ -20,8 +21,21 @@ const TTL_ANIO_EN_CURSO_MS = 6 * 60 * 60 * 1000;
 // el SII publica.
 export const MAX_ENTRADAS = 200;
 
-type Entrada = { valor: unknown; expira: number };
+// Se guarda la PROMESA en vuelo y no el valor resuelto: así N requests
+// concurrentes del mismo año-indicador (caché fría, o recién vencida) comparten
+// una sola bajada en vez de disparar N contra el portal. Sin esto, un consumidor
+// que arranca con diez conversiones a UF en paralelo hacía diez requests para el
+// mismo año.
+type Entrada = { valor: Promise<unknown>; expira: number };
 const cache = new Map<string, Entrada>();
+
+// Todo el dominio se serializa contra el portal: es el único que NO pasa por la
+// `ColaPorClave` de los tenants, así que sin esto varios tenants pidiendo años
+// distintos hacen un barrido PARALELO a sii.cl — el patrón exacto que ya bloqueó
+// el RCV (ver `ritmoSii.ts`). La clave es fija porque el límite es del portal,
+// no del año que se pide.
+const cola = new ColaPorClave();
+const CLAVE_PORTAL = 'indicadores';
 
 export function limpiarCacheIndicadores(): void {
   cache.clear();
@@ -36,23 +50,35 @@ function expiracion(anio: number, ahora: number): number {
   return anio < anioActual ? Number.POSITIVE_INFINITY : ahora + TTL_ANIO_EN_CURSO_MS;
 }
 
-async function conCache<T>(clave: string, anio: number, fn: () => Promise<T>): Promise<T> {
+function conCache<T>(clave: string, anio: number, fn: () => Promise<T>): Promise<T> {
   const ahora = Date.now();
   const guardado = cache.get(clave);
-  if (guardado && guardado.expira > ahora) return guardado.valor as T;
+  if (guardado && guardado.expira > ahora) {
+    // Re-insertar en cada acierto vuelve el desalojo LRU en vez de FIFO: el año
+    // en curso es de los primeros que entran y el que más se repide, así que un
+    // FIFO puro botaba justo la entrada más usada.
+    cache.delete(clave);
+    cache.set(clave, guardado);
+    return guardado.valor as Promise<T>;
+  }
   if (guardado) cache.delete(clave);
 
-  const valor = await fn();
-
-  // Sólo se cachea el éxito: un fallo puede ser del momento —el portal caído, un
-  // corte por volumen— y guardarlo convertiría un problema de un rato en la
-  // respuesta de todo el día.
   if (cache.size >= MAX_ENTRADAS) {
     const masVieja = cache.keys().next().value;
     if (masVieja !== undefined) cache.delete(masVieja);
   }
-  cache.set(clave, { valor, expira: expiracion(anio, ahora) });
-  return valor;
+
+  const enVuelo = cola.ejecutar(CLAVE_PORTAL, fn);
+  cache.set(clave, { valor: enVuelo, expira: expiracion(anio, ahora) });
+
+  // Sólo se cachea el éxito: un fallo puede ser del momento —el portal caído, un
+  // corte por volumen— y guardarlo convertiría un problema de un rato en la
+  // respuesta de todo el día. Se borra la entrada, no el `await`: quien ya está
+  // colgado de esta promesa recibe el mismo error.
+  enVuelo.catch(() => {
+    if (cache.get(clave)?.valor === enVuelo) cache.delete(clave);
+  });
+  return enVuelo;
 }
 
 export function uf(anio: number): Promise<ValorDiario[]> {
