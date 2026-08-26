@@ -170,3 +170,29 @@ describe('SiiHttpClient.postSdi ante el corte por volumen del SII', () => {
     await expect(fallo).rejects.not.toThrow(LimiteDeConsultasSii);
   });
 });
+
+// El corte es por PORTAL, no por vía: si afecta a las consultas SDI, afecta
+// también a las páginas HTML del mismo portal. Antes la detección vivía sólo en
+// `postSdi`, así que los scrapers que leen HTML —BHE, bienes raíces, mipyme—
+// veían el corte como un error genérico y lo reintentaban.
+describe('SiiHttpClient.get ante el corte por volumen', () => {
+  it('detecta el 429 del SII también en una consulta de HTML', async () => {
+    const { client } = makeClient();
+    mockExec.mockReturnValue(
+      '<html><body><div>Error 429: Se ha superado el límite de consultas</div></body></html>' as never
+    );
+
+    await expect(client.get('https://loa.sii.cl/cgi_IMT/algo.cgi', {}))
+      .rejects.toThrow(LimiteDeConsultasSii);
+  });
+
+  // Un HTML normal no puede confundirse con el corte, o cada consulta buena
+  // fallaría.
+  it('un HTML normal pasa sin problema', async () => {
+    const { client } = makeClient();
+    mockExec.mockReturnValue('<html><body>informe con datos</body></html>' as never);
+
+    await expect(client.get('https://loa.sii.cl/cgi_IMT/algo.cgi', {}))
+      .resolves.toContain('informe con datos');
+  });
+});

@@ -207,16 +207,8 @@ export class SiiHttpClient {
     try {
       return JSON.parse(salida);
     } catch {
-      // Antes del error genérico: el corte por volumen del SII se distingue.
-      // Llega como una PÁGINA HTML, no como un status 429, así que sin mirar el
-      // cuerpo es indistinguible de "la sesión expiró" — y las dos cosas piden
-      // lo contrario: una que esperes, la otra que reintentes.
-      if (LIMITE_DE_CONSULTAS.test(salida)) {
-        throw new LimiteDeConsultasSii(
-          'El SII cortó las consultas por volumen (su error 429). Hay que ESPERAR: ' +
-          'reintentar de inmediato mantiene el corte. Ver ritmoSii.ts.'
-        );
-      }
+      // El corte por volumen ya se detectó en `curl()`, que es la vía
+      // compartida: acá sólo queda el fallo genérico.
       // Una respuesta que no es JSON suele ser el HTML del login o de un error
       // del portal. Devolverla cruda al parser lo haría fallar mucho más lejos
       // de la causa, así que se corta acá con un extracto para diagnosticar.
@@ -229,7 +221,20 @@ export class SiiHttpClient {
 
   private async curl(args: string[]): Promise<string> {
     const { contenido, contentType } = await this.curlCrudo(args);
-    return decodificarRespuesta(contenido, contentType);
+    const texto = decodificarRespuesta(contenido, contentType);
+
+    // El corte por volumen del SII se detecta ACÁ, en la vía compartida, y no en
+    // cada consulta. Antes vivía sólo en el catch de `postSdi`, así que los
+    // scrapers que leen HTML —BHE, bienes raíces, mipyme— veían el corte como un
+    // error genérico. Y el corte es POR PORTAL: si afecta a las consultas SDI de
+    // un portal, afecta también a sus páginas.
+    if (LIMITE_DE_CONSULTAS.test(texto)) {
+      throw new LimiteDeConsultasSii(
+        'El SII cortó las consultas por volumen (su error 429). Hay que ESPERAR: ' +
+        'reintentar de inmediato mantiene el corte. Ver ritmoSii.ts.'
+      );
+    }
+    return texto;
   }
 
   // Ejecuta curl y separa cuerpo de Content-Type SIN decodificar el cuerpo. Es

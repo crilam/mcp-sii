@@ -3,14 +3,14 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { SesionesSimultaneas } from '../../erroresConsulta';
+import { SesionesSimultaneas, LimiteDeConsultasSii } from '../../erroresConsulta';
 import { RutaHandler, badRequest } from './comun';
 
 const zodValidarClave = z.object({ rut: z.string().min(1), clave: z.string().min(1) });
 
 export type ResultadoValidacion =
   | { ok: true }
-  | { ok: false; error: 'CREDENCIALES_INVALIDAS' | 'SESIONES_SIMULTANEAS' | 'ERROR' };
+  | { ok: false; error: 'CREDENCIALES_INVALIDAS' | 'SESIONES_SIMULTANEAS' | 'LIMITE_SII' | 'ERROR' };
 
 // Valida una clave tributaria contra el SII real, de una sola pasada: autentica,
 // confirma el resultado y cierra todo antes de devolver la respuesta — a
@@ -72,6 +72,13 @@ export async function validarClave(
     // llamador —las tools MCP— a manejar un código que no le corresponde.
     if (e instanceof SesionesSimultaneas) {
       return { ok: false, error: 'SESIONES_SIMULTANEAS' };
+    }
+    // Y el corte por volumen del SII, por el mismo motivo: con el ERROR genérico
+    // el tenant no distingue "no pudimos validar" de "el SII nos está cortando",
+    // y en el segundo caso reintentar de inmediato empeora el corte. Faltaba
+    // justo en la ruta donde la distinción más importa.
+    if (e instanceof LimiteDeConsultasSii) {
+      return { ok: false, error: 'LIMITE_SII' };
     }
     return { ok: false, error: clasificarErrorCredenciales(e) };
   }
