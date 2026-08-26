@@ -196,3 +196,60 @@ describe('SiiHttpClient.get ante el corte por volumen', () => {
       .resolves.toContain('informe con datos');
   });
 });
+
+// Los tres casos que Codex encontró en la primera versión de esta detección.
+// Cada uno rompía de un modo distinto, y los tres son silenciosos.
+describe('SiiHttpClient — límites de la detección del corte', () => {
+  // EL PEOR: buscar la marca en CUALQUIER cuerpo decodificado descartaba
+  // respuestas exitosas. Los payloads del SII traen texto libre —glosas de
+  // renta, razones sociales, nombres de tipo de documento— y uno que dijera
+  // "superado el límite" hacía tirar todo el resultado como si fuera un corte.
+  it('un JSON legítimo que menciona "superado el límite" NO es un corte', async () => {
+    const { client } = makeClient();
+    mockExec.mockReturnValue(JSON.stringify({
+      respEstado: { codRespuesta: 0 },
+      data: [{ glosa: 'Ha superado el limite de rentas exentas del articulo 57' }],
+    }) as never);
+
+    const r = await client.postSdi(BASE, NAMESPACE, 'getResumen', {});
+    expect(r.data[0].glosa).toContain('superado el limite');
+  });
+
+  // Y el mismo texto dentro de una PÁGINA sí es el corte: lo que distingue no es
+  // la frase sino que venga en HTML.
+  it('la misma frase dentro de una página HTML sí es un corte', async () => {
+    const { client } = makeClient();
+    mockExec.mockReturnValue('<html><body>Se ha superado el limite</body></html>' as never);
+
+    await expect(client.postSdi(BASE, NAMESPACE, 'getResumen', {}))
+      .rejects.toThrow(LimiteDeConsultasSii);
+  });
+
+  // La vía binaria (`getBinario`, que usa el PDF de BHE) no decodifica, así que
+  // el corte pasaba de largo y llegaba al scraper como "esto no es un PDF".
+  it('detecta el corte en la vía binaria del PDF', async () => {
+    const { client } = makeClient();
+    mockExec.mockReturnValue(
+      Buffer.from('<html><body>Error 429: Se ha superado el limite</body></html>' +
+        '\n__MCP_SII_CT__:text/html', 'latin1') as never
+    );
+
+    await expect(client.getBinario('https://loa.sii.cl/cgi_IMT/pdf.cgi', {}))
+      .rejects.toThrow(LimiteDeConsultasSii);
+  });
+
+  // Un PDF de verdad no se toca: sus bytes no se decodifican ni se escanean.
+  it('un PDF real pasa sin que se le busque texto', async () => {
+    const { client } = makeClient();
+    mockExec.mockReturnValue(
+      Buffer.concat([
+        Buffer.from('%PDF-1.3\n', 'latin1'),
+        Buffer.from([0xff, 0xfe, 0x00, 0x01]),
+        Buffer.from('\n__MCP_SII_CT__:application/pdf', 'latin1'),
+      ]) as never
+    );
+
+    const r = await client.getBinario('https://loa.sii.cl/cgi_IMT/pdf.cgi', {});
+    expect(r.contenido.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  });
+});
