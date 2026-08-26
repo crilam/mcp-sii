@@ -1,4 +1,4 @@
-import { RcvScraper, OperacionRcv, ResumenRcv, DetalleRcv, EmpresaAutorizadaRcv } from '../scrapers/rcv';
+import { RcvScraper, OperacionRcv, ResumenRcv, DetalleRcv, EmpresaAutorizadaRcv, TipoDocumentoRcv } from '../scrapers/rcv';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { EjecutorSesion } from '../registroSesiones';
@@ -42,5 +42,16 @@ export async function empresasAutorizadas(
   return registro.ejecutar(rut, async sesion => {
     const scraper = new RcvScraper(new SiiHttpClient(sesion), sesion);
     return scraper.empresasAutorizadas();
+  });
+}
+
+// Catálogo de tipos de documento del RCV. No depende de empresa ni de período.
+export async function tiposDocumento(
+  registro: EjecutorSesion<SessionManager>,
+  rut: string
+): Promise<TipoDocumentoRcv[]> {
+  return registro.ejecutar(rut, async sesion => {
+    const scraper = new RcvScraper(new SiiHttpClient(sesion), sesion);
+    return scraper.tiposDocumento();
   });
 }

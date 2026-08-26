@@ -94,6 +94,7 @@ async function main() {
   await llamar(rutas, 'POST /v1/renta/estado-declaracion', { ...cred, anio: ANIO });
   await llamar(rutas, 'POST /v1/mipyme/list-empresas', { ...cred });
   await llamar(rutas, 'POST /v1/rcv/empresas-autorizadas', { ...cred });
+  await llamar(rutas, 'POST /v1/rcv/tipos-documento', { ...cred });
   if (empresa) {
     await llamar(rutas, 'POST /v1/rcv/resumen', { ...cred, periodo: PERIODO, operacion: 'COMPRA', empresa_rut: empresa });
   }

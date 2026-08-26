@@ -3,7 +3,7 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/rcv';
-import { schemaResumen, schemaDetalle, schemaEmpresasAutorizadas } from '../core/schemas/rcv';
+import { schemaResumen, schemaDetalle, schemaEmpresasAutorizadas, schemaTiposDocumento } from '../core/schemas/rcv';
 
 export function registerRcvTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
@@ -68,5 +68,12 @@ export function registerRcvTools(server: McpServer, registro: RegistroSesiones<S
     'Empresas que el RUT persona autenticado puede consultar en el Registro de Compras y Ventas. OJO: es un universo DISTINTO del de sii_mipyme_list_empresas, que son las empresas que puede OPERAR en el portal de facturación gratuita — un RUT puede estar en una lista y no en la otra. El SII no informa por esta vía la razón social ni los privilegios, así que vienen en null; para el nombre de un RUT se puede usar la consulta de situación tributaria.',
     schemaEmpresasAutorizadas,
     async ({ rut }) => envolverParaMcp(() => core.empresasAutorizadas(registro, rut))
+  );
+
+  server.tool(
+    'sii_rcv_tipos_documento',
+    'Catálogo de tipos de documento del Registro de Compras y Ventas: los códigos que el registro conoce, con su nombre y si ingresan como electrónico o papel. Sirve para saber qué tipo_doc pedirle a sii_rcv_detalle, que exige uno — no existe "el detalle del período entero". OJO: el catálogo trae código y nombre, NO el signo del documento: que exista el tipo 61 no dice que las notas de crédito resten.',
+    schemaTiposDocumento,
+    async ({ rut }) => envolverParaMcp(() => core.tiposDocumento(registro, rut))
   );
 }

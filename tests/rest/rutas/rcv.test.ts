@@ -19,11 +19,12 @@ function armarRouter() {
 describe('registrarRutasRcv', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 3 rutas bajo /v1/rcv', () => {
+  it('registra las 4 rutas bajo /v1/rcv', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
       'POST /v1/rcv/resumen',
       'POST /v1/rcv/empresas-autorizadas',
+      'POST /v1/rcv/tipos-documento',
       'POST /v1/rcv/detalle',
     ]);
   });
@@ -186,5 +187,20 @@ describe('registrarRutasRcv', () => {
 
     expect(r.status).toBe(400);
     expect(core.empresasAutorizadas).not.toHaveBeenCalled();
+  });
+  // El catálogo existe porque `detalle` exige un tipo de documento y no hay
+  // "detalle del período entero": sin esto el consumidor adivina los códigos.
+  it('tipos-documento: llama al core y envuelve el catálogo en datos', async () => {
+    (core.tiposDocumento as jest.Mock).mockResolvedValue([
+      { codigo: 33, nombre: 'Factura Electrónica', tipoIngreso: 'DET_ELE' },
+    ]);
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/rcv/tipos-documento')!(
+      { rut: '11.111.111-1', clave: 'secreta' }
+    );
+
+    expect(r.status).toBe(200);
+    expect(r.body.datos).toHaveLength(1);
   });
 });

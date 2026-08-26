@@ -32,14 +32,15 @@ function metodos(rut: string, dv: string) {
   };
   const conTipo = { ...scope, codTipoDoc: TIPO_DOC };
   return [
-    { nombre: 'getDatosInicio', data: scope },
+    // El portal lo llama con data VACÍO: `getDatosInicio({}, null)` en su bundle.
+    { nombre: 'getDatosInicio', data: {} },
     { nombre: 'getDcvEmpresasAutorizadas', data: scope },
     { nombre: 'getResumenExport', data: scope },
     { nombre: 'getDetalleCompraExport', data: conTipo },
     { nombre: 'getDetalleVentaExport', data: { ...conTipo, operacion: 'VENTA' } },
     { nombre: 'getCtrlAsync', data: scope },
     { nombre: 'getOtrosImpuestos', data: conTipo },
-    { nombre: 'getEventosDoc', data: conTipo },
+    { nombre: 'getEventosDoc', data: {} },
     { nombre: 'getDetalleDTE', data: conTipo },
     { nombre: 'getDetalleIEC02', data: conTipo },
     { nombre: 'getDetallesObs', data: conTipo },

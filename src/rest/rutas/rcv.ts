@@ -3,7 +3,7 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/rcv';
-import { schemaResumen, schemaDetalle, schemaEmpresasAutorizadas } from '../../core/schemas/rcv';
+import { schemaResumen, schemaDetalle, schemaEmpresasAutorizadas, schemaTiposDocumento } from '../../core/schemas/rcv';
 import { ejecutorPara } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from './comun';
 
@@ -16,6 +16,7 @@ import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from '
 const zodResumen = conCredencial(schemaResumen);
 const zodDetalle = conCredencial(schemaDetalle);
 const zodEmpresasAutorizadas = conCredencial(schemaEmpresasAutorizadas);
+const zodTiposDocumento = conCredencial(schemaTiposDocumento);
 
 export function registrarRutasRcv(
   rutas: Map<string, RutaHandler>,
@@ -40,6 +41,17 @@ export function registrarRutasRcv(
     const { rut } = parseo.data;
     const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(() => core.empresasAutorizadas(ejecutor, rut));
+  });
+
+  // Catálogo de tipos de documento. Existe porque `detalle` EXIGE un tipo y no
+  // hay "detalle del período entero": sin esto hay que adivinar los códigos, o
+  // sacarlos de un resumen que sólo lista los que tuvieron movimiento.
+  rutas.set('POST /v1/rcv/tipos-documento', async body => {
+    const parseo = zodTiposDocumento.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(() => core.tiposDocumento(ejecutor, rut));
   });
 
   rutas.set('POST /v1/rcv/detalle', async body => {

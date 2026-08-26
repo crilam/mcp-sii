@@ -28,11 +28,12 @@ function registrar(rutRegistrado?: string) {
 describe('registerRcvTools', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 3 tools de rcv', () => {
+  it('registra las 4 tools de rcv', () => {
     const { tools } = registrar();
 
     expect(Object.keys(tools)).toEqual([
       'sii_rcv_resumen', 'sii_rcv_detalle', 'sii_rcv_empresas_autorizadas',
+      'sii_rcv_tipos_documento',
     ]);
   });
 

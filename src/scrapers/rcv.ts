@@ -223,6 +223,17 @@ export interface EmpresaAutorizadaRcv {
   fechaDesautorizacionEmpresa: string | null;
 }
 
+// Un tipo de documento del catálogo del RCV.
+export interface TipoDocumentoRcv {
+  codigo: number;
+  nombre: string;
+  // Cómo ingresó el documento al registro, en la nomenclatura del SII
+  // ("DET_ELE" electrónico, "DET_PAP" papel). Se expone crudo: es el valor con
+  // el que el propio portal distingue los dos mundos, y traducirlo sería
+  // inventar una taxonomía nuestra.
+  tipoIngreso: string | null;
+}
+
 export interface DetalleRcv {
   empresaRut: string;
   periodo: string;
@@ -404,6 +415,32 @@ export class RcvScraper {
         'Revisá los totales antes de usarlos.'
       ),
     };
+  }
+
+  // Catálogo de tipos de documento del RCV: los 46 códigos que el registro
+  // conoce, con su nombre. Resuelve un problema concreto del consumidor —
+  // `detalle` EXIGE un `tipoDocCodigo` y no existe "el detalle del período
+  // entero", así que sin este catálogo hay que adivinar los códigos o sacarlos
+  // de un resumen que sólo lista los tipos CON movimiento en ese período.
+  //
+  // Ojo con lo que NO resuelve: el catálogo trae código y nombre, no el SIGNO
+  // del documento. Saber que existe el tipo 61 no dice que las notas de crédito
+  // resten, así que `TIPOS_NOTA_CREDITO` sigue siendo la fuente de eso y
+  // `totalesConfiables` sigue significando lo mismo.
+  //
+  // Va con `data` VACÍO, no con el scope de las otras llamadas: así lo llama el
+  // portal (`getDatosInicio({}, null)` en su bundle) y con el scope de las demás
+  // el SII no devuelve JSON. El catálogo no depende de empresa ni de período.
+  async tiposDocumento(): Promise<TipoDocumentoRcv[]> {
+    this.session.assertPuedeEntregarCookieJar();
+
+    const resp = await this.http.postSdi(BASE, NAMESPACE, 'getDatosInicio', {});
+    const filas = Array.isArray(resp?.data) ? resp.data : [];
+    return filas.map((f: any) => ({
+      codigo: Number(f.dcvCodigoDoc),
+      nombre: (f.dcvNombreDoc ?? '').trim(),
+      tipoIngreso: f.dcvTipoIngreso ?? null,
+    }));
   }
 
   // Empresas que el RUT autenticado puede consultar en el registro de compras y

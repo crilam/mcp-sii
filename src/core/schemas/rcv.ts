@@ -28,3 +28,9 @@ export const schemaDetalle = {
 export const schemaEmpresasAutorizadas = {
   rut: z.string().min(1).describe('RUT de la persona autenticada, con dígito verificador.'),
 };
+
+// Sólo el RUT: el catálogo de tipos de documento no depende de empresa ni de
+// período.
+export const schemaTiposDocumento = {
+  rut: z.string().min(1).describe('RUT de la persona autenticada, con dígito verificador.'),
+};
