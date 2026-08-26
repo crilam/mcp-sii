@@ -15,6 +15,7 @@
     "verificar-clave-en-rutas": "ts-node src/scripts/verificarClaveEnRutas.ts",
     "verificar-situacion-tributaria": "ts-node src/scripts/verificarSituacionTributaria.ts",
     "relevar-metodos": "ts-node src/scripts/relevarMetodosSdi.ts",
+    "relevar-indicadores": "ts-node src/scripts/relevarIndicadores.ts",
     "validate-cert": "ts-node src/validateCert.ts",
     "test": "jest",
     "test:watch": "jest --watch",
