@@ -55,6 +55,25 @@ async function llamar(rutas: Map<string, RutaHandler>, ruta: string, body: unkno
   }
 }
 
+// El detalle de RCV pasó de 15 a 26 campos: se imprime uno completo para poder
+// contrastarlo con el portal, que es la única forma de saber si los campos
+// nuevos traen el dato correcto y no sólo "algo".
+async function mostrarDetalleCompleto(rutas: Map<string, RutaHandler>, cred: Record<string, string>) {
+  const handler = rutas.get('POST /v1/rcv/detalle');
+  if (!handler) return;
+  const r = await handler({ ...cred, periodo: PERIODO, operacion: 'COMPRA', tipo_doc: 33 });
+  const b = r.body as { ok?: boolean; documentos?: Record<string, unknown>[] };
+  const doc = b?.documentos?.[0];
+  if (!doc) {
+    console.log('    (sin documentos en el período para mostrar el detalle completo)');
+    return;
+  }
+  console.log('    detalle completo del primer documento:');
+  for (const [k, v] of Object.entries(doc)) {
+    console.log(`       ${k.padEnd(30)} ${JSON.stringify(v)}`);
+  }
+}
+
 async function main() {
   const rut = process.env.SII_RUT;
   const clave = process.env.SII_CLAVE;
@@ -68,6 +87,7 @@ async function main() {
   console.log('Con CLAVE (lo que antes daba BAD_REQUEST):');
   await llamar(rutas, 'POST /v1/rcv/resumen', { ...cred, periodo: PERIODO, operacion: 'COMPRA' });
   await llamar(rutas, 'POST /v1/rcv/detalle', { ...cred, periodo: PERIODO, operacion: 'COMPRA', tipo_doc: 33 });
+  await mostrarDetalleCompleto(rutas, cred);
   await llamar(rutas, 'POST /v1/dte/list-documentos-recibidos', { ...cred, periodo: PERIODO });
   await llamar(rutas, 'POST /v1/renta/estado-declaracion', { ...cred, anio: ANIO });
   await llamar(rutas, 'POST /v1/mipyme/list-empresas', { ...cred });

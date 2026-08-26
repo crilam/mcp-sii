@@ -133,6 +133,62 @@ export interface FilaDetalleRcv {
   // Estado de aceptación o reclamo del receptor, en texto del SII. `null` es lo
   // habitual: significa que no hubo evento registrado, no que fue aceptado.
   eventoReceptor: string | null;
+
+  // --- Campos tributarios que el SII informa y antes se descartaban ----------
+  //
+  // Estaban en la MISMA respuesta que ya pedíamos: el detalle salía con quince
+  // campos mientras el portal muestra veintiséis. Para quien arma un F29 no son
+  // opcionales —el IVA no recuperable, el de uso común y el de activo fijo
+  // cambian el crédito fiscal—, y un detalle al que le faltan no se distingue de
+  // uno completo.
+
+  // Fecha en que el SII recibió el documento, y fecha del acuse de recibo.
+  // Tal como las informa el SII y SIN convertir. Ojo: no tienen el mismo formato
+  // que `fechaEmision` —traen hora, "23/06/2026 12:51:37"— así que un consumidor
+  // que las parsee con el formato de la otra se lleva una sorpresa. Se dejan
+  // crudas justamente para que esa diferencia sea visible en vez de que la
+  // ocultemos normalizando. `null` si el SII no informa.
+  fechaRecepcion: string | null;
+  fechaAcuse: string | null;
+
+  // IVA que NO da derecho a crédito fiscal, con el código del SII que dice POR
+  // QUÉ no lo da. El código va crudo: traducirlo sería inventar una tabla que no
+  // tenemos, y el motivo cambia el tratamiento contable.
+  montoIvaNoRecuperable: number;
+  codigoIvaNoRecuperable: number | null;
+
+  // Compra de activo fijo: se declara aparte del gasto corriente.
+  montoNetoActivoFijo: number;
+  montoIvaActivoFijo: number;
+
+  // IVA de uso común (se prorratea entre operaciones afectas y exentas) e
+  // impuesto sin derecho a crédito.
+  montoIvaUsoComun: number;
+  montoSinDerechoACredito: number;
+
+  // IVA que correspondía retener y no se retuvo.
+  montoIvaNoRetenido: number;
+
+  // Impuestos específicos al tabaco, que el SII informa por categoría.
+  montoTabacoPuros: number;
+  montoTabacoCigarrillos: number;
+  montoTabacoElaborado: number;
+
+  // NO están los "otros impuestos" (código, valor y tasa) que sí muestra el
+  // export del portal, y es deliberado. Los candidatos del JSON son `detTpoImp`,
+  // `detTasaImp` y `totalDtoiMontoImp`, pero en los documentos relevados
+  // `detTpoImp` vale 1 con `detTasaImp` en null — o sea que el 1 parece ser
+  // "IVA normal" y no un código de otro impuesto. Mapearlo así publicaría un
+  // "otro impuesto código 1" en CADA documento, y alguien lo buscaría en una
+  // tabla donde no está.
+  //
+  // Para cerrarlo hace falta un documento que SÍ tenga otro impuesto —
+  // combustibles, bebidas alcohólicas— contra el cual verificar el mapeo. Sin
+  // ese caso, adivinar es peor que no publicarlo.
+
+  // Clasificación de la transacción que hace el SII (el "Tipo Compra" del
+  // portal). Código crudo por la misma razón que el de IVA no recuperable.
+  tipoTransaccion: number | null;
 }
 
 export interface DetalleRcv {
@@ -424,6 +480,24 @@ export class RcvScraper {
       referenciaTipoDoc: d.detTipoDocRef ? Number(d.detTipoDocRef) : null,
       referenciaFolio: d.detFolioDocRef ? Number(d.detFolioDocRef) : null,
       eventoReceptor: d.detEventoReceptorLeyenda ?? null,
+
+      // Los montos van con `?? 0`: el SII manda 0 cuando el concepto no aplica,
+      // y ahí el cero ES el dato. Los CÓDIGOS van con `null`, porque un 0 en un
+      // código no es "código cero", es "no hay" — y publicarlo como número haría
+      // que alguien lo busque en una tabla donde no está.
+      fechaRecepcion: d.detFecRecepcion ?? null,
+      fechaAcuse: d.detFecAcuse ?? null,
+      montoIvaNoRecuperable: Number(d.detMntIVANoRec ?? 0),
+      codigoIvaNoRecuperable: d.detMntCodNoRec ? Number(d.detMntCodNoRec) : null,
+      montoNetoActivoFijo: Number(d.detMntActFijo ?? 0),
+      montoIvaActivoFijo: Number(d.detMntIVAActFijo ?? 0),
+      montoIvaUsoComun: Number(d.detIVAUsoComun ?? 0),
+      montoSinDerechoACredito: Number(d.detMntSinCredito ?? 0),
+      montoIvaNoRetenido: Number(d.detIVANoRetenido ?? 0),
+      montoTabacoPuros: Number(d.detTabPuros ?? 0),
+      montoTabacoCigarrillos: Number(d.detTabCigarrillos ?? 0),
+      montoTabacoElaborado: Number(d.detTabElaborado ?? 0),
+      tipoTransaccion: d.detTipoTransaccion != null ? Number(d.detTipoTransaccion) : null,
     };
   }
 

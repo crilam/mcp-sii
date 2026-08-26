@@ -397,6 +397,26 @@ describe('RcvScraper.detalle', () => {
       referenciaTipoDoc: 33,
       referenciaFolio: 900000000,
       eventoReceptor: null,
+      // Campos tributarios que el SII ya mandaba en esta misma respuesta y antes
+      // se descartaban. Los ceros son dato: el SII manda 0 cuando el concepto no
+      // aplica al documento. Los códigos van en null porque un 0 ahí no es
+      // "código cero", es "no hay".
+      //
+      // `fechaRecepcion` trae HORA y `fechaEmision` no: son formatos distintos
+      // en la misma fila, y se dejan crudos para que la diferencia se vea.
+      fechaRecepcion: '23/06/2026 12:51:37',
+      fechaAcuse: null,
+      montoIvaNoRecuperable: 0,
+      codigoIvaNoRecuperable: null,
+      montoNetoActivoFijo: 0,
+      montoIvaActivoFijo: 0,
+      montoIvaUsoComun: 0,
+      montoSinDerechoACredito: 0,
+      montoIvaNoRetenido: 0,
+      montoTabacoPuros: 0,
+      montoTabacoCigarrillos: 0,
+      montoTabacoElaborado: 0,
+      tipoTransaccion: 1,
     });
   });
 
@@ -580,5 +600,33 @@ describe('RcvScraper.detalle', () => {
 
     await expect(scraper.detalle('202607', 'VENTA', 110)).rejects.toThrow(/certificado/);
     expect(http.postSdi).not.toHaveBeenCalled();
+  });
+  // El criterio que separa un cero informado de un dato ausente, y que es el que
+  // hace utilizable este detalle para armar un F29: los MONTOS van en 0 porque
+  // el SII manda 0 cuando el concepto no aplica —ahí el cero ES el dato—, y los
+  // CÓDIGOS van en null, porque un 0 en un código no es "código cero" sino "no
+  // hay", y publicarlo como número manda a buscarlo en una tabla donde no está.
+  it('distingue un monto en cero de un código ausente', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-compra.json'));
+
+    const detalle = await scraper.detalle('202606', 'COMPRA', 61, '22222222-2');
+    const doc = detalle.documentos[0];
+
+    expect(doc.montoIvaNoRecuperable).toBe(0);
+    expect(doc.montoIvaUsoComun).toBe(0);
+    expect(doc.codigoIvaNoRecuperable).toBeNull();
+  });
+
+  // Las dos fechas del documento NO comparten formato: la de emisión es
+  // DD/MM/AAAA y la de recepción trae hora. Se dejan crudas a propósito, así que
+  // esto lo fija — normalizar una de las dos escondería la diferencia y un
+  // consumidor que parsee las dos igual fallaría recién en producción.
+  it('conserva el formato de cada fecha tal como lo manda el SII', async () => {
+    const { scraper } = makeScraper(fixture('rcv-detalle-compra.json'));
+
+    const doc = (await scraper.detalle('202606', 'COMPRA', 61, '22222222-2')).documentos[0];
+
+    expect(doc.fechaEmision).toBe('23/06/2026');
+    expect(doc.fechaRecepcion).toBe('23/06/2026 12:51:37');
   });
 });

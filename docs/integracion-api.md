@@ -363,6 +363,30 @@ Agrega `tipo_doc` (int positivo, obligatorio) a los campos comunes. Devuelve `do
 }
 ```
 
+**El detalle trae 26 campos, no 15.** Además de los de arriba, cada documento
+informa los datos tributarios que el portal muestra y que antes se descartaban:
+`fechaRecepcion`, `fechaAcuse`, `montoIvaNoRecuperable` con
+`codigoIvaNoRecuperable`, `montoNetoActivoFijo`, `montoIvaActivoFijo`,
+`montoIvaUsoComun`, `montoSinDerechoACredito`, `montoIvaNoRetenido`, los tres
+montos de tabaco y `tipoTransaccion`. Para armar un F29 no son opcionales: el
+IVA no recuperable, el de uso común y el de activo fijo cambian el crédito
+fiscal.
+
+Dos criterios que conviene tener claros al leerlos:
+
+- **Los montos vienen en `0` y los códigos en `null`.** El SII manda 0 cuando el
+  concepto no aplica al documento, y ahí el cero **es** el dato. Un código en 0
+  no sería "código cero" sino "no hay", así que va `null`.
+- **`fechaRecepcion` trae hora y `fechaEmision` no** (`23/06/2026 12:51:37`
+  contra `23/06/2026`). Son dos formatos distintos en la misma fila, tal como
+  los manda el SII; no los normalizamos para que la diferencia se vea en vez de
+  que la descubras parseando.
+
+Los "otros impuestos" (código, valor y tasa) que muestra el portal **todavía no
+se exponen**: los campos candidatos del SII no se pudieron verificar contra un
+documento que realmente tenga uno, y mapearlos a ciegas publicaría un impuesto
+inexistente en cada documento.
+
 Trampas de este endpoint:
 
 - **En exportaciones, `contraparteRut` es el genérico `55555555-5` para todo extranjero.** Mirá `contraparteTipoId` antes de usar el RUT como identidad, o vas a fusionar contrapartes distintas en una.
