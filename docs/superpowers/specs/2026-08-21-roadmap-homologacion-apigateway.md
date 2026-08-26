@@ -65,6 +65,7 @@ En producción, 19 rutas REST:
 | persona | bienes-raices |
 | contribuyente | situacion-tributaria |
 | sesion | validar-clave |
+| indicadores | uf, dolar, utm, correccion-monetaria, impuesto-2da-categoria{,-art52} |
 
 **CORRECCIÓN (2026-08-26) — el pass-through por clave SÍ funciona.** La versión
 anterior decía que se había descartado (queue-it + F5 WAF, sin sesión
@@ -85,17 +86,25 @@ verificación en prod + aviso a los consumidores si cambia el contrato.
 
 | # | Dominio | En catálogo | Hoy | Notas |
 |---|---|---:|---:|---|
-| **R1** | **rcv** | 12 | 2 | RCV asíncrono (el SII procesa detalles grandes en background) y escritura de registro. Ya especificado en parte, ver ronda 1. |
+| **R1** | **rcv** | 12 | 4 | RCV asíncrono (el SII procesa detalles grandes en background) y escritura de registro. Ya especificado en parte, ver ronda 1. |
 | R2 | mipyme | 11 | 3 | Lectura restante (info-contribuyente, list-dte-recibidos, dte-pdf/xml) y borradores. |
 | R3 | bienes_raices | 10 | 1 | Comunas, certificados de avalúo y antecedentes (data y PDF). |
 | R4 | bhe | 9 | 5 | Consultas por terceros, y la paginación de recibidas >100 que hoy falla explícito. |
-| R5 | indicadores | 6 | 0 | UF, corrección monetaria, impuesto 2ª categoría. **Sin credencial**: páginas públicas. |
+| ~~R5~~ | **indicadores** | 6 | **6** | ✅ **Completa** (PR #63). UF, dólar, UTM/UTA/IPC, corrección monetaria e impuesto 2ª categoría (art. 43 y 52 bis). **Sin credencial ni `rut`**: páginas públicas. |
 | R6 | f29 | 5 | 0 | Ya especificado en parte en el spec de empresa-lectura. |
 | R7 | vehiculos | 4 | 0 | Tasación, categorías. Sin credencial. |
 | R8 | misii | 4 | 0 | Representantes, representados, datos del contribuyente. |
 | R9 | contribuyentes | 3 | 1 | Los dos restantes. |
 | R10 | dte (parte A) | ? | 4 | Sólo lo que sea consulta de portal. El resto pasa al mundo B. |
 | R11 | Escritura de portal | — | — | bhe emitir/anular, rcv set_tipo_transaccion/set_resumen, mipyme borradores. **Actos reales e irreversibles**: idempotencia y confirmación explícita. Spec con cuidado extra. |
+
+**Lo que dejó la R5, y que sirve para las rondas sin credencial (R7 vehículos).**
+Un dominio público no hereda del resto: no hay sesión, ni cookie jar, ni
+`ColaPorClave` por RUT. Eso último no es una simplificación sino un riesgo — sin
+una cola propia, varios tenants pidiendo años distintos barren el portal en
+paralelo, que es el patrón que ya bloqueó el RCV. La R5 quedó con cola de un slot
+para todo el dominio y caché por año, y **el SII cuenta las requests igual
+aunque no haya credencial**: el corte por volumen llega a las páginas públicas.
 
 **RE — Evaluación del mundo B.** Antes de comprometer diseño: spike sobre las
 APIs oficiales del SII (firma XML, CAF), y decisión build-vs-integrar LibreDTE
