@@ -14,6 +14,7 @@
     "buscar-retencion-emisor": "ts-node src/scripts/buscarRetencionEmisor.ts",
     "verificar-clave-en-rutas": "ts-node src/scripts/verificarClaveEnRutas.ts",
     "verificar-situacion-tributaria": "ts-node src/scripts/verificarSituacionTributaria.ts",
+    "relevar-metodos": "ts-node src/scripts/relevarMetodosSdi.ts",
     "validate-cert": "ts-node src/validateCert.ts",
     "test": "jest",
     "test:watch": "jest --watch",

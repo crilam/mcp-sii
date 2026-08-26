@@ -10,7 +10,62 @@ del usuario). Además ya está parcialmente especificado: la parte asíncrona
 viene del spec `2026-08-21-homologacion-empresa-lectura-design.md`, escrita con
 detalle y **no ejecutada**. Esta ronda la retoma corrigiendo lo que envejeció.
 
-## Fase 0 — Relevamiento (BLOQUEA todo lo demás)
+## Fase 0 — Relevamiento: CERRADA (2026-08-26)
+
+Se hizo, y cambió el alcance. El resumen está acá; el detalle, abajo.
+
+**El async existe** (`getCtrlAsync`), así que el riesgo heredado se cierra: no
+hay que caerlo de la spec. Pero el hallazgo grande es otro.
+
+**El SII expone del RCV bastante más de lo que leemos.** El método
+`getDetalleCompraExport` devuelve el detalle en CSV con **26 columnas**;
+nuestro `/v1/rcv/detalle` (que usa `getDetalleCompra`, la variante JSON)
+publica 15 campos. Faltan ~14 datos tributarios, y no son de adorno para quien
+arma un F29: IVA no recuperable con su código, monto neto e IVA de activo fijo,
+IVA de uso común, impuesto sin derecho a crédito, IVA no retenido, fecha de
+recepción y de acuse, y otros impuestos con código, valor y tasa.
+
+O sea que el valor de esta ronda no está sólo en agregar endpoints: está en
+**completar un dato que ya devolvemos incompleto**.
+
+### Cómo se relevó (sirve para las rondas siguientes)
+
+Adivinar nombres de método no funcionó: cuatro candidatos, cuatro fallos. Lo
+que funcionó fue bajar el bundle del portal y leer de ahí los nombres reales
+—el mismo método que sirvió para descubrir el PDF de BHE—. El portal es una app
+AngularJS y su `app.full.min.js` (863 KB) declara los métodos del facade.
+
+Una trampa que costó una corrida: el HTML del portal emite los atributos **sin
+comillas** (`<script src=https://...>`), así que una regex que exija comillas
+no encuentra ningún script y el relevamiento sale vacío sin fallar.
+
+### Los 21 métodos del facade de RCV
+
+Lectura, ya implementados: `getResumen`, `getDetalleCompra`, `getDetalleVenta`.
+
+Lectura, NO implementados:
+`getResumenExport`, `getDetalleCompraExport`, `getDetalleVentaExport`,
+`getCtrlAsync`, `getDatosInicio`, `getDcvEmpresasAutorizadas`, `getDetalleDTE`,
+`getEventosDoc`, `getOtrosImpuestos`, `getDetalleIEC02`, `getStringValue`.
+
+Observaciones (una familia entera sin tocar): `getDetallesObs`,
+`getDetalleObsCompraExp`, `getDetalleObservacionRutDoc`,
+`getDetalleObservacionTpoDoc`, `getResumenObsCruce`,
+`getResumenObservacionesRutTpoDoc`.
+
+**Escritura — NO va en esta ronda:** `ingresarAceptacionReclamoDocs` (aceptar o
+reclamar documentos). Es un acto real frente a terceros y va a la ronda de
+escritura (R11), con idempotencia y confirmación explícita.
+
+### Verificado en vivo
+
+Contra la empresa del `.env`, período 06/2025, con el control de `getResumen`
+respondiendo primero para separar "el método no existe" de "la sesión no
+sirve": `getDetalleCompraExport`, `getResumenExport` y `getCtrlAsync` devuelven
+los tres `codRespuesta: 0`. `getCtrlAsync` da lista vacía, que es lo esperado
+sin solicitudes en curso.
+
+## Fase 0 — Relevamiento (planteo original, cumplido)
 
 No se escribe código hasta cerrar esto. Son las dos incógnitas que pueden
 cambiar el alcance entero:
