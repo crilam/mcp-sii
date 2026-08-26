@@ -6,6 +6,7 @@ import { Browser } from './browser';
 import { AuthStrategy, SiiConfig } from './env';
 import { partirRut } from './rut';
 import { rutaTemporalSii } from './rutaTemporalSii';
+import { SesionesSimultaneas } from './erroresConsulta';
 
 export interface Empresa {
   rut: string;
@@ -807,11 +808,23 @@ export class SessionManager {
       // interstitial, un redirect lento) el texto desaparece, el motivo saldría
       // `undefined` y una clave que nunca va a servir se reportaría como fallo
       // transitorio para que el tenant la reintente.
-      if (this.leerMotivoDeRechazo() === 'CLAVE_INCORRECTA') {
+      const motivo = this.leerMotivoDeRechazo();
+      if (motivo === 'CLAVE_INCORRECTA') {
         this.logearRechazo('CLAVE_INCORRECTA');
         // Este texto es el que clasificarErrorCredenciales mapea a
         // CREDENCIALES_INVALIDAS; no cambiarlo sin actualizar esa función.
         throw new Error('El SII rechazó la autenticación: RUT o clave incorrectos.');
+      }
+      // También sale del loop apenas se detecta: es definitivo para ESTE intento
+      // (esperar los 15 segundos no va a liberar la sesión de otro lado) y quien
+      // llama necesita el motivo, no un timeout genérico.
+      if (motivo === 'SESIONES_SIMULTANEAS') {
+        this.logearRechazo('SESIONES_SIMULTANEAS');
+        throw new SesionesSimultaneas(
+          `El SII no aceptó la sesión: el RUT ${this.config.rut} ya tiene demasiadas ` +
+          'sesiones abiertas. Suele ser otra consulta en curso sobre el mismo ' +
+          'contribuyente; esperá a que termine y reintentá.'
+        );
       }
     }
 
@@ -878,7 +891,7 @@ export class SessionManager {
   // afirma lo que el portal dice con estas palabras: inventar una causa haría
   // que un fallo transitorio se reporte como credencial inválida, y el tenant
   // borraría una clave que en realidad servía.
-  private leerMotivoDeRechazo(): 'CLAVE_INCORRECTA' | undefined {
+  private leerMotivoDeRechazo(): 'CLAVE_INCORRECTA' | 'SESIONES_SIMULTANEAS' | undefined {
     try {
       // Se lee la página completa, no los primeros 2000 caracteres: el portal
       // imprime el aviso y su código DEBAJO del header, el menú y la navegación,
@@ -892,10 +905,21 @@ export class SessionManager {
       // cambia el copy, el código sigue identificando el caso; si mostrara el
       // código sin texto, tampoco se perdería. El tercer grupo del código varía
       // entre respuestas (se vieron 217 y 225), así que no se fija.
-      return /Clave Tributaria ingresada no es correcta/i.test(texto) ||
-        /01\.01\.\d+\.500\.720\.20\b/.test(texto)
-        ? 'CLAVE_INCORRECTA'
-        : undefined;
+      if (/Clave Tributaria ingresada no es correcta/i.test(texto) ||
+          /01\.01\.\d+\.500\.720\.20\b/.test(texto)) {
+        return 'CLAVE_INCORRECTA';
+      }
+      // Demasiadas sesiones abiertas para el RUT: mismo formato de código que el
+      // rechazo por clave pero terminado en .27 en vez de .20. Se detecta SÓLO
+      // por el código y no también por el texto —al revés que la clave
+      // incorrecta— porque no tenemos capturado el copy que el portal muestra en
+      // este caso. Es la señal estable de las dos: si el SII cambia el texto, el
+      // código sigue identificándolo. Cuando se capture el aviso, agregarlo acá
+      // como segunda señal.
+      if (/01\.01\.\d+\.500\.720\.27\b/.test(texto)) {
+        return 'SESIONES_SIMULTANEAS';
+      }
+      return undefined;
     } catch {
       return undefined;
     }
