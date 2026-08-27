@@ -161,10 +161,16 @@ describe('extraerIpsSospechosas', () => {
     expect(extraerIpsSospechosas(contenido)).toEqual([]);
   });
 
-  // La excepción es sólo para el cuádruple pegado a `nombre/`: una IP dentro de
+  // La excepción es sólo para el cuádruple pegado a `producto/`: una IP dentro de
   // una URL sigue siendo una IP, y ahí es donde aparecería una real.
-  it('sigue marcando una IP pública dentro de una URL', () => {
-    expect(extraerIpsSospechosas('https://8.8.4.4/consulta')).toContain('8.8.4.4');
+  it.each([
+    'https://8.8.4.4/consulta',
+    // El caso que una primera versión de la excepción dejaba pasar: el carácter
+    // previo es `s/`, igual que en `Chrome/`, pero es el final de un path.
+    'https://cdn.ejemplo.com/servers/8.8.4.4',
+    'ip de origen 8.8.4.4',
+  ])('sigue marcando la IP pública en %s', (contenido) => {
+    expect(extraerIpsSospechosas(contenido)).toContain('8.8.4.4');
   });
 });
 

@@ -135,7 +135,7 @@ function porMes(html: string): { mes: number; trozo: string }[] {
   // "el SII no publicó nada" en vez de "el parser no encontró las tablas".
   // El encabezado es el nombre del mes, y en algunas tablas trae el año pegado
   // ("Diciembre 2025"): se toma la primera palabra y se ignora el resto.
-  const marcas = [...html.matchAll(/<h([23])>\s*([A-Za-zÁÉÍÓÚáéíóúñÑ]+)[^<]*<\/h\1>/gi)];
+  const marcas = [...html.matchAll(/<h([23])(?:\s[^>]*)?>\s*([A-Za-zÁÉÍÓÚáéíóúñÑ]+)[^<]*<\/h\1>/gi)];
 
   for (const [i, m] of marcas.entries()) {
     const nombre = m[2].toLowerCase()
@@ -210,10 +210,26 @@ export function parsearValoresDiarios(html: string): ValorDiario[] {
  * semántica por tabla. Quien consume la ruta sabe qué pidió.
  */
 export function parsearValoresMensuales(html: string): ValorMensual[] {
+  // Se recorre TABLA por tabla y se elige la que tenga MÁS filas de mes, no el
+  // HTML entero: la página trae notas al pie, y una nota que arranque con un
+  // nombre de mes ("Enero es el mes base…") se colaba como fila de datos.
+  // `vistos` evitaba el duplicado pero se quedaba con la PRIMERA aparición, que
+  // no es necesariamente la de la tabla buena; y quedarse con la primera tabla
+  // que tenga algún mes tiene el mismo problema si la nota va arriba. La tabla de
+  // datos es la que trae los doce meses, así que gana por cantidad.
+  let mejor: ValorMensual[] = [];
+  for (const tabla of html.split(/<table[^>]*>/i).slice(1)) {
+    const valores = filasDeMes(tabla.split(/<\/table>/i)[0]);
+    if (valores.length > mejor.length) mejor = valores;
+  }
+  return mejor;
+}
+
+function filasDeMes(tabla: string): ValorMensual[] {
   const salida: ValorMensual[] = [];
   const vistos = new Set<number>();
 
-  for (const fila of filas(html)) {
+  for (const fila of filas(tabla)) {
     const c = celdas(fila);
     if (c.length < 2) continue;
 
@@ -272,8 +288,10 @@ const PERIODOS = new Set(['MENSUAL', 'QUINCENAL', 'SEMANAL', 'DIARIO']);
 
 export function parsearTramosImpuesto(html: string): TramoImpuesto[] {
   const salida: TramoImpuesto[] = [];
+  let bloques = 0;
 
   for (const { mes, trozo } of porMes(html)) {
+    bloques++;
     let periodo = '';
     for (const fila of filas(trozo)) {
       const c = celdas(fila);
@@ -292,11 +310,20 @@ export function parsearTramosImpuesto(html: string): TramoImpuesto[] {
         desde: numeroChileno(c[1]),
         hasta: numeroChileno(c[2]),
         factor: exento ? null : numeroChileno(c[3]),
-        rebaja: numeroChileno(c[4]),
+        rebaja: exento ? null : numeroChileno(c[4]),
         tasaMaxima: exento ? null : numeroChileno(c[5].replace('%', '')),
         exento,
       });
     }
+  }
+  // Una página con tablas por mes pero CERO tramos no es "el SII no publicó": es
+  // que el rótulo del período dejó de reconocerse —otra capitalización, otro
+  // nombre en la página del art. 52 bis, que es aparte— y el resultado sería un
+  // array vacío que se lee como dato. Mismo criterio que el h2/h3 de `porMes`.
+  if (bloques > 0 && salida.length === 0) {
+    throw new Error(
+      'El SII devolvió tablas por mes pero ningún tramo reconocible: '
+      + 'cambió el rótulo del período y hay que actualizar el scraper.');
   }
   return salida;
 }

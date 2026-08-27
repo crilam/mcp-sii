@@ -126,11 +126,18 @@ export function extraerIpsSospechosas(contenido: string): string[] {
     // números de versión, que si no serían ruido permanente.
     if (octetos.some(o => (o.length > 1 && o.startsWith('0')) || Number(o) > 255)) continue;
     if (esIpNoPersonal(octetos.map(Number))) continue;
-    // Un cuádruple precedido por `nombre/` es un número de VERSIÓN, no una IP:
+    // Un cuádruple precedido por `producto/` es un número de VERSIÓN, no una IP:
     // el caso real es el `Chrome/126.0.0.0` del User-Agent con que el scraper de
     // indicadores se presenta al SII. Se descarta acá y no relajando el rango de
     // octetos, que taparía IPs públicas de verdad.
-    if (/[A-Za-z]\/$/.test(contenido.slice(0, m.index))) continue;
+    //
+    // El nombre del producto tiene que arrancar la palabra —inicio de línea o
+    // espacio—, y NO valer si viene después de otra barra. Una primera versión
+    // pedía sólo "letra seguida de barra" y con eso
+    // `https://cdn.ejemplo.com/servers/8.8.4.4` quedaba exento: una IP pública al
+    // final de un path dejaba de detectarse, o sea el chequeo se debilitaba justo
+    // donde una IP real aparecería.
+    if (/(?:^|\s)[A-Za-z][A-Za-z0-9._-]*\/$/.test(contenido.slice(0, m.index))) continue;
     encontrados.push(m[0]);
   }
   return encontrados;

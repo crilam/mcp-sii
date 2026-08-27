@@ -16,10 +16,13 @@ import { ValorDiario, ValorMensual, TramoImpuesto } from '../scrapers/indicadore
 // consumidor que convierta cien montos a UF baja cien veces la misma tabla.
 const TTL_ANIO_EN_CURSO_MS = 6 * 60 * 60 * 1000;
 
-// Techo de entradas: son ~15 KB por año-indicador, así que 200 entradas son
-// ~3 MB. Con seis indicadores eso cubre más de treinta años, o sea todo lo que
-// el SII publica.
-export const MAX_ENTRADAS = 200;
+// Techo de entradas: son ~15 KB por año-indicador, así que 700 entradas son
+// ~10 MB. El schema acepta 1990–2100, o sea 111 años × 6 indicadores = 666
+// claves posibles: con un techo menor, un solo consumidor recorriendo el rango
+// completo vacía el caché de todos los demás, y con la cola de un slot eso
+// serializa cientos de bajadas al portal para todo el mundo. El techo cubre el
+// espacio entero y sigue siendo un tope, no una promesa de que quepa todo.
+export const MAX_ENTRADAS = 700;
 
 // Se guarda la PROMESA en vuelo y no el valor resuelto: así N requests
 // concurrentes del mismo año-indicador (caché fría, o recién vencida) comparten
@@ -68,7 +71,14 @@ function conCache<T>(clave: string, anio: number, fn: () => Promise<T>): Promise
     if (masVieja !== undefined) cache.delete(masVieja);
   }
 
-  const enVuelo = cola.ejecutar(CLAVE_PORTAL, fn);
+  // La expiración se calcula cuando LLEGA el dato, no cuando se encoló: con la
+  // cola serializada, una bajada puede esperar su turno varios segundos y el TTL
+  // empezaría a correr antes de tener nada.
+  const enVuelo = cola.ejecutar(CLAVE_PORTAL, fn).then(valor => {
+    const entrada = cache.get(clave);
+    if (entrada?.valor === enVuelo) entrada.expira = expiracion(anio, Date.now());
+    return valor;
+  });
   cache.set(clave, { valor: enVuelo, expira: expiracion(anio, ahora) });
 
   // Sólo se cachea el éxito: un fallo puede ser del momento —el portal caído, un
