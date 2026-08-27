@@ -199,6 +199,42 @@ mipyme las que puede **operar** en el portal de facturación gratuita. Un RUT
 puede estar en una lista y no en la otra. Confundirlas llevaría a ofrecer
 facturar por una empresa que sólo se puede mirar.
 
+### Indicadores y valores publicados
+
+| Tool | Descripción |
+|---|---|
+| `sii_indicadores_uf` | Valor diario de la UF de un año |
+| `sii_indicadores_dolar` | Dólar observado diario de un año |
+| `sii_indicadores_utm` | UTM, UTA e IPC por mes |
+| `sii_indicadores_correccion_monetaria` | Factores de corrección monetaria por mes |
+| `sii_indicadores_impuesto_2da_categoria` | Tramos del impuesto único de 2ª categoría (art. 43) |
+| `sii_indicadores_impuesto_2da_categoria_art52` | Tramos del art. 52 bis |
+
+Son las **únicas** tools y rutas del servicio que no reciben `rut` ni credencial,
+y que no necesitan `sii_iniciar_sesion`: el SII publica estas tablas abiertas. En
+REST viven bajo `/v1/indicadores/…` y siguen pasando por el auth de tenant y el
+rate-limit, como todas.
+
+Tres cosas al leerlas:
+
+- **Un día que el SII no publicó no aparece**, en vez de aparecer en cero. El
+  dólar sólo trae días hábiles, y el año en curso llega hasta el último día
+  publicado. Un cero en un tipo de cambio no es lo mismo que "no hay dato".
+- **La corrección monetaria es triangular**: un mes no tiene factor contra los
+  meses anteriores, así que muchas celdas vienen en `null`, y ese `null`
+  significa "no corresponde".
+- **En los tramos de 2ª categoría, el tramo exento trae `exento: true` y sus
+  números en `null`**, no en 0. Un factor 0 daría el mismo impuesto por un camino
+  que la tabla no dice. El art. 43 trae los cuatro períodos (MENSUAL, QUINCENAL,
+  SEMANAL, DIARIO) y el art. 52 bis sólo el mensual; el último tramo de cada
+  período no tiene tope, y ahí `hasta` va en `null`.
+
+Los resultados se cachean en memoria por año e indicador. Un año ya cerrado no se
+vuelve a consultar nunca —el valor de la UF de un día pasado no cambia— y el año
+en curso se revisa cada seis horas. Cada consulta baja una página entera del SII,
+y el SII corta por volumen: sin caché, convertir cien montos a UF bajaría cien
+veces la misma tabla.
+
 ### Boletas de honorarios y persona natural
 
 | Tool | Descripción |

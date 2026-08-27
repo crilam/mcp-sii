@@ -1,0 +1,34 @@
+<html><head><title>Dólar 2025</title></head><body>
+<!--
+  Recorte de la página del dólar. Difiere de la UF en DOS cosas que rompían el
+  parser si se asumía que todas las páginas del SII son iguales:
+
+    1. Titula los meses con `<h3>`, no con `<h2>`.
+    2. Los valores usan PUNTO DECIMAL y sin miles ("928.16"), al revés que la UF
+       ("40.875,09"). Tratarlos igual convertía 928.16 en 92816: un tipo de
+       cambio mil veces más alto y perfectamente creíble a simple vista.
+
+  También trae celdas vacías: el dólar no se publica fines de semana ni feriados.
+-->
+<table class='table table-hover table-bordered'>
+<tbody>
+<tr><th colspan='6'><h3>Febrero</h3></th></tr>
+<tr>
+<th width='40'><strong>1</strong></th><td width='200'></td>
+<th width='40'><strong>11</strong></th><td width='200'>950.5</td>
+<th width='40'><strong>21</strong></th><td width='200'>948.25</td>
+</tr>
+</tbody>
+</table>
+
+<table class='table table-hover table-bordered'>
+<tbody>
+<tr><th colspan='6'><h3>Enero</h3></th></tr>
+<tr>
+<th width='40'><strong>1</strong></th><td width='200'></td>
+<th width='40'><strong>11</strong></th><td width='200'>988.1</td>
+<th width='40'><strong>21</strong></th><td width='200'>1000.75</td>
+</tr>
+</tbody>
+</table>
+</body></html>

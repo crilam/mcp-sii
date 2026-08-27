@@ -16,6 +16,7 @@ import { registrarRutasDte } from './rest/rutas/dte';
 import { registrarRutasMipyme } from './rest/rutas/mipyme';
 import { registrarRutasSesion } from './rest/rutas/sesion';
 import { registrarRutasContribuyente } from './rest/rutas/situacionTributaria';
+import { registrarRutasIndicadores } from './rest/rutas/indicadores';
 
 const LIMITE_AUTH_FALLIDA_POR_IP = 20;
 
@@ -56,6 +57,8 @@ export function crearRestServer(
   registrarRutasSesion(rutas, registro, credenciales);
   // Consulta pública: no recibe `registro`/`credenciales` (sin clave ni sesión).
   registrarRutasContribuyente(rutas);
+  // Sin registro ni credenciales: son páginas públicas del SII.
+  registrarRutasIndicadores(rutas);
 
   const server = http.createServer(async (req, res) => {
     try {

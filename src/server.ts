@@ -5,6 +5,7 @@ import { registerBienesRaicesTools, registerSesionTools } from './tools/bienesRa
 import { registerBheTools } from './tools/bhe';
 import { registerRentaTools } from './tools/renta';
 import { registerRcvTools } from './tools/rcv';
+import { registerIndicadoresTools } from './tools/indicadores';
 import { ProveedorCredencialesRuntime } from './credencialesRuntime';
 import { crearRegistroSesionesSii } from './registroSesionesSii';
 
@@ -30,6 +31,8 @@ export function createServer(): McpServer {
   registerBheTools(server, registro);
   registerRentaTools(server, registro);
   registerRcvTools(server, registro);
+  // Sin `registro`: los indicadores son páginas públicas, no hay sesión.
+  registerIndicadoresTools(server);
 
   return server;
 }
