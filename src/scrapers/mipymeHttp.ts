@@ -355,10 +355,16 @@ export class MipymeHttpScraper {
     private session: SessionManager
   ) {}
 
-  // Las consultas por HTTP necesitan el cookie jar, que sólo produce la
-  // autenticación con certificado. Se verifica ANTES de tocar la red para no
-  // abrir una sesión en el SII que no se va a poder usar (ver
-  // SessionManager.assertPuedeEntregarCookieJar).
+  // Las consultas por HTTP necesitan el cookie jar. Se verifica ANTES de tocar
+  // la red para no abrir una sesión en el SII que no se va a poder usar y que
+  // igual cuenta para el límite de sesiones simultáneas.
+  //
+  // Este comentario decía "que sólo produce la autenticación con certificado".
+  // Dejó de ser cierto en el PR #55: las DOS estrategias producen el jar, y la
+  // lectura de mipyme anda con clave tributaria (ver
+  // SessionManager.assertPuedeEntregarCookieJar, que ya no rechaza nada). El
+  // certificado sigue siendo obligatorio sólo para `emitirDte`, porque firmar lo
+  // necesita de verdad.
   async listEmpresas(): Promise<Empresa[]> {
     this.session.assertPuedeEntregarCookieJar();
     return this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
