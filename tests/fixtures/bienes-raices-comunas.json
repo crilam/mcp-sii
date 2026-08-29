@@ -1,0 +1,42 @@
+[
+  {
+    "codigoConaraSii": 5406,
+    "nombre": "ALGARROBO",
+    "regional": 5,
+    "codigo": 0,
+    "descripcion": null,
+    "descCorta": null
+  },
+  {
+    "codigoConaraSii": 14605,
+    "nombre": "ALHUE",
+    "regional": 14,
+    "codigo": 0,
+    "descripcion": null,
+    "descCorta": null
+  },
+  {
+    "codigoConaraSii": 8414,
+    "nombre": "ALTO BIOBIO",
+    "regional": 8,
+    "codigo": 0,
+    "descripcion": null,
+    "descCorta": null
+  },
+  {
+    "codigoConaraSii": 3304,
+    "nombre": "ALTO DEL CARMEN",
+    "regional": 3,
+    "codigo": 0,
+    "descripcion": null,
+    "descCorta": null
+  },
+  {
+    "codigoConaraSii": 1211,
+    "nombre": "ALTO HOSPICIO",
+    "regional": 1,
+    "codigo": 0,
+    "descripcion": null,
+    "descCorta": null
+  }
+]

@@ -171,7 +171,7 @@ export class SessionManager {
   ) {}
 
   // Expone el Browser de esta sesión para scrapers que lo necesitan crudo
-  // (BienesRaicesScraper lee el DOM directo, a diferencia del resto que habla
+  // (el antiguo scraper de navegador de bienes raíces leía el DOM directo, a diferencia del resto que habla
   // HTTP vía SiiHttpClient). El mismo Browser que ya autenticó esta sesión —
   // no uno nuevo — porque el estado autenticado vive en el contexto de
   // agent-browser que ese Browser referencia (--session <rut>).

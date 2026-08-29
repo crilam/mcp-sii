@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "nombre": "DIRECCIÃN DE OBRA MUNICIPAL",
+    "inicioVigencia": "2024-04-24T04:00:00.000+00:00",
+    "finVigencia": "9999-12-31T03:00:00.000+00:00",
+    "ultimaModif": "2024-04-24T04:00:00.000+00:00"
+  },
+  {
+    "id": 2,
+    "nombre": "RENTAS - MUNICIPALIDAD",
+    "inicioVigencia": "2024-04-24T04:00:00.000+00:00",
+    "finVigencia": "9999-12-31T03:00:00.000+00:00",
+    "ultimaModif": "2024-04-24T04:00:00.000+00:00"
+  },
+  {
+    "id": 3,
+    "nombre": "CONSERVADOR",
+    "inicioVigencia": "2024-04-24T04:00:00.000+00:00",
+    "finVigencia": "9999-12-31T03:00:00.000+00:00",
+    "ultimaModif": "2024-04-24T04:00:00.000+00:00"
+  }
+]

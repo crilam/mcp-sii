@@ -320,7 +320,11 @@ veces la misma tabla.
 | `sii_bhe_list_recibidas` | Boletas de honorarios recibidas |
 | `sii_bhe_resumen` | Resumen anual de boletas emitidas |
 | `sii_bhe_resumen_recibidas` | Resumen anual de boletas recibidas |
-| `sii_persona_list_bienes_raices` | Bienes raíces de la persona |
+| `sii_persona_list_bienes_raices` | Bienes raíces de la persona, con los códigos del catastro |
+| `sii_bienes_raices_comunas` | Comunas del catastro con su código |
+| `sii_bienes_raices_consultar_rol` | Un bien raíz **cualquiera** por rol: avalúo y contribuciones |
+| `sii_bienes_raices_multipropietarios` | Copropietarios de un rol |
+| `sii_bienes_raices_solicitudes` | Historial de certificados pedidos, con la url del PDF |
 
 Los dos resúmenes anuales devuelven **siempre los doce meses**, en orden: un mes
 sin actividad viene en cero y con los folios en `null`. Devolver sólo los meses
@@ -342,6 +346,16 @@ significaría nada: cada boleta la folió un emisor distinto.
 100 boletas recibidas: ese CGI pagina distinto del de emitidas y el esquema no
 está cerrado, así que no se devuelve un mes truncado que parezca completo. El
 detalle de lo relevado está en el comentario de `src/scrapers/bhe.ts`.
+
+Bienes raíces ya **no usa navegador**: la SPA del portal tiene detrás una API
+REST/JSON (`/app/vica/{rut}/v1/…`) y el servicio le pide lo mismo que la SPA.
+Sin esa cookie del contexto `/app` que deja el handshake de la SPA, la API
+responde **cero bytes**, no un error. Los certificados de avalúo
+(`/v1/bienes-raices/certificado-avaluo`) y el PDF de una solicitud
+(`/v1/bienes-raices/documento`) van sólo por REST: un PDF en base64 satura el
+contexto del modelo. Pedir un certificado es una **solicitud real** que queda en
+el historial del contribuyente; no es un acto tributario ni tiene costo, pero
+tampoco es una lectura, y por eso no se cachea ni se reintenta solo.
 
 `sii_persona_list_bienes_raices` funciona con la sesión que abre
 `sii_iniciar_sesion` (clave, por navegador). El resto de las consultas por HTTP

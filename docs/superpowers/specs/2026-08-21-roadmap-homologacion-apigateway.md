@@ -63,6 +63,7 @@ En producción, 19 rutas REST:
 | renta | estado-declaracion, f22 |
 | mipyme | list-empresas, list-dte-{emitidos,recibidos}, dte-pdf, list-borradores, emitir-dte (sólo previsualización) |
 | persona | bienes-raices |
+| bienes-raices | comunas, consultar-rol, multipropietarios, solicitudes, documento, certificado-avaluo |
 | contribuyente | situacion-tributaria |
 | sesion | validar-clave |
 | indicadores | uf, dolar, utm, correccion-monetaria, impuesto-2da-categoria{,-art52} |
@@ -88,7 +89,7 @@ verificación en prod + aviso a los consumidores si cambia el contrato.
 |---|---|---:|---:|---|
 | **R1** | **rcv** | 12 | 4 | RCV asíncrono (el SII procesa detalles grandes en background) y escritura de registro. Ya especificado en parte, ver ronda 1. |
 | R2 | **mipyme** | 11 | **6** | Hechas: list-dte-recibidos, dte-pdf, list-borradores. **Sin camino**: `dte-xml` (sólo descarga masiva, tras reCAPTCHA), `info-contribuyente` (el portal no expone consulta separada) y `borrador-pdf` (no hay borradores con qué relevar). Ver las notas de la ronda. |
-| R3 | bienes_raices | 10 | 1 | Comunas, certificados de avalúo y antecedentes (data y PDF). |
+| ~~R3~~ | **bienes_raices** | 10 | **7** | ✅ **Completa en lo relevable.** El portal tiene una API REST/JSON detrás de la SPA (`/app/vica/{rut}/v1`), leída de su bundle; el listado dejó de usar navegador. Nuevas: comunas, consultar-rol (predio de terceros), multipropietarios, solicitudes, documento (PDF) y certificado-avaluo (PDF). Sin hacer: certificado de **antecedentes** (el flujo de terceros exige motivo e institución receptora y no se verificó) y búsqueda **por dirección**. |
 | R4 | bhe | 9 | 5 | Consultas por terceros, y la paginación de recibidas >100 que hoy falla explícito. |
 | ~~R5~~ | **indicadores** | 6 | **6** | ✅ **Completa** (PR #63). UF, dólar, UTM/UTA/IPC, corrección monetaria e impuesto 2ª categoría (art. 43 y 52 bis). **Sin credencial ni `rut`**: páginas públicas. |
 | R6 | f29 | 5 | 0 | Ya especificado en parte en el spec de empresa-lectura. |

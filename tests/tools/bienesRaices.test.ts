@@ -1,10 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerBienesRaicesTools } from '../../src/tools/bienesRaices';
-import { BienesRaicesScraper } from '../../src/scrapers/bienesRaices';
+import { BienesRaicesHttpScraper } from '../../src/scrapers/bienesRaicesHttp';
 import { RegistroSesiones } from '../../src/registroSesiones';
 
-jest.mock('../../src/scrapers/bienesRaices');
-const MockScraper = BienesRaicesScraper as jest.MockedClass<typeof BienesRaicesScraper>;
+jest.mock('../../src/scrapers/bienesRaicesHttp');
+const MockScraper = BienesRaicesHttpScraper as jest.MockedClass<typeof BienesRaicesHttpScraper>;
 
 function armar(rutRegistrado?: string) {
   const registro = {

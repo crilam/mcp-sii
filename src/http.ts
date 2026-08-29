@@ -123,14 +123,45 @@ function nuevoTransactionId(): string {
   return `mcp-sii-${Date.now()}-${contadorTransacciones}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export interface OpcionesPedido {
+  // Escribir en el cookie jar las cookies que devuelva la respuesta. Ver
+  // `curlCrudo`.
+  guardarCookies?: boolean;
+  // Valor del header `Accept`. Algunas APIs del SII contestan HTML de error si
+  // no se les pide JSON explícitamente.
+  accept?: string;
+}
+
+// Marca interna: va como PRIMER argumento y `curlCrudo` la consume. No es un
+// argumento de curl.
+const GUARDAR_COOKIES = '\u0000guardar-cookies';
+
+function argsDe(opciones?: OpcionesPedido): string[] {
+  const args: string[] = [];
+  if (opciones?.guardarCookies) args.push(GUARDAR_COOKIES);
+  if (opciones?.accept) args.push('-H', `Accept: ${opciones.accept}`);
+  return args;
+}
+
 // Transporte HTTP contra el SII. No sabe nada de ningún dominio del portal ni
 // de cómo se autenticó la sesión: sólo pide el cookie jar a su dueño.
 export class SiiHttpClient {
   constructor(private session: SessionManager) {}
 
-  async get(url: string, params?: Record<string, string>): Promise<string> {
+  async get(url: string, params?: Record<string, string>, opciones?: OpcionesPedido): Promise<string> {
     const query = params ? `?${this.encodeParams(params)}` : '';
-    return this.curl([`${url}${query}`]);
+    return this.curl([...argsDe(opciones), `${url}${query}`]);
+  }
+
+  // JSON plano en el cuerpo, sin el sobre SDI: es lo que esperan las APIs REST
+  // "de verdad" del SII, como la del portal de bienes raíces (`/app/vica/`).
+  async postJson(url: string, body: unknown, opciones?: OpcionesPedido): Promise<string> {
+    return this.curl([
+      ...argsDe(opciones),
+      '-H', 'Content-Type: application/json',
+      '--data-binary', JSON.stringify(body),
+      url,
+    ]);
   }
 
   // Variante de `get` para respuestas que NO son texto (el PDF de una boleta de
@@ -280,11 +311,19 @@ export class SiiHttpClient {
     // Se pide la salida como bytes crudos (`encoding: 'buffer'`) porque el
     // encoding correcto recién se conoce después de leer el Content-Type que
     // curl agrega con `-w`. Decodificar antes sería adivinar.
+    // `GUARDAR_COOKIES` es una marca que `argsDe` deja al frente de los args y
+    // acá se traduce a `-c jar`: escribir el jar con lo que el SII devuelva. No
+    // se hace siempre porque cambiaría el comportamiento de todos los scrapers
+    // que hoy funcionan; lo piden sólo las APIs cuyo handshake deja cookies
+    // nuevas (bienes raíces), y sin ellas responden 0 bytes.
+    const guardar = args[0] === GUARDAR_COOKIES;
+    const resto = guardar ? args.slice(1) : args;
     const salida = this.ejecutarCurl(
       [
-        '-sk', '-b', jar, '-L', '--max-redirs', '5', '--max-time', '25',
+        '-sk', '-b', jar, ...(guardar ? ['-c', jar] : []),
+        '-L', '--max-redirs', '5', '--max-time', '25',
         '-w', `${MARCA_CONTENT_TYPE}%{content_type}`,
-        ...args,
+        ...resto,
       ]
     );
 

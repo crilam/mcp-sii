@@ -184,7 +184,7 @@ export class BheScraper {
   // del SII ya caducada. Sin invalidarla, `autenticadoHasta` la sigue dando por
   // buena durante dos horas y cada reintento repite el mismo fallo hasta
   // reiniciar el proceso — así que el consejo "reintentá" era el único que no
-  // podía funcionar. Mismo patrón que BienesRaicesScraper. Vive acá, envolviendo
+  // podía funcionar. Mismo patrón que tenía el scraper de navegador de bienes raíces. Vive acá, envolviendo
   // a los dos informes, para no duplicar el reintento en cada método.
   private async conSesionFresca<T>(intento: () => Promise<T>): Promise<T> {
     try {
