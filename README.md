@@ -342,14 +342,10 @@ En ese informe, además, `folioInicial` y `folioFinal` vienen **siempre en
 `null`**, por mes y del año. El portal no muestra folios ahí, y un rango no
 significaría nada: cada boleta la folió un emisor distinto.
 
-`sii_bhe_list_recibidas` con **más de 100 boletas en el mes** ahora pagina
-encadenando el código de continuación del informe (`pagina_sig_codigo`, el mismo
-protocolo que apigateway expone). No hay captura real de un mes así —ninguna
-credencial disponible pasa de seis recibidas—, así que la garantía no es "probado
-contra el portal" sino los dos chequeos de integridad de siempre: el conteo cuadra
-con el total que el SII declara y no hay folios repetidos. Si el protocolo
-resultara distinto, la respuesta es `LIMITE_CONOCIDO`, nunca un mes truncado que
-parezca completo.
+`sii_bhe_list_recibidas` pagina los meses de **más de 100 boletas** encadenando el
+código de continuación del informe; no hay captura real de un mes así y la
+garantía son los chequeos de integridad (conteo y duplicados). El detalle está en
+la guía de integración, sección de limitaciones.
 
 Bienes raíces ya **no usa navegador**: la SPA del portal tiene detrás una API
 REST/JSON (`/app/vica/{rut}/v1/…`) y el servicio le pide lo mismo que la SPA.

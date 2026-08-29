@@ -8,11 +8,14 @@ import { pausaConfigurada } from '../ritmoSii';
 
 // Busca un mes con MÁS de 100 boletas de honorarios recibidas.
 //
-// Es lo único que falta para implementar la paginación del informe de recibidas
-// —el CGI pagina distinto que el de emitidas y sin una captura real no se puede
-// saber si `pagina_lista` enumera todas las páginas o sólo la actual— y hasta
-// ahora se buscó a mano. El anual de recibidas trae el conteo de los doce meses
-// en UNA llamada, así que dos años son dos pedidos y no veinticuatro.
+// La paginación de recibidas ya está implementada encadenando
+// `pagina_sig_codigo`, pero sin una captura real de un mes de más de una página:
+// lo que la protege son los chequeos de integridad, no una verificación contra
+// el portal. Este script existe para encontrar ese mes cuando haya una
+// credencial con más movimiento y verificar el protocolo de verdad.
+//
+// El anual de recibidas NO trae conteo por mes, sólo montos: se usa el bruto
+// como pista y se sondean los meses más altos con el mensual.
 const NOMBRE = (process.argv[2] ?? 'mercado') as NombrePerfil;
 const ANIOS = (process.env.BUSCAR_ANIOS ?? '2025,2026').split(',').map(Number);
 

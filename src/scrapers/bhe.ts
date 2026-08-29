@@ -344,6 +344,11 @@ export class BheScraper {
     // convierten cualquier interpretación equivocada del protocolo en un error
     // explícito en vez de un mes truncado que parece completo. Es la misma red
     // que ya protegía a emitidas.
+    // La primera página se pide con `pagina_solicitada: 0` para los dos informes
+    // (está probado en vivo: recibidas la acepta y en su respuesta la normaliza a
+    // `pagina_solicitada="1"`, que es lo que trajo el volcado real). Por eso la
+    // segunda de recibidas es la `2` y no la `1`: se sigue la numeración que el
+    // propio CGI devuelve, no la que se mandó.
     let sigCodigo = primera.values['pagina_sig_codigo'] ?? '';
 
     for (let pagina = 1; pagina < totalPaginas; pagina++) {

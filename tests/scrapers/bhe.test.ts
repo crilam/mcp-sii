@@ -651,6 +651,23 @@ ${filas}
     expect(pedidos[1]).toMatchObject({ pagina_solicitada: '2', pagina_sig_codigo: 'ABC123' });
   });
 
+  // Un bug que reenviara siempre el código de la PRIMERA página pasaría con dos
+  // páginas: hacen falta tres para ver que el código se actualiza en cada paso.
+  it('recibidas: cada página lleva el código que devolvió la anterior', async () => {
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock)
+      .mockResolvedValueOnce(paginaRecibidasCon(250, cien, 'A'))
+      .mockResolvedValueOnce(paginaRecibidasCon(250, Array.from({ length: 100 }, (_, i) => 500 + i), 'B'))
+      .mockResolvedValueOnce(paginaRecibidasCon(250, Array.from({ length: 50 }, (_, i) => 700 + i), '00000000000000'));
+
+    const boletas = await scraper.informeMensual(2025, 5, true);
+
+    expect(boletas).toHaveLength(250);
+    const pedidos = (http.postForm as jest.Mock).mock.calls.map(([, c]) => c);
+    expect(pedidos[1]).toMatchObject({ pagina_solicitada: '2', pagina_sig_codigo: 'A' });
+    expect(pedidos[2]).toMatchObject({ pagina_solicitada: '3', pagina_sig_codigo: 'B' });
+  });
+
   // Si el informe declara más páginas pero no da código de continuación, pedir
   // "la siguiente" con el índice devolvería la primera otra vez. Se corta antes.
   it('recibidas: sin código de continuación falla explícito sin pedir otra página', async () => {
