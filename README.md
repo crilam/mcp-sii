@@ -305,10 +305,10 @@ Livianos y pesados traen columnas distintas: pesados tiene carga y pasajeros y
 **no trae permiso** (va en `null`); livianos al revés. El diccionario de siglas de
 equipamiento está en `/v1/vehiculos/equipamiento`.
 
-Son las **únicas** tools y rutas del servicio que no reciben `rut` ni credencial,
-y que no necesitan `sii_iniciar_sesion`: el SII publica estas tablas abiertas. En
-REST viven bajo `/v1/indicadores/…` y siguen pasando por el auth de tenant y el
-rate-limit, como todas.
+Ni estas tools ni las de vehículos reciben `rut` ni credencial, ni necesitan
+`sii_iniciar_sesion`: el SII publica estas tablas abiertas. En REST viven bajo
+`/v1/indicadores/…` y `/v1/vehiculos/…`, y siguen pasando por el auth de tenant y
+el rate-limit, como todas.
 
 Tres cosas al leerlas:
 

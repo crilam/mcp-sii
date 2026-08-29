@@ -23,6 +23,9 @@ const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
   + '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const LIMITE_DE_CONSULTAS = /Error\s*429|superado el l[ií]mite/i;
+// Cada tantas filas se cede el event loop: parsear 80.000 filas de un tirón
+// congelaba a todos los tenants del adaptador durante dos o tres segundos.
+const FILAS_POR_TURNO = 2_000;
 
 export type CategoriaVehiculo = 'liviano' | 'pesado';
 
@@ -97,7 +100,7 @@ const COLUMNAS: Record<string, keyof TasacionVehiculo> = {
 };
 
 function normalizarCabecera(texto: string): string {
-  return texto.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+\d{4}$/, '')          // "tasacion 2026" → "tasacion"
     .replace(/\s+\d+(\.\d+)*$/, '')    // "observacion 21.420" → "observacion"
     .replace(/\s*\(cantidad\)\s*$/, ' (cantidad)') // "Pasajeros (cantidad)" con o sin espacio
@@ -116,7 +119,14 @@ function texto(v: ExcelJS.CellValue): string {
   return String(v).trim();
 }
 
+// Una celda NUMÉRICA se toma tal cual: quitarle el punto a 74.5 daría 745, un
+// dato corrupto sin ningún error. El punto se quita sólo cuando la celda es
+// TEXTO, donde es el separador de miles chileno ("1.600").
 function entero(v: ExcelJS.CellValue): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (v && typeof v === 'object' && 'result' in (v as object)) {
+    return entero((v as ExcelJS.CellFormulaValue).result as ExcelJS.CellValue);
+  }
   const t = texto(v).replace(/\./g, '');
   if (t === '') return null;
   const n = Number(t);
@@ -133,75 +143,84 @@ function entero(v: ExcelJS.CellValue): number | null {
 export async function parsearPlanilla(
   contenido: Buffer, anio: number, categoria: CategoriaVehiculo
 ): Promise<PlanillaTasacion> {
+  // Un XLSX es un zip: si no empieza con `PK`, es otra cosa (una página de cola
+  // virtual o del WAF con un content-type raro). Se dice acá, con palabras, y no
+  // como el "zip ilegible" que tiraría el lector.
+  if (contenido.subarray(0, 2).toString('latin1') !== 'PK') {
+    throw new Error(
+      `La planilla de tasación ${categoria} ${anio} no es un XLSX: `
+      + `${contenido.subarray(0, 160).toString('latin1').replace(/\s+/g, ' ')}`);
+  }
+
+  // Se carga el libro y se recorre cediendo el event loop cada tantas filas.
+  // El lector en streaming de ExcelJS habría evitado retener el libro, pero
+  // resultó frágil con el orden de las entradas del zip: leía bien las planillas
+  // del SII, veía UNA sola hoja en archivos escritos por openpyxl y reventaba
+  // con los escritos por el propio ExcelJS. Un parser que depende de quién
+  // generó el archivo no sirve. El costo real de `load` es memoria transitoria
+  // (el libro se descarta al salir); lo que sí importaba —80.000 filas
+  // síncronas congelando a todos los tenants del adaptador— se resuelve cediendo.
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(contenido as unknown as ExcelJS.Buffer);
 
   const hoja = wb.worksheets[0];
   if (!hoja) throw new Error('La planilla de tasación no tiene hojas.');
 
-  // Ubicar la cabecera: la primera fila que tenga "Código SII" y "Marca".
   let filaCabecera = 0;
   const indice = new Map<keyof TasacionVehiculo, number>();
-  hoja.eachRow((fila, n) => {
-    if (filaCabecera !== 0) return;
-    const nombres = new Map<string, number>();
-    fila.eachCell((celda, col) => nombres.set(normalizarCabecera(texto(celda.value)), col));
-    if (nombres.has('codigo sii') && nombres.has('marca')) {
-      filaCabecera = n;
-      for (const [nombre, col] of nombres) {
-        const campo = COLUMNAS[nombre];
-        if (campo) indice.set(campo, col);
-      }
-    }
-  });
-  // `permiso` no es obligatoria: pesados no la trae.
-  const obligatorias: (keyof TasacionVehiculo)[] = ['codigoSii', 'anioFabricacion', 'marca', 'modelo', 'tasacion'];
-  const faltantes = obligatorias.filter(c => !indice.has(c));
-  if (filaCabecera === 0 || faltantes.length > 0) {
-    throw new Error(
-      `La planilla de tasación ${categoria} ${anio} no tiene la cabecera esperada`
-      + (faltantes.length ? ` (faltan: ${faltantes.join(', ')})` : '')
-      + '. El SII cambió el formato y hay que revisar el parseo.');
-  }
-
   const filas: TasacionVehiculo[] = [];
-  const celda = (fila: ExcelJS.Row, campo: keyof TasacionVehiculo): ExcelJS.CellValue => {
+  const celdaDe = (fila: ExcelJS.Row, campo: keyof TasacionVehiculo): ExcelJS.CellValue => {
     const col = indice.get(campo);
     return col === undefined ? null : fila.getCell(col).value;
   };
-  hoja.eachRow((fila, n) => {
-    if (n <= filaCabecera) return;
-    const codigo = texto(celda(fila, 'codigoSii'));
-    const tasacion = entero(celda(fila, 'tasacion'));
+
+  const total = hoja.rowCount;
+  for (let n = 1; n <= total; n++) {
+    if (n % FILAS_POR_TURNO === 0) await new Promise<void>(r => setImmediate(r));
+    const fila = hoja.getRow(n);
+    if (filaCabecera === 0) {
+      const nombres = new Map<string, number>();
+      fila.eachCell((celda, col) => nombres.set(normalizarCabecera(texto(celda.value)), col));
+      if (nombres.has('codigo sii') && nombres.has('marca')) {
+        filaCabecera = n;
+        for (const [nombre, col] of nombres) {
+          const campo = COLUMNAS[nombre];
+          if (campo) indice.set(campo, col);
+        }
+      }
+      continue;
+    }
+    const codigo = texto(celdaDe(fila, 'codigoSii'));
+    const tasacion = entero(celdaDe(fila, 'tasacion'));
     // Filas de notas al pie o vacías: sin código o sin tasación no son vehículos.
-    if (codigo === '' || tasacion === null) return;
+    if (codigo === '' || tasacion === null) continue;
     filas.push({
       codigoSii: codigo,
-      anioFabricacion: entero(celda(fila, 'anioFabricacion')) ?? 0,
-      tipo: texto(celda(fila, 'tipo')),
-      marca: texto(celda(fila, 'marca')),
-      modelo: texto(celda(fila, 'modelo')),
-      version: texto(celda(fila, 'version')),
-      puertas: entero(celda(fila, 'puertas')),
-      cilindrada: entero(celda(fila, 'cilindrada')),
-      potencia: entero(celda(fila, 'potencia')),
-      combustible: texto(celda(fila, 'combustible')),
-      transmision: texto(celda(fila, 'transmision')),
-      marchas: entero(celda(fila, 'marchas')),
-      traccion: texto(celda(fila, 'traccion')),
-      pais: texto(celda(fila, 'pais')),
-      equipamiento: texto(celda(fila, 'equipamiento')),
-      carga: entero(celda(fila, 'carga')),
-      pasajeros: entero(celda(fila, 'pasajeros')),
+      anioFabricacion: entero(celdaDe(fila, 'anioFabricacion')) ?? 0,
+      tipo: texto(celdaDe(fila, 'tipo')),
+      marca: texto(celdaDe(fila, 'marca')),
+      modelo: texto(celdaDe(fila, 'modelo')),
+      version: texto(celdaDe(fila, 'version')),
+      puertas: entero(celdaDe(fila, 'puertas')),
+      cilindrada: entero(celdaDe(fila, 'cilindrada')),
+      potencia: entero(celdaDe(fila, 'potencia')),
+      combustible: texto(celdaDe(fila, 'combustible')),
+      transmision: texto(celdaDe(fila, 'transmision')),
+      marchas: entero(celdaDe(fila, 'marchas')),
+      traccion: texto(celdaDe(fila, 'traccion')),
+      pais: texto(celdaDe(fila, 'pais')),
+      equipamiento: texto(celdaDe(fila, 'equipamiento')),
+      carga: entero(celdaDe(fila, 'carga')),
+      pasajeros: entero(celdaDe(fila, 'pasajeros')),
       tasacion,
-      permiso: indice.has('permiso') ? entero(celda(fila, 'permiso')) : null,
-      observacion: texto(celda(fila, 'observacion')),
+      permiso: indice.has('permiso') ? entero(celdaDe(fila, 'permiso')) : null,
+      observacion: texto(celdaDe(fila, 'observacion')),
     });
-  });
+  }
 
   // La segunda hoja es el diccionario de siglas de equipamiento ("AA" → "Aire
-  // Acondicionado"). Sin ella, el campo `equipamiento` es una lista de siglas
-  // que nadie puede leer.
+  // Acondicionado"). Sin ella, `equipamiento` es una lista de siglas que nadie
+  // puede leer.
   const equipamiento: Equipamiento[] = [];
   const hojaEq = wb.worksheets[1];
   if (hojaEq) {
@@ -212,6 +231,16 @@ export async function parsearPlanilla(
       if (normalizarCabecera(a) === 'siglas') { enDatos = true; return; }
       if (enDatos && a !== '' && b !== '') equipamiento.push({ sigla: a, descripcion: b });
     });
+  }
+
+  // `permiso` no es obligatoria: pesados no la trae.
+  const obligatorias: (keyof TasacionVehiculo)[] = ['codigoSii', 'anioFabricacion', 'marca', 'modelo', 'tasacion'];
+  const faltantes = obligatorias.filter(c => !indice.has(c));
+  if (filaCabecera === 0 || faltantes.length > 0) {
+    throw new Error(
+      `La planilla de tasación ${categoria} ${anio} no tiene la cabecera esperada`
+      + (faltantes.length ? ` (faltan: ${faltantes.join(', ')})` : '')
+      + '. El SII cambió el formato y hay que revisar el parseo.');
   }
 
   return { anio, categoria, filas, equipamiento };

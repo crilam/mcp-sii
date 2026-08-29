@@ -35,9 +35,25 @@ describe('parsearPlanilla — livianos', () => {
   it('las celdas numéricas vacías van en null', async () => {
     const p = await parsearPlanilla(fixture('vehiculos-liv.xlsx'), 2026, 'liviano');
 
-    expect(p.filas[3].potencia).toBeNull();
     expect(p.filas[3].marchas).toBeNull();
     expect(p.filas[3].pais).toBe('');
+  });
+
+  // Excel guarda los números como números. Quitarle el punto a 74.5 (como si
+  // fuera "74.500" con separador de miles) daba 745: dato corrupto sin error.
+  it('una celda numérica con decimales se conserva tal cual', async () => {
+    const p = await parsearPlanilla(fixture('vehiculos-liv.xlsx'), 2026, 'liviano');
+
+    expect(p.filas[3].potencia).toBe(74.5);
+    expect(p.filas[3].cilindrada).toBe(1998);
+    expect(p.filas[3].tasacion).toBe(25000000);
+  });
+
+  // Un XLSX es un zip: cualquier otra cosa (una página de cola virtual con un
+  // content-type raro) tiene que decirse con palabras, no como "zip ilegible".
+  it('un contenido que no es XLSX falla explícito', async () => {
+    await expect(parsearPlanilla(Buffer.from('<html>cola virtual</html>'), 2026, 'liviano'))
+      .rejects.toThrow(/no es un XLSX/);
   });
 
   it('no toma la nota al pie como un vehículo', async () => {

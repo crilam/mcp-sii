@@ -124,4 +124,33 @@ describe('core/vehiculos', () => {
     await expect(core.equipamiento({ anio: 2026, categoria: 'liviano' }))
       .resolves.toEqual([{ sigla: 'AA', descripcion: 'Aire Acondicionado' }]);
   });
+
+  // Un año cerrado no cambia; el en curso el SII lo "complementa y rectifica",
+  // así que se revisa cada seis horas.
+  it('el año en curso se vuelve a bajar pasadas seis horas; un año cerrado no', async () => {
+    const reloj = jest.spyOn(Date, 'now');
+    const base = new Date('2026-08-29T12:00:00Z').getTime();
+    reloj.mockReturnValue(base);
+    await core.tipos({ anio: 2026, categoria: 'liviano' });
+    await core.tipos({ anio: 2025, categoria: 'liviano' });
+
+    reloj.mockReturnValue(base + 7 * 60 * 60 * 1000);
+    await core.tipos({ anio: 2026, categoria: 'liviano' });
+    await core.tipos({ anio: 2025, categoria: 'liviano' });
+
+    expect(planillaMock).toHaveBeenCalledTimes(3);
+    reloj.mockRestore();
+  });
+
+  // Cada planilla pesa: el techo evita que un consumidor que recorra todos los
+  // años deje el proceso con cientos de MB residentes.
+  it('al pasar el techo desaloja una planilla', async () => {
+    for (let i = 0; i < core.MAX_PLANILLAS; i++) await core.tipos({ anio: 2020 + i, categoria: 'liviano' });
+    const llamadas = planillaMock.mock.calls.length;
+
+    await core.tipos({ anio: 2020, categoria: 'pesado' });
+    for (let i = 0; i < core.MAX_PLANILLAS; i++) await core.tipos({ anio: 2020 + i, categoria: 'liviano' });
+
+    expect(planillaMock.mock.calls.length).toBeGreaterThan(llamadas + 1);
+  });
 });

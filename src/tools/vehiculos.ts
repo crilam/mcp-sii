@@ -37,4 +37,11 @@ export function registerVehiculosTools(server: McpServer): void {
         anio, categoria, codigoSii: codigo_sii, marca, modelo, version, anioFabricacion: anio_fabricacion,
       }))
   );
+
+  server.tool(
+    'sii_vehiculos_equipamiento',
+    'Diccionario de siglas de equipamiento de la planilla de tasación (por ejemplo "AA" → "Aire Acondicionado"). El campo `equipamiento` de una tasación es una lista de estas siglas; sin el diccionario no se puede leer. Sólo la planilla de livianos lo trae.',
+    schemaVehiculosBase,
+    async (f) => envolverParaMcp(() => core.equipamiento(f))
+  );
 }
