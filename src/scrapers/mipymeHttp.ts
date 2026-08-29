@@ -11,6 +11,34 @@ import { rutEsValido } from '../rut';
 const CGI_BASE = 'https://www1.sii.cl/cgi-bin/Portal001';
 const SEL_EMPRESA_URL = `${CGI_BASE}/mipeSelEmpresa.cgi`;
 const HISTORIAL_URL = `${CGI_BASE}/mipeAdminDocsEmi.cgi`;
+// El historial del lado RECIBIDO. El nombre no se adivinó: el menú del portal
+// lleva a `mipeLaunchPage.cgi?OPCION=1&TIPO=4`, que asigna por JavaScript el CGI
+// de verdad. Es `...Rcp.cgi` y no `...Rec.cgi`, que era la corazonada obvia — la
+// misma clase de corazonada que falló cuatro de cuatro veces relevando el RCV.
+const HISTORIAL_RECIBIDOS_URL = `${CGI_BASE}/mipeAdminDocsRcp.cgi`;
+
+// PDF de UN documento. Sale de la página de gestión del documento
+// (`mipeGesDocRcp.cgi`), donde el portal lo ofrece como "VISUALIZACIÓN DOCUMENTO
+// (pdf)". Toma el CODIGO del listado y nada más.
+//
+// NO se usa `mipeDownLoad.cgi` ni `mipeImprimeDocAdm.cgi`, que es a donde apunta
+// el listado: esos bajan el LOTE entero según los filtros de la pantalla, no un
+// documento, y los dispara un reCAPTCHA (`llamaRecaptchaConCallback`), o sea que
+// no son un camino que un servicio pueda recorrer solo.
+const PDF_DOCUMENTO_URL = `${CGI_BASE}/mipeShowPdf.cgi`;
+
+// Los BORRADORES no viven en el portal viejo. El menú los publica con una
+// función JavaScript (`printLinkAdmBorradores`, definida en `valores.js`) que
+// arma un enlace a otra aplicación, en otro host y con otra tecnología: una SPA
+// con API SDI, igual que el RCV. Los nombres salieron de su bundle
+// (`app.full.min.js`), que es la única forma que funcionó de relevar el RCV
+// después de que cuatro nombres "obvios" fallaran.
+const BORRADORES_BASE = 'https://www4.sii.cl/mipymeinternetui/services/data/borradorService';
+const BORRADORES_NAMESPACE = 'cl.sii.sdi.lob.diii.mipyme.data.impl.BorradorApplicationService';
+// El listado NO usa el sobre SDI por POST, a diferencia del RCV: el bundle lo
+// declara con `createGetOperation` y el servidor lo confirma — un POST devuelve
+// 500 con "No resource method found for POST" (medido). Es un GET simple.
+const BORRADORES_LISTADO_URL = `${BORRADORES_BASE}/listaBorrador`;
 
 // Emisión. Relevado en vivo el 2026-08-11; reemplaza a `mipeDocAlta.cgi`, que
 // nunca existió (404) y que era a donde apuntaba el camino de navegador.
@@ -69,7 +97,13 @@ const TIPO_DTE_NOMBRES: Record<string, number> = {
   'Nota de Debito': 56,
   'Nota de Debito Electronica': 56,
   'Guia de Despacho': 52,
+  // El portal escribe el nombre CON "Electronica" en el historial de recibidos
+  // ("Guia de Despacho Electronica"). Sin esta variante el tipo salía en 0 —
+  // medido en vivo, 3 de 100 documentos— y un consumidor que filtre por tipo los
+  // pierde sin enterarse. Las demás familias ya tenían su par por la misma razón.
+  'Guia de Despacho Electronica': 52,
   'Factura de Compra': 46,
+  'Factura de Compra Electronica': 46,
 };
 
 export interface DteEmitidoMipyme {
@@ -86,6 +120,47 @@ export interface DteEmitidoMipyme {
   // con el que el CGI de detalle (mipeGesDocEmi.cgi) acepta ser consultado, así
   // que se propaga en vez de descartarse.
   codigo: string;
+}
+
+export interface DteRecibidoMipyme {
+  tipoDte: number;
+  tipoDteNombre: string;
+  folio: number;
+  fecha: string;
+  emisorRut: string;
+  emisorNombre: string;
+  monto: number;
+  estado: string;
+  codigo: string;
+}
+
+export interface FiltrosDteRecibidos {
+  empresaRut?: string;
+  tipoDte?: number;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  // El filtro por contraparte es por EMISOR, no por receptor: del lado recibido
+  // la contraparte es quien emitió el documento.
+  emisorRut?: string;
+  folio?: number;
+  pagina?: number;
+}
+
+export interface DteRecibidosResult {
+  documentos: DteRecibidoMipyme[];
+  pagina: number;
+  totalPaginas: number | null;
+  empresaRut: string;
+}
+
+// Un borrador tal como lo devuelve la aplicación de borradores. Los nombres de
+// los campos son los del SII —mayúsculas y guiones bajos incluidos— y no se
+// renombran: son un contrato ajeno, y traducirlos obligaría a mantener un
+// diccionario que se desactualiza en silencio cuando el SII agrega un campo.
+export interface BorradorMipyme {
+  codigo: string;
+  tipoDte: number | null;
+  campos: Record<string, unknown>;
 }
 
 export interface FiltrosDteEmitidos {
@@ -355,10 +430,16 @@ export class MipymeHttpScraper {
     private session: SessionManager
   ) {}
 
-  // Las consultas por HTTP necesitan el cookie jar, que sólo produce la
-  // autenticación con certificado. Se verifica ANTES de tocar la red para no
-  // abrir una sesión en el SII que no se va a poder usar (ver
-  // SessionManager.assertPuedeEntregarCookieJar).
+  // Las consultas por HTTP necesitan el cookie jar. Se verifica ANTES de tocar
+  // la red para no abrir una sesión en el SII que no se va a poder usar y que
+  // igual cuenta para el límite de sesiones simultáneas.
+  //
+  // Este comentario decía "que sólo produce la autenticación con certificado".
+  // Dejó de ser cierto en el PR #55: las DOS estrategias producen el jar, y la
+  // lectura de mipyme anda con clave tributaria (ver
+  // SessionManager.assertPuedeEntregarCookieJar, que ya no rechaza nada). El
+  // certificado sigue siendo obligatorio sólo para `emitirDte`, porque firmar lo
+  // necesita de verdad.
   async listEmpresas(): Promise<Empresa[]> {
     this.session.assertPuedeEntregarCookieJar();
     return this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
@@ -393,6 +474,150 @@ export class MipymeHttpScraper {
         empresaRut,
       };
     });
+  }
+
+  // El lado RECIBIDO del historial. Mismo ciclo que emitidos y por las mismas
+  // razones: la empresa activa es estado del servidor, así que seleccionar y
+  // consultar van juntos en la sección crítica o dos consultas concurrentes se
+  // pisan y una devuelve los documentos de la otra.
+  async listDteRecibidos(filtros: FiltrosDteRecibidos): Promise<DteRecibidosResult> {
+    const pagina = filtros.pagina ?? 1;
+    if (!Number.isInteger(pagina) || pagina < 1) {
+      throw new Error(`pagina debe ser un entero mayor o igual a 1; se recibió ${filtros.pagina}`);
+    }
+    this.session.assertPuedeEntregarCookieJar();
+
+    return this.session.conEmpresaExclusiva(async () => {
+      const empresas = this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
+      const empresaRut = this.resolverEmpresa(empresas, filtros.empresaRut);
+
+      await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: empresaRut });
+
+      const html = await this.http.get(
+        HISTORIAL_RECIBIDOS_URL, this.paramsRecibidos(filtros, pagina));
+      this.assertEmpresaSeleccionada(html);
+
+      return {
+        documentos: this.parseHistorialRecibidos(html),
+        pagina,
+        totalPaginas: this.parseTotalPaginas(html),
+        empresaRut,
+      };
+    });
+  }
+
+  /**
+   * PDF de un documento del portal, emitido o recibido.
+   *
+   * Se identifica por el `codigo` que publica el listado y NO por el folio: el
+   * folio se repite entre emisores y entre tipos de documento, así que no
+   * identifica nada por sí solo. Es el mismo criterio que el PDF de BHE, que va
+   * por código de barras y no por folio.
+   */
+  async dtePdf(codigo: string, empresaRut?: string): Promise<Buffer> {
+    if (!/^\d+$/.test(codigo.trim())) {
+      throw new Error(
+        `El codigo del documento tiene que ser el que devuelve el listado del portal `
+        + `(sólo dígitos); se recibió "${codigo.slice(0, 40)}".`);
+    }
+    this.session.assertPuedeEntregarCookieJar();
+
+    return this.session.conEmpresaExclusiva(async () => {
+      const empresas = this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
+      const resuelta = this.resolverEmpresa(empresas, empresaRut);
+      // Sin la selección, el CGI responde "Su requerimiento no ha sido bien
+      // recepcionado" — un error genérico que manda a revisar el navegador
+      // cuando lo que falta es el contexto de empresa.
+      await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: resuelta });
+
+      const { contenido, contentType } = await this.http.getBinario(
+        PDF_DOCUMENTO_URL, { CODIGO: codigo.trim() });
+
+      // El CGI responde 200 con HTML cuando algo falla, así que el status no
+      // distingue nada: lo que separa un PDF de un error es el Content-Type. Sin
+      // este chequeo el fallo viajaría como un "PDF" que ningún lector abre.
+      if (!/application\/pdf/i.test(contentType)) {
+        const cuerpo = contenido.subarray(0, 4096).toString('latin1');
+        const codigoSii = cuerpo.match(/CODIGO:\s*([\d.\-]+)/)?.[1];
+        throw new Error(
+          `El portal mipyme no devolvió un PDF para el documento ${codigo.slice(0, 40)} `
+          + `(Content-Type: ${contentType || 'sin declarar'})`
+          + `${codigoSii ? `, código del SII ${codigoSii}` : ''}.`);
+      }
+      return contenido;
+    });
+  }
+
+  /**
+   * Borradores de DTE de la empresa.
+   *
+   * Selecciona la empresa igual que las demás consultas, aunque el servicio viva
+   * en otra aplicación. Una versión anterior no lo hacía, con el argumento de
+   * que esa aplicación resuelve la empresa por su cuenta —tiene su propio
+   * `rutEmpresa`—, pero lo que resuelve es la empresa ACTIVA de la sesión del
+   * portal, que es la que dejó la última consulta. O sea que sin seleccionar,
+   * esto devuelve los borradores de una empresa que depende de qué se llamó
+   * antes: para un RUT que opera cinco, el resultado es arbitrario y nadie se
+   * entera, porque un listado de otra empresa se lee perfectamente bien.
+   */
+  async listBorradores(empresaRut?: string): Promise<BorradorMipyme[]> {
+    this.session.assertPuedeEntregarCookieJar();
+
+    return this.session.conEmpresaExclusiva(async () => {
+      const empresas = this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
+      const resuelta = this.resolverEmpresa(empresas, empresaRut);
+      await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: resuelta });
+      return this.pedirBorradores();
+    });
+  }
+
+  private async pedirBorradores(): Promise<BorradorMipyme[]> {
+    const crudo = await this.http.get(BORRADORES_LISTADO_URL);
+
+    let resp: unknown;
+    try {
+      resp = JSON.parse(crudo);
+    } catch {
+      // El servidor de aplicaciones responde HTML en sus errores (404, 500, la
+      // página de login). Sin este mensaje, el fallo llegaría como un
+      // "Unexpected token <" que no dice nada de lo que pasó.
+      throw new Error(
+        'La aplicación de borradores del SII no devolvió JSON. Puede ser la sesión '
+        + `caída o un cambio del servicio. Respuesta: ${crudo.slice(0, 200)}`);
+    }
+
+    const lista = this.datosDeSdi(resp);
+    return lista.map(b => ({
+      // `ehdr_CODIGO` es el identificador del borrador y `ptdc_CODIGO` el del
+      // tipo de documento: los nombres salen de los logs del propio bundle.
+      codigo: String(b.ehdr_CODIGO ?? ''),
+      tipoDte: b.ptdc_CODIGO !== undefined && b.ptdc_CODIGO !== null
+        ? Number(b.ptdc_CODIGO) : null,
+      // El resto se publica entero y sin renombrar. Un borrador tiene decenas de
+      // campos (`EFXP_*`) que dependen del tipo de documento, y elegir cuáles
+      // exponer sería adivinar qué necesita el consumidor.
+      campos: b,
+    }));
+  }
+
+  // La respuesta SDI envuelve los datos y no siempre igual. Se acepta el arreglo
+  // directo o dentro de `data`, y CUALQUIER otra forma es un error explícito:
+  // devolver [] haría que "el SII contestó otra cosa" y "no hay borradores" se
+  // lean idénticos.
+  private datosDeSdi(resp: any): Record<string, unknown>[] {
+    const datos = Array.isArray(resp) ? resp
+      : Array.isArray(resp?.data) ? resp.data
+        : Array.isArray(resp?.data?.data) ? resp.data.data : null;
+
+    if (datos === null) {
+      const respCode = resp?.metaData?.respCode ?? resp?.respCode;
+      const msg = resp?.metaData?.msgError ?? resp?.msgError;
+      throw new Error(
+        'La aplicación de borradores del SII no devolvió una lista'
+        + `${respCode !== undefined ? ` (respCode ${respCode})` : ''}`
+        + `${msg ? `: ${String(msg).slice(0, 120)}` : '.'}`);
+    }
+    return datos;
   }
 
   // Emisión. `confirmar` es lo único que separa leer de emitir:
@@ -884,6 +1109,22 @@ export class MipymeHttpScraper {
     };
   }
 
+  // Los nombres de los parámetros salen de la URL que arma el propio portal:
+  // `RUT_EMI` acá contra `RUT_RECP` en emitidos. El resto coincide.
+  private paramsRecibidos(filtros: FiltrosDteRecibidos, pagina: number): Record<string, string> {
+    return {
+      RUT_EMI: filtros.emisorRut ?? '',
+      FOLIO: filtros.folio ? String(filtros.folio) : '',
+      RZN_SOC: '',
+      FEC_DESDE: filtros.fechaDesde ? this.aFechaSii(filtros.fechaDesde) : '',
+      FEC_HASTA: filtros.fechaHasta ? this.aFechaSii(filtros.fechaHasta) : '',
+      TPO_DOC: filtros.tipoDte ? String(filtros.tipoDte) : '',
+      ESTADO: '',
+      ORDEN: '',
+      NUM_PAG: String(pagina),
+    };
+  }
+
   private aFechaSii(iso: string): string {
     const [y, m, d] = iso.split('-');
     return `${d}/${m}/${y}`;
@@ -986,6 +1227,56 @@ export class MipymeHttpScraper {
         `El portal mipyme devolvió ${filasNoInterpretadas} fila(s) de documentos que este parser ` +
         `no pudo interpretar (se interpretaron ${docs.length}). El formato del historial pudo ` +
         `cambiar: revisar el parseo antes de confiar en el resultado.`
+      );
+    }
+    return docs;
+  }
+
+  // Igual que el de emitidos, con dos diferencias que vienen del portal: la
+  // marca de fila de datos es `mipeGesDocRcp.cgi` y la contraparte es el EMISOR.
+  // Se repite el cuerpo en vez de parametrizar el de emitidos: son dos tablas
+  // distintas del SII que hoy coinciden en forma, y unificarlas haría que un
+  // cambio en una arrastrara silenciosamente a la otra.
+  private parseHistorialRecibidos(html: string): DteRecibidoMipyme[] {
+    const docs: DteRecibidoMipyme[] = [];
+    let filasNoInterpretadas = 0;
+
+    for (const fila of html.matchAll(/<tr[\s\S]*?<\/tr>/gi)) {
+      const bruto = fila[0];
+      const esFilaDeDatos = /mipeGesDocRcp\.cgi/i.test(bruto);
+
+      const celdas = [...bruto.matchAll(/<td[^>]*>([\s\S]*?)(?=<\/td>|<td)/gi)]
+        .map(c => this.decodificar(c[1].replace(/<[^>]*>/g, ' ')).trim());
+
+      // [0]=Ver (link) [1]=RUT emisor [2]=razón social [3]=tipo de documento
+      // [4]=folio [5]=fecha [6]=monto [7]=estado
+      const codigo = bruto.match(/[?&]CODIGO=(\d+)/)?.[1];
+      if (celdas.length < 8 || !/^\d+$/.test(celdas[4]) || !codigo) {
+        if (esFilaDeDatos) filasNoInterpretadas++;
+        continue;
+      }
+
+      docs.push({
+        emisorRut: celdas[1],
+        emisorNombre: celdas[2],
+        tipoDteNombre: celdas[3],
+        tipoDte: TIPO_DTE_NOMBRES[celdas[3]] ?? 0,
+        folio: parseInt(celdas[4], 10),
+        fecha: celdas[5],
+        monto: parseInt(celdas[6].replace(/\./g, ''), 10) || 0,
+        estado: celdas[7],
+        codigo,
+      });
+    }
+
+    // Mismo criterio que emitidos: una fila que ES de datos y que el parser no
+    // supo leer no se saltea en silencio. Cien documentos convertidos en lista
+    // vacía se leen como "esta empresa no recibió nada".
+    if (filasNoInterpretadas > 0) {
+      throw new Error(
+        `El portal mipyme devolvió ${filasNoInterpretadas} fila(s) de documentos recibidos que ` +
+        `este parser no pudo interpretar (se interpretaron ${docs.length}). El formato del ` +
+        `historial pudo cambiar: revisar el parseo antes de confiar en el resultado.`
       );
     }
     return docs;

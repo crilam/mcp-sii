@@ -61,7 +61,7 @@ En producción, 19 rutas REST:
 | dte | list-documentos-{emitidos,recibidos}, get-documento-{emitido,recibido} |
 | rcv | resumen, detalle |
 | renta | estado-declaracion, f22 |
-| mipyme | list-empresas, list-dte-emitidos, emitir-dte (sólo previsualización) |
+| mipyme | list-empresas, list-dte-{emitidos,recibidos}, dte-pdf, list-borradores, emitir-dte (sólo previsualización) |
 | persona | bienes-raices |
 | contribuyente | situacion-tributaria |
 | sesion | validar-clave |
@@ -87,7 +87,7 @@ verificación en prod + aviso a los consumidores si cambia el contrato.
 | # | Dominio | En catálogo | Hoy | Notas |
 |---|---|---:|---:|---|
 | **R1** | **rcv** | 12 | 4 | RCV asíncrono (el SII procesa detalles grandes en background) y escritura de registro. Ya especificado en parte, ver ronda 1. |
-| R2 | mipyme | 11 | 3 | Lectura restante (info-contribuyente, list-dte-recibidos, dte-pdf/xml) y borradores. |
+| R2 | **mipyme** | 11 | **6** | Hechas: list-dte-recibidos, dte-pdf, list-borradores. **Sin camino**: `dte-xml` (sólo descarga masiva, tras reCAPTCHA), `info-contribuyente` (el portal no expone consulta separada) y `borrador-pdf` (no hay borradores con qué relevar). Ver las notas de la ronda. |
 | R3 | bienes_raices | 10 | 1 | Comunas, certificados de avalúo y antecedentes (data y PDF). |
 | R4 | bhe | 9 | 5 | Consultas por terceros, y la paginación de recibidas >100 que hoy falla explícito. |
 | ~~R5~~ | **indicadores** | 6 | **6** | ✅ **Completa** (PR #63). UF, dólar, UTM/UTA/IPC, corrección monetaria e impuesto 2ª categoría (art. 43 y 52 bis). **Sin credencial ni `rut`**: páginas públicas. |
@@ -105,6 +105,19 @@ una cola propia, varios tenants pidiendo años distintos barren el portal en
 paralelo, que es el patrón que ya bloqueó el RCV. La R5 quedó con cola de un slot
 para todo el dominio y caché por año, y **el SII cuenta las requests igual
 aunque no haya credencial**: el corte por volumen llega a las páginas públicas.
+
+**Lo que dejó la R2.** El portal de mipyme no es un solo sistema: los borradores
+viven en OTRA aplicación (`mipymeinternetui`, en www4), con API propia, y el
+menú los publica desde una función JavaScript en `valores.js`. La propuesta del
+F29 vive en un tercer lugar (`/cgi_csm/csmSelPeriodoF29.cgi`), dato que le sirve
+a la R6. O sea que "homologar un dominio" puede significar relevar dos o tres
+backends distintos, y eso no se ve desde el catálogo de apigateway.
+
+Y una barrera nueva que conviene tener presente en las rondas que siguen: **el
+SII pone reCAPTCHA en las descargas masivas** (`mipeDownLoad.cgi`,
+`mipeImprimeDocAdm.cgi`). Donde aparezca, no hay homologación posible por esa
+vía y hay que buscar el equivalente individual — que en el caso del PDF existía
+(`mipeShowPdf.cgi`) y en el del XML no.
 
 **RE — Evaluación del mundo B.** Antes de comprometer diseño: spike sobre las
 APIs oficiales del SII (firma XML, CAF), y decisión build-vs-integrar LibreDTE

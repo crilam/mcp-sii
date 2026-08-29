@@ -4,7 +4,7 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaEmitirDte } from '../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaListBorradores, schemaEmitirDte } from '../core/schemas/mipyme';
 
 // Orden de resolución de la empresa, el mismo que el resto del proyecto: el
 // parámetro de la llamada gana, si no vino cae a SII_EMPRESA_RUT, y si tampoco
@@ -41,6 +41,38 @@ export function registerMipymeTools(server: McpServer, registro: RegistroSesione
         empresaRut: empresaPedida(empresa_rut), tipoDte: tipo_dte, fechaDesde: fecha_desde,
         fechaHasta: fecha_hasta, receptorRut: receptor_rut, folio, pagina,
       }))
+  );
+
+  server.tool(
+    'sii_mipyme_list_dte_recibidos',
+    'Lista los DTE RECIBIDOS por la empresa en el Sistema de Facturación Gratuito del SII: ' +
+    'folio, tipo, emisor, monto y estado de acuse de cada documento. Es el lado espejo de ' +
+    'sii_mipyme_list_dte_emitidos y comparte su forma, con el EMISOR como contraparte en vez ' +
+    'del receptor. Sin filtros de fecha devuelve el historial completo, no el período actual, ' +
+    'y entrega de a 100 documentos por página: usá "pagina" para las siguientes. El campo ' +
+    '"estado" es el del acuse (por ejemplo "DTE Recibido Sin Reparos"), que es información ' +
+    'que sii_rcv_* no tiene.',
+    schemaListDteRecibidos,
+    async ({ rut, empresa_rut, tipo_dte, fecha_desde, fecha_hasta, emisor_rut, folio, pagina }) =>
+      envolverParaMcp(() => core.listDteRecibidos(registro, rut, {
+        empresaRut: empresaPedida(empresa_rut), tipoDte: tipo_dte, fechaDesde: fecha_desde,
+        fechaHasta: fecha_hasta, emisorRut: emisor_rut, folio, pagina,
+      }))
+  );
+
+  server.tool(
+    'sii_mipyme_list_borradores',
+    'Lista los borradores de DTE guardados en el portal de Facturación Gratuita. Devuelve el ' +
+    'código de cada borrador, su tipo de documento y TODOS los campos tal como los nombra el ' +
+    'SII (EFXP_*, sin renombrar): un borrador tiene decenas de campos que dependen del tipo, ' +
+    'y cuáles importan lo decide quien consulta. Los borradores viven en otra aplicación del ' +
+    'SII, no en el portal clásico. Los borradores cuelgan de la EMPRESA ACTIVA: si ' +
+    'el RUT opera varias, pasá empresa_rut — sin él se responden los borradores de ' +
+    'la empresa que dejó la consulta anterior, y una lista vacía se lee como "no hay ' +
+    'borradores" en vez de "preguntaste por otra empresa".',
+    schemaListBorradores,
+    async ({ rut, empresa_rut }) =>
+      envolverParaMcp(() => core.listBorradores(registro, rut, empresaPedida(empresa_rut)))
   );
 
   server.tool(

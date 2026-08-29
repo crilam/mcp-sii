@@ -82,6 +82,44 @@ depende de una suposición del código.
 Sin esta variable, emitir falla pidiéndola; todo lo demás (consultas y la
 previsualización de un DTE) funciona igual.
 
+### Perfiles de verificación contra el SII real
+
+Verificar el servicio entero necesita **cuatro** credenciales, no una: lo que un
+contribuyente puede consultar depende de qué es y de cómo factura, y el
+certificado es además otra forma de entrar.
+
+| Perfil | Qué es | Verifica |
+|---|---|---|
+| `SII_PERSONA_*` | Persona natural | BHE emitidas y recibidas, bienes raíces, renta |
+| `SII_MIPYME_*` | Inscrito en Facturación Gratuita del SII | El portal mipyme entero |
+| `SII_MERCADO_*` | Factura con software de mercado | RCV, DTE, F29 |
+| `SII_CERT_*` | Certificado digital (`.pfx` en disco) | Lo mismo que su titular, **más firmar**: `emitir-dte` |
+
+El de certificado no es otro contribuyente sino la otra forma de autenticar, y
+es la **única con la que se puede firmar**. El `.env` guarda la *ruta* del `.pfx`
+—es un binario de varios KB— y la conversión a base64 que piden las rutas la hace
+`perfilesVerificacion.ts`.
+
+El de mipyme no es intercambiable: **si el RUT no está inscrito en Facturación
+Gratuita, el selector de empresas del portal viene sin una sola opción** y no hay
+nada que consultar. Eso no se ve en el `.env` ni en ningún otro lado hasta que se
+intenta, y por eso existe:
+
+```bash
+npx ts-node src/scripts/clasificarCredencial.ts          # los que estén cargados
+npx ts-node src/scripts/clasificarCredencial.ts mipyme   # uno en particular
+```
+
+Sondea las rutas REST de producción y dice para qué sirve realmente cada
+credencial. Conviene correrlo **antes** de empezar una ronda, no a la mitad.
+
+`perfilesVerificacion.ts` **no sustituye un perfil por otro**: si falta el que se
+pide, falla diciendo cuál. Un fallback haría correr la verificación contra un
+contribuyente distinto, y ahí ni el verde ni el rojo dicen nada sobre lo que se
+quería probar.
+
+Ver `.env.example` para la plantilla completa.
+
 ### Legado: `SII_CLAVE` / `SII_CERT_PATH` (una sola credencial por proceso)
 
 ```bash
@@ -154,6 +192,8 @@ Todas reciben `rut` como primer parámetro — ver
 |---|---|
 | `sii_mipyme_list_empresas` | Empresas que la persona puede operar **en este portal** |
 | `sii_mipyme_list_dte_emitidos` | Historial de DTE emitidos por este portal, de a 100 por página |
+| `sii_mipyme_list_dte_recibidos` | DTE recibidos por la empresa, con el estado del acuse |
+| `sii_mipyme_list_borradores` | Borradores guardados, con todos los campos del SII |
 | `sii_mipyme_emitir_dte` | **Emite** un DTE. Acto tributario real e irreversible — ver la advertencia abajo |
 
 ### Consultas DTE
@@ -192,6 +232,43 @@ ES el dato, mientras un código en 0 no sería "código cero" sino "no hay". Y
 `23/06/2026`): son dos formatos distintos en la misma fila, tal como los manda el
 SII, y no se normalizan para que la diferencia se vea en vez de descubrirse
 parseando.
+
+`sii_mipyme_list_borradores` sale de **otra aplicación del SII**, no del portal
+clásico: `mipymeinternetui`, con su propia API. Devuelve los campos con los
+nombres del SII (`EFXP_*`) sin renombrar, porque un borrador trae decenas que
+dependen del tipo de documento y elegir cuáles exponer sería adivinar qué
+necesita quien consulta. Verificado con un borrador real: `ehdr_CODIGO` es el
+código y `ptdc_CODIGO` el tipo de documento.
+
+**Los borradores cuelgan de la empresa activa**, así que `empresa_rut` importa:
+sin él, un RUT que opera varias empresas recibe los borradores de la que dejó la
+consulta anterior. No es teórico — con la empresa sin fijar, las cinco empresas
+de prueba devolvían cero borradores, y un listado vacío se lee como "no tenés
+borradores" en vez de "preguntaste por otra empresa".
+
+Tres cosas del catálogo de apigateway **no se homologaron, y no por falta de
+tiempo**:
+
+- **`dte-xml`.** El único camino del portal a un XML es la descarga masiva
+  (`mipeDownLoad.cgi`), que baja el lote entero según los filtros de la pantalla
+  y está detrás de un reCAPTCHA. No hay descarga individual, y un reCAPTCHA no es
+  un camino que un servicio pueda recorrer solo.
+- **`borrador-pdf`.** Depende de tener un borrador; sin ninguno no hay nada que
+  relevar ni con qué verificar.
+- **`info-contribuyente`.** El formulario de emisión no expone ningún CGI de
+  consulta de contribuyente: los datos del receptor aparecen recién al
+  previsualizar, o sea que no hay una consulta separada que homologar.
+
+El **PDF de un documento** existe sólo como ruta REST (`POST /v1/mipyme/dte-pdf`),
+no como tool MCP, igual que el de BHE: un PDF en base64 dentro de una respuesta
+MCP satura el contexto sin que el modelo pueda hacer nada con él. Se pide por el
+`codigo` que devuelve el listado y **no por el folio**, que se repite entre
+emisores y entre tipos de documento.
+
+`sii_mipyme_list_dte_recibidos` es el espejo de `list_dte_emitidos` y comparte su
+forma, con el **emisor** como contraparte en vez del receptor. Trae algo que
+`sii_rcv_*` no tiene: el **estado del acuse** (`DTE Recibido Sin Reparos`,
+`con Reparos`), que es la respuesta que la empresa dio al documento.
 
 `sii_rcv_empresas_autorizadas` **no** es lo mismo que `sii_mipyme_list_empresas`:
 éstas son las empresas que el RUT puede **consultar** en el registro, y las de

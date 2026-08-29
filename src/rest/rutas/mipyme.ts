@@ -3,7 +3,7 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaEmitirDte } from '../../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaListBorradores, schemaEmitirDte } from '../../core/schemas/mipyme';
 import { ejecutorPara, ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCredencialCert } from './comun';
 
@@ -14,6 +14,9 @@ import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCred
 // certificado de verdad, no sólo una sesión autenticada.
 const zodListEmpresas = conCredencial(schemaListEmpresas);
 const zodListDteEmitidos = conCredencial(schemaListDteEmitidos);
+const zodListDteRecibidos = conCredencial(schemaListDteRecibidos);
+const zodDtePdf = conCredencial(schemaDtePdf);
+const zodListBorradores = conCredencial(schemaListBorradores);
 const zodEmitirDte = z.object(schemaEmitirDte).extend({
   ...zodCredencialCert,
   // `clave` se RECHAZA explícitamente, no se ignora. Sin esto, un body que
@@ -57,6 +60,49 @@ export function registrarRutasMipyme(
       empresaRut: empresa_rut, tipoDte: tipo_dte, fechaDesde: fecha_desde,
       fechaHasta: fecha_hasta, receptorRut: receptor_rut, folio, pagina,
     }));
+  });
+
+  rutas.set('POST /v1/mipyme/list-dte-recibidos', async body => {
+    const parseo = zodListDteRecibidos.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, empresa_rut, tipo_dte, fecha_desde, fecha_hasta, emisor_rut, folio, pagina } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(() => core.listDteRecibidos(ejecutor, rut, {
+      empresaRut: empresa_rut, tipoDte: tipo_dte, fechaDesde: fecha_desde,
+      fechaHasta: fecha_hasta, emisorRut: emisor_rut, folio, pagina,
+    }));
+  });
+
+  rutas.set('POST /v1/mipyme/dte-pdf', async body => {
+    const parseo = zodDtePdf.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, empresa_rut, codigo } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(async () => {
+      const contenido = await core.dtePdf(ejecutor, rut, codigo, empresa_rut);
+      // Se envuelve a mano: `ejecutar` spreadea el resultado, y spreadear un
+      // Buffer produciría {"0":37,"1":80,...} — un JSON enorme e inservible.
+      return {
+        codigo,
+        // Constante y no un eco del SII: el scraper ya rechazó todo lo que no
+        // fuera application/pdf. Se manda para que el tenant no lo asuma.
+        content_type: 'application/pdf',
+        // El schema ya exige sólo dígitos; el saneo va igual porque este valor
+        // viaja a un consumidor que puede usarlo como nombre de archivo real, y
+        // un separador acá sería path traversal allá.
+        nombre_archivo: `mipyme-dte-${codigo.replace(/[^A-Za-z0-9]/g, '')}.pdf`,
+        tamano_bytes: contenido.length,
+        pdf_base64: contenido.toString('base64'),
+      };
+    });
+  });
+
+  rutas.set('POST /v1/mipyme/list-borradores', async body => {
+    const parseo = zodListBorradores.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, empresa_rut } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(() => core.listBorradores(ejecutor, rut, empresa_rut));
   });
 
   // sii_mipyme_emitir_dte con confirmar=true firma con certificado digital,
