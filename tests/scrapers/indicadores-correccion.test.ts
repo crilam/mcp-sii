@@ -33,8 +33,19 @@ describe('parsearValoresMensuales — corrección monetaria', () => {
     expect(parsearValoresMensuales(html)).toHaveLength(3);
   });
 
-  it('una página sin tablas de mes devuelve vacío, no revienta', () => {
-    expect(parsearValoresMensuales('<html><body>sin datos</body></html>')).toEqual([]);
+  // Este test decía lo contrario —"devuelve vacío, no revienta"— y se dio vuelta
+  // por un hallazgo del code review del PR #63. El vacío silencioso convive mal
+  // con el bloque de acá abajo, que para los tramos exige lo opuesto: la misma
+  // situación (el SII cambió su maquetado) daba error en un parser y una lista
+  // vacía en el otro.
+  //
+  // Y la lista vacía es peor que un error, porque afirma algo: el consumidor la
+  // lee como "el SII no publicó estos valores". El año que el SII realmente no
+  // publica llega como 404 y sale por RecursoNoEncontrado, así que no se pierde
+  // ese caso.
+  it('una página sin tablas de mes es un error, no un array vacío', () => {
+    expect(() => parsearValoresMensuales('<html><body>sin datos</body></html>'))
+      .toThrow(/no se reconocieron/i);
   });
 });
 

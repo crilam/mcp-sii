@@ -1,6 +1,7 @@
 import * as scraper from '../scrapers/indicadores';
 import { ColaPorClave } from '../colaPorClave';
 import { ValorDiario, ValorMensual, TramoImpuesto } from '../scrapers/indicadores';
+import { ServicioOcupado } from '../erroresConsulta';
 
 // Indicadores públicos del SII. No usa `EjecutorSesion` como el resto de los
 // core: estas páginas no tienen credencial ni sesión, así que no hay nada que
@@ -40,8 +41,26 @@ const cache = new Map<string, Entrada>();
 const cola = new ColaPorClave();
 const CLAVE_PORTAL = 'indicadores';
 
+// Tope de bajadas esperando turno. La cola es de un solo turno y el
+// `AbortSignal.timeout` de la bajada cubre la CONEXIÓN, no la espera: sin tope,
+// un consumidor que pide cincuenta años nuevos deja a los demás colgados
+// minutos, con la conexión HTTP abierta y sin error a la vista. Del lado del
+// que integra, eso es indistinguible de un servicio caído — y peor, porque no
+// tiene con qué decidir reintentar.
+//
+// Doce es el peor caso legítimo con holgura: un consumidor que arma una tabla
+// de un año pide seis indicadores, y dos consumidores haciéndolo a la vez
+// entran. Más que eso no es demanda, es una ráfaga.
+export const MAX_EN_COLA = 12;
+let esperando = 0;
+
 export function limpiarCacheIndicadores(): void {
   cache.clear();
+  // También el contador de la cola: es estado de módulo del mismo mecanismo, y
+  // un test que deja bajadas colgadas dejaría el cupo consumido para todos los
+  // que siguen en el mismo proceso — fallando por contaminación, no por lo que
+  // el test dice probar.
+  esperando = 0;
 }
 
 function expiracion(anio: number, ahora: number): number {
@@ -71,6 +90,25 @@ function conCache<T>(clave: string, anio: number, fn: () => Promise<T>): Promise
     if (masVieja !== undefined) cache.delete(masVieja);
   }
 
+  // El tope se mira acá y no en la cola: un acierto de caché ya devolvió arriba
+  // sin tocar el portal, así que no consume cupo. Contarlo haría que un
+  // consumidor que repite el mismo año se auto-bloqueara pidiendo algo que ni
+  // siquiera sale a la red.
+  //
+  // Se devuelve una promesa rechazada y NO se lanza sincrónicamente: todas las
+  // demás salidas de esta función son promesas, y un throw síncrono obligaría a
+  // cada llamador a envolver la llamada en try/catch ADEMÁS del catch de la
+  // promesa. El que se olvide —y alguno se olvida— se lleva una excepción sin
+  // capturar en vez de un error de dominio.
+  if (esperando >= MAX_EN_COLA) {
+    return Promise.reject(new ServicioOcupado(
+      `Hay ${esperando} consultas de indicadores esperando turno contra el portal del SII. ` +
+      'Reintentá en unos segundos: el servicio serializa las bajadas a propósito, ' +
+      'porque un barrido paralelo hace que el SII corte por volumen.'
+    ));
+  }
+  esperando++;
+
   // La expiración se calcula cuando LLEGA el dato, no cuando se encoló: con la
   // cola serializada, una bajada puede esperar su turno varios segundos y el TTL
   // empezaría a correr antes de tener nada.
@@ -78,7 +116,7 @@ function conCache<T>(clave: string, anio: number, fn: () => Promise<T>): Promise
     const entrada = cache.get(clave);
     if (entrada?.valor === enVuelo) entrada.expira = expiracion(anio, Date.now());
     return valor;
-  });
+  }).finally(() => { esperando--; });
   cache.set(clave, { valor: enVuelo, expira: expiracion(anio, ahora) });
 
   // Sólo se cachea el éxito: un fallo puede ser del momento —el portal caído, un

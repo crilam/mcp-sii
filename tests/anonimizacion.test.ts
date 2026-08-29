@@ -172,6 +172,27 @@ describe('extraerIpsSospechosas', () => {
   ])('sigue marcando la IP pública en %s', (contenido) => {
     expect(extraerIpsSospechosas(contenido)).toContain('8.8.4.4');
   });
+
+  // La excepción nació por el User-Agent del propio repo, pero quedó escrita
+  // como "cualquier palabra seguida de barra": con eso, un `servidor/8.8.4.4`
+  // en un log o un `backend/8.8.4.4` en documentación quedan exentos y el
+  // chequeo deja pasar una IP real. La exención tiene que ser de los productos
+  // que aparecen en un User-Agent, no de cualquier palabra.
+  it.each([
+    'servidor/8.8.4.4',
+    'backend/8.8.4.4',
+    'host/8.8.4.4',
+  ])('no exime a un producto desconocido: %s', (contenido) => {
+    expect(extraerIpsSospechosas(contenido)).toContain('8.8.4.4');
+  });
+
+  it.each([
+    'Chrome/126.0.0.0',
+    'AppleWebKit/537.36',
+    'Safari/537.36',
+  ])('sigue eximiendo a los productos del User-Agent: %s', (contenido) => {
+    expect(extraerIpsSospechosas(contenido)).toEqual([]);
+  });
 });
 
 describe('extraerDatosPersonales', () => {

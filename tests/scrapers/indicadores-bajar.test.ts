@@ -49,7 +49,11 @@ describe('bajada de páginas de indicadores', () => {
   });
 
   it('se anuncia como navegador y no como script', async () => {
-    fetchMock.mockResolvedValue(respuesta(200, '<html></html>'));
+    // La página tiene que traer una tabla reconocible: desde el arreglo del
+    // vacío silencioso, un HTML sin tablas de mes es un error, y este test es
+    // sobre las cabeceras del request, no sobre el parseo.
+    fetchMock.mockResolvedValue(
+      respuesta(200, '<h2>Enero</h2><table><tr><td>1</td><td>38.384,41</td></tr></table>'));
 
     await uf(2025);
 

@@ -117,6 +117,13 @@ export function extraerCorreosSospechosos(contenido: string): string[] {
 
 // Devuelve las IPv4 públicas: las privadas y las de documentación son
 // legítimas en fixtures y no identifican a nadie.
+// Los productos que pueden anteceder a un número de versión de cuatro partes en
+// un User-Agent. Es lista cerrada a propósito: cualquier nombre que se agregue
+// acá deja de ser vigilado, así que agregarlo tiene que ser una decisión.
+const PRODUCTOS_DE_USER_AGENT = [
+  'Mozilla', 'AppleWebKit', 'Chrome', 'Safari', 'Firefox', 'Gecko', 'Edg', 'Version', 'OPR',
+];
+
 export function extraerIpsSospechosas(contenido: string): string[] {
   const encontrados: string[] = [];
   for (const m of contenido.matchAll(IPV4)) {
@@ -137,7 +144,14 @@ export function extraerIpsSospechosas(contenido: string): string[] {
     // `https://cdn.ejemplo.com/servers/8.8.4.4` quedaba exento: una IP pública al
     // final de un path dejaba de detectarse, o sea el chequeo se debilitaba justo
     // donde una IP real aparecería.
-    if (/(?:^|\s)[A-Za-z][A-Za-z0-9._-]*\/$/.test(contenido.slice(0, m.index))) continue;
+    //
+    // Y el producto tiene que ser uno de los que aparecen en un User-Agent, no
+    // cualquier palabra: con la versión laxa, un `servidor/8.8.4.4` en un log o
+    // un `backend/8.8.4.4` en documentación quedaban exentos y el chequeo dejaba
+    // pasar una IP real. La exención existe por el User-Agent del repo, así que
+    // se limita a él.
+    if (new RegExp(`(?:^|\\s)(${PRODUCTOS_DE_USER_AGENT.join('|')})\\/$`, 'i')
+      .test(contenido.slice(0, m.index))) continue;
     encontrados.push(m[0]);
   }
   return encontrados;
