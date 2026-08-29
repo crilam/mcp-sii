@@ -342,10 +342,10 @@ En ese informe, además, `folioInicial` y `folioFinal` vienen **siempre en
 `null`**, por mes y del año. El portal no muestra folios ahí, y un rango no
 significaría nada: cada boleta la folió un emisor distinto.
 
-`sii_bhe_list_recibidas` falla con `LIMITE_CONOCIDO` cuando un mes tiene más de
-100 boletas recibidas: ese CGI pagina distinto del de emitidas y el esquema no
-está cerrado, así que no se devuelve un mes truncado que parezca completo. El
-detalle de lo relevado está en el comentario de `src/scrapers/bhe.ts`.
+`sii_bhe_list_recibidas` pagina los meses de **más de 100 boletas** encadenando el
+código de continuación del informe; no hay captura real de un mes así y la
+garantía son los chequeos de integridad (conteo y duplicados). El detalle está en
+la guía de integración, sección de limitaciones.
 
 Bienes raíces ya **no usa navegador**: la SPA del portal tiene detrás una API
 REST/JSON (`/app/vica/{rut}/v1/…`) y el servicio le pide lo mismo que la SPA.
@@ -436,7 +436,7 @@ Lo que un consumidor necesita saber de cada código es **si reintentar sirve**:
 | `BAD_REQUEST` (HTTP 400) | No | El body no valida. Trae `detalle` con el campo y el motivo |
 | `CREDENCIALES_INVALIDAS` | No | El portal dijo explícitamente que la clave es incorrecta |
 | `NO_ENCONTRADO` | No | El SII confirmó que el dato no existe. Trae `detalle` |
-| `LIMITE_CONOCIDO` | No | Un límite que ya conocemos: un mes de recibidas con más de 100 boletas, un descuadre entre lo que el SII informa y lo que se recupera, o un cambio de formato de un CGI. Trae `detalle` |
+| `LIMITE_CONOCIDO` | No | Un límite que ya conocemos: un descuadre entre lo que el SII informa y lo que se recupera, o un cambio de formato de un CGI. Trae `detalle` |
 | `SESIONES_SIMULTANEAS` | **Sí**, tras esperar | El RUT ya tiene demasiadas sesiones abiertas en el SII. Trae `detalle` |
 | `LIMITE_SII` | **Sí, esperando de verdad** | El SII cortó las consultas por volumen (su propio error 429). Trae `detalle` |
 | `ERROR` | **Sí** | Todo lo demás: cola de espera del SII, portal caído, fallo de red |

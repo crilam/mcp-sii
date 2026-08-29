@@ -596,12 +596,13 @@ Todas devuelven `200` con `{"ok":false,"error":"LIMITE_CONOCIDO","detalle":"..."
 
 | Condición | Rutas afectadas | Qué hacer |
 |---|---|---|
-| **Un mes con más de 100 boletas recibidas.** La paginación de ese informe usa otro esquema que el de emitidas y no está relevada. | `/v1/bhe/list-recibidas` | Consultar el mes desde el portal. Es la única accionable por el usuario final. |
 | Descuadre de conteo: el SII informó N boletas y se recuperaron M, o hubo filas sin folio, o duplicados. | listados BHE | Reportar. No se devuelve un listado incompleto ni con duplicados. |
 | El informe anual trae datos para un mes pero ningún folio legible. **Se aborta el año entero.** | `/v1/bhe/resumen`, `/resumen-recibidas` | Reportar. |
 | El CGI cambió de formato (falta `CantidadFilas`). | consultas mensuales BHE | Reportar: hay que actualizar el scraper. |
 | `contraparte_rut` o `limit` sin `incluir_detalle:true`. | listados DTE | Arreglar el request. |
 | La respuesta del SII superó 4 MiB. | cualquiera, típicamente `/v1/bhe/pdf` | Reportar. |
+
+**Sobre `/v1/bhe/list-recibidas` con más de 100 boletas en el mes:** antes fallaba explícito; ahora pagina encadenando el código de continuación del informe (`pagina_sig_codigo`, el mismo protocolo que apigateway expone). No hay captura real de un mes con más de 100 recibidas, así que la garantía no es "está probado contra el portal" sino los dos chequeos de integridad de siempre: el conteo tiene que cuadrar con el total que el SII declara y no puede haber folios repetidos. Si el protocolo resultara distinto, la respuesta es `LIMITE_CONOCIDO`, nunca un mes truncado que parezca completo.
 
 El criterio detrás de todas: **es preferible fallar explícito a devolver un dato incompleto que se lea como completo.** Un listado truncado o un año a medias entra al motor contable del consumidor como total real, y nadie vuelve a mirarlo.
 

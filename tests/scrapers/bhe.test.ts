@@ -609,19 +609,94 @@ ${filas}
       .rejects.toThrow(/100 documento\(s\) repetido\(s\).*pagina servida dos veces|100 documento\(s\) repetido\(s\)/s);
   });
 
-  // Los dos CGI paginan distinto: el de recibidas es 1-based y navega con
-  // `pagina_sig_codigo`. Mandarle el índice de emitidas pediría dos veces la
-  // misma página, así que hasta relevarlo se falla explícito.
-  it('no adivina la paginación de recibidas: falla explícito', async () => {
-    const { scraper, http } = makeScraper('');
-    (http.postForm as jest.Mock).mockResolvedValue(
-      paginaCon(150, Array.from({ length: 100 }, (_, i) => 300 + i))
-    );
+  // Recibidas pagina DISTINTO: 1-based y encadenando el código de continuación
+  // que trae cada página (`pagina_sig_codigo`), con "00000000000000" como fin.
+  // Es el protocolo que apigateway expone hacia afuera y ellos scrapean este
+  // mismo CGI. No hay captura de un mes real con más de 100 recibidas —ninguna
+  // credencial pasa de seis—, así que lo que hace segura la implementación son
+  // los chequeos de integridad de abajo, no la fe en el protocolo.
+  function paginaRecibidasCon(totalMes: number, folios: number[], sigCodigo: string): string {
+    const filas = folios.map((folio, i) => `
+ arr_informe_mensual['nroboleta_${i + 1}'] = "${folio}";
+ arr_informe_mensual['codigobarras_${i + 1}'] = "REC${folio}";
+ arr_informe_mensual['rutemisor_${i + 1}'] = "33333333";
+ arr_informe_mensual['dvemisor_${i + 1}'] = "3";
+ arr_informe_mensual['nombre_emisor_${i + 1}'] = "EMISOR DE PRUEBA";
+ arr_informe_mensual['fecha_boleta_${i + 1}'] = "05/05/2025";
+ arr_informe_mensual['totalhonorarios_${i + 1}'] = formatMiles("1000",'.');`).join('');
+    return `<html><script>
+ xml_values['anio_consulta'] = "2025";
+ xml_values['total_boletas'] = "${totalMes}";
+ xml_values['pagina_sig_codigo'] = "${sigCodigo}";
+CantidadFilas=${folios.length};
+${filas}
+</script></html>`;
+  }
+  const cien = Array.from({ length: 100 }, (_, i) => 300 + i);
 
-    await expect(scraper.informeMensual(2025, 5, true))
-      .rejects.toThrow(/recibidas usa otro esquema/);
-    // Y no pidió una segunda página con el índice equivocado.
+  it('recibidas: encadena pagina_sig_codigo y junta el mes completo', async () => {
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock)
+      .mockResolvedValueOnce(paginaRecibidasCon(150, cien, 'ABC123'))
+      .mockResolvedValueOnce(paginaRecibidasCon(150, Array.from({ length: 50 }, (_, i) => 500 + i), '00000000000000'));
+
+    const boletas = await scraper.informeMensual(2025, 5, true);
+
+    expect(boletas).toHaveLength(150);
+    const pedidos = (http.postForm as jest.Mock).mock.calls.map(([, c]) => c);
+    // La primera página va sin código; la segunda lleva el índice 1-based Y el
+    // código que devolvió la primera. Mandar el índice de emitidas (0 y 1)
+    // pediría dos veces la misma página.
+    expect(pedidos[0].pagina_sig_codigo).toBeUndefined();
+    expect(pedidos[1]).toMatchObject({ pagina_solicitada: '2', pagina_sig_codigo: 'ABC123' });
+  });
+
+  // Un bug que reenviara siempre el código de la PRIMERA página pasaría con dos
+  // páginas: hacen falta tres para ver que el código se actualiza en cada paso.
+  it('recibidas: cada página lleva el código que devolvió la anterior', async () => {
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock)
+      .mockResolvedValueOnce(paginaRecibidasCon(250, cien, 'A'))
+      .mockResolvedValueOnce(paginaRecibidasCon(250, Array.from({ length: 100 }, (_, i) => 500 + i), 'B'))
+      .mockResolvedValueOnce(paginaRecibidasCon(250, Array.from({ length: 50 }, (_, i) => 700 + i), '00000000000000'));
+
+    const boletas = await scraper.informeMensual(2025, 5, true);
+
+    expect(boletas).toHaveLength(250);
+    const pedidos = (http.postForm as jest.Mock).mock.calls.map(([, c]) => c);
+    expect(pedidos[1]).toMatchObject({ pagina_solicitada: '2', pagina_sig_codigo: 'A' });
+    expect(pedidos[2]).toMatchObject({ pagina_solicitada: '3', pagina_sig_codigo: 'B' });
+  });
+
+  // Si el informe declara más páginas pero no da código de continuación, pedir
+  // "la siguiente" con el índice devolvería la primera otra vez. Se corta antes.
+  it('recibidas: sin código de continuación falla explícito sin pedir otra página', async () => {
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock).mockResolvedValue(paginaRecibidasCon(150, cien, '00000000000000'));
+
+    await expect(scraper.informeMensual(2025, 5, true)).rejects.toThrow(/código de continuación/);
     expect((http.postForm as jest.Mock).mock.calls).toHaveLength(1);
+  });
+
+  // La red de seguridad: si el protocolo resultara distinto y el CGI sirviera dos
+  // veces la misma página, el conteo puede cuadrar (200 == 200) y aun así ser
+  // basura. Los duplicados por folio+código lo atajan.
+  it('recibidas: una página servida dos veces se detecta como duplicados', async () => {
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock)
+      .mockResolvedValueOnce(paginaRecibidasCon(200, cien, 'ABC123'))
+      .mockResolvedValueOnce(paginaRecibidasCon(200, cien, '00000000000000'));
+
+    await expect(scraper.informeMensual(2025, 5, true)).rejects.toThrow(/repetido/);
+  });
+
+  it('recibidas: menos filas que el total declarado es un descuadre explícito', async () => {
+    const { scraper, http } = makeScraper('');
+    (http.postForm as jest.Mock)
+      .mockResolvedValueOnce(paginaRecibidasCon(150, cien, 'ABC123'))
+      .mockResolvedValueOnce(paginaRecibidasCon(150, [900, 901], '00000000000000'));
+
+    await expect(scraper.informeMensual(2025, 5, true)).rejects.toThrow(/se recuperaron 102/);
   });
 
   // El descuadre es determinístico: reintentar hace invalidate() +
