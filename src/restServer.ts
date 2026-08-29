@@ -18,6 +18,8 @@ import { registrarRutasSesion } from './rest/rutas/sesion';
 import { registrarRutasContribuyente } from './rest/rutas/situacionTributaria';
 import { registrarRutasIndicadores } from './rest/rutas/indicadores';
 import { registrarRutasVehiculos } from './rest/rutas/vehiculos';
+import { registrarRutasActividadesEconomicas } from './rest/rutas/actividadesEconomicas';
+import { registrarRutasMisii } from './rest/rutas/misii';
 
 const LIMITE_AUTH_FALLIDA_POR_IP = 20;
 
@@ -61,6 +63,8 @@ export function crearRestServer(
   // Sin registro ni credenciales: son páginas públicas del SII.
   registrarRutasIndicadores(rutas);
   registrarRutasVehiculos(rutas);
+  registrarRutasActividadesEconomicas(rutas);
+  registrarRutasMisii(rutas, registro, credenciales);
 
   const server = http.createServer(async (req, res) => {
     try {
