@@ -105,6 +105,10 @@ const XML_VALUE = /xml_values\['(\w+)'\]\s*=\s*"([^"]*)"/g;
 // El CGI pagina de a 100 filas: `MAXFILAS=100` y `tot_pag = Math.ceil(max/100)`
 // en la propia respuesta. Ver ESQUEMAS/comentario en parseBoletas.
 const MAX_FILAS_POR_PAGINA = 100;
+// Valor de `pagina_sig_codigo` con que el informe de recibidas marca que no hay
+// página siguiente. Medido en un mes de una sola página, y es el mismo
+// centinela que apigateway.cl documenta.
+const SIN_PAGINA_SIGUIENTE = '00000000000000';
 
 // Emitidas y recibidas NO comparten esquema: el CGI de recibidas usa otros
 // nombres de campo (verificado contra el portal). Parsear las recibidas con los
@@ -319,47 +323,47 @@ export class BheScraper {
     // `CantidadFilas` sirve para iterar las filas de cada página, y nada más.
     const totalPaginas = Math.ceil(total / MAX_FILAS_POR_PAGINA);
 
-    // La paginación se implementa SÓLO para emitidas, y no por comodidad: los
-    // dos CGI paginan distinto. El de emitidas usa `pagina_solicitada` 0-based
-    // (su paginador hace `listar(i)` para i en [0, tot_pag)). El de recibidas
-    // devuelve `pagina_solicitada="1"` y `pagina_actual="1"`, y navega con
-    // `GLB_sig_pag`/`pagina_sig_codigo` — o sea 1-based y con un código de
-    // continuación, y su `listar()` vive en un JS que no tenemos capturado.
-    // Mandarle el índice de emitidas pediría `0` y `1`, que probablemente son la
-    // misma página: 200 boletas con folios duplicados, el fallo silencioso que
-    // todo esto evita. Hasta relevar ese CGI, recibidas falla explícito.
+    // Los dos CGI paginan DISTINTO, y no es cosmético:
     //
-    // PISTA para cuando se releve, aportada por la sesión que integra Tributy:
-    // apigateway.cl expone su listado de BHE con `pagina` + `pagina_sig_codigo`
-    // y marca el fin con `pagina_sig_codigo == "00000000000000"`. Como ellos
-    // scrapean el mismo CGI, es muy probable que ése sea el mecanismo real:
-    // pedir la página siguiente mandando el código que devolvió la anterior, en
-    // vez de un índice. Encaja con que este informe emita `pagina_sig_codigo`,
-    // que el de emitidas no tiene.
+    //   emitidas   `pagina_solicitada` 0-based; su paginador hace `listar(i)`
+    //              para i en [0, tot_pag).
+    //   recibidas  1-based y con códigos de continuación: la respuesta trae
+    //              `pagina_sig_codigo`, y la página siguiente se pide mandando
+    //              ese código. El centinela "00000000000000" marca la última.
+    //              Es el mismo protocolo que apigateway.cl expone hacia afuera
+    //              (`pagina` + `pagina_sig_codigo`), y ellos scrapean este CGI.
     //
-    // Volcado real de un mes de 4 recibidas (07/2026), que confirma el esquema y
-    // agrega una variable más:
-    //   pagina_solicitada="1"  pagina_actual="1"
-    //   pagina_sig_codigo="00000000000000"  pagina_ant_codigo=""  pagina_med_codigo=""
-    //   pagina_lista="00000000000000;"
-    // O sea: 1-based, con códigos de continuación, y una `pagina_lista` separada
-    // por `;`. Falta lo único que decide la implementación: con una sola página
-    // no se puede distinguir si `pagina_lista` enumera TODAS las páginas del mes
-    // (implementarla sería recorrerla) o sólo la actual (habría que encadenar
-    // `pagina_sig_codigo` hasta el centinela). Elegir mal devuelve un mes
-    // truncado que parece completo, así que sigue fallando explícito hasta tener
-    // la captura de un mes con más de 100 recibidas.
-    if (recibidas && totalPaginas > 1) {
-      throw new LimitacionConocida(
-        `El SII informa ${total} boletas recibidas para ${String(mes).padStart(2, '0')}/${anio}, ` +
-        `y entrega ${MAX_FILAS_POR_PAGINA} por página. La paginación del informe de ` +
-        'recibidas usa otro esquema que el de emitidas y todavía no está relevada, ' +
-        'así que no se devuelve un listado incompleto. Consultá el mes desde el portal.'
-      );
-    }
+    // Mandarle a recibidas el índice de emitidas pediría `0` y `1`, que son la
+    // misma página: 200 boletas con folios duplicados. Por eso cada informe
+    // arma su pedido por separado.
+    //
+    // La paginación de recibidas NO tiene captura de un mes real con más de 100
+    // boletas: ninguna credencial disponible pasa de seis en un mes. Lo que la
+    // hace segura de todos modos son los DOS chequeos de integridad de abajo
+    // —conteo contra el total declarado y duplicados por folio+código— que
+    // convierten cualquier interpretación equivocada del protocolo en un error
+    // explícito en vez de un mes truncado que parece completo. Es la misma red
+    // que ya protegía a emitidas.
+    let sigCodigo = primera.values['pagina_sig_codigo'] ?? '';
 
     for (let pagina = 1; pagina < totalPaginas; pagina++) {
-      const { html } = await this.pedirPagina(anio, mes, recibidas, pagina);
+      let html: string;
+      let values: Record<string, string>;
+      if (recibidas) {
+        // Sin código de continuación no hay página siguiente que pedir, y
+        // pedirla con el índice devolvería la primera otra vez.
+        if (sigCodigo === '' || sigCodigo === SIN_PAGINA_SIGUIENTE) {
+          throw new LimitacionConocida(
+            `El SII informó ${total} boletas recibidas para ${String(mes).padStart(2, '0')}/${anio} ` +
+            `(${totalPaginas} páginas) pero la página ${pagina} no trajo código de continuación. ` +
+            'No se devuelve un listado incompleto.'
+          );
+        }
+        ({ html, values } = await this.pedirPagina(anio, mes, true, pagina + 1, { pagina_sig_codigo: sigCodigo }));
+        sigCodigo = values['pagina_sig_codigo'] ?? '';
+      } else {
+        ({ html } = await this.pedirPagina(anio, mes, false, pagina));
+      }
       const siguiente = this.parseBoletas(html, esquema);
       boletas.push(...siguiente.boletas);
       descartadas += siguiente.descartadas;
@@ -411,7 +415,8 @@ export class BheScraper {
     anio: number,
     mes: number,
     recibidas: boolean,
-    pagina: number
+    pagina: number,
+    extra: Record<string, string> = {}
   ): Promise<{ html: string; values: Record<string, string> }> {
     const { rut, dv } = this.session.identidad();
     const html = await this.http.postForm(
@@ -420,11 +425,13 @@ export class BheScraper {
         rut_arrastre: rut,
         dv_arrastre: dv,
         // Sin este campo el CGI responde el error TMB020a en vez del informe.
-        // Es 0-based (ver el paginador del propio informe).
+        // Emitidas lo lee 0-based; recibidas 1-based y acompañado del código de
+        // continuación en `extra` (ver el bucle de páginas).
         pagina_solicitada: String(pagina),
         // El formulario del portal manda el mes con dos digitos.
         cbmesinformemensual: String(mes).padStart(2, '0'),
         cbanoinformemensual: String(anio),
+        ...extra,
       }
     );
 
