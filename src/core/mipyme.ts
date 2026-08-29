@@ -35,6 +35,18 @@ export async function listDteRecibidos(
   });
 }
 
+export async function dtePdf(
+  ejecutor: EjecutorSesion<SessionManager>,
+  rut: string,
+  codigo: string,
+  empresaRut?: string
+): Promise<Buffer> {
+  return ejecutor.ejecutar(rut, async sesion => {
+    const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
+    return http.dtePdf(codigo, empresaRut);
+  });
+}
+
 export async function emitirDte(
   ejecutor: EjecutorSesion<SessionManager>,
   rut: string,

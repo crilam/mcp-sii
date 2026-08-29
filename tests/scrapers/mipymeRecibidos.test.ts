@@ -186,3 +186,83 @@ describe('MipymeHttpScraper.listDteRecibidos', () => {
     expect(res.totalPaginas).toBeNull();
   });
 });
+
+describe('MipymeHttpScraper.dtePdf', () => {
+  function conPdf(contenido: Buffer, contentType = 'application/pdf') {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock).mockResolvedValue(SEL_EMPRESA);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+    (http.getBinario as jest.Mock) = jest.fn()
+      .mockResolvedValue({ contenido, contentType });
+    return { scraper, http };
+  }
+
+  const PDF = Buffer.from('%PDF-1.4 contenido');
+
+  // Sale de mipeShowPdf.cgi y NO de mipeDownLoad/mipeImprimeDocAdm, que bajan el
+  // lote entero según los filtros de la pantalla y encima los dispara un
+  // reCAPTCHA: no son un camino que un servicio pueda recorrer solo.
+  it('pide el PDF a mipeShowPdf.cgi con el CODIGO', async () => {
+    const { scraper, http } = conPdf(PDF);
+
+    await scraper.dtePdf('1897586940', '33333333-3');
+
+    expect(http.getBinario).toHaveBeenCalledWith(
+      expect.stringContaining('mipeShowPdf.cgi'), { CODIGO: '1897586940' });
+  });
+
+  // Sin seleccionar empresa el CGI responde "Su requerimiento no ha sido bien
+  // recepcionado": un error genérico que manda a revisar el navegador cuando lo
+  // que falta es el contexto. Medido contra el portal real.
+  it('selecciona la empresa antes de pedir el PDF', async () => {
+    const { scraper, http } = conPdf(PDF);
+
+    await scraper.dtePdf('1897586940', '33333333-3');
+
+    expect(http.postForm).toHaveBeenCalledWith(
+      expect.stringContaining('mipeSelEmpresa.cgi'), { RUT_EMP: '33333333-3' });
+    expect((http.postForm as jest.Mock).mock.invocationCallOrder[0])
+      .toBeLessThan((http.getBinario as jest.Mock).mock.invocationCallOrder[0]);
+  });
+
+  it('devuelve el binario tal cual', async () => {
+    const { scraper } = conPdf(PDF);
+
+    await expect(scraper.dtePdf('1897586940', '33333333-3')).resolves.toEqual(PDF);
+  });
+
+  // El CGI responde 200 con HTML cuando algo falla, así que el status no
+  // distingue nada. Sin este chequeo el error viajaría como un "PDF" que ningún
+  // lector abre, y el consumidor lo descubriría recién al abrirlo.
+  it('un HTML de error no pasa por PDF', async () => {
+    const html = Buffer.from('<html>Error al contribuyente CODIGO: 02.35.209.59</html>');
+    const { scraper } = conPdf(html, 'text/html');
+
+    await expect(scraper.dtePdf('1897586940', '33333333-3'))
+      .rejects.toThrow(/no devolvió un PDF/);
+  });
+
+  it('el error del portal incluye el código del SII, que es lo que pide la mesa de ayuda', async () => {
+    const html = Buffer.from('<html>CODIGO: 02.35.209.59.203.2</html>');
+    const { scraper } = conPdf(html, 'text/html');
+
+    await expect(scraper.dtePdf('1897586940', '33333333-3'))
+      .rejects.toThrow(/02\.35\.209\.59\.203\.2/);
+  });
+
+  // El identificador es el `codigo` del listado, no el folio: el folio se repite
+  // entre emisores y entre tipos, así que no identifica un documento.
+  it.each(['205', 'abc', '', '12-34'])('rechaza un codigo que no es del listado (%p)', async (codigo) => {
+    const { scraper, http } = conPdf(PDF);
+
+    if (/^\d+$/.test(codigo)) {
+      // '205' SÍ es sólo dígitos: es un folio, y el scraper no puede saberlo.
+      // La distinción folio/codigo la hace el consumidor; acá sólo se valida la
+      // forma, y el portal responderá su propio error si el código no existe.
+      await scraper.dtePdf(codigo, '33333333-3');
+      expect(http.getBinario).toHaveBeenCalled();
+      return;
+    }
+    await expect(scraper.dtePdf(codigo, '33333333-3')).rejects.toThrow(/codigo/i);
+  });
+});

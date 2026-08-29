@@ -33,6 +33,19 @@ export const schemaListDteRecibidos = {
   pagina: z.number().int().min(1).default(1).describe('Página del historial (100 documentos por página)'),
 };
 
+export const schemaDtePdf = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  empresa_rut: z.string().optional()
+    .describe('RUT de la empresa con dígito verificador. Si se omite, se resuelve solo si este RUT opera una única empresa en el portal.'),
+  // El identificador es el `codigo` del listado y NO el folio: el folio se
+  // repite entre emisores y entre tipos, así que no identifica un documento.
+  // Se acepta como string aunque el SII lo entregue numérico: es un
+  // identificador opaco, no se aritmetiza, y el string no rompe si el SII le
+  // agrega letras.
+  codigo: z.string().regex(/^\d+$/, 'codigo debe ser el del listado del portal (sólo dígitos)')
+    .describe('Código del documento, tal como lo devuelve list-dte-emitidos o list-dte-recibidos'),
+};
+
 export const schemaEmitirDte = {
   rut: z.string().min(1).describe(RUT_DESC),
   empresa_rut: z.string().optional()

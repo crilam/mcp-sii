@@ -17,6 +17,16 @@ const HISTORIAL_URL = `${CGI_BASE}/mipeAdminDocsEmi.cgi`;
 // misma clase de corazonada que falló cuatro de cuatro veces relevando el RCV.
 const HISTORIAL_RECIBIDOS_URL = `${CGI_BASE}/mipeAdminDocsRcp.cgi`;
 
+// PDF de UN documento. Sale de la página de gestión del documento
+// (`mipeGesDocRcp.cgi`), donde el portal lo ofrece como "VISUALIZACIÓN DOCUMENTO
+// (pdf)". Toma el CODIGO del listado y nada más.
+//
+// NO se usa `mipeDownLoad.cgi` ni `mipeImprimeDocAdm.cgi`, que es a donde apunta
+// el listado: esos bajan el LOTE entero según los filtros de la pantalla, no un
+// documento, y los dispara un reCAPTCHA (`llamaRecaptchaConCallback`), o sea que
+// no son un camino que un servicio pueda recorrer solo.
+const PDF_DOCUMENTO_URL = `${CGI_BASE}/mipeShowPdf.cgi`;
+
 // Emisión. Relevado en vivo el 2026-08-11; reemplaza a `mipeDocAlta.cgi`, que
 // nunca existió (404) y que era a donde apuntaba el camino de navegador.
 //
@@ -470,6 +480,48 @@ export class MipymeHttpScraper {
         totalPaginas: this.parseTotalPaginas(html),
         empresaRut,
       };
+    });
+  }
+
+  /**
+   * PDF de un documento del portal, emitido o recibido.
+   *
+   * Se identifica por el `codigo` que publica el listado y NO por el folio: el
+   * folio se repite entre emisores y entre tipos de documento, así que no
+   * identifica nada por sí solo. Es el mismo criterio que el PDF de BHE, que va
+   * por código de barras y no por folio.
+   */
+  async dtePdf(codigo: string, empresaRut?: string): Promise<Buffer> {
+    if (!/^\d+$/.test(codigo.trim())) {
+      throw new Error(
+        `El codigo del documento tiene que ser el que devuelve el listado del portal `
+        + `(sólo dígitos); se recibió "${codigo.slice(0, 40)}".`);
+    }
+    this.session.assertPuedeEntregarCookieJar();
+
+    return this.session.conEmpresaExclusiva(async () => {
+      const empresas = this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
+      const resuelta = this.resolverEmpresa(empresas, empresaRut);
+      // Sin la selección, el CGI responde "Su requerimiento no ha sido bien
+      // recepcionado" — un error genérico que manda a revisar el navegador
+      // cuando lo que falta es el contexto de empresa.
+      await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: resuelta });
+
+      const { contenido, contentType } = await this.http.getBinario(
+        PDF_DOCUMENTO_URL, { CODIGO: codigo.trim() });
+
+      // El CGI responde 200 con HTML cuando algo falla, así que el status no
+      // distingue nada: lo que separa un PDF de un error es el Content-Type. Sin
+      // este chequeo el fallo viajaría como un "PDF" que ningún lector abre.
+      if (!/application\/pdf/i.test(contentType)) {
+        const cuerpo = contenido.subarray(0, 4096).toString('latin1');
+        const codigoSii = cuerpo.match(/CODIGO:\s*([\d.\-]+)/)?.[1];
+        throw new Error(
+          `El portal mipyme no devolvió un PDF para el documento ${codigo.slice(0, 40)} `
+          + `(Content-Type: ${contentType || 'sin declarar'})`
+          + `${codigoSii ? `, código del SII ${codigoSii}` : ''}.`);
+      }
+      return contenido;
     });
   }
 

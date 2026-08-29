@@ -232,6 +232,12 @@ ES el dato, mientras un código en 0 no sería "código cero" sino "no hay". Y
 SII, y no se normalizan para que la diferencia se vea en vez de descubrirse
 parseando.
 
+El **PDF de un documento** existe sólo como ruta REST (`POST /v1/mipyme/dte-pdf`),
+no como tool MCP, igual que el de BHE: un PDF en base64 dentro de una respuesta
+MCP satura el contexto sin que el modelo pueda hacer nada con él. Se pide por el
+`codigo` que devuelve el listado y **no por el folio**, que se repite entre
+emisores y entre tipos de documento.
+
 `sii_mipyme_list_dte_recibidos` es el espejo de `list_dte_emitidos` y comparte su
 forma, con el **emisor** como contraparte en vez del receptor. Trae algo que
 `sii_rcv_*` no tiene: el **estado del acuse** (`DTE Recibido Sin Reparos`,

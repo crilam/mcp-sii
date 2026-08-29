@@ -20,11 +20,12 @@ const RECEPTOR_MINIMO = {
 describe('registrarRutasMipyme', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 4 rutas bajo /v1/mipyme', () => {
+  it('registra las 5 rutas bajo /v1/mipyme', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
       'POST /v1/mipyme/list-empresas', 'POST /v1/mipyme/list-dte-emitidos',
-      'POST /v1/mipyme/list-dte-recibidos', 'POST /v1/mipyme/emitir-dte',
+      'POST /v1/mipyme/list-dte-recibidos', 'POST /v1/mipyme/dte-pdf',
+      'POST /v1/mipyme/emitir-dte',
     ]);
   });
 
@@ -112,6 +113,42 @@ describe('registrarRutasMipyme', () => {
     expect(r.status).toBe(400);
     expect(core.listDteRecibidos).not.toHaveBeenCalled();
   });
+
+  // El Buffer se envuelve a mano porque `ejecutar` spreadea el resultado, y
+  // spreadear un Buffer produce {"0":37,"1":80,...}: un JSON enorme e inservible.
+  it('dte-pdf: devuelve el PDF en base64, no el Buffer spreadeado', async () => {
+    (core.dtePdf as jest.Mock).mockResolvedValue(Buffer.from('%PDF-1.4 x'));
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/mipyme/dte-pdf')!({
+      rut: '11.111.111-1', clave: 'secreta', codigo: '1897586940',
+    });
+
+    expect(r.body).toMatchObject({
+      ok: true,
+      codigo: '1897586940',
+      content_type: 'application/pdf',
+      nombre_archivo: 'mipyme-dte-1897586940.pdf',
+      tamano_bytes: 10,
+      pdf_base64: Buffer.from('%PDF-1.4 x').toString('base64'),
+    });
+    expect((r.body as Record<string, unknown>)['0']).toBeUndefined();
+  });
+
+  // El identificador es el `codigo` del listado. Un folio ("205") también es
+  // sólo dígitos y el schema no puede distinguirlos; lo que sí se rechaza es
+  // cualquier cosa que no tenga la forma de un identificador del portal.
+  it.each(['abc', '', '12-34', '../etc/passwd'])(
+    'dte-pdf: rechaza un codigo mal formado (%p) sin llamar al core', async (codigo) => {
+      const rutas = armarRouter();
+
+      const r = await rutas.get('POST /v1/mipyme/dte-pdf')!({
+        rut: '11.111.111-1', clave: 'secreta', codigo,
+      });
+
+      expect(r.status).toBe(400);
+      expect(core.dtePdf).not.toHaveBeenCalled();
+    });
 
   // La emisión NO cambió: firmar un DTE requiere el certificado de verdad, no
   // basta una sesión autenticada. Este test es el que impide que un futuro
