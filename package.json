@@ -18,6 +18,7 @@
     "relevar-indicadores": "ts-node src/scripts/relevarIndicadores.ts",
     "relevar-params": "ts-node src/scripts/relevarParamsSdi.ts",
     "relevar-facade-rcv": "ts-node src/scripts/relevarFacadeRcv.ts",
+    "relevar-misii": "ts-node src/scripts/relevarMisii.ts",
     "relevar-rcv-vacios": "ts-node src/scripts/relevarRcvVacios.ts",
     "verificar-tipos-documento": "ts-node src/scripts/verificarTiposDocumento.ts",
     "validate-cert": "ts-node src/validateCert.ts",
