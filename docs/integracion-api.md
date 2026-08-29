@@ -602,6 +602,17 @@ Sin `rut` ni credencial. Fuente: las planillas XLSX anuales del SII (`liv{año}.
 
 Dos cosas: **`tasacion` devuelve todas las filas que coinciden** (un modelo tiene una por año de fabricación y por versión) en vez de elegir una; y **livianos y pesados traen columnas distintas**: pesados tiene `carga`/`pasajeros` y `permiso: null`; livianos, `puertas`/`potencia`/`combustible`/`permiso` y `carga`/`pasajeros` en `null`. `null` es ausencia en la planilla, no cero.
 
+### 6.9 Contribuyentes (sin credencial) y Mi SII
+
+| Endpoint | Body | Devuelve |
+|---|---|---|
+| **`POST /v1/contribuyentes/actividades-economicas`** | `categoria?` (`"1"`, `"2"` u otro valor de la tabla), `afecta_iva?`, `texto?` | `datos`: `{codigo, descripcion, rubro, subrubro, afectaIva, categoriaTributaria, disponibleInternet}` |
+| **`POST /v1/contribuyentes/actividad-economica`** | `codigo` (seis dígitos) | una actividad; inexistente → `NO_ENCONTRADO` |
+| **`POST /v1/contribuyentes/verificar-rut`** | `rut` | `{rut, valido, cuerpo, dv, motivo?}`. **No consulta al SII** ni dice si el RUT existe: sólo módulo 11. |
+| **`POST /v1/misii/datos-contribuyente`** | credencial estándar | la ficha de Mi SII: `rut, razonSocial, nombres, tipoContribuyente, subtipoContribuyente, personaEmpresa, segmento, glosaActividad, email, telefonoMovil, fechaConstitucion, fechaInicioActividades, fechaTerminoGiro, unidadOperativa, capitalEnterado, capitalPorEnterar, autorizadoDeclararDia20, direcciones[], atributos[], alertas[]` |
+
+`categoriaTributaria` es texto y viene tal como la publica el SII: la mayoría `"1"` o `"2"`, y alguna letra (`"G"`) que la tabla no explica. `atributos` son los regímenes y autorizaciones del contribuyente (por ejemplo `14D1` "Régimen Pro Pyme General") con `desde`/`hasta`. **Todas las fechas van en `YYYY-MM-DD`**: el SII las manda en dos formatos distintos dentro de la misma ficha y acá se normalizan.
+
 ---
 
 ## 7. Limitaciones conocidas

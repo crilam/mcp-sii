@@ -53,7 +53,7 @@ connections (billing del propio gateway).
 
 ## Estado real a 2026-08-26
 
-En producción, 42 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 sumaron el resto):
+En producción, 46 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 a 9 sumaron el resto):
 
 | Dominio | Rutas hoy |
 |---|---|
@@ -68,6 +68,8 @@ En producción, 42 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 sumaron el rest
 | sesion | validar-clave |
 | indicadores | uf, dolar, utm, correccion-monetaria, impuesto-2da-categoria{,-art52} |
 | vehiculos | tipos, marcas, modelos, tasacion, equipamiento |
+| contribuyentes | situacion-tributaria, actividades-economicas, actividad-economica, verificar-rut |
+| misii | datos-contribuyente |
 
 **CORRECCIÓN (2026-08-26) — el pass-through por clave SÍ funciona.** La versión
 anterior decía que se había descartado (queue-it + F5 WAF, sin sesión
@@ -95,8 +97,8 @@ verificación en prod + aviso a los consumidores si cambia el contrato.
 | ~~R5~~ | **indicadores** | 6 | **6** | ✅ **Completa** (PR #63). UF, dólar, UTM/UTA/IPC, corrección monetaria e impuesto 2ª categoría (art. 43 y 52 bis). **Sin credencial ni `rut`**: páginas públicas. |
 | R6 | f29 | 5 | 0 | **Relevada y diferida.** Las dos apps del menú (`rfiInternet/consulta`, `sifmConsultaInternet`) son **GWT** tras login y cola virtual, sin API legible en el bundle (GWT-RPC serializado). Con navegador la grilla F29 rinde, pero los estados por período son PNG inline sin texto y el click sobre el sprite no navega. La propuesta F29 de mipyme (`/cgi_csm/`) exige empresa mipyme. Requiere trabajo profundo de navegador; scripts `relevarF29*.ts`. |
 | ~~R7~~ | **vehiculos** | 4 | **5** | ✅ **Completa.** La consulta interactiva del portal (`vehiculospubui`) exige un **captcha propio del SII** antes de buscar: no automatizable. La fuente son las planillas XLSX anuales públicas (`liv{año}`/`pes{año}`, desde 2020), bajadas una vez y consultadas en memoria. Rutas: tipos, marcas, modelos, tasacion, equipamiento. |
-| R8 | misii | 4 | 0 | Representantes, representados, datos del contribuyente. |
-| R9 | contribuyentes | 3 | 1 | Los dos restantes. |
+| ~~R8~~ | **misii** | 4 | **1** | ✅ Lo que el catálogo real tiene (1 endpoint: `contribuyente/datos`). La home de Mi SII trae la ficha embebida en JSON (`DatosCntrNow`): identificación, direcciones, atributos. **Representantes, socios y giros** se renderizan del lado del servidor y con la credencial relevada venían vacíos: sin forma conocida, fuera. El conteo de 4 era orientativo. |
+| ~~R9~~ | **contribuyentes** | 3 | **4** | ✅ actividades-economicas (página pública, ~670 códigos), actividad-economica y verificar-rut (módulo 11, sin SII). `situacion-tributaria` ya existía. |
 | R10 | dte (parte A) | ? | 4 | Sólo lo que sea consulta de portal. El resto pasa al mundo B. |
 | R11 | Escritura de portal | — | — | bhe emitir/anular, rcv set_tipo_transaccion/set_resumen, mipyme borradores. **Actos reales e irreversibles**: idempotencia y confirmación explícita. Spec con cuidado extra. |
 

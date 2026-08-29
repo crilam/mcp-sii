@@ -295,6 +295,28 @@ facturar por una empresa que sólo se puede mirar.
 | `sii_vehiculos_marcas` | Marcas, opcionalmente por tipo |
 | `sii_vehiculos_modelos` | Modelos de una marca con versiones y años tasados |
 | `sii_vehiculos_tasacion` | Tasación fiscal y permiso, por código SII o marca+modelo |
+| `sii_vehiculos_equipamiento` | Diccionario de siglas de equipamiento |
+
+### Contribuyentes y Mi SII
+
+| Tool | Descripción |
+|---|---|
+| `sii_actividades_economicas` | Los ~670 códigos de actividad económica, filtrables por categoría, IVA y texto |
+| `sii_actividad_economica` | Un código de actividad económica |
+| `sii_verificar_rut` | Formato y dígito verificador de un RUT (aritmética, no consulta al SII) |
+| `sii_misii_datos_contribuyente` | La ficha del contribuyente autenticado según Mi SII |
+
+Las tres primeras van sin credencial: la tabla de códigos es una página pública y
+el verificador de RUT es módulo 11. `sii_verificar_rut` **no dice si el RUT
+existe** —para eso está `sii_contribuyente_situacion_tributaria`—, sólo si está
+bien formado. La categoría tributaria viene **tal como la publica el SII** ("1",
+"2" o alguna letra como "G" que su tabla no explica); traducirla sería inventar.
+
+`sii_misii_datos_contribuyente` lee el JSON que la home de Mi SII trae embebido
+(`DatosCntrNow`): identificación, tipo y subtipo, segmento, glosa de actividad,
+fechas, capital, direcciones vigentes y atributos (regímenes y autorizaciones con
+su vigencia). No trae representantes, socios ni giros: esas secciones no se
+pudieron relevar con datos.
 
 Sin `rut` ni credencial, como indicadores. La fuente **no** es la consulta
 interactiva del portal —exige un captcha propio del SII antes de cualquier

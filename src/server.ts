@@ -7,6 +7,8 @@ import { registerRentaTools } from './tools/renta';
 import { registerRcvTools } from './tools/rcv';
 import { registerIndicadoresTools } from './tools/indicadores';
 import { registerVehiculosTools } from './tools/vehiculos';
+import { registerActividadesEconomicasTools } from './tools/actividadesEconomicas';
+import { registerMisiiTools } from './tools/misii';
 import { ProveedorCredencialesRuntime } from './credencialesRuntime';
 import { crearRegistroSesionesSii } from './registroSesionesSii';
 
@@ -35,6 +37,8 @@ export function createServer(): McpServer {
   // Sin `registro`: los indicadores son páginas públicas, no hay sesión.
   registerIndicadoresTools(server);
   registerVehiculosTools(server);
+  registerActividadesEconomicasTools(server);
+  registerMisiiTools(server, registro);
 
   return server;
 }
