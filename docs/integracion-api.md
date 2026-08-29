@@ -518,9 +518,27 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
 ### 6.6 Persona
 
-**`POST /v1/persona/bienes-raices`** — `rut` + `clave` (este endpoint **no acepta certificado**).
+**`POST /v1/persona/bienes-raices`** — credencial estándar (clave **o** certificado; antes sólo clave).
 
-Devuelve `resumen` (`totalBienesRaices`, `solicitudesEnCurso`, `solicitudesResueltas`, `notificaciones`, `afectoSobretasa`, `beneficioAdultoMayor`) y `propiedades`, con `comuna`, `rol`, `direccion`, `destino`, `fojas`, `numero`, `anio` (todos string, **incluido `anio`**), más `porcentajeDerechos` y `avaluoFiscal` numéricos.
+Devuelve `resumen` (`totalBienesRaices`, `solicitudesEnCurso`, `solicitudesResueltas`, `notificaciones`, `afectoSobretasa`, `beneficioAdultoMayor`) y `propiedades`, con `comuna`, `rol`, `direccion`, `destino`, `fojas`, `numero`, `anio` (todos string, **incluido `anio`**), `porcentajeDerechos` y `avaluoFiscal` numéricos, **más** los códigos del catastro que piden las rutas de abajo: `comunaCodigo`, `manzana`, `predio`, `ultimoEacAplicado`. El `rol` "00632-00244" es `manzana`-`predio` con ceros a la izquierda.
+
+### 6.7 Bienes raíces
+
+Todas con credencial estándar. Un predio se identifica por **`comuna`** (código SII, el de `/comunas`), **`manzana`** y **`predio`**, los tres enteros.
+
+| Endpoint | Body además de la credencial | Devuelve |
+|---|---|---|
+| **`POST /v1/bienes-raices/comunas`** | — | `datos`: `{codigo, nombre, regional}` |
+| **`POST /v1/bienes-raices/consultar-rol`** | `comuna`, `manzana`, `predio` | `datos`: `{comuna, rol, direccion, destino, avaluoFiscal, contribuciones}` de un predio **cualquiera** (no hace falta ser el dueño). Rol inexistente → `NO_ENCONTRADO`. |
+| **`POST /v1/bienes-raices/multipropietarios`** | `comuna`, `manzana`, `predio` | `datos`: `{rut, nombre, porcentajeDerechos, fojas, numero, anio, fechaInscripcion}` |
+| **`POST /v1/bienes-raices/solicitudes`** | — | `datos`: historial de certificados pedidos: `{id, fecha, finVigencia, estado, tipo, folio, codigoVerificacion, url}` |
+| **`POST /v1/bienes-raices/documento`** | `url` (la de una solicitud, tal cual) | `pdf_base64`, `content_type`, `nombre_archivo`, `tamano_bytes` |
+| **`POST /v1/bienes-raices/certificado-avaluo`** | `bienes: [{comuna, manzana, predio, ultimo_eac_aplicado}]`, `tipo` (`simple` default, `multipropietario`, `detallado`) | ídem PDF, más `tipo` |
+
+Dos cosas al integrar:
+
+- **`certificado-avaluo` es una solicitud real** que queda en el historial del contribuyente (aparece en `/solicitudes`). No tiene costo ni es un acto tributario, pero no es una lectura: no la repitas en cada carga de pantalla. `ultimo_eac_aplicado` sale del listado de propiedades; no se inventa.
+- **`avaluoFiscal` y `contribuciones` de `consultar-rol` son strings** con el formato del portal (`"51.230.998"`), porque esa consulta es la de terceros y el SII la publica formateada. En el listado propio `avaluoFiscal` es numérico.
 
 ---
 

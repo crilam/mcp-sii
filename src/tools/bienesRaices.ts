@@ -5,7 +5,7 @@ import { RegistroSesiones } from '../registroSesiones';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { clasificarErrorCredenciales, envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/bienesRaices';
-import { schemaListBienesRaices } from '../core/schemas/bienesRaices';
+import { schemaListBienesRaices, schemaSoloRut, schemaRol } from '../core/schemas/bienesRaices';
 
 export function registerSesionTools(
   server: McpServer,
@@ -78,5 +78,45 @@ export function registerBienesRaicesTools(
     'Lista los bienes raíces (propiedades) del RUT persona autenticado en el SII, con comuna, ROL, dirección, destino, datos de inscripción, porcentaje de derechos y avalúo fiscal. Incluye un resumen con total de propiedades, solicitudes, notificaciones, afectación a sobretasa y beneficio de adulto mayor. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
     schemaListBienesRaices,
     async ({ rut }) => envolverParaMcp(() => core.listBienesRaices(registro, rut))
+  );
+
+  server.tool(
+    'sii_bienes_raices_comunas',
+    'Lista las comunas del catastro de bienes raíces del SII con su código. El código es el que ' +
+    'piden sii_bienes_raices_consultar_rol y sii_bienes_raices_multipropietarios en `comuna`: el ' +
+    'rol de una propiedad ("00632-00244") identifica manzana y predio, pero la comuna va aparte.',
+    schemaSoloRut,
+    async ({ rut }) => envolverParaMcp(() => core.comunas(registro, rut))
+  );
+
+  server.tool(
+    'sii_bienes_raices_consultar_rol',
+    'Consulta un bien raíz CUALQUIERA por su rol (comuna, manzana, predio): comuna, rol, dirección, ' +
+    'destino, avalúo fiscal vigente y contribuciones. Es la consulta que el portal ofrece a ' +
+    'terceros, así que no exige ser el propietario. Manzana y predio son las dos partes del rol ' +
+    '("00632-00244" → manzana 632, predio 244). Un rol inexistente responde NO_ENCONTRADO.',
+    schemaRol,
+    async ({ rut, comuna, manzana, predio }) =>
+      envolverParaMcp(() => core.consultarPorRol(registro, rut, { comuna, manzana, predio }))
+  );
+
+  server.tool(
+    'sii_bienes_raices_multipropietarios',
+    'Copropietarios de un bien raíz por rol: RUT, nombre, porcentaje de derechos y datos de la ' +
+    'inscripción (fojas, número, año, fecha). Sirve para saber quiénes comparten una propiedad ' +
+    'antes de pedir un certificado con propietarios.',
+    schemaRol,
+    async ({ rut, comuna, manzana, predio }) =>
+      envolverParaMcp(() => core.multipropietarios(registro, rut, { comuna, manzana, predio }))
+  );
+
+  server.tool(
+    'sii_bienes_raices_solicitudes',
+    'Historial de solicitudes de documentos de bienes raíces del contribuyente (certificados de ' +
+    'avalúo, de antecedentes, etc.): fecha, vigencia, estado, tipo, folio, código de verificación ' +
+    'y la url para bajar el PDF. El PDF se baja por REST (/v1/bienes-raices/documento), no por MCP: ' +
+    'un PDF en base64 satura el contexto sin que el modelo pueda hacer nada con él.',
+    schemaSoloRut,
+    async ({ rut }) => envolverParaMcp(() => core.solicitudes(registro, rut))
   );
 }

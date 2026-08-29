@@ -1,0 +1,17 @@
+[
+  {
+    "rutPropietario": "11.111.111-1",
+    "nombrePropietario": "PROPIETARIO DE PRUEBA",
+    "porcentajeDerecho": 100.0,
+    "porcentajeDerechoS": "100.00",
+    "fojas": "6603",
+    "numero": 5204,
+    "anno": 2019,
+    "fechaInscripcion": "2019-09-26",
+    "fechaInscripcionString": "26-09-2019",
+    "comunaNumero": 8201,
+    "manzana": 632,
+    "predio": 244,
+    "porcentajeDerechoString": "100.00%"
+  }
+]
