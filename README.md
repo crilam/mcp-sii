@@ -84,14 +84,21 @@ previsualización de un DTE) funciona igual.
 
 ### Perfiles de verificación contra el SII real
 
-Verificar el servicio entero necesita **tres** credenciales, no una: lo que un
-contribuyente puede consultar depende de qué es y de cómo factura.
+Verificar el servicio entero necesita **cuatro** credenciales, no una: lo que un
+contribuyente puede consultar depende de qué es y de cómo factura, y el
+certificado es además otra forma de entrar.
 
 | Perfil | Qué es | Verifica |
 |---|---|---|
 | `SII_PERSONA_*` | Persona natural | BHE emitidas y recibidas, bienes raíces, renta |
 | `SII_MIPYME_*` | Inscrito en Facturación Gratuita del SII | El portal mipyme entero |
 | `SII_MERCADO_*` | Factura con software de mercado | RCV, DTE, F29 |
+| `SII_CERT_*` | Certificado digital (`.pfx` en disco) | Lo mismo que su titular, **más firmar**: `emitir-dte` |
+
+El de certificado no es otro contribuyente sino la otra forma de autenticar, y
+es la **única con la que se puede firmar**. El `.env` guarda la *ruta* del `.pfx`
+—es un binario de varios KB— y la conversión a base64 que piden las rutas la hace
+`perfilesVerificacion.ts`.
 
 El de mipyme no es intercambiable: **si el RUT no está inscrito en Facturación
 Gratuita, el selector de empresas del portal viene sin una sola opción** y no hay
