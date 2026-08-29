@@ -49,7 +49,7 @@ async function main() {
   const rutContraparte = String(doc.contraparteRut ?? '');
   console.log('Documento del RCV:', JSON.stringify({ emisor: rutContraparte, folio: doc.folio, fecha: doc.fechaEmision, total: doc.montoTotal, tipo: doc.tipoDoc }));
   const [rutEmisor, dvEmisor] = rutContraparte.replace(/\./g, '').split('-');
-  const [rutRecep, dvRecep] = p.rut.split('-');
+  const [rutRecep, dvRecep] = p.rut.replace(/\./g, '').split('-');
   const fecha = String(doc.fechaEmision ?? '').slice(0, 10); // dd/mm/aaaa
   const [dd, mm, aaaa] = fecha.split('/');
 

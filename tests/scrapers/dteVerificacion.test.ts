@@ -38,6 +38,21 @@ describe('parsearValidez', () => {
     expect(r.folio).toBe(99999999);
   });
 
+  // El tipo se busca después del RUT: un emisor que se llame "FACTURA Y
+  // COBRANZA SPA" también dice "Factura".
+  it('no confunde el nombre del emisor con el tipo de documento', () => {
+    const html = fixture('dte-validez.html').replace('EMISOR DE PRUEBA LTDA', 'FACTURA Y COBRANZA SPA');
+    const r = parsearValidez(html);
+
+    expect(r.emisorNombre).toBe('FACTURA Y COBRANZA SPA');
+    expect(r.tipoDteNombre).toBe('Factura Electronica');
+  });
+
+  it('sin folio en la página devuelve null, no cero', () => {
+    const html = fixture('dte-validez.html').replace(/N[°º]\s*124/, '');
+    expect(parsearValidez(html).folio).toBeNull();
+  });
+
   // Sin resultado no hay veredicto: puede ser el login o un rediseño, y no
   // puede leerse como "documento inválido".
   it('una página sin resultado falla explícito', () => {
@@ -74,6 +89,18 @@ describe('parsearContenido', () => {
     // En el caso negativo el SII omite el nombre del emisor.
     expect(r.emisorNombre).toBe('');
     expect(r.montoTotal).toBe(68367);
+  });
+});
+
+describe('parsearContenido con el layout corrido', () => {
+  // Si una etiqueta cae en el lugar de un valor, no se publica texto arbitrario
+  // como fecha o RUT: va en null.
+  it('valores que no tienen la forma esperada van en null', () => {
+    const html = fixture('dte-contenido.html').replace('31-07-2025', 'Rut Receptor:').replace('$ 68.366', 'texto');
+    const r = parsearContenido(html);
+
+    expect(r.fechaEmision).toBeNull();
+    expect(r.montoTotal).toBeNull();
   });
 });
 

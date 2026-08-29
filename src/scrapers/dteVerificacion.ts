@@ -1,5 +1,6 @@
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
+import { pausaConfigurada } from '../ritmoSii';
 
 // Verificación de un DTE contra el SII: si fue recibido (validez) y si los datos
 // que uno tiene coinciden con los que el emisor informó (contenido).
@@ -39,7 +40,8 @@ export interface ResultadoValidez {
   identificadorEnvio: string | null;
   rutEmisor: string;
   tipoDteNombre: string;
-  folio: number;
+  // null si la página no trajo el folio: un 0 se leería como "folio cero".
+  folio: number | null;
   comprobante: string | null;
 }
 
@@ -86,8 +88,12 @@ function parsearComun(html: string, que: string): ResultadoValidez {
   const emisorNombre = bloque[0] && !/^Identificador|^R\.U\.T\./i.test(bloque[0]) ? bloque[0] : '';
   const envio = bloque.find(t => /^Identificador de Env[ií]o:/i.test(t));
   const rut = bloque.find(t => /^R\.U\.T\.?/i.test(t));
-  const tipo = bloque.find(t => /Electr[oó]nica|Factura|Nota|Gu[ií]a|Liquidaci[oó]n|Boleta/i.test(t) && !/^R\.U\.T/.test(t)) ?? '';
-  const folioTxt = bloque.find(t => /^N[°º]\s*\d+/.test(t)) ?? '';
+  // El tipo se busca DESPUÉS del RUT, nunca en el nombre del emisor: una razón
+  // social como "FACTURA Y COBRANZA SPA" también dice "Factura".
+  const iRut = rut ? bloque.indexOf(rut) : -1;
+  const trasRut = iRut === -1 ? bloque.slice(1) : bloque.slice(iRut + 1);
+  const tipo = trasRut.find(t => /Electr[oó]nica|Factura|Nota|Gu[ií]a|Liquidaci[oó]n|Boleta/i.test(t)) ?? '';
+  const folioTxt = trasRut.find(t => /^N[°º]\s*\d+/.test(t)) ?? '';
   const comprobante = despuesDe(textos, /^Comprobante de Atenci[oó]n$/i);
 
   return {
@@ -97,7 +103,7 @@ function parsearComun(html: string, que: string): ResultadoValidez {
     identificadorEnvio: envio ? envio.replace(/^Identificador de Env[ií]o:\s*/i, '') : null,
     rutEmisor: rut ? rut.replace(/^R\.U\.T\.?\s*/i, '') : '',
     tipoDteNombre: tipo,
-    folio: Number(folioTxt.replace(/\D/g, '')) || 0,
+    folio: folioTxt ? Number(folioTxt.replace(/\D/g, '')) : null,
     comprobante: comprobante ? comprobante.replace(/\s+/g, ' ') : null,
   };
 }
@@ -114,18 +120,24 @@ export function parsearContenido(html: string): ResultadoContenido {
   // 11111111-1 | $ 68.366".
   const iFecha = textos.findIndex(t => /^Fecha Emisi[oó]n:?$/i.test(t));
   const valores = iFecha === -1 ? [] : textos.slice(iFecha + 3, iFecha + 6);
-  const fecha = valores[0] ?? null;
-  const m = fecha ? /^(\d{2})-(\d{2})-(\d{4})$/.exec(fecha) : null;
-  const monto = valores[2] ? Number(valores[2].replace(/[^\d]/g, '')) : null;
+  // Cada valor se valida por FORMA: si el layout corriera una posición, una
+  // etiqueta ("Rut Receptor:") caería en el lugar de un valor, y devolverla tal
+  // cual sería publicar texto arbitrario como dato. Lo que no tiene la forma
+  // esperada va en null.
+  const m = valores[0] ? /^(\d{2})-(\d{2})-(\d{4})$/.exec(valores[0]) : null;
+  const rutReceptor = valores[1] && /^\d{1,8}-[\dkK]$/.test(valores[1]) ? valores[1] : null;
+  const monto = valores[2] && /^\$?\s*[\d.]+$/.test(valores[2]) ? Number(valores[2].replace(/[^\d]/g, '')) : null;
   return {
     ...base,
     // "Datos coinciden con los registrados" contra "datos NO coinciden con los
     // registrados": un `includes('coinciden')` daría verdadero en los dos. Medido
-    // con el mismo documento y el monto cambiado en un peso.
+    // con el mismo documento y el monto cambiado en un peso. El "NO" del SII va
+    // en mayúsculas y así se busca; si algún día lo escriben en minúscula, el
+    // texto sigue en `resultado` para leerlo.
     datosCoinciden: /coinciden con los registrados/i.test(base.resultado)
-      && !/\bNO coinciden/i.test(base.resultado),
-    fechaEmision: m ? `${m[3]}-${m[2]}-${m[1]}` : fecha,
-    rutReceptor: valores[1] ?? null,
+      && !/\bNO coinciden/.test(base.resultado),
+    fechaEmision: m ? `${m[3]}-${m[2]}-${m[1]}` : null,
+    rutReceptor,
     montoTotal: monto === null || Number.isNaN(monto) ? null : monto,
   };
 }
@@ -145,6 +157,8 @@ export class DteVerificacionScraper {
     const yo = this.session.identidad();
     const emisor = partir(d.rutEmisor);
     await this.http.get(`${BASE}/DTEauth?2`, undefined, { guardarCookies: true });
+    // Dos pedidos seguidos al mismo CGI: con el ritmo de siempre.
+    await new Promise(r => setTimeout(r, pausaConfigurada()));
     const html = await this.http.postForm(`${BASE}/QValidaDTE`, {
       rutConsulta: yo.rut, dvConsulta: yo.dv,
       rutQuery: emisor.cuerpo, dvQuery: emisor.dv,
@@ -161,6 +175,7 @@ export class DteVerificacionScraper {
     const f = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d.fechaEmision);
     if (!f) throw new Error(`La fecha de emisión tiene que ser YYYY-MM-DD; se recibió "${d.fechaEmision}".`);
     await this.http.get(`${BASE}/DTEauth?6`, undefined, { guardarCookies: true });
+    await new Promise(r => setTimeout(r, pausaConfigurada()));
     const html = await this.http.postForm(`${BASE}/QEstadoDTE`, {
       rutQuery: yo.rut, dvQuery: yo.dv,
       rutCompany: emisor.cuerpo, dvCompany: emisor.dv,

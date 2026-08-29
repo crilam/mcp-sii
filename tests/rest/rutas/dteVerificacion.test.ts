@@ -52,4 +52,13 @@ describe('registrarRutasDteVerificacion', () => {
       rutEmisor: '33333333-3', tipoDte: 33, folio: 124, rutReceptor: '11111111-1', fechaEmision: '2025-07-31', montoTotal: 68366,
     });
   });
+
+  // Un RUT mal formado tiene que ser 400 con el motivo, no un ERROR del scraper.
+  it('un rut_emisor sin forma de RUT es 400 sin llamar al core', async () => {
+    const r = await armar().get('POST /v1/dte/validez')!({ ...CRED, rut_emisor: 'hola', tipo_dte: 33, folio: 1 });
+
+    expect(r.status).toBe(400);
+    expect(JSON.stringify(r.body)).toMatch(/rut_emisor/);
+    expect(core.validez).not.toHaveBeenCalled();
+  });
 });
