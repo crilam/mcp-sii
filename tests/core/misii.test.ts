@@ -103,6 +103,36 @@ describe('régimen tributario', () => {
       { atrCodigo: '14D3', descAtrCodigo: 'REGIMEN ANTERIOR', fechaInicio: '01-01-2020', fechaTermino: '31-12-2025', valor: null },
     ])).toBeNull();
   });
+
+  // Dos vigentes a la vez no debería pasar, y por eso mismo no se resuelve
+  // eligiendo el primero: el orden del array no es un criterio, y de este campo
+  // sale el F29. Falla mostrando los dos códigos.
+  it('con dos regímenes vigentes falla en vez de elegir uno', () => {
+    expect(() => regimenDe([
+      { atrCodigo: '14D1', descAtrCodigo: 'PRO PYME GENERAL', fechaInicio: '01-01-2026', fechaTermino: null, valor: null },
+      { atrCodigo: '14A', descAtrCodigo: 'SEMI INTEGRADO', fechaInicio: '01-01-2020', fechaTermino: null, valor: null },
+    ])).toThrow(/14D1, 14A/);
+  });
+});
+
+describe('atributos incompletos', () => {
+  // Un atributo sin código saldría como la cadena "undefined", que el consumidor
+  // trataría como un código real del SII. Un atributo de menos es preferible a
+  // uno inventado.
+  it('descarta el atributo sin código en vez de emitir "undefined"', () => {
+    const ficha2 = normalizar({
+      contribuyente: { rut: '22222222', dv: '2' } as never,
+      direcciones: [],
+      actividades: [],
+      alertas: [],
+      atributos: [
+        { atrCodigo: undefined as never, descAtrCodigo: 'SIN CODIGO', fechaInicio: null, fechaTermino: null, valor: null },
+        { atrCodigo: 'NOTI', descAtrCodigo: 'NOTIFICADO', fechaInicio: '01-01-2020', fechaTermino: null, valor: null },
+      ],
+    }, CAPTURA);
+
+    expect(ficha2.atributos.map(a => a.codigo)).toEqual(['NOTI']);
+  });
 });
 
 describe('normalización de fechas y booleanos', () => {
@@ -126,7 +156,7 @@ describe('normalización de fechas y booleanos', () => {
   });
 
   it.each([
-    ['S', true], ['SI', true], ['N', false], ['No', false],
+    ['S', true], ['SI', true], ['Sí', true], ['N', false], ['No', false], [' s ', true],
   ])('el booleano %s del SII es %s', (entrada, esperado) => {
     expect(aBooleano(entrada as string)).toBe(esperado);
   });

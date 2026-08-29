@@ -1,4 +1,5 @@
 import { MisiiScraper, FichaCruda, AtributoMisii } from '../scrapers/misii';
+import { LimitacionConocida } from '../erroresConsulta';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { EjecutorSesion } from '../registroSesiones';
@@ -109,6 +110,18 @@ function aNumero(valor: string | null | undefined): number | null {
 export function regimenDe(atributos: AtributoMisii[]): RegimenFicha | null {
   const vigentes = atributos.filter(a =>
     PREFIJO_REGIMEN.test(String(a.atrCodigo ?? '')) && !a.fechaTermino);
+
+  // Dos regímenes vigentes a la vez no debería pasar, y justamente por eso no
+  // se puede resolver eligiendo el primero: el orden del array no es un
+  // criterio, y de este campo sale el F29 del consumidor. Se falla con los dos
+  // códigos a la vista, que es lo que necesita quien tenga que decidir.
+  if (vigentes.length > 1) {
+    throw new LimitacionConocida(
+      `El SII informa ${vigentes.length} regímenes vigentes a la vez ` +
+      `(${vigentes.map(v => v.atrCodigo).join(', ')}): no se puede determinar cuál rige.`
+    );
+  }
+
   const a = vigentes[0];
   if (!a) return null;
   return {
@@ -156,7 +169,10 @@ export function normalizar(cruda: FichaCruda, capturadoEn: string): FichaContrib
       comuna: d.comunaDescripcion ?? null,
       region: d.regionDescripcion ?? null,
     })),
-    atributos: cruda.atributos.map(a => ({
+    // Un atributo sin código se descarta en vez de emitirse como la cadena
+    // "undefined": un código inventado es peor que un atributo de menos, porque
+    // el consumidor lo trata como un dato del SII.
+    atributos: cruda.atributos.filter(a => a.atrCodigo).map(a => ({
       codigo: String(a.atrCodigo),
       descripcion: String(a.descAtrCodigo ?? ''),
       desde: aIso(a.fechaInicio),

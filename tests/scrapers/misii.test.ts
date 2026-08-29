@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { parsearFicha, extraerVariable, EstructuraMisiiDesconocida } from '../../src/scrapers/misii';
+import { LimitacionConocida } from '../../src/erroresConsulta';
+import { SesionExpirada } from '../../src/erroresSesion';
 
 const html = fs.readFileSync(path.join(__dirname, '../fixtures/misii-home.html'), 'utf8');
 
@@ -36,6 +38,53 @@ describe('parsearFicha', () => {
     const sinRut = html.replace('"rut":"22222222"', '"rut":null');
 
     expect(() => parsearFicha(sinRut)).toThrow(/RUT/i);
+  });
+
+  // Un cambio de estructura del portal es PERMANENTE: reintentarlo no lo
+  // arregla y sólo gasta sesiones del SII. Si el error no es una
+  // `LimitacionConocida`, el adaptador REST lo colapsa a `ERROR`, que en el
+  // contrato significa "reintentá" — y el tenant reintenta en loop algo que no
+  // va a funcionar hasta que alguien arregle el parser.
+  it('el cambio de estructura es una limitación conocida, no un error reintentable', () => {
+    const sinActeco = html.replace('DatosActeco', 'DatosOtroNombre');
+
+    expect(() => parsearFicha(sinActeco)).toThrow(LimitacionConocida);
+  });
+
+  // Si la sesión no llegó a `misiir.sii.cl`, el portal devuelve el HTML del
+  // login. Ahí tampoco está `DatosCntrNow`, así que sin distinguirlo el
+  // diagnóstico dice "cambió la estructura de la página" —falso— y encima, al
+  // ser limitación conocida, lo marca como permanente: una sesión vencida se
+  // reintenta y punto.
+  // Regresión encontrada EN VIVO, no en el fixture: la ficha legítima habla de
+  // la clave tributaria en su propio menú ("Historial de Cambios de Clave
+  // Tributaria"), así que una detección por menciones de texto declaraba
+  // expirada una sesión perfectamente válida. Sólo el formulario distingue.
+  it('una ficha válida que menciona la clave tributaria NO es login', () => {
+    const conMenu = html.replace('<div id="datosContribuyente">',
+      '<a href="#">Historial de Cambios de Clave Tributaria</a><div id="datosContribuyente">');
+
+    expect(parsearFicha(conMenu).contribuyente.razonSocial).toBe('EMPRESA DE EJEMPLO S.A.');
+  });
+
+  it('la página de login es sesión expirada, no un cambio de estructura', () => {
+    const login = `<html><head><title>Servicio de Impuestos Internos</title></head><body>
+      <form action="https://zeusr.sii.cl/cgi_AUT2000/CAutInicio.cgi">
+      <input name="rutcntr"><input type="password" name="clave">
+      <p>Ingrese su RUT y Clave Tributaria para autenticarse</p></form></body></html>`;
+
+    expect(() => parsearFicha(login)).toThrow(SesionExpirada);
+  });
+
+  // El propio payload informa errores del SII. Sin mirarlo, un `codigoError`
+  // distinto de cero se reportaba como cambio de estructura, que apunta al
+  // lugar equivocado a quien tiene que diagnosticar.
+  it('un codigoError del SII se propaga con su descripción, no como cambio de estructura', () => {
+    const conError = html.replace(
+      '{"codigoError":0,"descripcionError":"OK"',
+      '{"codigoError":9,"descripcionError":"Contribuyente no existe"');
+
+    expect(() => parsearFicha(conError)).toThrow(/Contribuyente no existe/);
   });
 });
 
