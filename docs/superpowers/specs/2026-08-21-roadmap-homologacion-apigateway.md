@@ -53,7 +53,7 @@ connections (billing del propio gateway).
 
 ## Estado real a 2026-08-26
 
-En producción, 19 rutas REST:
+En producción, 42 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 sumaron el resto):
 
 | Dominio | Rutas hoy |
 |---|---|
@@ -67,6 +67,7 @@ En producción, 19 rutas REST:
 | contribuyente | situacion-tributaria |
 | sesion | validar-clave |
 | indicadores | uf, dolar, utm, correccion-monetaria, impuesto-2da-categoria{,-art52} |
+| vehiculos | tipos, marcas, modelos, tasacion, equipamiento |
 
 **CORRECCIÓN (2026-08-26) — el pass-through por clave SÍ funciona.** La versión
 anterior decía que se había descartado (queue-it + F5 WAF, sin sesión
@@ -90,10 +91,10 @@ verificación en prod + aviso a los consumidores si cambia el contrato.
 | **R1** | **rcv** | 12 | 4 | RCV asíncrono (el SII procesa detalles grandes en background) y escritura de registro. Ya especificado en parte, ver ronda 1. |
 | R2 | **mipyme** | 11 | **6** | Hechas: list-dte-recibidos, dte-pdf, list-borradores. **Sin camino**: `dte-xml` (sólo descarga masiva, tras reCAPTCHA), `info-contribuyente` (el portal no expone consulta separada) y `borrador-pdf` (no hay borradores con qué relevar). Ver las notas de la ronda. |
 | ~~R3~~ | **bienes_raices** | 10 | **7** | ✅ **Completa en lo relevable.** El portal tiene una API REST/JSON detrás de la SPA (`/app/vica/{rut}/v1`), leída de su bundle; el listado dejó de usar navegador. Nuevas: comunas, consultar-rol (predio de terceros), multipropietarios, solicitudes, documento (PDF) y certificado-avaluo (PDF, los tres tipos verificados con PDF real). Sin hacer: certificado de **antecedentes** (el flujo de terceros exige motivo e institución receptora y no se verificó) y búsqueda **por dirección**. |
-| R4 | bhe | 9 | 5 | Consultas por terceros, y la paginación de recibidas >100 que hoy falla explícito. |
+| ~~R4~~ | **bhe** | 9 | **5** | ✅ Lectura completa: la paginación de recibidas >100 encadena `pagina_sig_codigo` (PR #69). Falta sólo escritura (emitir, anular, observar, email) → R11. |
 | ~~R5~~ | **indicadores** | 6 | **6** | ✅ **Completa** (PR #63). UF, dólar, UTM/UTA/IPC, corrección monetaria e impuesto 2ª categoría (art. 43 y 52 bis). **Sin credencial ni `rut`**: páginas públicas. |
-| R6 | f29 | 5 | 0 | Ya especificado en parte en el spec de empresa-lectura. |
-| R7 | vehiculos | 4 | 0 | Tasación, categorías. Sin credencial. |
+| R6 | f29 | 5 | 0 | **Relevada y diferida.** Las dos apps del menú (`rfiInternet/consulta`, `sifmConsultaInternet`) son **GWT** tras login y cola virtual, sin API legible en el bundle (GWT-RPC serializado). Con navegador la grilla F29 rinde, pero los estados por período son PNG inline sin texto y el click sobre el sprite no navega. La propuesta F29 de mipyme (`/cgi_csm/`) exige empresa mipyme. Requiere trabajo profundo de navegador; scripts `relevarF29*.ts`. |
+| ~~R7~~ | **vehiculos** | 4 | **5** | ✅ **Completa.** La consulta interactiva del portal (`vehiculospubui`) exige un **captcha propio del SII** antes de buscar: no automatizable. La fuente son las planillas XLSX anuales públicas (`liv{año}`/`pes{año}`, desde 2020), bajadas una vez y consultadas en memoria. Rutas: tipos, marcas, modelos, tasacion, equipamiento. |
 | R8 | misii | 4 | 0 | Representantes, representados, datos del contribuyente. |
 | R9 | contribuyentes | 3 | 1 | Los dos restantes. |
 | R10 | dte (parte A) | ? | 4 | Sólo lo que sea consulta de portal. El resto pasa al mundo B. |

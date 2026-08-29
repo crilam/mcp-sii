@@ -588,6 +588,20 @@ consultar nunca, y el año en curso se revisa cada seis horas. Aun así, convien
 pedir el año una vez y resolver los días en memoria: cada llamada baja una página
 completa del SII, y el SII corta por volumen (`LIMITE_SII`).
 
+### 6.8 Tasación de vehículos
+
+Sin `rut` ni credencial. Fuente: las planillas XLSX anuales del SII (`liv{año}.xlsx`, `pes{año}.xlsx`, desde 2020); la consulta interactiva del portal exige captcha y no se usa. Todas toman `anio` (el de la planilla, 2020–2100) y `categoria` (`liviano` default, `pesado`). **La primera consulta de un año tarda unos segundos** (baja ~7 MB); después es de memoria.
+
+| Endpoint | Body además de `anio`/`categoria` | Devuelve |
+|---|---|---|
+| **`POST /v1/vehiculos/tipos`** | — | `datos`: string[] |
+| **`POST /v1/vehiculos/marcas`** | `tipo?` | `datos`: string[] |
+| **`POST /v1/vehiculos/modelos`** | `marca` | `datos`: `{modelo, versiones[], aniosFabricacion[]}`; marca inexistente → `NO_ENCONTRADO` |
+| **`POST /v1/vehiculos/tasacion`** | `codigo_sii`, **o** `marca`+`modelo` (+`version`, +`anio_fabricacion`) | `datos`: una fila por año de fabricación y versión: `codigoSii, anioFabricacion, tipo, marca, modelo, version, puertas, cilindrada, potencia, combustible, transmision, marchas, traccion, pais, equipamiento, carga, pasajeros, tasacion, permiso, observacion` |
+| **`POST /v1/vehiculos/equipamiento`** | — | `datos`: `{sigla, descripcion}` |
+
+Dos cosas: **`tasacion` devuelve todas las filas que coinciden** (un modelo tiene una por año de fabricación y por versión) en vez de elegir una; y **livianos y pesados traen columnas distintas**: pesados tiene `carga`/`pasajeros` y `permiso: null`; livianos, `puertas`/`potencia`/`combustible`/`permiso` y `carga`/`pasajeros` en `null`. `null` es ausencia en la planilla, no cero.
+
 ---
 
 ## 7. Limitaciones conocidas

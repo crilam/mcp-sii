@@ -18,7 +18,8 @@ const RAIZ = path.join(__dirname, '..');
 
 // Archivos generados o binarios: no contienen datos capturados del portal y
 // sólo aportan falsos positivos.
-const EXTENSIONES_IGNORADAS = ['.png', '.jpg', '.gif', '.pdf', '.ico'];
+// `.xlsx` es un zip: leído como latin1 son bytes al azar que pueden parecer una IP.
+const EXTENSIONES_IGNORADAS = ['.png', '.jpg', '.gif', '.pdf', '.ico', '.xlsx'];
 const GENERADOS = ['package-lock.json'];
 
 function archivosVersionados(): string[] {

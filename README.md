@@ -287,10 +287,28 @@ facturar por una empresa que sólo se puede mirar.
 | `sii_indicadores_impuesto_2da_categoria` | Tramos del impuesto único de 2ª categoría (art. 43) |
 | `sii_indicadores_impuesto_2da_categoria_art52` | Tramos del art. 52 bis |
 
-Son las **únicas** tools y rutas del servicio que no reciben `rut` ni credencial,
-y que no necesitan `sii_iniciar_sesion`: el SII publica estas tablas abiertas. En
-REST viven bajo `/v1/indicadores/…` y siguen pasando por el auth de tenant y el
-rate-limit, como todas.
+### Tasación de vehículos
+
+| Tool | Descripción |
+|---|---|
+| `sii_vehiculos_tipos` | Tipos de vehículo de la planilla de un año |
+| `sii_vehiculos_marcas` | Marcas, opcionalmente por tipo |
+| `sii_vehiculos_modelos` | Modelos de una marca con versiones y años tasados |
+| `sii_vehiculos_tasacion` | Tasación fiscal y permiso, por código SII o marca+modelo |
+
+Sin `rut` ni credencial, como indicadores. La fuente **no** es la consulta
+interactiva del portal —exige un captcha propio del SII antes de cualquier
+búsqueda— sino las **planillas XLSX anuales** que el SII publica (`liv{año}` para
+livianos, `pes{año}` para pesados, desde 2020). La primera consulta de un año baja
+la planilla entera (~7 MB, unos segundos) y las siguientes salen de memoria.
+Livianos y pesados traen columnas distintas: pesados tiene carga y pasajeros y
+**no trae permiso** (va en `null`); livianos al revés. El diccionario de siglas de
+equipamiento está en `/v1/vehiculos/equipamiento`.
+
+Ni estas tools ni las de vehículos reciben `rut` ni credencial, ni necesitan
+`sii_iniciar_sesion`: el SII publica estas tablas abiertas. En REST viven bajo
+`/v1/indicadores/…` y `/v1/vehiculos/…`, y siguen pasando por el auth de tenant y
+el rate-limit, como todas.
 
 Tres cosas al leerlas:
 

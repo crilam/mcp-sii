@@ -17,6 +17,7 @@ import { registrarRutasMipyme } from './rest/rutas/mipyme';
 import { registrarRutasSesion } from './rest/rutas/sesion';
 import { registrarRutasContribuyente } from './rest/rutas/situacionTributaria';
 import { registrarRutasIndicadores } from './rest/rutas/indicadores';
+import { registrarRutasVehiculos } from './rest/rutas/vehiculos';
 
 const LIMITE_AUTH_FALLIDA_POR_IP = 20;
 
@@ -59,6 +60,7 @@ export function crearRestServer(
   registrarRutasContribuyente(rutas);
   // Sin registro ni credenciales: son páginas públicas del SII.
   registrarRutasIndicadores(rutas);
+  registrarRutasVehiculos(rutas);
 
   const server = http.createServer(async (req, res) => {
     try {
