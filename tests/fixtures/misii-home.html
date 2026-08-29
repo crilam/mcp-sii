@@ -1,0 +1,16 @@
+<html><body>
+<!-- Home de Mi SII, recortado. Reproduce lo que importa: la página embebe los
+     payloads como asignaciones a variables JavaScript, con objetos anidados y
+     los dos formatos de fecha que usa el SII en el mismo documento.
+     Datos ficticios: RUT de dígito repetido y dominio de ejemplo. -->
+<div id="datosContribuyente">Cargando…</div>
+<script>
+var DatosCntrNow = {"codigoError":0,"descripcionError":"OK","sysdate":null,"contribuyente":{"codigoError":0,"descripcionError":"Contribuyente existe","sysdate":null,"rut":"22222222","dv":"2","nombres":null,"apellidoPaterno":null,"apellidoMaterno":null,"razonSocial":"EMPRESA DE EJEMPLO S.A.","tipoContribuyenteCodigo":"2","tipoContribuyenteDescripcion":"PERSONA JURIDICA COMERCIAL","subtipoContribuyenteCodigo":"213","subtipoContribuyenteDescrip":"SOCIEDADES ANONIMAS CERRADAS","paisCodigo":null,"sexo":null,"fechaConstitucion":"2008-03-26 00:00:00.0","fechaNacimiento":null,"eMail":"contacto@ejemplo.cl","telefonoMovil":"900000000","fechaTerminoGiro":null,"autorizadoDeclararDia20":"S","fechaInicioActividades":"2008-05-26 00:00:00.0","unidadOperativaCodigo":"15000","unidadOperativaDescripcion":"SANTIAGO ORIENTE","capitalPorEnterar":"0","capitalEnterado":"5000","segmentoCodigo":"SGME","segmentoDescripcion":"MEDIANA EMPRESA","personaEmpresa":"EMPRESA","glosaActividad":"SERVICIOS DE EJEMPLO","declaraTG":"No"},"direcciones":[{"codigo":"90000001","comunaCodigo":"13114","comunaDescripcion":"LAS CONDES","regionCodigo":"13","regionDescripcion":"REGION METROPOLITANA","tipoDomicilioCodigo":"1","tipoDomicilioDescripcion":"DOMICILIO","calle":"CALLE DE EJEMPLO","numero":"1234","bloque":null,"departamento":"501","villaPoblacion":null,"ciudad":"SANTIAGO","telefono":null,"fechaModiRegistro":"2023-01-17 10:39:24.0"}],"atributos":[{"rut":22222222,"dv":"2","atrCodigo":"14D1","descAtrCodigo":"REGIMEN PRO PYME GENERAL (14D)","fechaInicio":"01-01-2026","valor":"Inscripción Internet","fechaTermino":null},{"rut":22222222,"dv":"2","atrCodigo":"EMTP","descAtrCodigo":"EMPRESA DE MENOR TAMANO","fechaInicio":"01-01-2024","valor":"MEDIANA","fechaTermino":null},{"rut":22222222,"dv":"2","atrCodigo":"FAEL","descAtrCodigo":"FACTURADOR ELECTRONICO","fechaInicio":"15-07-2016","valor":"0000000080 22/08/2014","fechaTermino":null}],"alertas":[]};
+var DatosActeco = [{"codigoError":0,"descripcionError":"Contribuyente posee actividades económicas","sysdate":null,"codigo":"522120","descripcion":"EXPLOTACION DE ESTACIONAMIENTOS","categoriaTributaria":"1","afectoIva":"S","fechaInicio":"16-12-2015"},{"codigoError":0,"descripcionError":"Contribuyente posee actividades económicas","sysdate":null,"codigo":"749900","descripcion":"OTRAS ACTIVIDADES PROFESIONALES N.C.P.","categoriaTributaria":"1","afectoIva":"N","fechaInicio":"01-03-2019"}];
+var DatosCntrAler = {"codigoError":0,"descripcionError":null,"sysdate":null,"alertas":[]};
+</script>
+<!-- El bloque de representantes existe en la página real y viene SIEMPRE vacío:
+     verificado en dos empresas de forma jurídica distinta. No hay JSON para él. -->
+<div id="divRepress"><table><tr><th>Nombre</th><th>Rut</th><th>A partir de</th></tr>
+<tr><td colspan="3">No registra información</td></tr></table></div>
+</body></html>

@@ -20,6 +20,7 @@
     "relevar-facade-rcv": "ts-node src/scripts/relevarFacadeRcv.ts",
     "relevar-rcv-vacios": "ts-node src/scripts/relevarRcvVacios.ts",
     "verificar-tipos-documento": "ts-node src/scripts/verificarTiposDocumento.ts",
+    "verificar-misii": "ts-node src/scripts/verificarMisii.ts",
     "validate-cert": "ts-node src/validateCert.ts",
     "test": "jest",
     "test:watch": "jest --watch",

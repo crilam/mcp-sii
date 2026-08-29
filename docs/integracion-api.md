@@ -524,7 +524,51 @@ Devuelve `resumen` (`totalBienesRaices`, `solicitudesEnCurso`, `solicitudesResue
 
 ---
 
-### 6.7 Indicadores y valores publicados
+### 6.7 Ficha del contribuyente (Mi SII)
+
+**`POST /v1/misii/ficha-contribuyente`** — `rut` + credencial (clave o certificado).
+
+La identidad tributaria del contribuyente autenticado, tal como la publica el
+portal privado del SII. **Una sola llamada**: el portal entrega todo en la misma
+página, así que no hay endpoints granulares que gasten una sesión por pedazo.
+
+Devuelve `razonSocial`, `tipoContribuyente` y `subtipoContribuyente` (código y
+descripción), `fechaConstitucion`, `fechaInicioActividades`, `fechaTerminoGiro`,
+`segmento`, `regimen`, `actividades` (código, giro, categoría, `afectaIva` y la
+fecha `desde` de cada una), `direcciones` y `atributos`. Más tres campos de
+procedencia: `capturadoEn` (cuándo se leyó **del SII**), `parserVersion`, y
+`crudo` con el payload original sin normalizar.
+
+Las fechas vienen normalizadas a ISO y los booleanos convertidos: el SII usa dos
+formatos de fecha en el mismo payload y strings `"S"`/`"N"`/`"No"` como
+booleanos. Se normaliza acá para que cada consumidor no repita la conversión —y
+el mismo bug—; `crudo` conserva los valores originales.
+
+**Sobre `regimen`, y esto conviene leerlo entero antes de usarlo:**
+
+- Es el régimen **VIGENTE**, y el portal **no guarda el anterior**. Verificado
+  con un caso real: una empresa que cambió de régimen no deja ningún rastro del
+  que tenía antes.
+- Por eso `regimen.desde` **no es decorativo**: es el único dato que dice para
+  qué períodos vale la respuesta. **Para un período anterior a esa fecha, este
+  NO es el régimen que corresponde** — hay que buscarlo en otra fuente, y nunca
+  extrapolar el actual hacia atrás. Un F29 calculado así sale con el régimen
+  equivocado y sin ninguna señal de error.
+- `regimen` puede venir en `null`, que significa "no se pudo determinar". No es
+  un régimen por defecto y no debe tratarse como uno.
+- El código se entrega **tal como lo da el SII** (por ejemplo `14D1` con su
+  glosa), sin traducirlo a una clasificación propia: sólo se relevó uno de los
+  códigos, y clasificar los demás a ciegas daría un régimen plausible y
+  equivocado.
+
+**Lo que este endpoint NO trae:** representantes legales y socios. El portal
+muestra esos bloques vacíos —verificado en dos empresas de forma jurídica
+distinta, las dos con representante legal registrado—, así que su ausencia acá
+**no significa** que el contribuyente no los tenga.
+
+---
+
+### 6.8 Indicadores y valores publicados
 
 Los **únicos** endpoints del servicio que no reciben `rut` ni credencial: el SII
 publica estas tablas abiertas y no hay sesión que abrir. Siguen pidiendo la API
