@@ -100,9 +100,9 @@ export function registrarRutasMipyme(
   rutas.set('POST /v1/mipyme/list-borradores', async body => {
     const parseo = zodListBorradores.safeParse(body);
     if (!parseo.success) return badRequest(parseo.error);
-    const { rut } = parseo.data;
+    const { rut, empresa_rut } = parseo.data;
     const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
-    return ejecutar(() => core.listBorradores(ejecutor, rut));
+    return ejecutar(() => core.listBorradores(ejecutor, rut, empresa_rut));
   });
 
   // sii_mipyme_emitir_dte con confirmar=true firma con certificado digital,

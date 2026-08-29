@@ -29,12 +29,13 @@ async function main() {
   const lista = (empresas.body as { datos?: { rut: string; nombre: string }[] }).datos ?? [];
 
   for (const e of lista) {
-    // `list-dte-emitidos` deja la empresa seleccionada como efecto de su propio
-    // ciclo: es la forma que hay hoy de fijar la empresa activa sin agregar una
-    // ruta que sólo sirva para eso.
-    await rutas.get('POST /v1/mipyme/list-dte-emitidos')!({ ...cred, empresa_rut: e.rut });
-
-    const r = await rutas.get('POST /v1/mipyme/list-borradores')!({ ...cred });
+    // La empresa va EXPLÍCITA. Una versión anterior dependía de que una consulta
+    // previa dejara la empresa activa, que es exactamente el error que la ruta
+    // ahora impide: sin decir cuál, un RUT con varias empresas recibía los
+    // borradores de la última que alguien hubiera consultado.
+    const r = await rutas.get('POST /v1/mipyme/list-borradores')!({
+      ...cred, empresa_rut: e.rut,
+    });
     const b = r.body as Record<string, unknown>;
 
     if (b.ok !== true) {

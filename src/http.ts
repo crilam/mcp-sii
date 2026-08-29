@@ -205,20 +205,11 @@ export class SiiHttpClient {
   // mensaje apunta a un problema de permisos cuando en realidad es de formato:
   // el certificado y la sesión pueden estar perfectos. Antes de sospechar de
   // los permisos, revisá el sobre.
-  /**
-   * @param metodoNamespace nombre del método DENTRO del sobre, cuando difiere
-   *   del segmento de la URL. En el RCV coinciden, pero la aplicación de
-   *   borradores de mipyme publica `.../borradorService/listaBorrador` con el
-   *   namespace `...BorradorApplicationService/listado`: derivar uno del otro
-   *   da 404 en la URL o "método no encontrado" en el sobre, según cuál se
-   *   elija. Por omisión se usa `metodo`, que es el caso de siempre.
-   */
   async postSdi(
     baseUrl: string,
     namespace: string,
     metodo: string,
-    data: Record<string, unknown>,
-    metodoNamespace: string = metodo
+    data: Record<string, unknown>
   ): Promise<any> {
     // Fuerza la autenticación (si hace falta) ANTES de leer la cookie TOKEN:
     // sin sesión el cookie jar no existe y el conversationId no se puede
@@ -227,7 +218,7 @@ export class SiiHttpClient {
 
     const sobre = {
       metaData: {
-        namespace: `${namespace}/${metodoNamespace}`,
+        namespace: `${namespace}/${metodo}`,
         // El cliente del portal usa el valor de la cookie TOKEN. Lo resuelve
         // SessionManager, que es el dueño del cookie jar: el transporte no lee
         // el archivo por su cuenta.

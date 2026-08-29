@@ -49,11 +49,12 @@ export async function dtePdf(
 
 export async function listBorradores(
   ejecutor: EjecutorSesion<SessionManager>,
-  rut: string
+  rut: string,
+  empresaRut?: string
 ): Promise<BorradorMipyme[]> {
   return ejecutor.ejecutar(rut, async sesion => {
     const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
-    return http.listBorradores();
+    return http.listBorradores(empresaRut);
   });
 }
 

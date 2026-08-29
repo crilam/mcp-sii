@@ -48,6 +48,12 @@ export const schemaDtePdf = {
 
 export const schemaListBorradores = {
   rut: z.string().min(1).describe(RUT_DESC),
+  // Los borradores cuelgan de la empresa ACTIVA de la sesión del portal. Sin
+  // este campo, un RUT que opera varias empresas recibe los borradores de la
+  // que haya dejado la consulta anterior — y un listado de otra empresa se lee
+  // perfectamente bien, así que nadie se entera.
+  empresa_rut: z.string().optional()
+    .describe('RUT de la empresa con dígito verificador. Si se omite, se resuelve solo si este RUT opera una única empresa en el portal.'),
 };
 
 export const schemaEmitirDte = {

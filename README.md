@@ -237,10 +237,14 @@ parseando.
 clásico: `mipymeinternetui`, con su propia API. Devuelve los campos con los
 nombres del SII (`EFXP_*`) sin renombrar, porque un borrador trae decenas que
 dependen del tipo de documento y elegir cuáles exponer sería adivinar qué
-necesita quien consulta. **Su mapeo de campos no está verificado con datos
-reales**: las cinco empresas de prueba no tenían ningún borrador guardado, así
-que lo confirmado es el camino —responde, autentica y devuelve JSON válido— y no
-el contenido.
+necesita quien consulta. Verificado con un borrador real: `ehdr_CODIGO` es el
+código y `ptdc_CODIGO` el tipo de documento.
+
+**Los borradores cuelgan de la empresa activa**, así que `empresa_rut` importa:
+sin él, un RUT que opera varias empresas recibe los borradores de la que dejó la
+consulta anterior. No es teórico — con la empresa sin fijar, las cinco empresas
+de prueba devolvían cero borradores, y un listado vacío se lee como "no tenés
+borradores" en vez de "preguntaste por otra empresa".
 
 Tres cosas del catálogo de apigateway **no se homologaron, y no por falta de
 tiempo**:

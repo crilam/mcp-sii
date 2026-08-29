@@ -270,9 +270,35 @@ describe('MipymeHttpScraper.dtePdf', () => {
 describe('MipymeHttpScraper.listBorradores', () => {
   function conRespuesta(cuerpo: string) {
     const { scraper, http } = armar();
-    (http.get as jest.Mock).mockResolvedValue(cuerpo);
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValue(cuerpo);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
     return { scraper, http };
   }
+
+  // Los borradores cuelgan de la empresa ACTIVA de la sesión del portal, aunque
+  // el servicio viva en otra aplicación. Sin seleccionar, un RUT que opera cinco
+  // empresas recibe los borradores de la que dejó la consulta anterior — y un
+  // listado de otra empresa se lee perfectamente bien, así que nadie se entera.
+  it('selecciona la empresa antes de pedir los borradores', async () => {
+    const { scraper, http } = conRespuesta('[]');
+
+    await scraper.listBorradores('33333333-3');
+
+    expect(http.postForm).toHaveBeenCalledWith(
+      expect.stringContaining('mipeSelEmpresa.cgi'), { RUT_EMP: '33333333-3' });
+    const ordenPost = (http.postForm as jest.Mock).mock.invocationCallOrder[0];
+    const ordenListado = (http.get as jest.Mock).mock.invocationCallOrder[1];
+    expect(ordenPost).toBeLessThan(ordenListado);
+  });
+
+  it('exige que la empresa pedida esté entre las que el RUT opera', async () => {
+    const { scraper } = conRespuesta('[]');
+
+    await expect(scraper.listBorradores('99999999-9'))
+      .rejects.toThrow(/no está entre las que este RUT puede operar/);
+  });
 
   // El bundle lo declara con `createGetOperation`, y el servidor lo confirma: un
   // POST con el sobre SDI devuelve 500 "No resource method found for POST".
@@ -280,7 +306,7 @@ describe('MipymeHttpScraper.listBorradores', () => {
   it('consulta por GET, no con el sobre SDI', async () => {
     const { scraper, http } = conRespuesta('[]');
 
-    await scraper.listBorradores();
+    await scraper.listBorradores('33333333-3');
 
     expect(http.get).toHaveBeenCalledWith(
       expect.stringContaining('/borradorService/listaBorrador'));
@@ -293,9 +319,11 @@ describe('MipymeHttpScraper.listBorradores', () => {
   it('usa el segmento de URL del bundle y no el del namespace', async () => {
     const { scraper, http } = conRespuesta('[]');
 
-    await scraper.listBorradores();
+    await scraper.listBorradores('33333333-3');
 
-    const url = (http.get as jest.Mock).mock.calls[0][0] as string;
+    // La primera llamada es la del selector de empresa; la del listado es la
+    // siguiente.
+    const url = (http.get as jest.Mock).mock.calls[1][0] as string;
     expect(url).toContain('listaBorrador');
     expect(url).not.toMatch(/\/listado$/);
   });
@@ -305,7 +333,7 @@ describe('MipymeHttpScraper.listBorradores', () => {
       { ehdr_CODIGO: 12345, ptdc_CODIGO: 33, EFXP_RZNSOC_RECEP: 'ALGUIEN SPA' },
     ]));
 
-    const res = await scraper.listBorradores();
+    const res = await scraper.listBorradores('33333333-3');
 
     expect(res).toEqual([{
       codigo: '12345',
@@ -322,7 +350,7 @@ describe('MipymeHttpScraper.listBorradores', () => {
   it('el codigo viaja como string aunque el SII lo mande numérico', async () => {
     const { scraper } = conRespuesta(JSON.stringify([{ ehdr_CODIGO: 987, ptdc_CODIGO: 61 }]));
 
-    const res = await scraper.listBorradores();
+    const res = await scraper.listBorradores('33333333-3');
 
     expect(res[0].codigo).toBe('987');
   });
@@ -330,7 +358,7 @@ describe('MipymeHttpScraper.listBorradores', () => {
   it('un tipo ausente queda en null, no en cero', async () => {
     const { scraper } = conRespuesta(JSON.stringify([{ ehdr_CODIGO: 1 }]));
 
-    const res = await scraper.listBorradores();
+    const res = await scraper.listBorradores('33333333-3');
 
     expect(res[0].tipoDte).toBeNull();
   });
@@ -338,7 +366,7 @@ describe('MipymeHttpScraper.listBorradores', () => {
   it('acepta la lista envuelta en data', async () => {
     const { scraper } = conRespuesta(JSON.stringify({ data: [{ ehdr_CODIGO: 7, ptdc_CODIGO: 34 }] }));
 
-    const res = await scraper.listBorradores();
+    const res = await scraper.listBorradores('33333333-3');
 
     expect(res).toHaveLength(1);
     expect(res[0].codigo).toBe('7');
@@ -347,7 +375,7 @@ describe('MipymeHttpScraper.listBorradores', () => {
   it('sin borradores devuelve una lista vacía', async () => {
     const { scraper } = conRespuesta('[]');
 
-    await expect(scraper.listBorradores()).resolves.toEqual([]);
+    await expect(scraper.listBorradores('33333333-3')).resolves.toEqual([]);
   });
 
   // El servidor de aplicaciones responde HTML en sus errores (404, 500, login).
@@ -356,7 +384,7 @@ describe('MipymeHttpScraper.listBorradores', () => {
   it('un HTML de error no se confunde con una respuesta', async () => {
     const { scraper } = conRespuesta('<html>HTTP Status 404</html>');
 
-    await expect(scraper.listBorradores()).rejects.toThrow(/no devolvió JSON/);
+    await expect(scraper.listBorradores('33333333-3')).rejects.toThrow(/no devolvió JSON/);
   });
 
   // Un JSON que no es una lista tampoco es "no hay borradores": devolver [] haría
@@ -364,6 +392,45 @@ describe('MipymeHttpScraper.listBorradores', () => {
   it('un JSON que no es lista es un error explícito', async () => {
     const { scraper } = conRespuesta(JSON.stringify({ metaData: { respCode: 99, msgError: 'sin permiso' } }));
 
-    await expect(scraper.listBorradores()).rejects.toThrow(/no devolvió una lista.*99.*sin permiso/s);
+    await expect(scraper.listBorradores('33333333-3')).rejects.toThrow(/no devolvió una lista.*99.*sin permiso/s);
+  });
+});
+
+// El parser de recibidos es una copia del de emitidos a propósito: son dos
+// tablas distintas del SII que HOY coinciden en forma, y unificarlas haría que
+// un cambio en una arrastrara a la otra. Pero si nadie mira, la copia se
+// justifica sola para siempre. Estos tests fijan en qué se diferencian de
+// verdad, para que la duplicación siga teniendo una razón verificable.
+describe('emitidos y recibidos son tablas distintas', () => {
+  const EMITIDOS = fixture('mipyme-historial-emitidos.html');
+
+  it('la contraparte es el receptor en uno y el emisor en el otro', async () => {
+    const a = armar();
+    (a.http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA).mockResolvedValueOnce(EMITIDOS);
+    (a.http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+    const emitidos = await a.scraper.listDteEmitidos({ empresaRut: '33333333-3' });
+
+    const b = conHistorial();
+    const recibidos = await b.scraper.listDteRecibidos({ empresaRut: '33333333-3' });
+
+    expect(Object.keys(emitidos.documentos[0])).toContain('receptorRut');
+    expect(Object.keys(emitidos.documentos[0])).not.toContain('emisorRut');
+    expect(Object.keys(recibidos.documentos[0])).toContain('emisorRut');
+    expect(Object.keys(recibidos.documentos[0])).not.toContain('receptorRut');
+  });
+
+  it('el filtro de contraparte usa un parámetro distinto en cada tabla', async () => {
+    const a = armar();
+    (a.http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA).mockResolvedValueOnce(EMITIDOS);
+    (a.http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+    await a.scraper.listDteEmitidos({ empresaRut: '33333333-3', receptorRut: '9-9' });
+
+    const b = conHistorial();
+    await b.scraper.listDteRecibidos({ empresaRut: '33333333-3', emisorRut: '9-9' });
+
+    expect((a.http.get as jest.Mock).mock.calls[1][1]).toHaveProperty('RUT_RECP', '9-9');
+    expect((b.http.get as jest.Mock).mock.calls[1][1]).toHaveProperty('RUT_EMI', '9-9');
   });
 });

@@ -551,13 +551,27 @@ export class MipymeHttpScraper {
   /**
    * Borradores de DTE de la empresa.
    *
-   * A diferencia del resto de mipyme, NO pasa por la selección de empresa del
-   * portal viejo: esta aplicación resuelve la empresa por su cuenta (tiene su
-   * propio `rutEmpresa`), así que mandar el POST de selección no aportaría nada.
+   * Selecciona la empresa igual que las demás consultas, aunque el servicio viva
+   * en otra aplicación. Una versión anterior no lo hacía, con el argumento de
+   * que esa aplicación resuelve la empresa por su cuenta —tiene su propio
+   * `rutEmpresa`—, pero lo que resuelve es la empresa ACTIVA de la sesión del
+   * portal, que es la que dejó la última consulta. O sea que sin seleccionar,
+   * esto devuelve los borradores de una empresa que depende de qué se llamó
+   * antes: para un RUT que opera cinco, el resultado es arbitrario y nadie se
+   * entera, porque un listado de otra empresa se lee perfectamente bien.
    */
-  async listBorradores(): Promise<BorradorMipyme[]> {
+  async listBorradores(empresaRut?: string): Promise<BorradorMipyme[]> {
     this.session.assertPuedeEntregarCookieJar();
 
+    return this.session.conEmpresaExclusiva(async () => {
+      const empresas = this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
+      const resuelta = this.resolverEmpresa(empresas, empresaRut);
+      await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: resuelta });
+      return this.pedirBorradores();
+    });
+  }
+
+  private async pedirBorradores(): Promise<BorradorMipyme[]> {
     const crudo = await this.http.get(BORRADORES_LISTADO_URL);
 
     let resp: unknown;

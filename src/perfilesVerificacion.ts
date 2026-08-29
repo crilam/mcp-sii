@@ -67,6 +67,13 @@ function faltante(nombre: NombrePerfil, faltan: string): Error {
     + 'equivocado da un resultado que no dice nada. Ver .env.example.');
 }
 
+// `~` no lo expande nadie cuando el valor viene de un archivo .env: sin esto,
+// una ruta perfectamente escrita a mano falla con un ENOENT que manda a buscar
+// el certificado en el lugar equivocado.
+function expandirHome(ruta: string): string {
+  return ruta.startsWith('~') ? path.join(os.homedir(), ruta.slice(1)) : ruta;
+}
+
 /**
  * El certificado se guarda en el `.env` como una RUTA a un archivo, no como
  * base64: es un binario de varios KB y meterlo en una variable de entorno lo
@@ -83,12 +90,7 @@ function leerCertificado(nombre: NombrePerfil): CredencialPerfil {
     throw faltante(nombre, faltan);
   }
 
-  // `~` no lo expande nadie cuando el valor viene de un archivo .env: sin esto,
-  // una ruta perfectamente escrita a mano falla con un ENOENT que manda a buscar
-  // el certificado en el lugar equivocado.
-  const ruta = rutaCruda.startsWith('~')
-    ? path.join(os.homedir(), rutaCruda.slice(1))
-    : rutaCruda;
+  const ruta = expandirHome(rutaCruda);
 
   if (!fs.existsSync(ruta)) {
     throw new Error(
@@ -147,15 +149,23 @@ export function credencialParaBody(p: PerfilVerificacion): Record<string, string
     };
 }
 
-/** Perfiles cargados hoy, para que un script diga qué puede y qué no. */
+/**
+ * Perfiles cargados hoy, para que un script diga qué puede y qué no.
+ *
+ * Comprueba la EXISTENCIA del certificado sin leerlo: es una función de sondeo,
+ * y cargar un .pfx entero a memoria para responder "sí, está configurado" es un
+ * efecto que nadie espera de una consulta.
+ */
 export function perfilesDisponibles(): NombrePerfil[] {
   return PERFILES.filter(n => {
-    try {
-      perfil(n);
-      return true;
-    } catch {
-      return false;
+    if (n === 'certificado') {
+      const ruta = (process.env.SII_CERT_PATH ?? '').trim();
+      return (process.env.SII_CERT_RUT ?? '').trim() !== ''
+        && (process.env.SII_CERT_PASSWORD ?? '') !== ''
+        && ruta !== '' && fs.existsSync(expandirHome(ruta));
     }
+    const { rut, clave } = variables(n);
+    return (process.env[rut] ?? '').trim() !== '' && (process.env[clave] ?? '') !== '';
   });
 }
 

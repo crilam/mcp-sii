@@ -5,7 +5,7 @@ import { crearRegistroSesionesSii } from '../registroSesionesSii';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { SiiHttpClient } from '../http';
 import { MipymeHttpScraper } from '../scrapers/mipymeHttp';
-import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacion';
+import { perfil, NombrePerfil } from '../perfilesVerificacion';
 import { pausaConfigurada } from '../ritmoSii';
 
 // Releva la página de UN documento recibido (`mipeGesDocRcp.cgi?CODIGO=...`).

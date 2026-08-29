@@ -22,9 +22,14 @@ const SALIDA = process.env.RELEVO_SALIDA ?? '/tmp/relevo-mipyme';
 const CGI_BASE = 'https://www1.sii.cl/cgi-bin/Portal001';
 const SEL_EMPRESA_URL = `${CGI_BASE}/mipeSelEmpresa.cgi`;
 
-// Tope duro de páginas a bajar en una corrida. Un relevamiento sin tope es
+// Tope duro de PEDIDOS al SII en una corrida. Un relevamiento sin tope es
 // exactamente el barrido que bloqueó el RCV.
-const TOPE_PAGINAS = Number(process.env.RELEVO_TOPE ?? 12);
+//
+// Cuenta todos los pedidos y no sólo los que guardan una página: una primera
+// versión sólo contaba los de `bajar()`, así que los POST de selección y el
+// salto del launcher quedaban afuera y el tope real era mayor que el declarado —
+// justo el tipo de discrepancia que hace inútil un tope.
+const TOPE_PEDIDOS = Number(process.env.RELEVO_TOPE ?? 12);
 
 function enlacesDe(html: string): { href: string; texto: string }[] {
   const salida: { href: string; texto: string }[] = [];
@@ -74,14 +79,26 @@ async function main() {
   // el cupo de sesiones simultáneas a los tenants reales si algo fallara.
   await registro.ejecutar(rut, async sesion => {
     const http = new SiiHttpClient(sesion);
-    let bajadas = 0;
+    let pedidos = 0;
+
+    // Todo pedido al SII pasa por acá, guarde o no la respuesta: es lo que hace
+    // que el tope sea el tope.
+    const contar = () => {
+      pedidos++;
+      if (pedidos > TOPE_PEDIDOS) {
+        throw new Error(
+          `Se alcanzó el tope de ${TOPE_PEDIDOS} pedidos al SII. Subilo con `
+          + 'RELEVO_TOPE si de verdad hace falta, sabiendo que un barrido largo '
+          + 'deja al servicio sin el portal para los tenants reales.');
+      }
+    };
 
     const bajar = async (url: string, nombre: string, params?: Record<string, string>) => {
-      if (bajadas >= TOPE_PAGINAS) {
-        console.log(`  TOPE alcanzado (${TOPE_PAGINAS}); no se baja ${nombre}.`);
+      if (pedidos >= TOPE_PEDIDOS) {
+        console.log(`  TOPE alcanzado (${TOPE_PEDIDOS}); no se baja ${nombre}.`);
         return null;
       }
-      bajadas++;
+      contar();
       await new Promise(r => setTimeout(r, pausaConfigurada()));
       const html = await http.get(url, params);
       fs.writeFileSync(path.join(SALIDA, `${nombre}.html`), html, 'latin1');
@@ -107,6 +124,7 @@ async function main() {
     }
 
     console.log(`\n2. Menú del portal con ${empresa} activa`);
+    contar();
     await new Promise(r => setTimeout(r, pausaConfigurada()));
     let menu = await http.postForm(SEL_EMPRESA_URL, { RUT_EMP: empresa });
     fs.writeFileSync(path.join(SALIDA, 'menu.html'), menu, 'latin1');
@@ -120,6 +138,7 @@ async function main() {
       : null;
     if (salto) {
       console.log(`  el POST redirige por JS a ${salto}; se sigue`);
+      contar();
       await new Promise(r => setTimeout(r, pausaConfigurada()));
       const real = await http.get(`https://www1.sii.cl${salto}`);
       fs.writeFileSync(path.join(SALIDA, 'menu.html'), real, 'latin1');
@@ -184,7 +203,7 @@ async function main() {
       console.log(`    la página trae ${tablas} tabla(s) y ${filas} fila(s)`);
     }
 
-    console.log(`\nHTML guardado en ${SALIDA}. Bajadas: ${bajadas} de ${TOPE_PAGINAS}.`);
+    console.log(`\nHTML guardado en ${SALIDA}. Pedidos al SII: ${pedidos} de ${TOPE_PEDIDOS}.`);
   });
 }
 

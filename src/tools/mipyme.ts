@@ -66,9 +66,13 @@ export function registerMipymeTools(server: McpServer, registro: RegistroSesione
     'código de cada borrador, su tipo de documento y TODOS los campos tal como los nombra el ' +
     'SII (EFXP_*, sin renombrar): un borrador tiene decenas de campos que dependen del tipo, ' +
     'y cuáles importan lo decide quien consulta. Los borradores viven en otra aplicación del ' +
-    'SII, no en el portal clásico, y cuelgan de la empresa activa.',
+    'SII, no en el portal clásico. Los borradores cuelgan de la EMPRESA ACTIVA: si ' +
+    'el RUT opera varias, pasá empresa_rut — sin él se responden los borradores de ' +
+    'la empresa que dejó la consulta anterior, y una lista vacía se lee como "no hay ' +
+    'borradores" en vez de "preguntaste por otra empresa".',
     schemaListBorradores,
-    async ({ rut }) => envolverParaMcp(() => core.listBorradores(registro, rut))
+    async ({ rut, empresa_rut }) =>
+      envolverParaMcp(() => core.listBorradores(registro, rut, empresaPedida(empresa_rut)))
   );
 
   server.tool(
