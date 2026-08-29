@@ -613,6 +613,17 @@ Dos cosas: **`tasacion` devuelve todas las filas que coinciden** (un modelo tien
 
 `categoriaTributaria` es texto y viene tal como la publica el SII: la mayoría `"1"` o `"2"`, y alguna letra (`"G"`) que la tabla no explica. `atributos` son los regímenes y autorizaciones del contribuyente (por ejemplo `14D1` "Régimen Pro Pyme General") con `desde`/`hasta`. **Todas las fechas van en `YYYY-MM-DD`**: el SII las manda en dos formatos distintos dentro de la misma ficha y acá se normalizan.
 
+### 6.10 Verificación de DTE
+
+Credencial estándar (eran públicas; el SII las cerró detrás del login). `tipo_dte` sólo acepta los que el formulario del SII ofrece: 33, 34, 46, 52, 56, 61, 43, 110, 111, 112.
+
+| Endpoint | Body | Devuelve |
+|---|---|---|
+| **`POST /v1/dte/validez`** | `rut_emisor`, `tipo_dte`, `folio` | `recibidoPorElSii`, `resultado` ("Documento recibido por el SII" / "Documento no autorizado"), `emisorNombre`, `identificadorEnvio` (`**********` si no existe), `rutEmisor`, `tipoDteNombre`, `folio`, `comprobante` |
+| **`POST /v1/dte/verificar`** | ídem + `rut_receptor`, `fecha_emision` (YYYY-MM-DD), `monto_total` | ídem + `datosCoinciden`, `fechaEmision`, `rutReceptor`, `montoTotal` |
+
+`datosCoinciden` es el veredicto que importa: `resultado` dice "Datos coinciden con los registrados" o "Documento recibido por el SII pero datos NO coinciden con los registrados", y cuando no coinciden el SII **omite el nombre del emisor**. Un folio inexistente no es un error: es `recibidoPorElSii: false` con "Documento no autorizado".
+
 ---
 
 ## 7. Limitaciones conocidas

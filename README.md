@@ -204,6 +204,15 @@ Todas reciben `rut` como primer parámetro — ver
 | `sii_dte_list_documentos_recibidos` | Ídem, del lado recibido |
 | `sii_dte_get_documento_emitido` | Detalle de un documento emitido |
 | `sii_dte_get_documento_recibido` | Detalle de un documento recibido |
+| `sii_dte_validez` | Si un DTE (emisor, tipo, folio) fue recibido por el SII |
+| `sii_dte_verificar` | Si emisor, receptor, folio, fecha y monto coinciden con lo informado al SII |
+
+`sii_dte_validez` y `sii_dte_verificar` eran consultas públicas del SII y hoy
+están detrás del login, así que van con sesión. La segunda es la que sirve para
+validar una factura recibida antes de pagarla: `datosCoinciden` es el veredicto,
+y el texto del SII distingue "Datos coinciden con los registrados" de "datos NO
+coinciden" con casi las mismas palabras — se midió con el mismo documento y el
+monto cambiado en un peso.
 
 ### Impuestos y registros
 

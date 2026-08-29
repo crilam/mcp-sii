@@ -1,0 +1,181 @@
+<HTML>
+ <head>
+    <title>VERIFICACION DEL CONTENIDO DE UN DOCUMENTO
+    </title>
+</head>
+
+<script src="/dte/UPL/validaRut.js"></script>
+<script language="JavaScript">
+
+//Funciones para deshabilitar boton derecho
+
+var message="";
+
+function clickIE() {
+        if (document.all) {
+           (message);
+           return false;
+        }
+}
+
+function clickNS(e) {
+        if (document.layers||(document.getElementById&&!document.all)) {
+           if (e.which==2||e.which==3) {
+              (message);return false;
+           }
+        }
+}
+
+if (document.layers) {
+        document.captureEvents(Event.MOUSEDOWN);
+        document.onmousedown=clickNS;
+}
+else {
+        document.onmouseup=clickNS;
+        document.oncontextmenu=clickIE;
+}
+
+document.oncontextmenu=new Function("return false")
+</script>
+
+<body link="003399" >
+
+  <FORM NAME="respuesta" METHOD="POST">
+     <div align="center"><center>
+        <table width="670">
+           <tr>
+            <td vAlign="top">
+            <font class="titulo" face="Arial" size="4" color="#000000">
+            <strong>
+              VERIFICACION DEL CONTENIDO DE UN DOCUMENTO </strong></font>
+            <font face="Arial" size="2">
+              <br>
+              Esta p&aacute;gina muestra el contenido de un documento
+              tributario electr&oacute;nico emitido por una empresa
+              autorizada.  De esta forma podr&aacute; verificar los valores
+              informados al SII por el contribuyente emisor.</br>
+            </font>
+            </td>
+           </tr>
+		</table>
+	<p><br>
+
+
+
+   <table border="0" width="670">
+    <tr>
+     <td><small><font face="Arial">
+      <strong><img border="0" src="/dte/UPL/Alerta.gif" align="left" width="26" height="26">Resultado de la Consulta:</strong><br>
+      Documento recibido por el SII pero datos NO coinciden con los registrados
+     </font></small></td>
+    </tr>
+   </table>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            </td>
+           </tr>
+           <tr>
+            <td>
+            <font face="Arial" size="2">
+               <strong>Documento consultado:</strong>
+            </font>
+            </td>
+           </tr>
+          <tr>
+            <td>
+
+<table border="0" width="670" cellpadding="2">
+  <tr>
+    <td width="326" valign="middle">
+      <p align="center"><b><br>
+      <br>
+      </b>Identificador de Envio: 10000000001</td>
+    <td width="326" bgcolor="#000000">
+      <table border="0" width="100%" bgcolor="#FFFFFF">
+        <tr>
+          <td width="100%">
+            <p align="center"><b>R.U.T. 33333333-3<br>
+            Factura Electronica<br>
+            N° 124</b></td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td width="326" valign="middle">
+    </td>
+    <td width="326" valign="top">
+      <table border="0" width="100%">
+        <tr>
+    <td width="59%" valign="middle">
+      <p align="right"><b>Fecha Emisión:<br>
+      Rut Receptor:<br>
+      Monto Total:</b></td>
+    <td width="41%" valign="top" align="right">
+      31-07-2025<br>
+      11111111-1<br>
+      $ 68.367
+    </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+<table border="0" width="670" cellpadding="2">
+  <tr>
+    <td width="100%" valign="middle">
+      <hr>
+      <p><strong><font face="Arial"><small>Comprobante de Atención</small><small>:&nbsp;&nbsp;
+      </small></font></strong>228154&nbsp;&nbsp;&nbsp; -&nbsp;&nbsp;
+      2026/08/29 13:14:05</td>
+  </tr>
+</table>
+
+            </td>
+           </tr>
+
+        </table>
+<p><br>
+
+
+<!-- Rut Firmante: 11111111  --> 
+
+
+<P>&nbsp;</P>
+
+<a href="#" onclick="window.print()">Imprimir</a>
+<a href="#" onclick="window.close()">Cerrar</a>
+
+   </center>
+  </FORM>
+  </body>
+</HTML> 
+

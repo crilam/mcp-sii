@@ -1,0 +1,141 @@
+<HTML>
+ <head>
+    <title>VERIFICACION DEL CONTENIDO DE UN DOCUMENTO
+    </title>
+</head>
+
+<script src="/dte/UPL/validaciones.js"></script>
+<script language="JavaScript">
+
+//Funciones para deshabilitar boton derecho
+
+var message="";
+
+function clickIE() {
+        if (document.all) {
+           (message);
+           return false;
+        }
+}
+
+function clickNS(e) {
+        if (document.layers||(document.getElementById&&!document.all)) {
+           if (e.which==2||e.which==3) {
+              (message);return false;
+           }
+        }
+}
+
+if (document.layers) {
+        document.captureEvents(Event.MOUSEDOWN);
+        document.onmousedown=clickNS;
+}
+else {
+        document.onmouseup=clickNS;
+        document.oncontextmenu=clickIE;
+}
+
+document.oncontextmenu=new Function("return false")
+</script>
+
+<body link="003399" >
+  <FORM NAME="respuesta" METHOD="POST">
+     <div align="center">
+        <table width="670">
+           <tr>
+            <td vAlign="top">
+            <font class="titulo" face="Arial" size="4" color="#000000">
+            <strong>
+              CONSULTA VALIDEZ DE UN DOCUMENTO 
+            </strong></font>
+            <font face="Arial" size="2">
+              <br>
+              Esta p&aacute;gina muestra si un documento tributario
+              electr&oacute;nico emitido por un contribuyente ha
+              sido informado por &eacute;ste al SII.
+            </font>
+            </td>
+           </tr>
+
+           <tr>
+            <td vAlign="middle" align="center" height="20">
+               <hr>
+            </td>
+           </tr>
+
+        </table>
+
+   <table border="0" width="670">
+    <tr>
+     <td><img border="0" src="/dte/UPL/VisBue.gif" align="left"><small><font face="Arial"><strong>Resultado de la Consulta:</strong><br>
+      Documento recibido por el SII
+     </font></small></td>
+    </tr>
+   </table>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<p><br>
+
+<table border="0" width="670" cellpadding="2">
+  <tr>
+    <td width="660" valign="middle" colspan="2"><hr><br><font face="Arial"><strong><small>Documento Consultado:</small></strong></font></td>
+  </tr>
+  <tr>
+    <td width="339" valign="middle">
+      <p align="center"><b>EMISOR DE PRUEBA LTDA<br>
+      <br>
+      </b>Identificador de Envio: 10000000001</td>
+    <td width="313" bgcolor="#000000">
+      <table border="0" width="100%" bgcolor="#FFFFFF">
+        <tr>
+          <td width="100%">
+            <p align="center"><b>R.U.T. 33333333-3<br>
+            Factura Electronica<br>
+            N° 124</b></td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+<p>&nbsp;</p>
+<table border="0" width="670" cellpadding="2">
+  <tr>
+    <td width="100%" valign="middle">
+      <hr>
+      <p><strong><font face="Arial"><small>Comprobante de Atencion</small><small>:&nbsp;&nbsp;&nbsp;&nbsp;
+      </small></font></strong>227332&nbsp;&nbsp;&nbsp; -&nbsp;&nbsp;
+      2026/08/29 13:14:00</td>
+  </tr>
+</table>
+
+<p>&nbsp;</p>
+
+
+</div>
+
+<center>
+<a href="#" onclick="window.print()">Imprimir</a>
+<a href="#" onclick="window.close()">Cerrar</a>
+</center>
+
+  </FORM>
+  </body>
+</HTML>

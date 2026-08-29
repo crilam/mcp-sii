@@ -20,6 +20,7 @@ import { registrarRutasIndicadores } from './rest/rutas/indicadores';
 import { registrarRutasVehiculos } from './rest/rutas/vehiculos';
 import { registrarRutasActividadesEconomicas } from './rest/rutas/actividadesEconomicas';
 import { registrarRutasMisii } from './rest/rutas/misii';
+import { registrarRutasDteVerificacion } from './rest/rutas/dteVerificacion';
 
 const LIMITE_AUTH_FALLIDA_POR_IP = 20;
 
@@ -65,6 +66,7 @@ export function crearRestServer(
   registrarRutasVehiculos(rutas);
   registrarRutasActividadesEconomicas(rutas);
   registrarRutasMisii(rutas, registro, credenciales);
+  registrarRutasDteVerificacion(rutas, registro, credenciales);
 
   const server = http.createServer(async (req, res) => {
     try {
