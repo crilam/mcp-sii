@@ -84,6 +84,30 @@ Diez atributos en la empresa relevada:
 régimen no se relevó —esta empresa tiene uno solo—, así que un mapeo a enum
 debe tratar el código desconocido como "no reconocido", nunca caer a un default.
 
+### `atributos[]` trae SÓLO lo vigente: no hay histórico
+
+Verificado con un caso real: la empresa relevada **estuvo antes en otro régimen**
+(14D3) y cambió al actual con vigencia 01-01-2026. En el payload no queda ni
+rastro del anterior — no hay una fila con `fechaTermino`, simplemente no está.
+Los diez atributos vienen todos con `fechaTermino: null`.
+
+Consecuencia, y es la más importante de este relevamiento para un consumidor
+contable: **este endpoint contesta "en qué régimen está hoy", no "en qué régimen
+estaba en el período P"**. Calcular un F29 de 2025 de esta empresa con el
+régimen que devuelve hoy lo calcula con el régimen equivocado, y sin ninguna
+señal de error: el dato es correcto, la pregunta es otra.
+
+De ahí dos reglas para el contrato:
+
+- `regimen.desde` **no es decorativo**: es el único dato que permite al
+  consumidor saber para qué períodos vale la respuesta. Un consumidor que
+  persista el régimen sin esa fecha pierde la capacidad de detectar que no
+  aplica al período que está calculando.
+- Si el período que se está calculando es anterior a `regimen.desde`, el
+  régimen de ese período **no lo sabe este endpoint**. Hay que buscarlo en otra
+  fuente (declaraciones del período, carpeta tributaria) o tratarlo como
+  desconocido. No extrapolar hacia atrás.
+
 Los atributos son una **lista abierta**: aparecen y desaparecen con el tiempo
 (`PCOV` es de la pandemia). Modelarlos como bolsa con código, glosa, vigencia y
 valor, no como campos fijos.
@@ -149,8 +173,11 @@ implementar.
 - **Sucursales múltiples.** Las dos empresas tienen una sola dirección. El array
   admite varias y la tabla del portal tiene columna "Código Sucursal", pero eso
   es inferencia, no evidencia.
-- **Códigos de régimen distintos de `14D1`.** Las dos empresas están en el mismo
-  régimen. El mapeo de cualquier otro código sigue sin evidencia.
+- **Códigos de régimen distintos de `14D1`.** Las dos empresas están hoy en el
+  mismo régimen. Se sabe que existe al menos un `14D3` —la primera empresa
+  estuvo en él antes del 01-01-2026— pero **no se pudo capturar**: el payload no
+  guarda el anterior. El mapeo de cualquier código que no sea `14D1` sigue sin
+  evidencia directa.
 
 ## Las otras tres páginas candidatas: descartadas
 
