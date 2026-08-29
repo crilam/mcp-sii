@@ -20,10 +20,11 @@ const RECEPTOR_MINIMO = {
 describe('registrarRutasMipyme', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 3 rutas bajo /v1/mipyme', () => {
+  it('registra las 4 rutas bajo /v1/mipyme', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
-      'POST /v1/mipyme/list-empresas', 'POST /v1/mipyme/list-dte-emitidos', 'POST /v1/mipyme/emitir-dte',
+      'POST /v1/mipyme/list-empresas', 'POST /v1/mipyme/list-dte-emitidos',
+      'POST /v1/mipyme/list-dte-recibidos', 'POST /v1/mipyme/emitir-dte',
     ]);
   });
 
@@ -71,6 +72,45 @@ describe('registrarRutasMipyme', () => {
 
     expect(r.status).toBe(200);
     expect(r.body.ok).toBe(true);
+  });
+
+  it('list-dte-recibidos: acepta clave tributaria', async () => {
+    (core.listDteRecibidos as jest.Mock).mockResolvedValue({ documentos: [] });
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/mipyme/list-dte-recibidos')!({
+      rut: '11.111.111-1', clave: 'secreta',
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+  });
+
+  // El filtro de contraparte del lado recibido es `emisor_rut`. Si la ruta
+  // tomara `receptor_rut` por copiar la de emitidos, el filtro se perdería en
+  // silencio y la respuesta traería TODO el historial.
+  it('list-dte-recibidos: pasa emisor_rut al core como emisorRut', async () => {
+    (core.listDteRecibidos as jest.Mock).mockResolvedValue({ documentos: [] });
+    const rutas = armarRouter();
+
+    await rutas.get('POST /v1/mipyme/list-dte-recibidos')!({
+      rut: '11.111.111-1', clave: 'secreta', emisor_rut: '22222222-2', pagina: 2,
+    });
+
+    expect(core.listDteRecibidos).toHaveBeenCalledWith(
+      expect.anything(), '11.111.111-1',
+      expect.objectContaining({ emisorRut: '22222222-2', pagina: 2 }));
+  });
+
+  it('list-dte-recibidos: una página inválida es 400 y no llama al core', async () => {
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/mipyme/list-dte-recibidos')!({
+      rut: '11.111.111-1', clave: 'secreta', pagina: 0,
+    });
+
+    expect(r.status).toBe(400);
+    expect(core.listDteRecibidos).not.toHaveBeenCalled();
   });
 
   // La emisión NO cambió: firmar un DTE requiere el certificado de verdad, no

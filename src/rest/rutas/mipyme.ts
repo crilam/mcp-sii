@@ -3,7 +3,7 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaEmitirDte } from '../../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaEmitirDte } from '../../core/schemas/mipyme';
 import { ejecutorPara, ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCredencialCert } from './comun';
 
@@ -14,6 +14,7 @@ import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCred
 // certificado de verdad, no sólo una sesión autenticada.
 const zodListEmpresas = conCredencial(schemaListEmpresas);
 const zodListDteEmitidos = conCredencial(schemaListDteEmitidos);
+const zodListDteRecibidos = conCredencial(schemaListDteRecibidos);
 const zodEmitirDte = z.object(schemaEmitirDte).extend({
   ...zodCredencialCert,
   // `clave` se RECHAZA explícitamente, no se ignora. Sin esto, un body que
@@ -56,6 +57,17 @@ export function registrarRutasMipyme(
     return ejecutar(() => core.listDteEmitidos(ejecutor, rut, {
       empresaRut: empresa_rut, tipoDte: tipo_dte, fechaDesde: fecha_desde,
       fechaHasta: fecha_hasta, receptorRut: receptor_rut, folio, pagina,
+    }));
+  });
+
+  rutas.set('POST /v1/mipyme/list-dte-recibidos', async body => {
+    const parseo = zodListDteRecibidos.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, empresa_rut, tipo_dte, fecha_desde, fecha_hasta, emisor_rut, folio, pagina } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(() => core.listDteRecibidos(ejecutor, rut, {
+      empresaRut: empresa_rut, tipoDte: tipo_dte, fechaDesde: fecha_desde,
+      fechaHasta: fecha_hasta, emisorRut: emisor_rut, folio, pagina,
     }));
   });
 

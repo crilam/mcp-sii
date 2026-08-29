@@ -192,6 +192,7 @@ Todas reciben `rut` como primer parámetro — ver
 |---|---|
 | `sii_mipyme_list_empresas` | Empresas que la persona puede operar **en este portal** |
 | `sii_mipyme_list_dte_emitidos` | Historial de DTE emitidos por este portal, de a 100 por página |
+| `sii_mipyme_list_dte_recibidos` | DTE recibidos por la empresa, con el estado del acuse |
 | `sii_mipyme_emitir_dte` | **Emite** un DTE. Acto tributario real e irreversible — ver la advertencia abajo |
 
 ### Consultas DTE
@@ -230,6 +231,11 @@ ES el dato, mientras un código en 0 no sería "código cero" sino "no hay". Y
 `23/06/2026`): son dos formatos distintos en la misma fila, tal como los manda el
 SII, y no se normalizan para que la diferencia se vea en vez de descubrirse
 parseando.
+
+`sii_mipyme_list_dte_recibidos` es el espejo de `list_dte_emitidos` y comparte su
+forma, con el **emisor** como contraparte en vez del receptor. Trae algo que
+`sii_rcv_*` no tiene: el **estado del acuse** (`DTE Recibido Sin Reparos`,
+`con Reparos`), que es la respuesta que la empresa dio al documento.
 
 `sii_rcv_empresas_autorizadas` **no** es lo mismo que `sii_mipyme_list_empresas`:
 éstas son las empresas que el RUT puede **consultar** en el registro, y las de

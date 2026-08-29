@@ -1,0 +1,56 @@
+<html><body>
+<!-- Historial de DTE RECIBIDOS del portal mipyme (mipeAdminDocsRcp.cgi).
+     Estructura tomada del portal real; RUT y razones sociales anonimizados. -->
+<table id="tablaDatos" class="table table-pagination">
+<thead>
+<tr>
+<th title='Ver Documento'>Ver</th>
+<th title='RUT del emisor del documento'> Emisor </th>
+<th title='Raz&oacute;n Social o Nombre del Emisor del documento'> Raz&oacute;n Social </th>
+<th title='Tipo de documento'> Documento </th>
+<th title='Folio del documento'> Folio </th>
+<th title='Fecha de emisi&oacute;n'> Fecha </th>
+<th title='Monto total'> Monto </th>
+<th title='Estado del documento'> Estado </th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td> <a href="/cgi-bin/Portal001/mipeGesDocRcp.cgi?CODIGO=1111111111&ALL_PAGE_ANT=2"><img src="/Portal001/button_edit.gif" border="0"></a></td>
+<td>11111111-1</td>
+<td>ASESOR&Iacute;AS GEN&Eacute;RICAS LTDA</td>
+<td>Factura Exenta Electronica</td>
+<td>205</td>
+<td>2023-07-19</td>
+<td>592370</td>
+<td>DTE Recibido Sin Reparos</td>
+</tr>
+<tr>
+<td> <a href="/cgi-bin/Portal001/mipeGesDocRcp.cgi?CODIGO=2222222222"><img src="/Portal001/button_edit.gif" border="0"></a></td>
+<td>22222222-2</td>
+<td>BANCO GEN&Eacute;RICO</td>
+<td>Factura Electronica</td>
+<td>27335976</td>
+<td>2019-09-11</td>
+<td>20856</td>
+<td>DTE Recibido Sin Reparos</td>
+</tr>
+<!-- El portal escribe el nombre CON "Electronica": sin esa variante en el
+     catálogo el tipo salía en 0 y un filtro por tipo lo perdía en silencio. -->
+<tr>
+<td> <a href="/cgi-bin/Portal001/mipeGesDocRcp.cgi?CODIGO=3333333333"><img src="/Portal001/button_edit.gif" border="0"></a></td>
+<td>33333333-3</td>
+<td>TRANSPORTES GEN&Eacute;RICOS SPA</td>
+<td>Guia de Despacho Electronica</td>
+<td>412</td>
+<td>2024-01-15</td>
+<td>150000</td>
+<td>DTE Recibido con Reparos</td>
+</tr>
+</tbody>
+</table>
+<div class="dataTables_paginate">
+<a class="paginate_button" href="/cgi-bin/Portal001/mipeAdminDocsRcp.cgi?RUT_EMI=&FOLIO=&NUM_PAG=2">2</a>
+<a class="paginate_button" href="/cgi-bin/Portal001/mipeAdminDocsRcp.cgi?RUT_EMI=&FOLIO=&NUM_PAG=3">3</a>
+</div>
+</body></html>

@@ -19,6 +19,20 @@ export const schemaListDteEmitidos = {
   pagina: z.number().int().min(1).default(1).describe('Página del historial (100 documentos por página)'),
 };
 
+export const schemaListDteRecibidos = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  empresa_rut: z.string().optional()
+    .describe('RUT de la empresa con dígito verificador. Si se omite, se resuelve solo si este RUT opera una única empresa en el portal.'),
+  tipo_dte: z.number().int().optional().describe('Filtrar por tipo: 33=factura, 34=exenta, 61=N.crédito, 56=N.débito, 52=guía, 46=F.compra'),
+  fecha_desde: FechaSchema,
+  fecha_hasta: FechaSchema,
+  // Del lado recibido la contraparte es el EMISOR: es el filtro simétrico a
+  // `receptor_rut` de emitidos, y el portal lo llama `RUT_EMI`.
+  emisor_rut: z.string().optional().describe('Filtrar por RUT del emisor'),
+  folio: z.number().int().optional().describe('Filtrar por folio exacto'),
+  pagina: z.number().int().min(1).default(1).describe('Página del historial (100 documentos por página)'),
+};
+
 export const schemaEmitirDte = {
   rut: z.string().min(1).describe(RUT_DESC),
   empresa_rut: z.string().optional()

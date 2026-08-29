@@ -5,6 +5,7 @@ import { crearRegistroSesionesSii } from '../registroSesionesSii';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { SiiHttpClient } from '../http';
 import { pausaConfigurada } from '../ritmoSii';
+import { perfil, NombrePerfil } from '../perfilesVerificacion';
 
 // Releva el portal mipyme: qué CGI ofrece el menú una vez seleccionada la
 // empresa, y qué formularios expone cada uno.
@@ -34,25 +35,39 @@ function enlacesDe(html: string): { href: string; texto: string }[] {
   return salida;
 }
 
+// Las empresas del portal viven en `<option value="RUT">`, no en enlaces. Una
+// primera versión contaba `<a>` y reportaba "0 empresas" con las cinco delante:
+// el portal estaba bien y el relevamiento medía otra cosa.
+function empresasDe(html: string): { rut: string; nombre: string }[] {
+  return [...html.matchAll(/<option\s+value=["']([^"']+)["'][^>]*>([^<]*)/gi)]
+    .map(m => ({ rut: m[1].trim(), nombre: m[2].replace(/\s+/g, ' ').trim() }))
+    .filter(e => /^\d+-[\dkK]$/.test(e.rut));
+}
+
 function formulariosDe(html: string): string[] {
   return [...html.matchAll(/<form[^>]*>/gi)].map(m => m[0]);
 }
 
 async function main() {
-  const rut = process.env.SII_EMPRESA_RUT ?? process.env.SII_RUT;
-  if (!rut) throw new Error('Falta SII_EMPRESA_RUT (o SII_RUT) en el .env.');
+  // Por defecto el perfil del certificado: es el que tiene empresas en
+  // Facturación Gratuita. Con un RUT que no esté inscrito, el selector del
+  // portal vuelve vacío y no hay nada que relevar.
+  const nombre = (process.argv[2] ?? 'certificado') as NombrePerfil;
+  const p = perfil(nombre);
 
   fs.mkdirSync(SALIDA, { recursive: true });
 
-  const clave = process.env.SII_EMPRESA_CLAVE ?? process.env.SII_CLAVE;
-  if (!clave) throw new Error('Falta SII_EMPRESA_CLAVE (o SII_CLAVE) en el .env.');
-
-  // El proveedor de runtime es el mismo que usa el adaptador REST, y espera que
-  // la credencial se registre antes: en producción llega en el body de la
-  // request, acá la pone el .env.
   const credenciales = new ProveedorCredencialesRuntime();
-  credenciales.guardar(rut, clave);
+  if (p.credencial.tipo === 'certificado') {
+    credenciales.guardarCertificado(
+      p.rut, p.credencial.certificadoBase64, p.credencial.certificadoPassword,
+      process.env.SII_CERT_CLAVE_SII);
+  } else {
+    credenciales.guardar(p.rut, p.credencial.clave);
+  }
   const registro = crearRegistroSesionesSii(credenciales);
+  const rut = p.rut;
+  console.log(`Relevando con el perfil ${nombre} (${rut}, ${p.credencial.tipo}).\n`);
 
   // `ejecutar` es el mismo camino que usan las rutas: encola por RUT y cierra la
   // sesión al terminar. Un relevamiento que abriera la sesión a mano le comería
@@ -78,13 +93,38 @@ async function main() {
     const selector = await bajar(SEL_EMPRESA_URL, 'sel-empresa');
     if (!selector) return;
 
-    const enlacesSelector = enlacesDe(selector).filter(e => /\.cgi/i.test(e.href));
-    console.log(`  enlaces en el selector: ${enlacesSelector.length}`);
+    const empresas = empresasDe(selector);
+    console.log(`  ${empresas.length} empresa(s) disponibles:`);
+    for (const e of empresas) console.log(`    ${e.rut.padEnd(12)} ${e.nombre}`);
 
-    console.log('\n2. Menú del portal, ya con empresa activa');
+    // La empresa a activar es una de las del selector, NO el RUT con que se
+    // autenticó: ese es el de la persona natural que las opera. Mandarlo hacía
+    // que el portal devolviera otra vez el selector, sin error visible.
+    const empresa = process.env.RELEVO_EMPRESA ?? empresas[0]?.rut;
+    if (!empresa) {
+      console.log('  Sin empresas en el portal: no hay nada que relevar.');
+      return;
+    }
+
+    console.log(`\n2. Menú del portal con ${empresa} activa`);
     await new Promise(r => setTimeout(r, pausaConfigurada()));
-    const menu = await http.postForm(SEL_EMPRESA_URL, { RUT_EMP: rut.replace(/\./g, '') });
+    let menu = await http.postForm(SEL_EMPRESA_URL, { RUT_EMP: empresa });
     fs.writeFileSync(path.join(SALIDA, 'menu.html'), menu, 'latin1');
+
+    // El POST de selección NO devuelve el menú: devuelve 681 bytes de HTML con un
+    // `window.location.replace(...)` en un onLoad. Un navegador lo sigue solo; un
+    // cliente HTTP se queda con la página vacía y parece que el portal no tuviera
+    // menú. Se sigue el salto a mano.
+    const salto = /window\.location\.replace\(\s*url_host\s*\)/.test(menu)
+      ? (/url_host\s*=\s*"(\/factura_sii[^"]+)"/.exec(menu)?.[1] ?? null)
+      : null;
+    if (salto) {
+      console.log(`  el POST redirige por JS a ${salto}; se sigue`);
+      await new Promise(r => setTimeout(r, pausaConfigurada()));
+      const real = await http.get(`https://www1.sii.cl${salto}`);
+      fs.writeFileSync(path.join(SALIDA, 'menu.html'), real, 'latin1');
+      menu = real;
+    }
 
     const enlaces = enlacesDe(menu).filter(e => /\.cgi|\.html?/i.test(e.href));
     console.log(`  ${enlaces.length} enlaces en el menú:`);
@@ -96,6 +136,53 @@ async function main() {
 
     console.log(`\n  formularios del menú: ${formulariosDe(menu).length}`);
     for (const f of formulariosDe(menu)) console.log(`    ${f.slice(0, 120)}`);
+
+    // El menú no lleva a los CGI: lleva a `mipeLaunchPage.cgi?OPCION=N`, que es
+    // el enrutador del portal. Lo que interesa de cada opción es a QUÉ CGI
+    // termina llevando y qué formulario expone, porque ese CGI es el que va a
+    // consultar el scraper.
+    console.log('\n3. Opciones del menú que faltan homologar');
+    const OPCIONES: { opcion: string; que: string }[] = [
+      { opcion: '1', que: 'documentos recibidos' },
+      { opcion: '103', que: 'propuesta F29' },
+    ];
+
+    for (const { opcion, que } of OPCIONES) {
+      const html = await bajar(
+        `${CGI_BASE}/mipeLaunchPage.cgi`, `opcion-${opcion}`,
+        { OPCION: opcion, TIPO: '4' });
+      if (!html) break;
+
+      console.log(`  OPCION=${opcion} (${que})`);
+      for (const f of formulariosDe(html)) {
+        const accion = /action=["']([^"']+)["']/i.exec(f)?.[1] ?? '(sin action)';
+        const nombre = /name=["']([^"']+)["']/i.exec(f)?.[1] ?? '';
+        console.log(`    form ${nombre.padEnd(18)} -> ${accion}`);
+      }
+      const campos = [...html.matchAll(/<(?:input|select)[^>]*name=["']([^"']+)["']/gi)]
+        .map(m => m[1]);
+      if (campos.length > 0) {
+        console.log(`    campos: ${[...new Set(campos)].join(', ').slice(0, 200)}`);
+      }
+      // El launcher tampoco es la página: asigna `window.location.href` al CGI
+      // de verdad. Es el dato que se vino a buscar — el nombre del CGI y sus
+      // parámetros, que no se adivinan (recibidos es `...Rcp.cgi`, no `...Rec`).
+      const destino = /window\.location\.href\s*=\s*"([^"]+)"/.exec(html)?.[1];
+      if (!destino) continue;
+      console.log(`    -> ${destino}`);
+
+      const url = new URL(destino, 'https://www1.sii.cl');
+      const params = [...url.searchParams.keys()];
+      if (params.length > 0) console.log(`    params: ${params.join(', ')}`);
+
+      const pagina = await bajar(url.origin + url.pathname, `cgi-opcion-${opcion}`,
+        Object.fromEntries(url.searchParams));
+      if (!pagina) break;
+
+      const tablas = pagina.split(/<table/i).length - 1;
+      const filas = pagina.split(/<tr/i).length - 1;
+      console.log(`    la página trae ${tablas} tabla(s) y ${filas} fila(s)`);
+    }
 
     console.log(`\nHTML guardado en ${SALIDA}. Bajadas: ${bajadas} de ${TOPE_PAGINAS}.`);
   });

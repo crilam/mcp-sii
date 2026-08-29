@@ -11,6 +11,11 @@ import { rutEsValido } from '../rut';
 const CGI_BASE = 'https://www1.sii.cl/cgi-bin/Portal001';
 const SEL_EMPRESA_URL = `${CGI_BASE}/mipeSelEmpresa.cgi`;
 const HISTORIAL_URL = `${CGI_BASE}/mipeAdminDocsEmi.cgi`;
+// El historial del lado RECIBIDO. El nombre no se adivinó: el menú del portal
+// lleva a `mipeLaunchPage.cgi?OPCION=1&TIPO=4`, que asigna por JavaScript el CGI
+// de verdad. Es `...Rcp.cgi` y no `...Rec.cgi`, que era la corazonada obvia — la
+// misma clase de corazonada que falló cuatro de cuatro veces relevando el RCV.
+const HISTORIAL_RECIBIDOS_URL = `${CGI_BASE}/mipeAdminDocsRcp.cgi`;
 
 // Emisión. Relevado en vivo el 2026-08-11; reemplaza a `mipeDocAlta.cgi`, que
 // nunca existió (404) y que era a donde apuntaba el camino de navegador.
@@ -69,7 +74,13 @@ const TIPO_DTE_NOMBRES: Record<string, number> = {
   'Nota de Debito': 56,
   'Nota de Debito Electronica': 56,
   'Guia de Despacho': 52,
+  // El portal escribe el nombre CON "Electronica" en el historial de recibidos
+  // ("Guia de Despacho Electronica"). Sin esta variante el tipo salía en 0 —
+  // medido en vivo, 3 de 100 documentos— y un consumidor que filtre por tipo los
+  // pierde sin enterarse. Las demás familias ya tenían su par por la misma razón.
+  'Guia de Despacho Electronica': 52,
   'Factura de Compra': 46,
+  'Factura de Compra Electronica': 46,
 };
 
 export interface DteEmitidoMipyme {
@@ -86,6 +97,37 @@ export interface DteEmitidoMipyme {
   // con el que el CGI de detalle (mipeGesDocEmi.cgi) acepta ser consultado, así
   // que se propaga en vez de descartarse.
   codigo: string;
+}
+
+export interface DteRecibidoMipyme {
+  tipoDte: number;
+  tipoDteNombre: string;
+  folio: number;
+  fecha: string;
+  emisorRut: string;
+  emisorNombre: string;
+  monto: number;
+  estado: string;
+  codigo: string;
+}
+
+export interface FiltrosDteRecibidos {
+  empresaRut?: string;
+  tipoDte?: number;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  // El filtro por contraparte es por EMISOR, no por receptor: del lado recibido
+  // la contraparte es quien emitió el documento.
+  emisorRut?: string;
+  folio?: number;
+  pagina?: number;
+}
+
+export interface DteRecibidosResult {
+  documentos: DteRecibidoMipyme[];
+  pagina: number;
+  totalPaginas: number | null;
+  empresaRut: string;
 }
 
 export interface FiltrosDteEmitidos {
@@ -394,6 +436,36 @@ export class MipymeHttpScraper {
 
       return {
         documentos: this.parseHistorial(html),
+        pagina,
+        totalPaginas: this.parseTotalPaginas(html),
+        empresaRut,
+      };
+    });
+  }
+
+  // El lado RECIBIDO del historial. Mismo ciclo que emitidos y por las mismas
+  // razones: la empresa activa es estado del servidor, así que seleccionar y
+  // consultar van juntos en la sección crítica o dos consultas concurrentes se
+  // pisan y una devuelve los documentos de la otra.
+  async listDteRecibidos(filtros: FiltrosDteRecibidos): Promise<DteRecibidosResult> {
+    const pagina = filtros.pagina ?? 1;
+    if (!Number.isInteger(pagina) || pagina < 1) {
+      throw new Error(`pagina debe ser un entero mayor o igual a 1; se recibió ${filtros.pagina}`);
+    }
+    this.session.assertPuedeEntregarCookieJar();
+
+    return this.session.conEmpresaExclusiva(async () => {
+      const empresas = this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
+      const empresaRut = this.resolverEmpresa(empresas, filtros.empresaRut);
+
+      await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: empresaRut });
+
+      const html = await this.http.get(
+        HISTORIAL_RECIBIDOS_URL, this.paramsRecibidos(filtros, pagina));
+      this.assertEmpresaSeleccionada(html);
+
+      return {
+        documentos: this.parseHistorialRecibidos(html),
         pagina,
         totalPaginas: this.parseTotalPaginas(html),
         empresaRut,
@@ -890,6 +962,22 @@ export class MipymeHttpScraper {
     };
   }
 
+  // Los nombres de los parámetros salen de la URL que arma el propio portal:
+  // `RUT_EMI` acá contra `RUT_RECP` en emitidos. El resto coincide.
+  private paramsRecibidos(filtros: FiltrosDteRecibidos, pagina: number): Record<string, string> {
+    return {
+      RUT_EMI: filtros.emisorRut ?? '',
+      FOLIO: filtros.folio ? String(filtros.folio) : '',
+      RZN_SOC: '',
+      FEC_DESDE: filtros.fechaDesde ? this.aFechaSii(filtros.fechaDesde) : '',
+      FEC_HASTA: filtros.fechaHasta ? this.aFechaSii(filtros.fechaHasta) : '',
+      TPO_DOC: filtros.tipoDte ? String(filtros.tipoDte) : '',
+      ESTADO: '',
+      ORDEN: '',
+      NUM_PAG: String(pagina),
+    };
+  }
+
   private aFechaSii(iso: string): string {
     const [y, m, d] = iso.split('-');
     return `${d}/${m}/${y}`;
@@ -992,6 +1080,56 @@ export class MipymeHttpScraper {
         `El portal mipyme devolvió ${filasNoInterpretadas} fila(s) de documentos que este parser ` +
         `no pudo interpretar (se interpretaron ${docs.length}). El formato del historial pudo ` +
         `cambiar: revisar el parseo antes de confiar en el resultado.`
+      );
+    }
+    return docs;
+  }
+
+  // Igual que el de emitidos, con dos diferencias que vienen del portal: la
+  // marca de fila de datos es `mipeGesDocRcp.cgi` y la contraparte es el EMISOR.
+  // Se repite el cuerpo en vez de parametrizar el de emitidos: son dos tablas
+  // distintas del SII que hoy coinciden en forma, y unificarlas haría que un
+  // cambio en una arrastrara silenciosamente a la otra.
+  private parseHistorialRecibidos(html: string): DteRecibidoMipyme[] {
+    const docs: DteRecibidoMipyme[] = [];
+    let filasNoInterpretadas = 0;
+
+    for (const fila of html.matchAll(/<tr[\s\S]*?<\/tr>/gi)) {
+      const bruto = fila[0];
+      const esFilaDeDatos = /mipeGesDocRcp\.cgi/i.test(bruto);
+
+      const celdas = [...bruto.matchAll(/<td[^>]*>([\s\S]*?)(?=<\/td>|<td)/gi)]
+        .map(c => this.decodificar(c[1].replace(/<[^>]*>/g, ' ')).trim());
+
+      // [0]=Ver (link) [1]=RUT emisor [2]=razón social [3]=tipo de documento
+      // [4]=folio [5]=fecha [6]=monto [7]=estado
+      const codigo = bruto.match(/[?&]CODIGO=(\d+)/)?.[1];
+      if (celdas.length < 8 || !/^\d+$/.test(celdas[4]) || !codigo) {
+        if (esFilaDeDatos) filasNoInterpretadas++;
+        continue;
+      }
+
+      docs.push({
+        emisorRut: celdas[1],
+        emisorNombre: celdas[2],
+        tipoDteNombre: celdas[3],
+        tipoDte: TIPO_DTE_NOMBRES[celdas[3]] ?? 0,
+        folio: parseInt(celdas[4], 10),
+        fecha: celdas[5],
+        monto: parseInt(celdas[6].replace(/\./g, ''), 10) || 0,
+        estado: celdas[7],
+        codigo,
+      });
+    }
+
+    // Mismo criterio que emitidos: una fila que ES de datos y que el parser no
+    // supo leer no se saltea en silencio. Cien documentos convertidos en lista
+    // vacía se leen como "esta empresa no recibió nada".
+    if (filasNoInterpretadas > 0) {
+      throw new Error(
+        `El portal mipyme devolvió ${filasNoInterpretadas} fila(s) de documentos recibidos que ` +
+        `este parser no pudo interpretar (se interpretaron ${docs.length}). El formato del ` +
+        `historial pudo cambiar: revisar el parseo antes de confiar en el resultado.`
       );
     }
     return docs;
