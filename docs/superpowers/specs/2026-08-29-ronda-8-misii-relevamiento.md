@@ -110,16 +110,47 @@ filas en la empresa relevada. Ejemplo: `codigo: "522120"`, `categoriaTributaria:
 Es **más rico que lo que ya expone** `/v1/contribuyente/situacion-tributaria`:
 agrega `fechaInicio` por actividad, que el informe público no trae.
 
-## Lo que NO se pudo verificar
+## Segunda empresa: qué cerró y qué no
 
-- **Representantes legales y socios.** La página tiene los bloques y sus
-  columnas ("Nombre", "Rut", "A partir de", "Fecha inicio", "Fecha término"),
-  pero en esta empresa las cuatro tablas dicen "No registra información" y **no
-  vienen en ningún JSON**. No se puede distinguir "el portal no los publica acá"
-  de "esta empresa no los tiene cargados". Hace falta una segunda empresa que sí
-  los tenga.
-- **Sucursales múltiples** (ver arriba).
-- **Códigos de régimen distintos de `14D1`.**
+Se relevó una segunda empresa (persona jurídica comercial, **sociedad por
+acciones**, distinta de la primera que es S.A. cerrada) para contrastar. Misma
+estructura de payloads, y:
+
+- **El régimen se confirma como mecanismo.** También `14D1` (REGIMEN PRO PYME
+  GENERAL), pero con `fechaInicio` distinta: 13-03-2025 contra 01-01-2026 de la
+  primera. La fecha es del contribuyente, no una constante del código.
+- **Los atributos son efectivamente una lista abierta.** Comparten cuatro
+  códigos (`14D1`, `CPYM`, `EMTP`, `NOTI`) y difieren en el resto: la primera
+  trae `BOLE, FAEL, INTE, OFE2, PCOV, SGME` y la segunda `BSII, FPYM, REGS,
+  SGPM`. Diez y ocho atributos respectivamente. Modelar columnas fijas habría
+  fallado con la segunda empresa.
+- **`subtipoContribuyenteDescrip` varía** (SOCIEDADES ANONIMAS CERRADAS contra
+  SOCIEDAD POR ACCIONES), así que es dato del contribuyente y no una constante
+  del tipo.
+
+**Representantes legales y socios: el portal no los entrega acá.** Las dos
+empresas —una S.A. y una SpA, las dos con representante legal registrado ante el
+SII por obligación— muestran "No registra información" en las cuatro tablas. No
+aparecen en ningún JSON, y se revisó `misii.min.js` y
+`funciones_misii_footer.min.js` sin encontrar ninguna llamada que llene esos
+contenedores (`divRepress`, `represOld`, `divSociosNew`, `divSociosOld`): el
+único `.cgi` que mencionan es `siihome.cgi`.
+
+Con dos contribuyentes de forma jurídica distinta dando lo mismo, la lectura ya
+no es "esta empresa no los tiene": **la sección está en la página pero servida
+vacía**. Sacarlos requiere otra fuente y su propio relevamiento. Candidato a
+mirar, con una advertencia: `zeusr.sii.cl/cgi_AUT2000/admRPTEBuild.cgi`
+("Administrar representantes electrónicos") es **representación electrónica**,
+que NO es lo mismo que el representante legal societario. No confundirlos al
+implementar.
+
+## Lo que sigue sin verificar
+
+- **Sucursales múltiples.** Las dos empresas tienen una sola dirección. El array
+  admite varias y la tabla del portal tiene columna "Código Sucursal", pero eso
+  es inferencia, no evidencia.
+- **Códigos de régimen distintos de `14D1`.** Las dos empresas están en el mismo
+  régimen. El mapeo de cualquier otro código sigue sin evidencia.
 
 ## Las otras tres páginas candidatas: descartadas
 
@@ -141,7 +172,9 @@ capas:
 
 ```jsonc
 {
-  "rut": "22222222-2",
+  "capturadoEn": "2026-08-29T04:12:33.000Z",  // cuándo se leyó DEL SII, no cuándo se respondió
+  "parserVersion": 1,
+  "rut": "22222222-2",                        // el del payload del SII, para verificar identidad
   "razonSocial": "EMPRESA DE EJEMPLO S.A.",
   "tipoContribuyente": { "codigo": "2", "descripcion": "PERSONA JURIDICA COMERCIAL" },
   "subtipoContribuyente": { "codigo": "213", "descripcion": "SOCIEDADES ANONIMAS CERRADAS" },
@@ -173,6 +206,33 @@ capas:
 
 Caché por RUT del orden de horas: esta ficha cambia con frecuencia de meses y
 cada consulta abre una sesión real.
+
+### Procedencia, y por qué la fecha no puede ser la del request
+
+Tres campos que pidió el consumidor (AgenticERP) y que conviene fijar en el
+contrato, porque los tres nacen de un error posible:
+
+- **`capturadoEn` es la hora en que se leyó del SII, no la del response.** Con
+  caché de horas, fechar con la hora de la respuesta afirma una confirmación
+  contra el SII que no ocurrió en ese momento — y esa fecha es la que la ficha
+  le muestra al usuario final. Un acierto de caché devuelve el `capturadoEn`
+  original, no `now()`.
+- **`parserVersion`** viaja con cada captura, para poder auditar hacia atrás qué
+  parseo produjo un dato que después resultó estar mal.
+- **`rut` dentro del payload** viene del JSON del SII, no del request. Permite
+  al consumidor verificar identidad antes de escribir: una sesión cruzada
+  escribiría la identidad de otro contribuyente en silencio.
+
+### Quién normaliza: nosotros
+
+Las fechas salen ISO (`"2008-05-26"`) y los booleanos convertidos, en el núcleo
+tipado. El payload original queda intacto bajo `crudo`, con sus dos formatos de
+fecha y sus `"S"`/`"N"`/`"No"`, para quien necesite auditar.
+
+Que lo haga el adaptador y no cada consumidor es lo correcto acá: la
+irregularidad es del SII, es conocida, y replicar su normalización en cada
+cliente multiplica el mismo bug. `crudo` deja abierta la salida de emergencia si
+alguna vez normalizamos mal.
 
 ## Criterio de terminado
 
