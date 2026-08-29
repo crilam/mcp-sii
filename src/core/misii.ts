@@ -42,18 +42,21 @@ export interface FichaContribuyente {
   segmento: { codigo: string | null; descripcion: string | null };
   regimen: RegimenFicha | null;
   actividades: {
-    codigo: number | null;
+    /** Código ACTECO. STRING y no número: varios empiezan con cero. */
+    codigo: string | null;
     giro: string | null;
     categoria: number | null;
     afectaIva: boolean | null;
     desde: string | null;
   }[];
   direcciones: {
+    /** Código de sucursal que asigna el SII. Es lo que distingue una de otra. */
+    codigo: string | null;
     tipo: string | null;
     calle: string | null;
     numero: string | null;
-    comuna: string | null;
-    region: string | null;
+    comuna: { codigo: string | null; descripcion: string | null };
+    region: { codigo: string | null; descripcion: string | null };
   }[];
   atributos: {
     codigo: string;
@@ -156,18 +159,28 @@ export function normalizar(cruda: FichaCruda, capturadoEn: string): FichaContrib
     },
     regimen: regimenDe(cruda.atributos),
     actividades: cruda.actividades.map(a => ({
-      codigo: aNumero(a.codigo),
+      // El código ACTECO se deja como STRING. Convertirlo a número se come el
+      // cero a la izquierda —011101 (cultivo de trigo) quedaría en 11101—, y
+      // ese código no existe: el join contra la tabla de actividades del SII
+      // no encuentra nada, o peor, encuentra otra actividad.
+      codigo: a.codigo ?? null,
       giro: a.descripcion ?? null,
       categoria: aNumero(a.categoriaTributaria),
       afectaIva: aBooleano(a.afectoIva),
       desde: aIso(a.fechaInicio),
     })),
+    // Se expone el `codigo` de cada dirección y los códigos de comuna y región,
+    // no sólo sus descripciones: el código es lo que distingue una sucursal de
+    // otra —y el comportamiento con varias direcciones es justamente lo que no
+    // se pudo verificar—, y las descripciones no sirven para cruzar contra
+    // tablas oficiales de comuna.
     direcciones: cruda.direcciones.map(d => ({
+      codigo: d.codigo ?? null,
       tipo: d.tipoDomicilioDescripcion ?? null,
       calle: d.calle ?? null,
       numero: d.numero ?? null,
-      comuna: d.comunaDescripcion ?? null,
-      region: d.regionDescripcion ?? null,
+      comuna: { codigo: d.comunaCodigo ?? null, descripcion: d.comunaDescripcion ?? null },
+      region: { codigo: d.regionCodigo ?? null, descripcion: d.regionDescripcion ?? null },
     })),
     // Un atributo sin código se descarta en vez de emitirse como la cadena
     // "undefined": un código inventado es peor que un atributo de menos, porque

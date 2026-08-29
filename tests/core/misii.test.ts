@@ -22,9 +22,25 @@ describe('normalización de la ficha', () => {
     expect(ficha.crudo.version).toBe(PARSER_VERSION);
   });
 
+  // El código ACTECO va como STRING y no como número: varios empiezan con cero
+  // (011101 es agricultura) y convertirlos a número se lo come, dejando un
+  // código que no existe y que no cruza contra la tabla de actividades del SII.
+  it('conserva el código de actividad como string, con su cero a la izquierda', () => {
+    const conCero = normalizar({
+      contribuyente: { rut: '22222222', dv: '2' } as never,
+      direcciones: [], atributos: [], alertas: [],
+      actividades: [{
+        codigo: '011101', descripcion: 'CULTIVO DE TRIGO', categoriaTributaria: '1',
+        afectoIva: 'S', fechaInicio: '01-01-2020',
+      }],
+    }, CAPTURA);
+
+    expect(conCero.actividades[0].codigo).toBe('011101');
+  });
+
   it('normaliza las actividades, con su fecha de inicio propia', () => {
     expect(ficha.actividades[0]).toEqual({
-      codigo: 522120,
+      codigo: '522120',
       giro: 'EXPLOTACION DE ESTACIONAMIENTOS',
       categoria: 1,
       afectaIva: true,
@@ -36,13 +52,17 @@ describe('normalización de la ficha', () => {
     expect(ficha.actividades[1].afectaIva).toBe(false);
   });
 
-  it('aplana la dirección a lo que consume una ficha de empresa', () => {
+  // Con el código de la dirección y los de comuna y región: el primero es lo
+  // único que distingue una sucursal de otra, y las descripciones no cruzan
+  // contra las tablas oficiales.
+  it('aplana la dirección conservando los códigos, no sólo las descripciones', () => {
     expect(ficha.direcciones[0]).toEqual({
+      codigo: '90000001',
       tipo: 'DOMICILIO',
       calle: 'CALLE DE EJEMPLO',
       numero: '1234',
-      comuna: 'LAS CONDES',
-      region: 'REGION METROPOLITANA',
+      comuna: { codigo: '13114', descripcion: 'LAS CONDES' },
+      region: { codigo: '13', descripcion: 'REGION METROPOLITANA' },
     });
   });
 

@@ -535,7 +535,13 @@ página, así que no hay endpoints granulares que gasten una sesión por pedazo.
 Devuelve `razonSocial`, `tipoContribuyente` y `subtipoContribuyente` (código y
 descripción), `fechaConstitucion`, `fechaInicioActividades`, `fechaTerminoGiro`,
 `segmento`, `regimen`, `actividades` (código, giro, categoría, `afectaIva` y la
-fecha `desde` de cada una), `direcciones` y `atributos`. Más tres campos de
+fecha `desde` de cada una), `direcciones` y `atributos`.
+
+El **código de actividad viaja como string**, no como número: varios códigos
+ACTECO empiezan con cero (`011101` es cultivo de trigo) y convertirlos a número
+se lo come, dejando un código que no cruza contra la tabla del SII. Las
+direcciones traen su `codigo` —el de sucursal, que es lo único que distingue una
+de otra— y comuna y región con `{codigo, descripcion}`. Más tres campos de
 procedencia: `capturadoEn` (cuándo se leyó **del SII**), `parserVersion`, y
 `crudo` con el payload original sin normalizar.
 

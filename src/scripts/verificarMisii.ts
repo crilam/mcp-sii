@@ -43,7 +43,9 @@ async function main() {
       console.log(`   ${String(a.codigo).padEnd(8)} cat=${a.categoria} iva=${a.afectaIva} desde=${a.desde}`);
     }
     console.log(`direcciones             ${ficha.direcciones.length}`);
-    for (const d of ficha.direcciones) console.log(`   ${d.tipo} — ${d.comuna}, ${d.region}`);
+    for (const d of ficha.direcciones) {
+      console.log(`   [${d.codigo}] ${d.tipo} — ${d.comuna.descripcion} (${d.comuna.codigo}), ${d.region.descripcion}`);
+    }
     console.log(`atributos               ${ficha.atributos.map(a => a.codigo).join(', ')}`);
     console.log(`capturadoEn             ${ficha.capturadoEn}`);
     console.log(`parserVersion           ${ficha.parserVersion}`);
@@ -61,6 +63,11 @@ async function main() {
       regimenDesde: ficha.regimen?.desde,
     })) {
       if (valor && !/^\d{4}-\d{2}-\d{2}$/.test(valor)) problemas.push(`${campo} no quedó en ISO: ${valor}`);
+    }
+    for (const a of ficha.actividades) {
+      if (a.codigo !== null && !/^\d{6}$/.test(a.codigo)) {
+        problemas.push(`el código ACTECO ${a.codigo} no tiene seis dígitos: se perdió un cero al normalizar`);
+      }
     }
     if (ficha.actividades.some(a => a.afectaIva === null)) {
       problemas.push('alguna actividad quedó con afectaIva en null: el SII usa S/N, revisá el mapeo');
