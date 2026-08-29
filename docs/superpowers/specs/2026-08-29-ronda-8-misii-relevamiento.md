@@ -173,6 +173,10 @@ implementar.
 - **Sucursales múltiples.** Las dos empresas tienen una sola dirección. El array
   admite varias y la tabla del portal tiene columna "Código Sucursal", pero eso
   es inferencia, no evidencia.
+- **Que `misiir` funcione con CERTIFICADO.** El relevamiento se hizo con clave.
+  Desde el PR #55 las dos credenciales sirven en las consultas verificadas, pero
+  este portal no está entre ellas: la ruta lo acepta, y si alguien lo usa con
+  certificado conviene confirmarlo antes de darlo por hecho.
 - **Códigos de régimen distintos de `14D1`.** Las dos empresas están hoy en el
   mismo régimen. Se sabe que existe al menos un `14D3` —la primera empresa
   estuvo en él antes del 01-01-2026— pero **no se pudo capturar**: el payload no
@@ -216,16 +220,22 @@ capas:
     "hasta": null
   },
   "actividades": [
-    { "codigo": 522120, "giro": "…", "categoria": 1, "afectaIva": true, "desde": "2015-12-16" }
+    { "codigo": "522120", "giro": "…", "categoria": 1, "afectaIva": true, "desde": "2015-12-16" }
   ],
-  "direcciones": [ { "tipo": "…", "calle": "…", "numero": "…", "comuna": "…", "region": "…" } ],
+  "direcciones": [ { "codigo": "…", "tipo": "…", "calle": "…", "numero": "…",
+                     "comuna": { "codigo": "…", "descripcion": "…" },
+                     "region": { "codigo": "…", "descripcion": "…" } } ],
   "atributos": [ { "codigo": "…", "descripcion": "…", "desde": "…", "hasta": null, "valor": "…" } ],
   "crudo": { "version": 1, "contribuyente": {}, "direcciones": [], "atributos": [], "actividades": [] }
 }
 ```
 
 - **Núcleo tipado** para lo que la contabilidad consume, con fechas
-  normalizadas a ISO y booleanos reales.
+  normalizadas a ISO y booleanos reales. El **código ACTECO va como string**:
+  varios empiezan con cero (`011101`, cultivo de trigo) y pasarlos a número se
+  lo come, dejando un código que no cruza contra la tabla del SII. Las
+  direcciones llevan su `codigo` de sucursal y los códigos de comuna y región,
+  no sólo las descripciones.
 - **`crudo` versionado** con los payloads tal cual: el día que el SII agregue un
   campo, el consumidor lo tiene sin esperar un release nuestro.
 - **`regimen` es derivado, y su derivación es la parte frágil.** Si ningún
@@ -267,5 +277,7 @@ alguna vez normalizamos mal.
 2. Ruta REST + tool MCP a la par.
 3. Fixture anonimizado, y verificado que los tests fallan si se rompe lo que
    dicen proteger.
-4. Segunda empresa relevada para cerrar representantes, socios y sucursales, o
-   se documentan como limitación conocida.
+4. Representantes y socios documentados como **limitación conocida**: la
+   segunda empresa ya se relevó y no los cerró — el portal sirve esos bloques
+   vacíos para las dos. Sucursales múltiples sigue pendiente, y necesita una
+   empresa con más de una dirección, no otra empresa cualquiera.

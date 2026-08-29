@@ -21,12 +21,17 @@ import { recorrerConRitmo } from '../ritmoSii';
 // versionan. Los fixtures se anonimizan antes de entrar a tests/.
 const SALIDA = process.env.RELEVAR_SALIDA ?? path.join(process.env.TMPDIR ?? '/tmp', 'relevar-misii');
 
-// Páginas candidatas, en orden de interés. Todas son LECTURA: ninguna modifica
-// el registro del contribuyente. Las `#` de las SPA no llegan al servidor, así
-// que de esas se baja la raíz y lo que interesa es si sirven HTML con datos o
-// sólo el shell de la aplicación.
+// La única página que sirve. Las otras tres candidatas del relevamiento inicial
+// están DESCARTADAS con evidencia —`siicont.cgi` devuelve 9 bytes, la SPA de
+// regímenes 700 de shell, y el timbraje una landing sin datos— y se dejan detrás
+// de RELEVAR_DESCARTADAS en vez de en la corrida normal: cada una es un request
+// más contra un portal que bloquea por patrón de uso, y volver a bajarlas no
+// aporta nada que el spec no diga ya.
 const PAGINAS = [
   { nombre: 'misii-home', url: 'https://misiir.sii.cl/cgi_misii/siihome.cgi' },
+];
+
+const DESCARTADAS = [
   { nombre: 'datos-contribuyente', url: 'https://misiir.sii.cl/cgi_misii/siicont.cgi' },
   { nombre: 'regimenes-tributarios', url: 'https://www4.sii.cl/regimenesTributariosInternet/' },
   { nombre: 'timbraje', url: 'https://zeus.sii.cl/cvc/vdc/index.html' },
@@ -52,9 +57,12 @@ function rotulos(html: string): string[] {
 }
 
 async function main() {
-  const rut = process.env.SII_EMPRESA_RUT ?? process.env.SII_RUT;
-  const clave = process.env.SII_EMPRESA_CLAVE ?? process.env.SII_CLAVE;
-  if (!rut || !clave) throw new Error('Faltan SII_EMPRESA_RUT/SII_EMPRESA_CLAVE en el entorno.');
+  // Sin fallback a otra credencial: relevar con un RUT distinto del que se cree
+  // estar usando produce un informe atribuido a la empresa equivocada, y eso no
+  // se nota leyendo la salida.
+  const rut = process.env.SII_EMPRESA_RUT;
+  const clave = process.env.SII_EMPRESA_CLAVE;
+  if (!rut || !clave) throw new Error('Faltan SII_EMPRESA_RUT y SII_EMPRESA_CLAVE en el entorno.');
 
   fs.mkdirSync(SALIDA, { recursive: true });
   const sesion = new SessionManager(
@@ -71,7 +79,8 @@ async function main() {
 
     // Con ritmo: son cuatro páginas seguidas del mismo portal, y el SII corta
     // por volumen y por patrón (ver `ritmoSii.ts`).
-    await recorrerConRitmo(PAGINAS, async ({ nombre, url }) => {
+    const aRelevar = process.env.RELEVAR_DESCARTADAS ? [...PAGINAS, ...DESCARTADAS] : PAGINAS;
+    await recorrerConRitmo(aRelevar, async ({ nombre, url }) => {
       try {
         const html = await http.get(url);
         fs.writeFileSync(path.join(SALIDA, `${nombre}.html`), html);
