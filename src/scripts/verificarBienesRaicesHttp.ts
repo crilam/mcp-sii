@@ -71,11 +71,20 @@ async function main() {
       console.log(`\ndocumento de la solicitud: ${doc.length} bytes, firma ${doc.subarray(0, 5).toString('latin1')}`);
     }
 
+    // Cada tipo es una solicitud REAL en el historial del contribuyente: se piden
+    // sólo los que se listen en VERIF_CERT_TIPOS (por defecto, sólo `simple`).
     if (process.env.VERIF_CERT === '1') {
-      await pausa();
-      const pdf = await scraper.certificadoAvaluo([{ ...rol, ultimoEacAplicado: primera.ultimoEacAplicado }], 'simple');
-      console.log(`\ncertificado de avalúo simple: ${pdf.length} bytes, firma ${pdf.subarray(0, 5).toString('latin1')}`);
-      if (SALIDA_PDF) { fs.writeFileSync(SALIDA_PDF, pdf); console.log(`  guardado en ${SALIDA_PDF}`); }
+      const tipos = (process.env.VERIF_CERT_TIPOS ?? 'simple').split(',') as ('simple' | 'multipropietario' | 'detallado')[];
+      for (const tipo of tipos) {
+        await pausa();
+        try {
+          const pdf = await scraper.certificadoAvaluo([{ ...rol, ultimoEacAplicado: primera.ultimoEacAplicado }], tipo);
+          console.log(`\ncertificado de avalúo ${tipo}: ${pdf.length} bytes, firma ${pdf.subarray(0, 5).toString('latin1')}`);
+          if (SALIDA_PDF) { fs.writeFileSync(`${SALIDA_PDF}.${tipo}.pdf`, pdf); }
+        } catch (e) {
+          console.log(`\ncertificado de avalúo ${tipo}: FALLA ${(e as Error).message.slice(0, 200)}`);
+        }
+      }
     } else {
       console.log('\n(certificado no pedido: VERIF_CERT=1 para pedir uno real)');
     }

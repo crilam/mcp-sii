@@ -27,7 +27,7 @@ async function main() {
 
   await registro.ejecutar(p.rut, async sesion => {
     const jar = await sesion.rutaCookieJar();
-    const base = `${HOST}/app/vica/${p.rut}/v1`;
+    const base = `${HOST}/app/vica/${p.rut.replace(/\./g, '')}/v1`;
     const entrada = `${HOST}/vica/Menu/BienesRaices`;
 
     const sonda = (url: string, extra: string[] = []) => {

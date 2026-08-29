@@ -98,6 +98,11 @@ export interface BienesRaicesHttpResult extends BienesRaicesResult {
   propiedades: BienRaizHttp[];
 }
 
+// Los dos modos de falla de una sesión caída en esta API: cuerpo vacío, o el
+// HTML del login en vez de JSON. Es una clase propia para que `conSesionFresca`
+// reintente sólo eso y no cualquier error.
+class SesionDeVicaCaida extends Error {}
+
 export class BienesRaicesHttpScraper {
   private handshakeHecho = false;
 
@@ -126,17 +131,30 @@ export class BienesRaicesHttpScraper {
   }
 
   private async getJson<T>(ruta: string, params?: Record<string, string>): Promise<T> {
-    await this.handshake();
-    const crudo = await this.http.get(`${this.base()}${ruta}`, params,
-      { guardarCookies: true, accept: 'application/json' });
-    return this.parsear<T>(crudo, ruta);
+    return this.conSesionFresca(async () => {
+      await this.handshake();
+      const crudo = await this.http.get(`${this.base()}${ruta}`, params,
+        { guardarCookies: true, accept: 'application/json' });
+      return this.parsear<T>(crudo, ruta);
+    });
   }
 
-  private async postJson<T>(ruta: string, body: unknown): Promise<T> {
-    await this.handshake();
-    const crudo = await this.http.postJson(`${this.base()}${ruta}`, body,
-      { guardarCookies: true, accept: 'application/json' });
-    return this.parsear<T>(crudo, ruta);
+  // La causa más común de que la API responda vacío o HTML es una sesión del
+  // SII ya caducada. Sin invalidarla, `autenticadoHasta` la sigue dando por
+  // buena unas dos horas y cada reintento repite el mismo fallo hasta reiniciar
+  // el proceso. Se reintenta UNA vez con sesión nueva y handshake nuevo — el
+  // scraper de navegador hacía lo mismo, y quitarlo fue una regresión que el
+  // review atajó. Sólo para LECTURAS: el certificado es una solicitud real y no
+  // se repite solo.
+  private async conSesionFresca<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!(e instanceof SesionDeVicaCaida)) throw e;
+      this.session.invalidate();
+      this.handshakeHecho = false;
+      return fn();
+    }
   }
 
   private parsear<T>(crudo: string, ruta: string): T {
@@ -144,14 +162,14 @@ export class BienesRaicesHttpScraper {
     // falta contexto de sesión. Se nombra, porque "Unexpected end of JSON" manda
     // a buscar un bug de parseo cuando el problema es la sesión.
     if (crudo.trim() === '') {
-      throw new Error(
+      throw new SesionDeVicaCaida(
         `La API de bienes raíces respondió vacío en ${ruta}. Suele ser la sesión del `
         + 'portal caída: reintentá.');
     }
     try {
       return JSON.parse(crudo) as T;
     } catch {
-      throw new Error(
+      throw new SesionDeVicaCaida(
         `La API de bienes raíces no devolvió JSON en ${ruta}. La sesión pudo expirar. `
         + `Respuesta: ${crudo.slice(0, 200)}`);
     }
@@ -209,11 +227,23 @@ export class BienesRaicesHttpScraper {
       // El porcentaje viene como string con punto decimal ("100.00").
       porcentajeDerechos: Number(p.porcentajeDerecho ?? 0) || 0,
       avaluoFiscal: Number(p.avaluoFiscal ?? 0) || 0,
-      comunaCodigo: Number(p.comunaCnp),
-      manzana: Number(p.manzanaCnp),
-      predio: Number(p.predioCnp),
+      comunaCodigo: this.codigo(p.comunaCnp, 'comunaCnp', p.rol),
+      manzana: this.codigo(p.manzanaCnp, 'manzanaCnp', p.rol),
+      predio: this.codigo(p.predioCnp, 'predioCnp', p.rol),
       ultimoEacAplicado: Number(p.ultimoEacAplicado ?? 0),
     };
+  }
+
+  // Un código ausente daría `NaN`, que JSON serializa como `null`, y la llamada
+  // siguiente a consultar-rol o al certificado fallaría lejos de la causa.
+  private codigo(valor: unknown, campo: string, rol?: string): number {
+    const n = Number(valor);
+    if (valor === null || valor === undefined || !Number.isFinite(n)) {
+      throw new Error(
+        `La API de bienes raíces devolvió una propiedad${rol ? ` (rol ${rol})` : ''} sin `
+        + `${campo}: el formato cambió y hay que revisar el parseo.`);
+    }
+    return n;
   }
 
   async comunas(): Promise<Comuna[]> {

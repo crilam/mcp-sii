@@ -238,7 +238,7 @@ describe('BienesRaicesHttpScraper.solicitudes', () => {
     const res = await scraper.solicitudes();
 
     expect(res).toHaveLength(2);
-    expect(res[0].tipo).toBe('Documento de Antecedentes del bien raÃ­z y detalle catastral');
+    expect(res[0].tipo).toBe('Documento de Antecedentes del bien raíz y detalle catastral');
     expect(res[0].tipo.endsWith(' ')).toBe(false);
     expect(res[0].url).toBe('/descarga/documento/a9474a73-89c2-4498-ae91-f73ae483233b/V5642722');
   });
@@ -410,11 +410,12 @@ describe('BienesRaicesHttpScraper.descargarDocumento', () => {
 describe('BienesRaicesHttpScraper errores de la API', () => {
   // Cuerpo vacío es el modo de falla característico de esta API cuando falta
   // contexto de sesión: nombrarlo evita perseguir un bug de parseo inexistente.
+  // Se responde vacío SIEMPRE (no sólo una vez): el scraper reintenta con sesión
+  // nueva, y lo que se prueba acá es el error que sale cuando eso tampoco alcanza.
   it('una respuesta vacía en una ruta de datos lanza error de "respondió vacío"', async () => {
-    const { scraper, http } = armar();
-    (http.get as jest.Mock)
-      .mockResolvedValueOnce('').mockResolvedValueOnce('')
-      .mockResolvedValueOnce('');
+    const { scraper, http, session } = armar();
+    (session.invalidate as jest.Mock) = jest.fn();
+    (http.get as jest.Mock).mockResolvedValue('');
 
     await expect(scraper.comunas()).rejects.toThrow(/respondió vacío/);
   });
@@ -422,11 +423,97 @@ describe('BienesRaicesHttpScraper errores de la API', () => {
   // El servidor de aplicaciones puede responder HTML de error (login, 500);
   // sin este chequeo el fallo se vería como un JSON.parse roto sin contexto.
   it('una respuesta HTML lanza error de "no devolvió JSON"', async () => {
-    const { scraper, http } = armar();
-    (http.get as jest.Mock)
-      .mockResolvedValueOnce('').mockResolvedValueOnce('')
-      .mockResolvedValueOnce('<html>Error</html>');
+    const { scraper, http, session } = armar();
+    (session.invalidate as jest.Mock) = jest.fn();
+    (http.get as jest.Mock).mockResolvedValue('<html>Error</html>');
 
     await expect(scraper.comunas()).rejects.toThrow(/no devolvió JSON/);
+  });
+});
+
+describe('BienesRaicesHttpScraper con la sesión caída', () => {
+  // La causa más común de un cuerpo vacío es la sesión del SII caducada. Sin
+  // invalidarla, `autenticadoHasta` la sigue dando por buena unas dos horas y
+  // cada reintento repite el mismo fallo. El scraper de navegador lo hacía;
+  // quitarlo fue una regresión que el review atajó.
+  it('ante un cuerpo vacío invalida la sesión, rehace el handshake y reintenta UNA vez', async () => {
+    const { scraper, http, session } = armar();
+    (session.invalidate as jest.Mock) = jest.fn();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce('').mockResolvedValueOnce('')   // handshake 1
+      .mockResolvedValueOnce('')                              // cabecera vacía: sesión caída
+      .mockResolvedValueOnce('').mockResolvedValueOnce('')   // handshake 2
+      .mockResolvedValueOnce(CABECERA)
+      .mockResolvedValueOnce(PROPIEDADES);
+
+    const r = await scraper.listBienesRaices();
+
+    expect(session.invalidate).toHaveBeenCalledTimes(1);
+    expect(r.propiedades).toHaveLength(3);
+    const urls = (http.get as jest.Mock).mock.calls.map(c => c[0]);
+    // El handshake aparece dos veces: la segunda es la sesión nueva.
+    expect(urls.filter(u => u === ENTRADA)).toHaveLength(2);
+  });
+
+  it('si el reintento también falla, el error sale y no se reintenta más', async () => {
+    const { scraper, http, session } = armar();
+    (session.invalidate as jest.Mock) = jest.fn();
+    (http.get as jest.Mock).mockResolvedValue('');
+
+    await expect(scraper.comunas()).rejects.toThrow(/respondió vacío/);
+    expect(session.invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('el HTML del login también cuenta como sesión caída', async () => {
+    const { scraper, http, session } = armar();
+    (session.invalidate as jest.Mock) = jest.fn();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce('').mockResolvedValueOnce('')
+      .mockResolvedValueOnce('<html>login</html>')
+      .mockResolvedValueOnce('').mockResolvedValueOnce('')
+      .mockResolvedValueOnce(COMUNAS);
+
+    await expect(scraper.comunas()).resolves.toHaveLength(5);
+    expect(session.invalidate).toHaveBeenCalledTimes(1);
+  });
+
+  // El certificado es una SOLICITUD real que queda en el historial: repetirla
+  // sola duplicaría solicitudes sin que nadie lo pida.
+  it('el certificado NO se reintenta ni invalida la sesión', async () => {
+    const { scraper, http, session } = armar();
+    (session.invalidate as jest.Mock) = jest.fn();
+    (http.get as jest.Mock).mockResolvedValue('');
+    (http.postJson as jest.Mock) = jest.fn().mockResolvedValue('');
+
+    await expect(scraper.certificadoAvaluo([{ comuna: 1, manzana: 2, predio: 3, ultimoEacAplicado: 4 }]))
+      .rejects.toThrow(/respondió vacío al pedir el certificado/);
+    expect(http.postJson).toHaveBeenCalledTimes(1);
+    expect(session.invalidate).not.toHaveBeenCalled();
+  });
+});
+
+describe('BienesRaicesHttpScraper.descargarDocumento sin Content-Type de PDF', () => {
+  // El backend a veces manda el PDF como base64 en texto en vez de binario; si
+  // no se decodifica, el consumidor recibe "un PDF" que ningún lector abre.
+  it('con texto base64 devuelve el PDF decodificado', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock).mockResolvedValue('');
+    const pdf = Buffer.from('%PDF-1.4 doc');
+    (http.getBinario as jest.Mock) = jest.fn().mockResolvedValue({
+      contenido: Buffer.from(pdf.toString('base64'), 'latin1'), contentType: 'text/plain',
+    });
+
+    await expect(scraper.descargarDocumento('/descarga/documento/abc-1/V1')).resolves.toEqual(pdf);
+  });
+
+  it('con texto que no es un PDF en base64 falla explícito', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock).mockResolvedValue('');
+    (http.getBinario as jest.Mock) = jest.fn().mockResolvedValue({
+      contenido: Buffer.from('<html>error</html>'), contentType: 'text/html',
+    });
+
+    await expect(scraper.descargarDocumento('/descarga/documento/abc-1/V1'))
+      .rejects.toThrow(/no devolvió un PDF/);
   });
 });

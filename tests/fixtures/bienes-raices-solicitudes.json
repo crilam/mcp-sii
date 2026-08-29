@@ -4,7 +4,7 @@
     "rut": 11111111,
     "dv": "1",
     "estado": 2,
-    "estadoGlosa": "Finalizado con Ãxito",
+    "estadoGlosa": "Finalizado con Éxito",
     "fecha": "2026-08-01T00:00:00.000+00:00",
     "fechaString": "01-08-2026",
     "inicioVigencia": "2026-08-01T00:00:00.000+00:00",
@@ -15,7 +15,7 @@
     "estadoTramo": 2,
     "codigoVerificacion": "00000000-0000-0000-0000-000000000000",
     "folio": "V0000001",
-    "tipoSolicitud": "Documento de Antecedentes del bien raÃ­z y detalle catastral ",
+    "tipoSolicitud": "Documento de Antecedentes del bien raíz y detalle catastral ",
     "url": "/descarga/documento/a9474a73-89c2-4498-ae91-f73ae483233b/V5642722"
   },
   {
@@ -23,7 +23,7 @@
     "rut": 11111111,
     "dv": "1",
     "estado": 2,
-    "estadoGlosa": "Finalizado con Ãxito",
+    "estadoGlosa": "Finalizado con Éxito",
     "fecha": "2026-08-01T00:00:00.000+00:00",
     "fechaString": "01-08-2026",
     "inicioVigencia": "2026-08-01T00:00:00.000+00:00",
@@ -34,7 +34,7 @@
     "estadoTramo": 2,
     "codigoVerificacion": "00000000-0000-0000-0000-000000000000",
     "folio": "V0000001",
-    "tipoSolicitud": "Documento de Antecedentes del bien raÃ­z y detalle catastral ",
+    "tipoSolicitud": "Documento de Antecedentes del bien raíz y detalle catastral ",
     "url": "/descarga/documento/971b42f7-5ba0-4a33-a4af-662c1ff54922/V5642719"
   }
 ]
