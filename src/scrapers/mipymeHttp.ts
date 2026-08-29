@@ -27,6 +27,19 @@ const HISTORIAL_RECIBIDOS_URL = `${CGI_BASE}/mipeAdminDocsRcp.cgi`;
 // no son un camino que un servicio pueda recorrer solo.
 const PDF_DOCUMENTO_URL = `${CGI_BASE}/mipeShowPdf.cgi`;
 
+// Los BORRADORES no viven en el portal viejo. El menú los publica con una
+// función JavaScript (`printLinkAdmBorradores`, definida en `valores.js`) que
+// arma un enlace a otra aplicación, en otro host y con otra tecnología: una SPA
+// con API SDI, igual que el RCV. Los nombres salieron de su bundle
+// (`app.full.min.js`), que es la única forma que funcionó de relevar el RCV
+// después de que cuatro nombres "obvios" fallaran.
+const BORRADORES_BASE = 'https://www4.sii.cl/mipymeinternetui/services/data/borradorService';
+const BORRADORES_NAMESPACE = 'cl.sii.sdi.lob.diii.mipyme.data.impl.BorradorApplicationService';
+// El listado NO usa el sobre SDI por POST, a diferencia del RCV: el bundle lo
+// declara con `createGetOperation` y el servidor lo confirma — un POST devuelve
+// 500 con "No resource method found for POST" (medido). Es un GET simple.
+const BORRADORES_LISTADO_URL = `${BORRADORES_BASE}/listaBorrador`;
+
 // Emisión. Relevado en vivo el 2026-08-11; reemplaza a `mipeDocAlta.cgi`, que
 // nunca existió (404) y que era a donde apuntaba el camino de navegador.
 //
@@ -138,6 +151,16 @@ export interface DteRecibidosResult {
   pagina: number;
   totalPaginas: number | null;
   empresaRut: string;
+}
+
+// Un borrador tal como lo devuelve la aplicación de borradores. Los nombres de
+// los campos son los del SII —mayúsculas y guiones bajos incluidos— y no se
+// renombran: son un contrato ajeno, y traducirlos obligaría a mantener un
+// diccionario que se desactualiza en silencio cuando el SII agrega un campo.
+export interface BorradorMipyme {
+  codigo: string;
+  tipoDte: number | null;
+  campos: Record<string, unknown>;
 }
 
 export interface FiltrosDteEmitidos {
@@ -523,6 +546,64 @@ export class MipymeHttpScraper {
       }
       return contenido;
     });
+  }
+
+  /**
+   * Borradores de DTE de la empresa.
+   *
+   * A diferencia del resto de mipyme, NO pasa por la selección de empresa del
+   * portal viejo: esta aplicación resuelve la empresa por su cuenta (tiene su
+   * propio `rutEmpresa`), así que mandar el POST de selección no aportaría nada.
+   */
+  async listBorradores(): Promise<BorradorMipyme[]> {
+    this.session.assertPuedeEntregarCookieJar();
+
+    const crudo = await this.http.get(BORRADORES_LISTADO_URL);
+
+    let resp: unknown;
+    try {
+      resp = JSON.parse(crudo);
+    } catch {
+      // El servidor de aplicaciones responde HTML en sus errores (404, 500, la
+      // página de login). Sin este mensaje, el fallo llegaría como un
+      // "Unexpected token <" que no dice nada de lo que pasó.
+      throw new Error(
+        'La aplicación de borradores del SII no devolvió JSON. Puede ser la sesión '
+        + `caída o un cambio del servicio. Respuesta: ${crudo.slice(0, 200)}`);
+    }
+
+    const lista = this.datosDeSdi(resp);
+    return lista.map(b => ({
+      // `ehdr_CODIGO` es el identificador del borrador y `ptdc_CODIGO` el del
+      // tipo de documento: los nombres salen de los logs del propio bundle.
+      codigo: String(b.ehdr_CODIGO ?? ''),
+      tipoDte: b.ptdc_CODIGO !== undefined && b.ptdc_CODIGO !== null
+        ? Number(b.ptdc_CODIGO) : null,
+      // El resto se publica entero y sin renombrar. Un borrador tiene decenas de
+      // campos (`EFXP_*`) que dependen del tipo de documento, y elegir cuáles
+      // exponer sería adivinar qué necesita el consumidor.
+      campos: b,
+    }));
+  }
+
+  // La respuesta SDI envuelve los datos y no siempre igual. Se acepta el arreglo
+  // directo o dentro de `data`, y CUALQUIER otra forma es un error explícito:
+  // devolver [] haría que "el SII contestó otra cosa" y "no hay borradores" se
+  // lean idénticos.
+  private datosDeSdi(resp: any): Record<string, unknown>[] {
+    const datos = Array.isArray(resp) ? resp
+      : Array.isArray(resp?.data) ? resp.data
+        : Array.isArray(resp?.data?.data) ? resp.data.data : null;
+
+    if (datos === null) {
+      const respCode = resp?.metaData?.respCode ?? resp?.respCode;
+      const msg = resp?.metaData?.msgError ?? resp?.msgError;
+      throw new Error(
+        'La aplicación de borradores del SII no devolvió una lista'
+        + `${respCode !== undefined ? ` (respCode ${respCode})` : ''}`
+        + `${msg ? `: ${String(msg).slice(0, 120)}` : '.'}`);
+    }
+    return datos;
   }
 
   // Emisión. `confirmar` es lo único que separa leer de emitir:

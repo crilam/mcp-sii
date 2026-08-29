@@ -266,3 +266,104 @@ describe('MipymeHttpScraper.dtePdf', () => {
     await expect(scraper.dtePdf(codigo, '33333333-3')).rejects.toThrow(/codigo/i);
   });
 });
+
+describe('MipymeHttpScraper.listBorradores', () => {
+  function conRespuesta(cuerpo: string) {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock).mockResolvedValue(cuerpo);
+    return { scraper, http };
+  }
+
+  // El bundle lo declara con `createGetOperation`, y el servidor lo confirma: un
+  // POST con el sobre SDI devuelve 500 "No resource method found for POST".
+  // Medido contra el servicio real.
+  it('consulta por GET, no con el sobre SDI', async () => {
+    const { scraper, http } = conRespuesta('[]');
+
+    await scraper.listBorradores();
+
+    expect(http.get).toHaveBeenCalledWith(
+      expect.stringContaining('/borradorService/listaBorrador'));
+    expect(http.postSdi).not.toHaveBeenCalled();
+  });
+
+  // La URL y el namespace nombran distinto la misma operación
+  // (`listaBorrador` contra `listado`). Este test fija el segmento de la URL,
+  // que es el que dio 404 cuando se usó el del namespace.
+  it('usa el segmento de URL del bundle y no el del namespace', async () => {
+    const { scraper, http } = conRespuesta('[]');
+
+    await scraper.listBorradores();
+
+    const url = (http.get as jest.Mock).mock.calls[0][0] as string;
+    expect(url).toContain('listaBorrador');
+    expect(url).not.toMatch(/\/listado$/);
+  });
+
+  it('mapea codigo y tipo de documento de los campos del SII', async () => {
+    const { scraper } = conRespuesta(JSON.stringify([
+      { ehdr_CODIGO: 12345, ptdc_CODIGO: 33, EFXP_RZNSOC_RECEP: 'ALGUIEN SPA' },
+    ]));
+
+    const res = await scraper.listBorradores();
+
+    expect(res).toEqual([{
+      codigo: '12345',
+      tipoDte: 33,
+      // Los campos del SII se publican enteros y sin renombrar: un borrador
+      // trae decenas de `EFXP_*` que dependen del tipo, y elegir cuáles exponer
+      // sería adivinar qué necesita el consumidor.
+      campos: { ehdr_CODIGO: 12345, ptdc_CODIGO: 33, EFXP_RZNSOC_RECEP: 'ALGUIEN SPA' },
+    }]);
+  });
+
+  // El código es un identificador opaco: se publica como string aunque el SII lo
+  // mande numérico, para que no se aritmetice y no rompa si le agregan letras.
+  it('el codigo viaja como string aunque el SII lo mande numérico', async () => {
+    const { scraper } = conRespuesta(JSON.stringify([{ ehdr_CODIGO: 987, ptdc_CODIGO: 61 }]));
+
+    const res = await scraper.listBorradores();
+
+    expect(res[0].codigo).toBe('987');
+  });
+
+  it('un tipo ausente queda en null, no en cero', async () => {
+    const { scraper } = conRespuesta(JSON.stringify([{ ehdr_CODIGO: 1 }]));
+
+    const res = await scraper.listBorradores();
+
+    expect(res[0].tipoDte).toBeNull();
+  });
+
+  it('acepta la lista envuelta en data', async () => {
+    const { scraper } = conRespuesta(JSON.stringify({ data: [{ ehdr_CODIGO: 7, ptdc_CODIGO: 34 }] }));
+
+    const res = await scraper.listBorradores();
+
+    expect(res).toHaveLength(1);
+    expect(res[0].codigo).toBe('7');
+  });
+
+  it('sin borradores devuelve una lista vacía', async () => {
+    const { scraper } = conRespuesta('[]');
+
+    await expect(scraper.listBorradores()).resolves.toEqual([]);
+  });
+
+  // El servidor de aplicaciones responde HTML en sus errores (404, 500, login).
+  // Sin este mensaje el fallo llegaría como "Unexpected token <", que no dice
+  // nada de lo que pasó.
+  it('un HTML de error no se confunde con una respuesta', async () => {
+    const { scraper } = conRespuesta('<html>HTTP Status 404</html>');
+
+    await expect(scraper.listBorradores()).rejects.toThrow(/no devolvió JSON/);
+  });
+
+  // Un JSON que no es una lista tampoco es "no hay borradores": devolver [] haría
+  // que "el SII contestó otra cosa" y "no tenés borradores" se lean idénticos.
+  it('un JSON que no es lista es un error explícito', async () => {
+    const { scraper } = conRespuesta(JSON.stringify({ metaData: { respCode: 99, msgError: 'sin permiso' } }));
+
+    await expect(scraper.listBorradores()).rejects.toThrow(/no devolvió una lista.*99.*sin permiso/s);
+  });
+});

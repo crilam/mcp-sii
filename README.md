@@ -193,6 +193,7 @@ Todas reciben `rut` como primer parámetro — ver
 | `sii_mipyme_list_empresas` | Empresas que la persona puede operar **en este portal** |
 | `sii_mipyme_list_dte_emitidos` | Historial de DTE emitidos por este portal, de a 100 por página |
 | `sii_mipyme_list_dte_recibidos` | DTE recibidos por la empresa, con el estado del acuse |
+| `sii_mipyme_list_borradores` | Borradores guardados, con todos los campos del SII |
 | `sii_mipyme_emitir_dte` | **Emite** un DTE. Acto tributario real e irreversible — ver la advertencia abajo |
 
 ### Consultas DTE
@@ -231,6 +232,28 @@ ES el dato, mientras un código en 0 no sería "código cero" sino "no hay". Y
 `23/06/2026`): son dos formatos distintos en la misma fila, tal como los manda el
 SII, y no se normalizan para que la diferencia se vea en vez de descubrirse
 parseando.
+
+`sii_mipyme_list_borradores` sale de **otra aplicación del SII**, no del portal
+clásico: `mipymeinternetui`, con su propia API. Devuelve los campos con los
+nombres del SII (`EFXP_*`) sin renombrar, porque un borrador trae decenas que
+dependen del tipo de documento y elegir cuáles exponer sería adivinar qué
+necesita quien consulta. **Su mapeo de campos no está verificado con datos
+reales**: las cinco empresas de prueba no tenían ningún borrador guardado, así
+que lo confirmado es el camino —responde, autentica y devuelve JSON válido— y no
+el contenido.
+
+Tres cosas del catálogo de apigateway **no se homologaron, y no por falta de
+tiempo**:
+
+- **`dte-xml`.** El único camino del portal a un XML es la descarga masiva
+  (`mipeDownLoad.cgi`), que baja el lote entero según los filtros de la pantalla
+  y está detrás de un reCAPTCHA. No hay descarga individual, y un reCAPTCHA no es
+  un camino que un servicio pueda recorrer solo.
+- **`borrador-pdf`.** Depende de tener un borrador; sin ninguno no hay nada que
+  relevar ni con qué verificar.
+- **`info-contribuyente`.** El formulario de emisión no expone ningún CGI de
+  consulta de contribuyente: los datos del receptor aparecen recién al
+  previsualizar, o sea que no hay una consulta separada que homologar.
 
 El **PDF de un documento** existe sólo como ruta REST (`POST /v1/mipyme/dte-pdf`),
 no como tool MCP, igual que el de BHE: un PDF en base64 dentro de una respuesta

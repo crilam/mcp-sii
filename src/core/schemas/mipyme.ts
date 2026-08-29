@@ -46,6 +46,10 @@ export const schemaDtePdf = {
     .describe('Código del documento, tal como lo devuelve list-dte-emitidos o list-dte-recibidos'),
 };
 
+export const schemaListBorradores = {
+  rut: z.string().min(1).describe(RUT_DESC),
+};
+
 export const schemaEmitirDte = {
   rut: z.string().min(1).describe(RUT_DESC),
   empresa_rut: z.string().optional()

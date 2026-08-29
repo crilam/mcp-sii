@@ -20,12 +20,12 @@ const RECEPTOR_MINIMO = {
 describe('registrarRutasMipyme', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 5 rutas bajo /v1/mipyme', () => {
+  it('registra las 6 rutas bajo /v1/mipyme', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
       'POST /v1/mipyme/list-empresas', 'POST /v1/mipyme/list-dte-emitidos',
       'POST /v1/mipyme/list-dte-recibidos', 'POST /v1/mipyme/dte-pdf',
-      'POST /v1/mipyme/emitir-dte',
+      'POST /v1/mipyme/list-borradores', 'POST /v1/mipyme/emitir-dte',
     ]);
   });
 
@@ -149,6 +149,20 @@ describe('registrarRutasMipyme', () => {
       expect(r.status).toBe(400);
       expect(core.dtePdf).not.toHaveBeenCalled();
     });
+
+  it('list-borradores: acepta clave tributaria y envuelve la lista en datos', async () => {
+    (core.listBorradores as jest.Mock).mockResolvedValue([
+      { codigo: '1', tipoDte: 33, campos: {} },
+    ]);
+    const rutas = armarRouter();
+
+    const r = await rutas.get('POST /v1/mipyme/list-borradores')!({
+      rut: '11.111.111-1', clave: 'secreta',
+    });
+
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ ok: true, datos: [{ codigo: '1', tipoDte: 33, campos: {} }] });
+  });
 
   // La emisión NO cambió: firmar un DTE requiere el certificado de verdad, no
   // basta una sesión autenticada. Este test es el que impide que un futuro

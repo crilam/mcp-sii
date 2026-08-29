@@ -4,7 +4,7 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaEmitirDte } from '../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaListBorradores, schemaEmitirDte } from '../core/schemas/mipyme';
 
 // Orden de resolución de la empresa, el mismo que el resto del proyecto: el
 // parámetro de la llamada gana, si no vino cae a SII_EMPRESA_RUT, y si tampoco
@@ -58,6 +58,17 @@ export function registerMipymeTools(server: McpServer, registro: RegistroSesione
         empresaRut: empresaPedida(empresa_rut), tipoDte: tipo_dte, fechaDesde: fecha_desde,
         fechaHasta: fecha_hasta, emisorRut: emisor_rut, folio, pagina,
       }))
+  );
+
+  server.tool(
+    'sii_mipyme_list_borradores',
+    'Lista los borradores de DTE guardados en el portal de Facturación Gratuita. Devuelve el ' +
+    'código de cada borrador, su tipo de documento y TODOS los campos tal como los nombra el ' +
+    'SII (EFXP_*, sin renombrar): un borrador tiene decenas de campos que dependen del tipo, ' +
+    'y cuáles importan lo decide quien consulta. Los borradores viven en otra aplicación del ' +
+    'SII, no en el portal clásico, y cuelgan de la empresa activa.',
+    schemaListBorradores,
+    async ({ rut }) => envolverParaMcp(() => core.listBorradores(registro, rut))
   );
 
   server.tool(

@@ -3,7 +3,7 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaEmitirDte } from '../../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaListBorradores, schemaEmitirDte } from '../../core/schemas/mipyme';
 import { ejecutorPara, ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCredencialCert } from './comun';
 
@@ -16,6 +16,7 @@ const zodListEmpresas = conCredencial(schemaListEmpresas);
 const zodListDteEmitidos = conCredencial(schemaListDteEmitidos);
 const zodListDteRecibidos = conCredencial(schemaListDteRecibidos);
 const zodDtePdf = conCredencial(schemaDtePdf);
+const zodListBorradores = conCredencial(schemaListBorradores);
 const zodEmitirDte = z.object(schemaEmitirDte).extend({
   ...zodCredencialCert,
   // `clave` se RECHAZA explícitamente, no se ignora. Sin esto, un body que
@@ -94,6 +95,14 @@ export function registrarRutasMipyme(
         pdf_base64: contenido.toString('base64'),
       };
     });
+  });
+
+  rutas.set('POST /v1/mipyme/list-borradores', async body => {
+    const parseo = zodListBorradores.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(() => core.listBorradores(ejecutor, rut));
   });
 
   // sii_mipyme_emitir_dte con confirmar=true firma con certificado digital,
