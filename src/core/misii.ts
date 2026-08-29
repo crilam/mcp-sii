@@ -1,5 +1,6 @@
 import { MisiiScraper, FichaCruda, AtributoMisii } from '../scrapers/misii';
 import { LimitacionConocida } from '../erroresConsulta';
+import { partirRut } from '../rut';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { EjecutorSesion } from '../registroSesiones';
@@ -110,9 +111,17 @@ function aNumero(valor: string | null | undefined): number | null {
 // Por eso `desde` no es decorativo: es el único dato con el que el consumidor
 // puede saber para qué períodos vale esta respuesta. Un F29 de un período
 // anterior a esa fecha NO se calcula con este régimen.
-export function regimenDe(atributos: AtributoMisii[]): RegimenFicha | null {
-  const vigentes = atributos.filter(a =>
-    PREFIJO_REGIMEN.test(String(a.atrCodigo ?? '')) && !a.fechaTermino);
+export function regimenDe(atributos: AtributoMisii[], hoy = new Date()): RegimenFicha | null {
+  // Vigente es "sin término" O "con término todavía por venir". Descartar
+  // cualquier `fechaTermino` dejaba `regimen: null` —que el contrato define como
+  // "no se pudo determinar"— para un régimen que el SII informa perfectamente,
+  // sólo porque tiene fecha de fin agendada.
+  const vigentes = atributos.filter(a => {
+    if (!PREFIJO_REGIMEN.test(String(a.atrCodigo ?? ''))) return false;
+    if (!a.fechaTermino) return true;
+    const termino = aIso(a.fechaTermino);
+    return termino !== null && termino >= hoy.toISOString().slice(0, 10);
+  });
 
   // Dos regímenes vigentes a la vez no debería pasar, y justamente por eso no
   // se puede resolver eligiendo el primero: el orden del array no es un
@@ -158,7 +167,11 @@ export function normalizar(cruda: FichaCruda, capturadoEn: string): FichaContrib
       descripcion: c.segmentoDescripcion ?? null,
     },
     regimen: regimenDe(cruda.atributos),
-    actividades: cruda.actividades.map(a => ({
+    // Cada elemento de `DatosActeco` trae su propio `codigoError`: un
+    // contribuyente sin actividades devuelve un elemento de error con todo en
+    // null, que sin filtrar pasaba como una actividad fantasma y el consumidor
+    // la mostraría como una actividad real.
+    actividades: cruda.actividades.filter(a => a.codigo).map(a => ({
       // El código ACTECO se deja como STRING. Convertirlo a número se come el
       // cero a la izquierda —011101 (cultivo de trigo) quedaría en 11101—, y
       // ese código no existe: el join contra la tabla de actividades del SII
@@ -203,6 +216,21 @@ export async function fichaContribuyente(
   return registro.ejecutar(rut, async sesion => {
     const scraper = new MisiiScraper(new SiiHttpClient(sesion));
     const cruda = await scraper.ficha();
+
+    // La ficha es de la IDENTIDAD AUTENTICADA, no del RUT que viaja en el
+    // request. Hoy son el mismo —la credencial es la de ese RUT—, pero si
+    // alguna vez difieren, el consumidor persistiría contra el RUT que pidió
+    // una ficha que es de otro contribuyente, sin ninguna señal de que pasó.
+    // Es el peor error que puede cometer este endpoint, y cuesta una
+    // comparación: se corta acá en vez de confiar en que no ocurra.
+    const pedido = partirRut(rut, 'RUT del request');
+    const devuelto = `${cruda.contribuyente.rut}-${cruda.contribuyente.dv}`;
+    if (devuelto !== `${pedido.rut}-${pedido.dv}`) {
+      throw new LimitacionConocida(
+        `El SII devolvió la ficha de ${devuelto} y se pidió la de ` +
+        `${pedido.rut}-${pedido.dv}: no se entrega una identidad que no es la pedida.`
+      );
+    }
     // `capturadoEn` se sella cuando LLEGA el dato del SII, no cuando se
     // responde. Hoy son casi lo mismo; en cuanto haya caché dejan de serlo, y
     // fechar con la hora de la respuesta afirmaría una confirmación contra el

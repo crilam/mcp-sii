@@ -545,6 +545,12 @@ de otra— y comuna y región con `{codigo, descripcion}`. Más tres campos de
 procedencia: `capturadoEn` (cuándo se leyó **del SII**), `parserVersion`, y
 `crudo` con el payload original sin normalizar.
 
+**`crudo` contiene datos personales**: correo, teléfono móvil, capital enterado
+y el RUT en cada atributo, tal como los entrega el SII y sin filtrar. Es
+deliberado —es el payload original, y ahí está su valor para auditar—, pero
+significa que **loguear la respuesta completa es loguear PII**. Si se registran
+respuestas, hay que excluir `crudo`.
+
 Las fechas vienen normalizadas a ISO y los booleanos convertidos: el SII usa dos
 formatos de fecha en el mismo payload y strings `"S"`/`"N"`/`"No"` como
 booleanos. Se normaliza acá para que cada consumidor no repita la conversión —y

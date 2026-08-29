@@ -124,6 +124,20 @@ describe('régimen tributario', () => {
     ])).toBeNull();
   });
 
+  // Un término FUTURO sigue vigente hoy. Descartarlo por tener fecha devolvía
+  // `regimen: null` —"no se pudo determinar"— para un régimen que el SII sí
+  // informa, y el consumidor se queda sin dato por nada.
+  it('un régimen con término futuro sigue vigente', () => {
+    const dentroDeUnAnio = new Date(Date.now() + 365 * 24 * 3600 * 1000);
+    const dd = String(dentroDeUnAnio.getDate()).padStart(2, '0');
+    const mm = String(dentroDeUnAnio.getMonth() + 1).padStart(2, '0');
+
+    expect(regimenDe([
+      { atrCodigo: '14D1', descAtrCodigo: 'PRO PYME GENERAL', fechaInicio: '01-01-2026',
+        fechaTermino: `${dd}-${mm}-${dentroDeUnAnio.getFullYear()}`, valor: null },
+    ])).toMatchObject({ codigo: '14D1' });
+  });
+
   // Dos vigentes a la vez no debería pasar, y por eso mismo no se resuelve
   // eligiendo el primero: el orden del array no es un criterio, y de este campo
   // sale el F29. Falla mostrando los dos códigos.
@@ -132,6 +146,25 @@ describe('régimen tributario', () => {
       { atrCodigo: '14D1', descAtrCodigo: 'PRO PYME GENERAL', fechaInicio: '01-01-2026', fechaTermino: null, valor: null },
       { atrCodigo: '14A', descAtrCodigo: 'SEMI INTEGRADO', fechaInicio: '01-01-2020', fechaTermino: null, valor: null },
     ])).toThrow(/14D1, 14A/);
+  });
+});
+
+describe('actividades incompletas', () => {
+  // Cada elemento de DatosActeco trae su propio codigoError. Un contribuyente
+  // sin actividades devuelve un elemento de error con todo en null, que sin
+  // filtrar pasaba como una actividad fantasma —código null, giro null— y el
+  // consumidor la mostraría como una actividad real del contribuyente.
+  it('descarta el elemento sin código en vez de emitir una actividad fantasma', () => {
+    const ficha2 = normalizar({
+      contribuyente: { rut: '22222222', dv: '2' } as never,
+      direcciones: [], atributos: [], alertas: [],
+      actividades: [
+        { codigo: null, descripcion: null, categoriaTributaria: null, afectoIva: null, fechaInicio: null },
+        { codigo: '522120', descripcion: 'ESTACIONAMIENTOS', categoriaTributaria: '1', afectoIva: 'S', fechaInicio: '16-12-2015' },
+      ],
+    }, CAPTURA);
+
+    expect(ficha2.actividades.map(a => a.codigo)).toEqual(['522120']);
   });
 });
 

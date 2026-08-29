@@ -73,7 +73,15 @@ async function main() {
       problemas.push('alguna actividad quedó con afectaIva en null: el SII usa S/N, revisá el mapeo');
     }
 
-    console.log(problemas.length ? `\nPROBLEMAS:\n - ${problemas.join('\n - ')}` : '\nControles OK.');
+    if (problemas.length) {
+      // Sale con código distinto de cero: un chequeo que imprime "PROBLEMAS" y
+      // termina en 0 se pasa por alto en CI, y a ojo también cuando la salida
+      // es larga.
+      console.error(`\nPROBLEMAS:\n - ${problemas.join('\n - ')}`);
+      process.exitCode = 1;
+    } else {
+      console.log('\nControles OK.');
+    }
   } finally {
     await cerrarSesionSii(sesion);
   }

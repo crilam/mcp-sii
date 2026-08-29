@@ -26,7 +26,10 @@ export function registerMisiiTools(server: McpServer, registro: RegistroSesiones
     '(verificado en dos empresas de forma jurídica distinta), así que su ausencia no significa que el ' +
     'contribuyente no los tenga. ' +
     'Cada respuesta trae `capturadoEn` (cuándo se leyó del SII) y `parserVersion`, y `crudo` con el payload ' +
-    'original sin normalizar.',
+    'original sin normalizar — que incluye datos personales (correo, teléfono, capital), así que no conviene ' +
+    'volcarlo entero en un log. ' +
+    'Si la sesión del SII expiró, la consulta falla y hay que cerrar la sesión con sii_cerrar_sesion antes de ' +
+    'reintentar: la sesión vencida queda cacheada y reintentar sin cerrarla pega contra la misma cookie.',
     schemaFichaContribuyente,
     async ({ rut }) => envolverParaMcp(() => core.fichaContribuyente(registro, rut))
   );
