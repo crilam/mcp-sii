@@ -82,6 +82,37 @@ depende de una suposición del código.
 Sin esta variable, emitir falla pidiéndola; todo lo demás (consultas y la
 previsualización de un DTE) funciona igual.
 
+### Perfiles de verificación contra el SII real
+
+Verificar el servicio entero necesita **tres** credenciales, no una: lo que un
+contribuyente puede consultar depende de qué es y de cómo factura.
+
+| Perfil | Qué es | Verifica |
+|---|---|---|
+| `SII_PERSONA_*` | Persona natural | BHE emitidas y recibidas, bienes raíces, renta |
+| `SII_MIPYME_*` | Inscrito en Facturación Gratuita del SII | El portal mipyme entero |
+| `SII_MERCADO_*` | Factura con software de mercado | RCV, DTE, F29 |
+
+El de mipyme no es intercambiable: **si el RUT no está inscrito en Facturación
+Gratuita, el selector de empresas del portal viene sin una sola opción** y no hay
+nada que consultar. Eso no se ve en el `.env` ni en ningún otro lado hasta que se
+intenta, y por eso existe:
+
+```bash
+npx ts-node src/scripts/clasificarCredencial.ts          # los que estén cargados
+npx ts-node src/scripts/clasificarCredencial.ts mipyme   # uno en particular
+```
+
+Sondea las rutas REST de producción y dice para qué sirve realmente cada
+credencial. Conviene correrlo **antes** de empezar una ronda, no a la mitad.
+
+`perfilesVerificacion.ts` **no sustituye un perfil por otro**: si falta el que se
+pide, falla diciendo cuál. Un fallback haría correr la verificación contra un
+contribuyente distinto, y ahí ni el verde ni el rojo dicen nada sobre lo que se
+quería probar.
+
+Ver `.env.example` para la plantilla completa.
+
 ### Legado: `SII_CLAVE` / `SII_CERT_PATH` (una sola credencial por proceso)
 
 ```bash
