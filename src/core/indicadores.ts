@@ -52,7 +52,11 @@ const CLAVE_PORTAL = 'indicadores';
 // de un año pide seis indicadores, y dos consumidores haciéndolo a la vez
 // entran. Más que eso no es demanda, es una ráfaga.
 export const MAX_EN_COLA = 12;
-let esperando = 0;
+
+// Cuenta las bajadas EN VUELO: la que está corriendo más las que esperan turno.
+// Se llama así y no `esperando` porque con 12 son 11 esperando y 1 corriendo, y
+// el nombre anterior hacía leer mal el mensaje de error.
+let bajadasEnVuelo = 0;
 
 export function limpiarCacheIndicadores(): void {
   cache.clear();
@@ -60,7 +64,11 @@ export function limpiarCacheIndicadores(): void {
   // un test que deja bajadas colgadas dejaría el cupo consumido para todos los
   // que siguen en el mismo proceso — fallando por contaminación, no por lo que
   // el test dice probar.
-  esperando = 0;
+  // `Math.max(0, …)` en el decremento y no sólo el reset: una bajada colgada
+  // cuando se limpia sigue teniendo su `finally` pendiente, y sin el piso el
+  // contador quedaba NEGATIVO al liberarla — aflojando el tope para todo lo que
+  // viniera después, en silencio.
+  bajadasEnVuelo = 0;
 }
 
 function expiracion(anio: number, ahora: number): number {
@@ -100,14 +108,14 @@ function conCache<T>(clave: string, anio: number, fn: () => Promise<T>): Promise
   // cada llamador a envolver la llamada en try/catch ADEMÁS del catch de la
   // promesa. El que se olvide —y alguno se olvida— se lleva una excepción sin
   // capturar en vez de un error de dominio.
-  if (esperando >= MAX_EN_COLA) {
+  if (bajadasEnVuelo >= MAX_EN_COLA) {
     return Promise.reject(new ServicioOcupado(
-      `Hay ${esperando} consultas de indicadores esperando turno contra el portal del SII. ` +
+      `Hay ${bajadasEnVuelo} consultas de indicadores en curso contra el portal del SII. ` +
       'Reintentá en unos segundos: el servicio serializa las bajadas a propósito, ' +
       'porque un barrido paralelo hace que el SII corte por volumen.'
     ));
   }
-  esperando++;
+  bajadasEnVuelo++;
 
   // La expiración se calcula cuando LLEGA el dato, no cuando se encoló: con la
   // cola serializada, una bajada puede esperar su turno varios segundos y el TTL
@@ -116,7 +124,7 @@ function conCache<T>(clave: string, anio: number, fn: () => Promise<T>): Promise
     const entrada = cache.get(clave);
     if (entrada?.valor === enVuelo) entrada.expira = expiracion(anio, Date.now());
     return valor;
-  }).finally(() => { esperando--; });
+  }).finally(() => { bajadasEnVuelo = Math.max(0, bajadasEnVuelo - 1); });
   cache.set(clave, { valor: enVuelo, expira: expiracion(anio, ahora) });
 
   // Sólo se cachea el éxito: un fallo puede ser del momento —el portal caído, un

@@ -182,6 +182,9 @@ describe('extraerIpsSospechosas', () => {
     'servidor/8.8.4.4',
     'backend/8.8.4.4',
     'host/8.8.4.4',
+    // Con la bandera `i`, este quedaba exento gratis: los productos de un
+    // User-Agent van con mayúscula fija.
+    'version/8.8.4.4',
   ])('no exime a un producto desconocido: %s', (contenido) => {
     expect(extraerIpsSospechosas(contenido)).toContain('8.8.4.4');
   });

@@ -150,7 +150,10 @@ export function extraerIpsSospechosas(contenido: string): string[] {
     // un `backend/8.8.4.4` en documentación quedaban exentos y el chequeo dejaba
     // pasar una IP real. La exención existe por el User-Agent del repo, así que
     // se limita a él.
-    if (new RegExp(`(?:^|\\s)(${PRODUCTOS_DE_USER_AGENT.join('|')})\\/$`, 'i')
+    // Sin la bandera `i`: los productos de un User-Agent se escriben con
+    // mayúscula fija ("Chrome/", "Safari/"), y con `i` un `version/8.8.4.4`
+    // cualquiera en un documento quedaba eximido gratis.
+    if (new RegExp(`(?:^|\\s)(${PRODUCTOS_DE_USER_AGENT.join('|')})\\/$`)
       .test(contenido.slice(0, m.index))) continue;
     encontrados.push(m[0]);
   }

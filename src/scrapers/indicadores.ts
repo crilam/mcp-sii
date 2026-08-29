@@ -94,9 +94,13 @@ export function numeroChileno(texto: string | undefined): number | null {
 // corta la nota entra en cualquier ventana razonable. El discriminante que sí
 // sirve es si hay tabla de datos.
 function pareceTablaDeDatos(html: string): boolean {
-  if (!/<table/i.test(html)) return false;
-  const nombresDeMes = Object.keys(MESES).join('|');
-  return new RegExp(`\\b(${nombresDeMes})\\b`, 'i').test(html);
+  // Se reusa `porMes`, que es LA definición de "hay tablas de datos" para este
+  // archivo. Una definición propia acá (un `<table` más un nombre de mes en
+  // cualquier parte) empezaba igual pero iba a divergir: una página de corte
+  // con tabla de maquetado y un "Enero" al pie pasaba como datos y después
+  // reventaba con "no se reconocieron las tablas", que apunta al lugar
+  // equivocado.
+  return porMes(html).length > 0;
 }
 
 function assertNoEsCorte(html: string): void {
