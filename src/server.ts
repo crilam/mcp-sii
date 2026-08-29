@@ -9,6 +9,7 @@ import { registerIndicadoresTools } from './tools/indicadores';
 import { registerVehiculosTools } from './tools/vehiculos';
 import { registerActividadesEconomicasTools } from './tools/actividadesEconomicas';
 import { registerMisiiTools } from './tools/misii';
+import { registerDteVerificacionTools } from './tools/dteVerificacion';
 import { ProveedorCredencialesRuntime } from './credencialesRuntime';
 import { crearRegistroSesionesSii } from './registroSesionesSii';
 
@@ -39,6 +40,7 @@ export function createServer(): McpServer {
   registerVehiculosTools(server);
   registerActividadesEconomicasTools(server);
   registerMisiiTools(server, registro);
+  registerDteVerificacionTools(server, registro);
 
   return server;
 }

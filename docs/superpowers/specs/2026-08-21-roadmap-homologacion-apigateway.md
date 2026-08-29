@@ -53,7 +53,7 @@ connections (billing del propio gateway).
 
 ## Estado real a 2026-08-26
 
-En producción, 46 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 a 9 sumaron el resto):
+En producción, 48 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 a 10 sumaron el resto):
 
 | Dominio | Rutas hoy |
 |---|---|
@@ -70,6 +70,7 @@ En producción, 46 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 a 9 sumaron el 
 | vehiculos | tipos, marcas, modelos, tasacion, equipamiento |
 | contribuyentes | situacion-tributaria, actividades-economicas, actividad-economica, verificar-rut |
 | misii | datos-contribuyente |
+| dte | validez, verificar (además de los cuatro list/get previos) |
 
 **CORRECCIÓN (2026-08-26) — el pass-through por clave SÍ funciona.** La versión
 anterior decía que se había descartado (queue-it + F5 WAF, sin sesión
@@ -99,7 +100,7 @@ verificación en prod + aviso a los consumidores si cambia el contrato.
 | ~~R7~~ | **vehiculos** | 4 | **5** | ✅ **Completa.** La consulta interactiva del portal (`vehiculospubui`) exige un **captcha propio del SII** antes de buscar: no automatizable. La fuente son las planillas XLSX anuales públicas (`liv{año}`/`pes{año}`, desde 2020), bajadas una vez y consultadas en memoria. Rutas: tipos, marcas, modelos, tasacion, equipamiento. |
 | ~~R8~~ | **misii** | 4 | **1** | ✅ Lo que el catálogo real tiene (1 endpoint: `contribuyente/datos`). La home de Mi SII trae la ficha embebida en JSON (`DatosCntrNow`): identificación, direcciones, atributos. **Representantes, socios y giros** se renderizan del lado del servidor y con la credencial relevada venían vacíos: sin forma conocida, fuera. El conteo de 4 era orientativo. |
 | ~~R9~~ | **contribuyentes** | 3 | **4** | ✅ actividades-economicas (página pública, ~670 códigos), actividad-economica y verificar-rut (módulo 11, sin SII). `situacion-tributaria` ya existía. |
-| R10 | dte (parte A) | ? | 4 | Sólo lo que sea consulta de portal. El resto pasa al mundo B. |
+| ~~R10~~ | **dte (parte A)** | 2 | **6** | ✅ Los dos endpoints de consulta del catálogo. `emitidos/verificar` → `/v1/dte/validez` y `/v1/dte/verificar`: eran CGI públicos de palena (`QValidaDTE`, `QEstadoDTE`) y el SII los puso detrás del login; con sesión funcionan. `contribuyentes/autorizado/{rut}`: el CGI público (`ee_empresa_rut`) **da 404** y los listados estáticos alternativos traen 1.000 filas recientes, no el universo — sin fuente confiable, fuera. El resto de `dte` (CAF, folios, anulación) es mundo B. |
 | R11 | Escritura de portal | — | — | bhe emitir/anular, rcv set_tipo_transaccion/set_resumen, mipyme borradores. **Actos reales e irreversibles**: idempotencia y confirmación explícita. Spec con cuidado extra. |
 
 **Lo que dejó la R5, y que sirve para las rondas sin credencial (R7 vehículos).**
