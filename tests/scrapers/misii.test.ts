@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { extraerDatos, MisiiScraper } from '../../src/scrapers/misii';
+import { extraerDatos, fechaIso, MisiiScraper } from '../../src/scrapers/misii';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
 
@@ -87,5 +87,51 @@ describe('MisiiScraper', () => {
     expect(d.rut).toBe('11111111-1');
     expect(http.get).toHaveBeenCalledWith(
       'https://misiir.sii.cl/cgi_misii/siihome.cgi', undefined, { guardarCookies: true });
+  });
+
+  // La causa más común de una home sin datos es la sesión caducada: sin
+  // invalidarla, cada llamada repetiría el login hasta reiniciar el proceso.
+  it('si la home viene sin datos, invalida la sesión y reintenta una vez', async () => {
+    const session = new (SessionManager as jest.MockedClass<typeof SessionManager>)({} as any, {} as any);
+    const http = new (SiiHttpClient as jest.MockedClass<typeof SiiHttpClient>)(session);
+    (session.assertPuedeEntregarCookieJar as jest.Mock) = jest.fn();
+    (session.invalidate as jest.Mock) = jest.fn();
+    (http.get as jest.Mock).mockResolvedValueOnce('<html>login</html>').mockResolvedValueOnce(HOME);
+
+    const d = await new MisiiScraper(http, session).datosContribuyente();
+
+    expect(d.rut).toBe('11111111-1');
+    expect(session.invalidate).toHaveBeenCalledTimes(1);
+    expect(http.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('si el reintento también falla, el error sale y no se reintenta más', async () => {
+    const session = new (SessionManager as jest.MockedClass<typeof SessionManager>)({} as any, {} as any);
+    const http = new (SiiHttpClient as jest.MockedClass<typeof SiiHttpClient>)(session);
+    (session.assertPuedeEntregarCookieJar as jest.Mock) = jest.fn();
+    (session.invalidate as jest.Mock) = jest.fn();
+    (http.get as jest.Mock).mockResolvedValue('<html>login</html>');
+
+    await expect(new MisiiScraper(http, session).datosContribuyente()).rejects.toThrow(/DatosCntrNow/);
+    expect(http.get).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('fechaIso', () => {
+  // La ficha mezcla "2008-03-26 00:00:00.0" y "01-01-2026": el consumidor no
+  // tiene que adivinar cuál le tocó.
+  it.each([
+    ['2008-03-26 00:00:00.0', '2008-03-26'],
+    ['01-01-2026', '2026-01-01'],
+    ['', null],
+    [null, null],
+  ])('%p → %p', (entrada, esperado) => {
+    expect(fechaIso(entrada)).toBe(esperado);
+  });
+
+  it('las fechas de la ficha salen normalizadas', () => {
+    const d = extraerDatos(HOME);
+    expect(d.fechaConstitucion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(d.atributos[0].desde).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

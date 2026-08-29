@@ -48,7 +48,16 @@ describe('parsearActividades', () => {
   });
 
   it('una tabla sin códigos reconocibles falla explícito', () => {
-    expect(() => parsearActividades('<table><tr><td>Rubro</td></tr><tr><td>x</td><td>y</td></tr></table>'))
-      .toThrow(/ningún código reconocible/);
+    const conCabeceraPeroSinCodigos = '<table><tr><td>Rubro</td></tr>'
+      + '<tr><td>Código</td><td>Sub</td><td>Afecto a IVA</td><td>Categoría Tributaria</td><td>Disponible</td></tr>'
+      + '<tr><td>x</td><td>y</td></tr></table>';
+    expect(() => parsearActividades(conCabeceraPeroSinCodigos)).toThrow(/ningún código reconocible/);
+  });
+
+  // La tabla de datos no es necesariamente la PRIMERA de la página: una tabla
+  // de layout agregada antes no puede convertir los datos en "ningún código".
+  it('elige la tabla que trae la cabecera de códigos, no la primera', () => {
+    const conLayout = '<table><tr><td>menú</td><td>otra</td></tr></table>' + html;
+    expect(parsearActividades(conLayout)).toHaveLength(8);
   });
 });

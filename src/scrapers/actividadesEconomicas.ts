@@ -52,7 +52,10 @@ function celdas(fila: string): string[] {
 }
 
 export function parsearActividades(html: string): ActividadEconomica[] {
-  const tabla = /<table[\s\S]*?<\/table>/i.exec(html)?.[0];
+  // La tabla que trae la cabecera de los códigos, no la PRIMERA de la página:
+  // una tabla de layout agregada antes convertiría los datos en "ningún código".
+  const tabla = [...html.matchAll(/<table[\s\S]*?<\/table>/gi)].map(m => m[0])
+    .find(t => /Categor/i.test(t) && /C[oó]digo|C&oacute;digo/i.test(t));
   if (!tabla) {
     throw new Error(
       'La página de códigos de actividad económica del SII no trae la tabla esperada. '

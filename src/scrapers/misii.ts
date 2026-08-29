@@ -71,16 +71,20 @@ export interface DatosContribuyente {
  * una regex hasta el `;`: el JSON trae strings con puntos y comas.
  */
 export function extraerDatos(html: string): DatosContribuyente {
-  const i = html.indexOf(`${MARCA} =`);
-  if (i === -1) {
+  // Con o sin espacios alrededor del `=`: una minificación no debe romperlo. Y
+  // el `{` tiene que ser el que sigue al `=`, no cualquier `{` posterior: si el
+  // valor fuera `null`, engancharía el objeto de otro script.
+  const m = new RegExp(`${MARCA}\\s*=\\s*\\{`).exec(html);
+  const i = m ? m.index : -1;
+  if (i === -1 || !m) {
     // Sin la marca no es la home: es el login, un error del portal o un rediseño.
     // Distinguirlo de "sin datos" importa: un rediseño no puede leerse como un
     // contribuyente vacío.
-    throw new Error(
+    throw new SesionDeMisiiCaida(
       'La home de Mi SII no trajo el bloque de datos del contribuyente (DatosCntrNow). '
       + 'La sesión pudo expirar o el portal cambió.');
   }
-  const desde = html.indexOf('{', i);
+  const desde = i + m[0].length - 1;
   const crudo = recortarJson(html, desde);
   let d: DatosCrudo;
   try {
@@ -92,6 +96,11 @@ export function extraerDatos(html: string): DatosContribuyente {
   if (!c || c.codigoError !== 0) {
     throw new Error(
       `Mi SII respondió un error en los datos del contribuyente: ${c?.descripcionError ?? d.descripcionError ?? 'sin detalle'}.`);
+  }
+  // Sin RUT no hay ficha: un "undefined-undefined" con status 200 sería peor
+  // que un error.
+  if (!c.rut || !c.dv) {
+    throw new Error('El bloque DatosCntrNow de Mi SII no trae el RUT del contribuyente: cambió el formato.');
   }
 
   return {
@@ -107,9 +116,9 @@ export function extraerDatos(html: string): DatosContribuyente {
     glosaActividad: c.glosaActividad ?? '',
     email: c.eMail || null,
     telefonoMovil: c.telefonoMovil || null,
-    fechaConstitucion: c.fechaConstitucion ?? null,
-    fechaInicioActividades: c.fechaInicioActividades ?? null,
-    fechaTerminoGiro: c.fechaTerminoGiro ?? null,
+    fechaConstitucion: fechaIso(c.fechaConstitucion),
+    fechaInicioActividades: fechaIso(c.fechaInicioActividades),
+    fechaTerminoGiro: fechaIso(c.fechaTerminoGiro),
     unidadOperativa: c.unidadOperativaDescripcion ?? '',
     capitalEnterado: numero(c.capitalEnterado),
     capitalPorEnterar: numero(c.capitalPorEnterar),
@@ -124,14 +133,14 @@ export function extraerDatos(html: string): DatosContribuyente {
       comunaCodigo: x.comunaCodigo ?? '',
       region: (x.regionDescripcion ?? '').trim(),
       tipoPropiedad: x.tipoPropiedadDescripcion ?? '',
-      desde: x.fechaModiRegistro ?? '',
+      desde: fechaIso(x.fechaModiRegistro) ?? '',
     })),
     atributos: (d.atributos ?? []).map(a => ({
       codigo: a.atrCodigo ?? '',
       descripcion: a.descAtrCodigo ?? '',
       valor: a.valor ?? '',
-      desde: a.fechaInicio ?? '',
-      hasta: a.fechaTermino ?? null,
+      desde: fechaIso(a.fechaInicio) ?? '',
+      hasta: fechaIso(a.fechaTermino),
     })),
     alertas: d.alertas ?? [],
   };
@@ -156,10 +165,25 @@ function recortarJson(html: string, desde: number): string {
   throw new Error('El bloque DatosCntrNow de Mi SII está truncado.');
 }
 
+// El backend manda los montos como texto SIN separador de miles ("5000"), así
+// que no se le quita ningún punto: "1000.5" tiene que seguir siendo 1000.5.
 function numero(v: string | number | null | undefined): number | null {
   if (v === null || v === undefined || v === '') return null;
-  const n = Number(String(v).replace(/\./g, '').replace(',', '.'));
+  const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+// La ficha mezcla dos formatos de fecha —"2008-03-26 00:00:00.0" en el
+// contribuyente y "01-01-2026" en los atributos—. Se normalizan a YYYY-MM-DD
+// para que el consumidor no tenga que adivinar cuál le tocó.
+export function fechaIso(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const t = v.trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = /^(\d{2})-(\d{2})-(\d{4})/.exec(t);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return t;
 }
 
 interface DatosCrudo {
@@ -171,10 +195,28 @@ interface DatosCrudo {
   alertas?: unknown[];
 }
 
+// La home sin el bloque de datos es el login o un error del portal: la causa
+// más común es la sesión del SII caducada. Es una clase propia para que el
+// reintento aplique sólo a eso.
+class SesionDeMisiiCaida extends Error {}
+
 export class MisiiScraper {
   constructor(private http: SiiHttpClient, private session: SessionManager) {}
 
+  // Sin invalidar la sesión, `autenticadoHasta` la sigue dando por buena unas
+  // dos horas y cada llamada repetiría el login hasta reiniciar el proceso.
+  // Mismo patrón que bienes raíces y BHE: se reintenta UNA vez con sesión nueva.
   async datosContribuyente(): Promise<DatosContribuyente> {
+    try {
+      return await this.intentar();
+    } catch (e) {
+      if (!(e instanceof SesionDeMisiiCaida)) throw e;
+      this.session.invalidate();
+      return this.intentar();
+    }
+  }
+
+  private async intentar(): Promise<DatosContribuyente> {
     this.session.assertPuedeEntregarCookieJar();
     const html = await this.http.get(HOME, undefined, { guardarCookies: true });
     return extraerDatos(html);

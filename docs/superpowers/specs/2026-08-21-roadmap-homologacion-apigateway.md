@@ -53,7 +53,7 @@ connections (billing del propio gateway).
 
 ## Estado real a 2026-08-26
 
-En producción, 42 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 sumaron el resto):
+En producción, 46 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 a 9 sumaron el resto):
 
 | Dominio | Rutas hoy |
 |---|---|

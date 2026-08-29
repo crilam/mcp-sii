@@ -611,7 +611,7 @@ Dos cosas: **`tasacion` devuelve todas las filas que coinciden** (un modelo tien
 | **`POST /v1/contribuyentes/verificar-rut`** | `rut` | `{rut, valido, cuerpo, dv, motivo?}`. **No consulta al SII** ni dice si el RUT existe: sólo módulo 11. |
 | **`POST /v1/misii/datos-contribuyente`** | credencial estándar | la ficha de Mi SII: `rut, razonSocial, nombres, tipoContribuyente, subtipoContribuyente, personaEmpresa, segmento, glosaActividad, email, telefonoMovil, fechaConstitucion, fechaInicioActividades, fechaTerminoGiro, unidadOperativa, capitalEnterado, capitalPorEnterar, autorizadoDeclararDia20, direcciones[], atributos[], alertas[]` |
 
-`categoriaTributaria` es texto y viene tal como la publica el SII: la mayoría `"1"` o `"2"`, y alguna letra (`"G"`) que la tabla no explica. `atributos` son los regímenes y autorizaciones del contribuyente (por ejemplo `14D1` "Régimen Pro Pyme General") con `desde`/`hasta`.
+`categoriaTributaria` es texto y viene tal como la publica el SII: la mayoría `"1"` o `"2"`, y alguna letra (`"G"`) que la tabla no explica. `atributos` son los regímenes y autorizaciones del contribuyente (por ejemplo `14D1` "Régimen Pro Pyme General") con `desde`/`hasta`. **Todas las fechas van en `YYYY-MM-DD`**: el SII las manda en dos formatos distintos dentro de la misma ficha y acá se normalizan.
 
 ---
 

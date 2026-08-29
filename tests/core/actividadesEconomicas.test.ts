@@ -53,14 +53,16 @@ describe('core/actividadesEconomicas', () => {
 
 describe('verificarRut', () => {
   // Módulo 11 con los RUT de prueba del repo: el DV se calcula, no se adivina.
+  // Sólo RUT de prueba (dígitos repetidos): el repo tiene un chequeo que falla
+  // si un RUT real queda versionado. Los DV se calcularon con el módulo 11.
   it.each([
     ['11111111-1', true],
     ['11.111.111-1', true],
-    ['76019824-2', true],
     ['22222222-2', true],
-    ['12345678-5', true],
-    ['12345678-K', false],
+    ['33333333-3', true],
+    ['77777777-7', true],
     ['11111111-2', false],
+    ['22222222-K', false],
   ])('%s → %p', (rut, valido) => {
     expect(core.verificarRut(rut).valido).toBe(valido);
   });
@@ -73,13 +75,11 @@ describe('verificarRut', () => {
     expect(r.motivo).toMatch(/es 1, no 2/);
   });
 
-  // Un DV "K" es válido: 10 en módulo 11. Se acepta en minúscula también.
+  // Un DV "K" es 10 en módulo 11 y se acepta en minúscula: 6 → 6×2 = 12,
+  // 12 % 11 = 1, 11 − 1 = 10 → K.
   it('acepta K mayúscula o minúscula', () => {
-    // 4-K es un RUT válido conocido por aritmética: 4*2=8 → 11-(8%11)=3... se
-    // busca uno real: 20-K → 2*3+0*2=6 → 11-6=5, no. Se calcula el K de 25.
-    const conK = core.verificarRut('25-k');
-    expect(conK.dv).toBe('K');
-    expect(conK.valido).toBe(core.verificarRut('25-K').valido);
+    expect(core.verificarRut('6-k')).toMatchObject({ valido: true, dv: 'K', rut: '6-K' });
+    expect(core.verificarRut('6-K').valido).toBe(true);
   });
 
   it('rechaza lo que no tiene forma de RUT', () => {
