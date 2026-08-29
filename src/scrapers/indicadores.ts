@@ -254,7 +254,15 @@ export function parsearValoresMensuales(html: string): ValorMensual[] {
     const valores = filasDeMes(tabla.split(/<\/table>/i)[0]);
     if (valores.length > mejor.length) mejor = valores;
   }
-  assertReconocioTablas(mejor.length);
+  // Se distingue "no hay tablas de mes" de "hay tablas y ninguna fila parseó":
+  // con un solo mensaje, el segundo caso mandaba a mirar los encabezados, que
+  // estaban perfectos, mientras el problema estaba en las celdas.
+  assertReconocioTablas(html.split(/<table[^>]*>/i).length - 1);
+  if (mejor.length === 0) {
+    throw new Error(
+      'El SII devolvió tablas pero ninguna fila de mes reconocible: '
+      + 'cambió el formato de las celdas y hay que actualizar el scraper.');
+  }
   return mejor;
 }
 
@@ -371,6 +379,10 @@ export function parsearTramosImpuesto(html: string): TramoImpuesto[] {
   // que el rótulo del período dejó de reconocerse —otra capitalización, otro
   // nombre en la página del art. 52 bis, que es aparte— y el resultado sería un
   // array vacío que se lee como dato. Mismo criterio que el h2/h3 de `porMes`.
+  // Sin ningún bloque tampoco se calla: era el mismo vacío silencioso, y el
+  // comentario de `assertReconocioTablas` afirmaba que este parser ya fallaba
+  // ruidosamente en ese caso. No era cierto hasta acá.
+  assertReconocioTablas(bloques);
   if (bloques > 0 && salida.length === 0) {
     throw new Error(
       'El SII devolvió tablas por mes pero ningún tramo reconocible: '

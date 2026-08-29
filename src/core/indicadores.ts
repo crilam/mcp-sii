@@ -93,11 +93,6 @@ function conCache<T>(clave: string, anio: number, fn: () => Promise<T>): Promise
   }
   if (guardado) cache.delete(clave);
 
-  if (cache.size >= MAX_ENTRADAS) {
-    const masVieja = cache.keys().next().value;
-    if (masVieja !== undefined) cache.delete(masVieja);
-  }
-
   // El tope se mira acá y no en la cola: un acierto de caché ya devolvió arriba
   // sin tocar el portal, así que no consume cupo. Contarlo haría que un
   // consumidor que repite el mismo año se auto-bloqueara pidiendo algo que ni
@@ -116,6 +111,14 @@ function conCache<T>(clave: string, anio: number, fn: () => Promise<T>): Promise
     ));
   }
   bajadasEnVuelo++;
+
+  // El desalojo LRU va DESPUÉS del tope: un request que va a ser rechazado no
+  // tiene por qué botar una entrada de caché válida de paso.
+  if (cache.size >= MAX_ENTRADAS) {
+    const masVieja = cache.keys().next().value;
+    if (masVieja !== undefined) cache.delete(masVieja);
+  }
+
 
   // La expiración se calcula cuando LLEGA el dato, no cuando se encoló: con la
   // cola serializada, una bajada puede esperar su turno varios segundos y el TTL

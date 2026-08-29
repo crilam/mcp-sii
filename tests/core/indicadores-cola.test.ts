@@ -42,14 +42,23 @@ describe('tope de la cola de indicadores', () => {
     await Promise.allSettled(enCurso);
   });
 
-  // El tope no puede convertirse en un rechazo permanente: cuando las que
-  // estaban esperando terminan, el servicio vuelve a aceptar.
-  it('vuelve a aceptar cuando la cola se descarga', async () => {
-    uf.mockResolvedValue([{ mes: 1, dia: 1, valor: 39000 }]);
+  // El tope no puede convertirse en un rechazo permanente. La versión anterior
+  // de este test pedía las consultas de a una con `await`, así que la cola
+  // nunca llegaba a llenarse: probaba que el contador bajaba, no que el
+  // servicio se recupera DESDE el tope, que es lo que importa.
+  it('vuelve a aceptar después de haber rechazado por tope', async () => {
+    let abrir!: () => void;
+    const compuerta = new Promise<void>(resolve => { abrir = resolve; });
+    uf.mockImplementation(async () => { await compuerta; return [{ mes: 1, dia: 1, valor: 39000 }]; });
 
-    for (let i = 0; i < core.MAX_EN_COLA + 3; i++) {
-      await expect(core.uf(1990 + i)).resolves.toHaveLength(1);
-    }
+    const enCurso = Array.from({ length: core.MAX_EN_COLA }, (_, i) => core.uf(1990 + i));
+    enCurso.forEach(p => p.catch(() => { /* liberadas abajo */ }));
+    await expect(core.uf(2050)).rejects.toBeInstanceOf(ServicioOcupado);
+
+    abrir();
+    await Promise.allSettled(enCurso);
+
+    await expect(core.uf(2051)).resolves.toHaveLength(1);
   });
 
   // Un acierto de caché no toca el portal, así que no debe consumir cupo: si lo

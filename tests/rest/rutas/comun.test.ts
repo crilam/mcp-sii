@@ -1,5 +1,5 @@
 import { ejecutar } from '../../../src/rest/rutas/comun';
-import { SesionesSimultaneas, LimiteDeConsultasSii } from '../../../src/erroresConsulta';
+import { SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado } from '../../../src/erroresConsulta';
 
 describe('ejecutar', () => {
   it('objeto: spreadea flat junto a ok:true', async () => {
@@ -63,6 +63,20 @@ describe('ejecutar', () => {
     expect(respuesta.status).toBe(200);
     expect((respuesta.body as { error: string }).error).toBe('LIMITE_SII');
     expect((respuesta.body as { detalle: string }).detalle).toMatch(/volumen/);
+  });
+
+  // Simétrico al de arriba, y por el mismo motivo: `SERVICIO_OCUPADO` es
+  // NUESTRA cola llena, no el SII. Como `ERROR` el consumidor reintenta al
+  // instante contra una cola que justamente está llena; con su código propio
+  // sabe que espera segundos, no los minutos de `LIMITE_SII`.
+  it('ServicioOcupado sale como SERVICIO_OCUPADO y no como ERROR', async () => {
+    const respuesta = await ejecutar(async () => {
+      throw new ServicioOcupado('Hay 12 consultas de indicadores en curso');
+    });
+
+    expect(respuesta.status).toBe(200);
+    expect((respuesta.body as { error: string }).error).toBe('SERVICIO_OCUPADO');
+    expect((respuesta.body as { detalle: string }).detalle).toMatch(/12 consultas/);
   });
 
   // Tampoco puede caer en LIMITE_CONOCIDO, que el contrato declara PERMANENTE:

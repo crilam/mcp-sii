@@ -63,9 +63,20 @@ describe('silencio del parser cuando no reconoce las tablas', () => {
     await expect(uf(2025)).rejects.toThrow(/no se reconocieron/i);
   });
 
+  // En las mensuales el diagnóstico se separa en dos: sin tablas es "no se
+  // reconocieron las tablas"; CON tablas pero sin filas parseables, el problema
+  // está en las celdas y el mensaje tiene que decir eso. Mandar a mirar los
+  // encabezados, que están perfectos, es hacer perder el tiempo a quien
+  // diagnostica.
   it('vale también para las tablas mensuales (UTM, corrección monetaria)', async () => {
     fetchMock.mockResolvedValue(
       respuesta(200, '<html><body><h4>Enero</h4><table><tr><td>1</td></tr></table></body></html>'));
+
+    await expect(utm(2025)).rejects.toThrow(/ninguna fila de mes reconocible/i);
+  });
+
+  it('una página mensual sin ninguna tabla dice que no se reconocieron las tablas', async () => {
+    fetchMock.mockResolvedValue(respuesta(200, '<html><body>sin datos</body></html>'));
 
     await expect(utm(2025)).rejects.toThrow(/no se reconocieron/i);
   });
