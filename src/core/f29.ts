@@ -20,8 +20,8 @@ async function unidadOperativa(sesion: SessionManager, rut: string): Promise<str
     unidadPorRut.set(rut, u);
     return u;
   } catch {
-    // Si Mi SII falla, se sigue sin unidad: el F29 respondió igual sin ella.
-    unidadPorRut.set(rut, '');
+    // Si Mi SII falla, se sigue sin unidad (el F29 respondió igual sin ella),
+    // pero NO se cachea el fallo: la próxima llamada vuelve a intentar.
     return '';
   }
 }

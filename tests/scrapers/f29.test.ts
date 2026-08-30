@@ -9,7 +9,7 @@ jest.mock('../../src/session');
 
 // Respuesta REAL de getFoliosConsulta para un período declarado (ids
 // anonimizados salvo folio/codInt, que no son datos personales).
-const OK = `//OK[-7,-7,4,24,23,22,-7,'xdp',5,21,20,'tcaQa',5,'xdp',5,'C5Z20',5,19,0,18,'IOFT3a',5,17,'A',5,0,-6,16,15,14,1,3,13,12,11,10,9,8,0,7,'WFX5y',5,6,'Eh_hw',5,4,2026,3,2,1,1,["java.util.Vector/3057315478","cl.sii.sdi.sifm.commons.to.consulta.FolioPeriodoFormularioTO/3253336399","java.lang.Integer/3438268394","2","java.lang.Long/4227064769","SINOBS","DRCP","Vigente","AMBOS","29","F29 - Declaración Mensual","Declaración Mensual","MES","DPS","G1515000gym","MPD_PLANT","20/02/2026","860148593","CLP","2026-02-20 22:45:21.0","N","OPVPHHA","M01","CRCIVA"],0,7]`;
+const OK = `//OK[-7,-7,4,24,23,22,-7,'xdp',5,21,20,'tcaQa',5,'xdp',5,'C5Z20',5,19,0,18,'Hc1lAB',5,17,'A',5,0,-6,16,15,14,1,3,13,12,11,10,9,8,0,7,'WFX5y',5,6,'Eh_hw',5,4,2026,3,2,1,1,["java.util.Vector/3057315478","cl.sii.sdi.sifm.commons.to.consulta.FolioPeriodoFormularioTO/3253336399","java.lang.Integer/3438268394","2","java.lang.Long/4227064769","SINOBS","DRCP","Vigente","AMBOS","29","F29 - Declaración Mensual","Declaración Mensual","MES","DPS","G1515000gym","MPD_PLANT","20/02/2026","800000001","CLP","2026-02-20 22:45:21.0","N","OPVPHHA","M01","CRCIVA"],0,7]`;
 // Un período SIN declaración: el Vector viene vacío, sin folio ni codInt.
 const OK_VACIO = '//OK[1,1,["java.util.Vector/3057315478"],0,7]';
 
@@ -48,7 +48,7 @@ describe('F29Scraper', () => {
     const e = await scraper.estadoDeclaracion(202601, 'SANTIAGO ORIENTE');
 
     expect(e).toMatchObject({
-      periodo: 202601, formulario: '29', folio: 8826207706, codInt: '860148593',
+      periodo: 202601, formulario: '29', folio: 8000000001, codInt: '800000001',
       estado: 'Vigente', observaciones: 'SINOBS', fechaPresentacion: '20/02/2026', moneda: 'CLP',
     });
   });
@@ -72,6 +72,21 @@ describe('F29Scraper', () => {
     await expect(scraper.estadoDeclaracion(203001)).rejects.toBeInstanceOf(RecursoNoEncontrado);
   });
 
+  // Un período con rectificatoria trae dos declaraciones. El folio y su codInt
+  // se leen ADYACENTES para no cruzarlos: el par correcto es folio 8000000001 +
+  // codInt 800000001, aunque haya OTRO folio 8000000002 después en el stream.
+  it('con dos declaraciones toma folio y codInt de la misma (no los cruza)', async () => {
+    // tabla: 1=Vector 2=TO 3=codInt1 4=Vigente 5=29 6=fecha 7=codInt2 8=CLP 9=SINOBS
+    // stream resuelto: [codInt1, folio1(Hc1lAB), Vigente, codInt2, folio2(Hc1lAC), fecha, SINOBS, CLP]
+    const dos = "//OK[3,'Hc1lAB',4,7,'Hc1lAC',6,9,8,[\"java.util.Vector/3057315478\",\"cl.sii.sdi.sifm.commons.to.consulta.FolioPeriodoFormularioTO/3253336399\",\"800000001\",\"Vigente\",\"29\",\"20/02/2026\",\"800000002\",\"CLP\",\"SINOBS\"],0,7]";
+    const { scraper } = armar(dos);
+
+    const e = await scraper.estadoDeclaracion(202601);
+
+    expect(e.folio).toBe(8000000001);
+    expect(e.codInt).toBe('800000001'); // el pegado al folio, no 800000002
+  });
+
   // El sobre mal formado devuelve //EX: no puede leerse como "sin declaración".
   it('una excepción GWT no se confunde con período sin datos', async () => {
     const { scraper } = armar('//EX[2,1,["com.google.gwt.user.client.rpc.IncompatibleRemoteServiceException/3936916533"],0,7]');
@@ -85,9 +100,9 @@ describe('F29Scraper', () => {
     (http.getBinario as jest.Mock) = jest.fn().mockResolvedValue({ contenido: Buffer.from('%PDF-1.4 x'), contentType: 'application/pdf' });
     const s2 = new F29Scraper(http, session);
 
-    await expect(s2.pdfCompacto(8826207706, '860148593')).resolves.toEqual(Buffer.from('%PDF-1.4 x'));
+    await expect(s2.pdfCompacto(8000000001, '800000001')).resolves.toEqual(Buffer.from('%PDF-1.4 x'));
     expect(http.getBinario).toHaveBeenCalledWith(expect.stringContaining('formCompacto'),
-      expect.objectContaining({ folio: '8826207706', codInt: '860148593', form: '029', rut: '76019824' }));
+      expect.objectContaining({ folio: '8000000001', codInt: '800000001', form: '029', rut: '76019824' }));
   });
 
   it('si el PDF no viene con Content-Type de PDF, falla explícito', async () => {

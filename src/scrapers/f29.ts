@@ -20,7 +20,7 @@ import { codificarLong, leerRespuestaGwt, ValorGwt } from './gwtRpc';
 //
 // FRÁGIL POR DISEÑO DEL SII: el sobre GWT lleva un hash de interfaz y una
 // permutación que cambian cuando el SII recompila la app (meses). Están como
-// constantes acá, relevadas el 2026-08-30; si el SII responde algo que no es
+// constantes acá, relevadas el 2026-08-29; si el SII responde algo que no es
 // `//OK`, el error manda a re-relevar con `relevarF29Rpc.ts`.
 const BASE = 'https://www4.sii.cl/sifmConsultaInternet';
 const PDF_BASE = 'https://www4.sii.cl/rfiInternet/formCompacto';
@@ -35,6 +35,15 @@ const INTERFAZ = 'cl.sii.sdi.diii.sifmConsulta.web.client.consulta.service.SvcCo
 // operación DPS (declaración y pago simultáneo).
 const APP = 'IVAEXP';
 const FORM = '29';
+
+// Campos de AUDITORÍA del sobre (LogAuditoriaDTO): copiados de la captura, el
+// servidor los aceptó sin validarlos contra la sesión. Son traza, no identidad:
+// aplicación que originó la consulta, canal, e IP de origen (interna del SII).
+const AUD_APP = 'DIFM2008_SIFM';
+const AUD_COD = '106';
+const AUD_NUM = '203';
+const AUD_TTL = '3600';
+const AUD_IP = '10.20.111.207';
 
 export interface EstadoF29 {
   periodo: number;
@@ -67,13 +76,15 @@ export interface EstadoF29 {
 const PLANTILLA_GET_FOLIOS =
   `7|0|21|${BASE}/|${HASH_SVC}|${INTERFAZ}|getFoliosConsulta|`
   + 'java.lang.String/2004016611|J|cl.sii.sdi.sifm.commons.to.parser.LogAuditoriaDTO/2405597199|'
-  + `${APP}|${FORM}|DPS|Internet|106|DIFM2008_SIFM|203|2|10.20.111.207|3600|`
+  + `${APP}|${FORM}|DPS|Internet|${AUD_COD}|${AUD_APP}|${AUD_NUM}|2|${AUD_IP}|${AUD_TTL}|`
   + 'java.lang.Integer/3438268394|C|{UNIDAD}|java.util.HashMap/1797211028|'
   + '1|2|3|4|7|5|5|6|6|5|5|7|8|9|{PERLONG}|{RUTLONG}|10|11|7|12|13|14|15|15|16|17|18|{RUT}|18|{RUT}|19|20|21|0|';
 
 export function sobreGetFolios(rut: number, periodo: number, unidadOperativa: string): string {
   // La unidad va en la tabla de strings: no puede traer `|` (rompería el sobre).
-  const unidad = (unidadOperativa || 'SANTIAGO ORIENTE').replace(/\|/g, ' ');
+  // Vacía si no se conoce: es un campo de auditoría y el SII respondió igual sin
+  // ella; inventar una unidad ajena sería mentir en la traza.
+  const unidad = unidadOperativa.replace(/\|/g, ' ');
   return PLANTILLA_GET_FOLIOS
     .replace('{UNIDAD}', unidad)
     .replace('{PERLONG}', codificarLong(periodo))
@@ -81,33 +92,55 @@ export function sobreGetFolios(rut: number, periodo: number, unidadOperativa: st
     .replace(/\{RUT\}/g, String(rut));
 }
 
-// Del stream ya decodificado se leen los campos por FORMA, no por posición
-// exacta: la posición dentro del TO puede correrse con un cambio menor de la
-// app, pero un folio F29 es un número de 10 dígitos, el codInt un string de 8-9
-// dígitos, la fecha `dd/mm/yyyy`. Se valida cada uno.
-function extraerEstado(stream: ValorGwt[], tabla: string[], periodo: number): EstadoF29 {
-  const numeros = stream.filter((v): v is number => typeof v === 'number');
-  const folio = numeros.find(n => n >= 1_000_000_000 && n <= 9_999_999_999) ?? null;
+// El folio y el codInt de una declaración salen ADYACENTES en el stream (el TO
+// serializa sus campos juntos). Un período con rectificatoria trae DOS o más
+// declaraciones, y el riesgo es cruzar el folio de una con el codInt de otra:
+// eso pediría un PDF equivocado. Se evita tomando el codInt PEGADO al folio, no
+// el primero global. El SII ordena la vigente primero (su UI "despliega la
+// declaración vigente más reciente"), así que el primer par folio+codInt es esa
+// —verificado en vivo—; los demás campos se leen de ese mismo frente del stream.
+const ESTADO = /^(Vigente|Anulada|Reemplazada|No Vigente)$/i;
 
-  const sololDigitos = (s: string) => /^\d+$/.test(s);
-  const codInt = tabla.find(s => sololDigitos(s) && s.length >= 8 && s.length <= 9 && Number(s) !== folio) ?? null;
+function esFolio(v: ValorGwt): v is number {
+  return typeof v === 'number' && v >= 1_000_000_000 && v <= 9_999_999_999;
+}
 
-  if (folio === null || codInt === null) {
-    // Sin folio ni codInt no hay declaración que apuntar: puede ser un período
-    // sin declarar, y eso se dice como NO_ENCONTRADO, no como un dato a medias.
+function extraerEstado(stream: ValorGwt[], periodo: number): EstadoF29 {
+  // Todos los folios (una por declaración), en orden del stream.
+  const posFolios = stream.map((v, i) => (esFolio(v) ? i : -1)).filter(i => i >= 0);
+  if (posFolios.length === 0) {
+    // Sin folio no hay declaración: puede ser un período sin declarar, y eso se
+    // dice como NO_ENCONTRADO, no como un dato a medias.
     throw new RecursoNoEncontrado(
       `El SII no tiene una declaración F29 vigente para el período ${periodo}.`);
   }
 
-  const estado = tabla.find(s => /^(Vigente|Anulada|Reemplazada|No Vigente)$/i.test(s)) ?? '';
-  const observaciones = tabla.find(s => /^(SINOBS|CONOBS|OBS)/.test(s)) ?? '';
-  const fecha = tabla.find(s => /^\d{2}\/\d{2}\/\d{4}$/.test(s)) ?? null;
-  const moneda = tabla.find(s => /^(CLP|USD)$/.test(s)) ?? 'CLP';
+  // El SII devuelve la vigente primero: se toma el primer folio y el codInt
+  // PEGADO a él (ventana de ±3), para no cruzarlo con el de otra declaración.
+  const iFolio = posFolios[0];
+  const folio = stream[iFolio] as number;
+  const codInt = (() => {
+    for (let d = 1; d <= 3; d++) {
+      for (const j of [iFolio - d, iFolio + d]) {
+        const v = stream[j];
+        if (typeof v === 'string' && /^\d{8,9}$/.test(v) && Number(v) !== folio) return v;
+      }
+    }
+    return null;
+  })();
+  if (codInt === null) {
+    throw new RecursoNoEncontrado(
+      `El período ${periodo} trae un folio F29 sin su codInt adyacente: no se puede pedir el PDF.`);
+  }
 
+  // Estado, obs, fecha y moneda: del frente del stream, que es la vigente.
+  const buscar = (re: RegExp) => stream.find((v): v is string => typeof v === 'string' && re.test(v));
   return {
     periodo, formulario: FORM, folio, codInt,
-    estado: estado || 'desconocido', observaciones,
-    fechaPresentacion: fecha, moneda,
+    estado: buscar(ESTADO) ?? 'desconocido',
+    observaciones: buscar(/^(SINOBS|CONOBS|OBS)/) ?? '',
+    fechaPresentacion: buscar(/^\d{2}\/\d{2}\/\d{4}$/) ?? null,
+    moneda: buscar(/^(CLP|USD)$/) ?? 'CLP',
   };
 }
 
@@ -133,9 +166,9 @@ export class F29Scraper {
   async estadoDeclaracion(periodo: number, unidadOperativa = ''): Promise<EstadoF29> {
     this.session.assertPuedeEntregarCookieJar();
     const { rut } = this.session.identidad();
-    const { stream, tabla } = await this.postGwt(
+    const { stream } = await this.postGwt(
       sobreGetFolios(Number(rut), periodo, unidadOperativa));
-    return extraerEstado(stream, tabla, periodo);
+    return extraerEstado(stream, periodo);
   }
 
   /**

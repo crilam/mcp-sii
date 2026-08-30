@@ -11,12 +11,10 @@ const periodo = z.number().int()
   }, 'periodo debe ser AAAAMM, con año 2007-2100 y mes 01-12')
   .describe('Período tributario en formato AAAAMM (ej. 202507)');
 
+// Estado y compacto piden lo mismo: RUT + período.
 export const schemaEstadoF29 = {
   rut: z.string().min(1).describe(RUT_DESC),
   periodo,
 };
 
-export const schemaCompactoF29 = {
-  rut: z.string().min(1).describe(RUT_DESC),
-  periodo,
-};
+export const schemaCompactoF29 = schemaEstadoF29;
