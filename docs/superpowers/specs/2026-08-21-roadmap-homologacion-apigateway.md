@@ -71,6 +71,7 @@ En producción, 48 rutas REST (19 al 26-08; las rondas 1 a 5 y 7 a 10 sumaron el
 | contribuyentes | situacion-tributaria, actividades-economicas, actividad-economica, verificar-rut |
 | misii | datos-contribuyente |
 | dte | validez, verificar (además de los cuatro list/get previos) |
+| f29 | estado-declaracion, formulario-compacto |
 
 **CORRECCIÓN (2026-08-26) — el pass-through por clave SÍ funciona.** La versión
 anterior decía que se había descartado (queue-it + F5 WAF, sin sesión
@@ -96,7 +97,7 @@ verificación en prod + aviso a los consumidores si cambia el contrato.
 | ~~R3~~ | **bienes_raices** | 10 | **7** | ✅ **Completa en lo relevable.** El portal tiene una API REST/JSON detrás de la SPA (`/app/vica/{rut}/v1`), leída de su bundle; el listado dejó de usar navegador. Nuevas: comunas, consultar-rol (predio de terceros), multipropietarios, solicitudes, documento (PDF) y certificado-avaluo (PDF, los tres tipos verificados con PDF real). Sin hacer: certificado de **antecedentes** (el flujo de terceros exige motivo e institución receptora y no se verificó) y búsqueda **por dirección**. |
 | ~~R4~~ | **bhe** | 9 | **5** | ✅ Lectura completa: la paginación de recibidas >100 encadena `pagina_sig_codigo` (PR #69). Falta sólo escritura (emitir, anular, observar, email) → R11. |
 | ~~R5~~ | **indicadores** | 6 | **6** | ✅ **Completa** (PR #63). UF, dólar, UTM/UTA/IPC, corrección monetaria e impuesto 2ª categoría (art. 43 y 52 bis). **Sin credencial ni `rut`**: páginas públicas. |
-| R6 | f29 | 5 | 0 | **Relevada y diferida.** Las dos apps del menú (`rfiInternet/consulta`, `sifmConsultaInternet`) son **GWT** tras login y cola virtual, sin API legible en el bundle (GWT-RPC serializado). Con navegador la grilla F29 rinde, pero los estados por período son PNG inline sin texto y el click sobre el sprite no navega. La propuesta F29 de mipyme (`/cgi_csm/`) exige empresa mipyme. Requiere trabajo profundo de navegador; scripts `relevarF29*.ts`. |
+| ~~R6~~ | **f29** | 5 | **2** | ✅ estado-declaracion y formulario-compacto (PDF). La Consulta Integral es GWT; se descifró el protocolo GWT-RPC (`svcConsulta/getFoliosConsulta` → folio+codInt → GET `formCompacto` PDF). Frágil: un redeploy de la app cambia el hash de interfaz y hay que re-relevar con `relevarF29Rpc.ts`. |
 | ~~R7~~ | **vehiculos** | 4 | **5** | ✅ **Completa.** La consulta interactiva del portal (`vehiculospubui`) exige un **captcha propio del SII** antes de buscar: no automatizable. La fuente son las planillas XLSX anuales públicas (`liv{año}`/`pes{año}`, desde 2020), bajadas una vez y consultadas en memoria. Rutas: tipos, marcas, modelos, tasacion, equipamiento. |
 | ~~R8~~ | **misii** | 4 | **1** | ✅ Lo que el catálogo real tiene (1 endpoint: `contribuyente/datos`). La home de Mi SII trae la ficha embebida en JSON (`DatosCntrNow`): identificación, direcciones, atributos. **Representantes, socios y giros** se renderizan del lado del servidor y con la credencial relevada venían vacíos: sin forma conocida, fuera. El conteo de 4 era orientativo. |
 | ~~R9~~ | **contribuyentes** | 3 | **4** | ✅ actividades-economicas (página pública, ~670 códigos), actividad-economica y verificar-rut (módulo 11, sin SII). `situacion-tributaria` ya existía. |

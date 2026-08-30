@@ -639,6 +639,17 @@ Credencial estándar (eran públicas; el SII las cerró detrás del login). `tip
 
 `datosCoinciden` es el veredicto que importa: `resultado` dice "Datos coinciden con los registrados" o "Documento recibido por el SII pero datos NO coinciden con los registrados", y cuando no coinciden el SII **omite el nombre del emisor**. Un folio inexistente no es un error: es `recibidoPorElSii: false` con "Documento no autorizado".
 
+### 6.11 Formulario 29 (IVA mensual)
+
+Credencial estándar. `periodo` es AAAAMM (año 2007-2100). La Consulta Integral del SII es una aplicación **GWT** sin API pública; el servicio reproduce su protocolo GWT-RPC, lo que hace este dominio **más frágil**: un redeploy de la app cambia un hash interno y devuelve un error explícito (`ERROR`), no un dato equivocado.
+
+| Endpoint | Body | Devuelve |
+|---|---|---|
+| **`POST /v1/f29/estado-declaracion`** | `periodo` | `{periodo, formulario, folio, codInt, estado, observaciones, fechaPresentacion, moneda}`; período sin declaración → `NO_ENCONTRADO` |
+| **`POST /v1/f29/formulario-compacto`** | `periodo` | el estado (sin `codInt`) más `pdf_base64`, `content_type`, `nombre_archivo`, `tamano_bytes` |
+
+Dos cosas: **el monto pagado NO se expone en el estado** —la respuesta GWT trae varios enteros grandes sin una posición fiable, y publicar el equivocado es peor que no publicarlo; los montos están en el PDF—; y **`formulario-compacto` resuelve el folio por período**, así que el consumidor pide por período y no necesita conocer el folio.
+
 ---
 
 ## 7. Limitaciones conocidas

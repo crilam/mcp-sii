@@ -206,6 +206,7 @@ Todas reciben `rut` como primer parámetro — ver
 | `sii_dte_get_documento_recibido` | Detalle de un documento recibido |
 | `sii_dte_validez` | Si un DTE (emisor, tipo, folio) fue recibido por el SII |
 | `sii_dte_verificar` | Si emisor, receptor, folio, fecha y monto coinciden con lo informado al SII |
+| `sii_f29_estado_declaracion` | Estado del F29 (IVA mensual) de un período |
 
 `sii_dte_validez` y `sii_dte_verificar` eran consultas públicas del SII y hoy
 están detrás del login, así que van con sesión. La segunda es la que sirve para
@@ -213,6 +214,14 @@ validar una factura recibida antes de pagarla: `datosCoinciden` es el veredicto,
 y el texto del SII distingue "Datos coinciden con los registrados" de "datos NO
 coinciden" con casi las mismas palabras — se midió con el mismo documento y el
 monto cambiado en un peso.
+
+`sii_f29_estado_declaracion` consulta la declaración de IVA de un período
+(AAAAMM): folio, estado, observaciones, fecha y moneda. El **PDF del formulario
+compacto** —donde están todos los montos— se pide aparte por REST
+(`/v1/f29/formulario-compacto`). La Consulta Integral del SII es una app GWT sin
+API pública: el servicio habla su protocolo GWT-RPC directamente, así que esta
+consulta es **más frágil que las demás** —si el SII recompila la app cambia un
+hash interno y hay que re-relevarlo—, y falla explícito cuando eso pasa.
 
 ### Impuestos y registros
 
