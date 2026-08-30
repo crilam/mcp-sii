@@ -83,10 +83,30 @@ export function numeroChileno(texto: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// La página de corte del SII no trae datos: es un mensaje de error. Una página
+// que SÍ trae la tabla del año no es un corte por más que mencione la frase —y
+// la menciona, en notas al pie del estilo "si ha superado el límite de
+// consultas diarias…".
+//
+// Buscar la marca en el documento entero convertía esas páginas en un
+// LIMITE_SII falso, y ese código le dice al consumidor que espere minutos por
+// datos que ya tenía. Acotar la búsqueda a un prefijo no alcanza: en una página
+// corta la nota entra en cualquier ventana razonable. El discriminante que sí
+// sirve es si hay tabla de datos.
+function pareceTablaDeDatos(html: string): boolean {
+  // Se reusa `porMes`, que es LA definición de "hay tablas de datos" para este
+  // archivo. Una definición propia acá (un `<table` más un nombre de mes en
+  // cualquier parte) empezaba igual pero iba a divergir: una página de corte
+  // con tabla de maquetado y un "Enero" al pie pasaba como datos y después
+  // reventaba con "no se reconocieron las tablas", que apunta al lugar
+  // equivocado.
+  return porMes(html).length > 0;
+}
+
 function assertNoEsCorte(html: string): void {
   const inicio = html.slice(0, 400);
   const esHtml = /<\s*(!doctype|html|head|body)\b/i.test(inicio);
-  if (esHtml && LIMITE_DE_CONSULTAS.test(html)) {
+  if (esHtml && LIMITE_DE_CONSULTAS.test(html) && !pareceTablaDeDatos(html)) {
     throw new LimiteDeConsultasSii(
       'El SII cortó las consultas por volumen (su error 429). Hay que ESPERAR: ' +
       'reintentar de inmediato mantiene el corte.'
@@ -106,7 +126,17 @@ async function bajar(ruta: string): Promise<string> {
     });
   } catch (e) {
     const causa = (e as Error)?.name === 'TimeoutError' ? 'expiró el tiempo de espera' : 'falló la conexión';
-    throw new Error(`No se pudo consultar el SII: ${causa}.`);
+    // La causa original se encadena: sin esto, un DNS que no resuelve y un TLS
+    // vencido producen el MISMO mensaje, y quien opera no tiene por dónde
+    // empezar a mirar.
+    //
+    // Se asigna la propiedad en vez de usar el segundo argumento de `Error`
+    // porque `lib` está en ES2020 y `ErrorOptions` es de ES2022. Node la
+    // soporta igual en runtime; subir el target del repo entero por esto sería
+    // un cambio mucho más grande que el arreglo.
+    const error = new Error(`No se pudo consultar el SII: ${causa}.`);
+    (error as Error & { cause?: unknown }).cause = e;
+    throw error;
   }
 
   // El 404 de estas páginas es informativo: significa que el SII no publicó ese
@@ -178,8 +208,10 @@ function filas(trozo: string): string[] {
  */
 export function parsearValoresDiarios(html: string): ValorDiario[] {
   const salida: ValorDiario[] = [];
+  const bloques = porMes(html);
+  assertReconocioTablas(bloques.length);
 
-  for (const { mes, trozo } of porMes(html)) {
+  for (const { mes, trozo } of bloques) {
     for (const fila of filas(trozo)) {
       const c = celdas(fila);
       // Pares (día, valor). Una fila de cabecera no tiene números en la posición
@@ -222,7 +254,34 @@ export function parsearValoresMensuales(html: string): ValorMensual[] {
     const valores = filasDeMes(tabla.split(/<\/table>/i)[0]);
     if (valores.length > mejor.length) mejor = valores;
   }
+  // Se distingue "no hay tablas de mes" de "hay tablas y ninguna fila parseó":
+  // con un solo mensaje, el segundo caso mandaba a mirar los encabezados, que
+  // estaban perfectos, mientras el problema estaba en las celdas.
+  assertReconocioTablas(html.split(/<table[^>]*>/i).length - 1);
+  if (mejor.length === 0) {
+    throw new Error(
+      'El SII devolvió tablas pero ninguna fila de mes reconocible: '
+      + 'cambió el formato de las celdas y hay que actualizar el scraper.');
+  }
   return mejor;
+}
+
+// El parser de tramos ya falla ruidosamente cuando no reconoce ningún rótulo;
+// estos dos devolvían `[]`. La diferencia importa porque el consumidor lee la
+// lista vacía como "el SII no publicó estos valores", que es una afirmación
+// sobre los datos del SII — falsa, y hecha por nosotros. Un rediseño de la
+// página (que ya pasó: la UF titula con h2 y el dólar con h3) tiene que dar
+// error, no un año sin datos.
+//
+// No colisiona con el caso legítimo de año no publicado: ese llega como 404 y
+// sale por `RecursoNoEncontrado` antes de parsear nada.
+function assertReconocioTablas(cuantas: number): void {
+  if (cuantas === 0) {
+    throw new Error(
+      'No se reconocieron las tablas de la página del SII: cambió su estructura. ' +
+      'Esto NO significa que el SII no haya publicado los valores.'
+    );
+  }
 }
 
 function filasDeMes(tabla: string): ValorMensual[] {
@@ -320,6 +379,10 @@ export function parsearTramosImpuesto(html: string): TramoImpuesto[] {
   // que el rótulo del período dejó de reconocerse —otra capitalización, otro
   // nombre en la página del art. 52 bis, que es aparte— y el resultado sería un
   // array vacío que se lee como dato. Mismo criterio que el h2/h3 de `porMes`.
+  // Sin ningún bloque tampoco se calla: era el mismo vacío silencioso, y el
+  // comentario de `assertReconocioTablas` afirmaba que este parser ya fallaba
+  // ruidosamente en ese caso. No era cierto hasta acá.
+  assertReconocioTablas(bloques);
   if (bloques > 0 && salida.length === 0) {
     throw new Error(
       'El SII devolvió tablas por mes pero ningún tramo reconocible: '

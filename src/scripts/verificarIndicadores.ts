@@ -7,7 +7,15 @@ import { recorrerConRitmo } from '../ritmoSii';
 // plausibles y equivocados.
 //
 // Va con ritmo: son páginas públicas, pero el SII cuenta las requests igual.
+// Se valida el año en vez de confiar en `Number`: con un argumento no numérico
+// esto era `NaN` y el script salía a pedirle al SII `uf/ufNaN.htm` —una consulta
+// segura de fallar, contra un portal que cuenta cada request para cortar por
+// volumen. Un año fuera de rango tampoco tiene sentido pedirlo.
 const ANIO = Number(process.argv[2] ?? 2025);
+if (!Number.isInteger(ANIO) || ANIO < 1990 || ANIO > 2100) {
+  console.error(`Año inválido: ${process.argv[2]}. Uso: npm run verificar-indicadores -- <año>`);
+  process.exit(1);
+}
 
 const CONSULTAS = [
   { nombre: 'uf', fn: () => uf(ANIO) },

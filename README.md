@@ -488,6 +488,7 @@ Lo que un consumidor necesita saber de cada código es **si reintentar sirve**:
 | `LIMITE_CONOCIDO` | No | Un límite que ya conocemos: un descuadre entre lo que el SII informa y lo que se recupera, o un cambio de formato de un CGI. Trae `detalle` |
 | `SESIONES_SIMULTANEAS` | **Sí**, tras esperar | El RUT ya tiene demasiadas sesiones abiertas en el SII. Trae `detalle` |
 | `LIMITE_SII` | **Sí, esperando de verdad** | El SII cortó las consultas por volumen (su propio error 429). Trae `detalle` |
+| `SERVICIO_OCUPADO` | **Sí, en segundos** | Nosotros estamos ocupados: demasiadas consultas de indicadores esperando turno. Trae `detalle` |
 | `ERROR` | **Sí** | Todo lo demás: cola de espera del SII, portal caído, fallo de red |
 
 `LIMITE_SII` es el que más cambia qué hacer: el SII tiene rate limiting propio y,

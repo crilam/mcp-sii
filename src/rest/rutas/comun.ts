@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeConsultasSii } from '../../erroresConsulta';
+import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado } from '../../erroresConsulta';
 
 // Fragmento zod para la única ruta que recibe SÓLO certificado digital:
 // `/v1/mipyme/emitir-dte`, porque firmar un DTE necesita el certificado de
@@ -199,6 +199,14 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
     }
     if (e instanceof SesionesSimultaneas) {
       return { status: 200, body: { ok: false, error: 'SESIONES_SIMULTANEAS', detalle: e.message } };
+    }
+    // Somos NOSOTROS los que estamos ocupados, no el SII. Va con código propio
+    // por la misma razón que los dos de arriba: con `ERROR`, el consumidor lee
+    // "el servicio falló" y reintenta enseguida contra una cola que justamente
+    // está llena. Acá el mensaje es "esperá unos segundos y volvé", y la espera
+    // se mide en segundos, no en los minutos que pide `LIMITE_SII`.
+    if (e instanceof ServicioOcupado) {
+      return { status: 200, body: { ok: false, error: 'SERVICIO_OCUPADO', detalle: e.message } };
     }
     const error = clasificarErrorCredenciales(e);
     // Un error que no es rechazo de credenciales es un bug (del scraper, de

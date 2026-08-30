@@ -78,3 +78,21 @@ export class LimiteDeConsultasSii extends Error {
     this.name = new.target.name;
   }
 }
+
+// Hay demasiadas consultas esperando su turno contra el mismo portal público.
+//
+// Los indicadores se serializan en una cola de un solo turno, porque un barrido
+// paralelo contra sii.cl es el patrón que ya bloqueó el RCV. El timeout de la
+// bajada cubre la conexión, NO el tiempo en cola: con la cola sin tope, un
+// consumidor que pide cincuenta años nuevos deja a los demás esperando minutos
+// con la conexión HTTP abierta y sin error a la vista, que del lado del que
+// integra es indistinguible de un servicio colgado.
+//
+// Rechazar rápido es preferible a hacer esperar sin decir nada: el consumidor
+// recibe una respuesta inmediata y sabe que tiene que reintentar más tarde.
+export class ServicioOcupado extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = new.target.name;
+  }
+}

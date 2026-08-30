@@ -33,12 +33,34 @@ describe('parsearValoresMensuales — corrección monetaria', () => {
     expect(parsearValoresMensuales(html)).toHaveLength(3);
   });
 
-  it('una página sin tablas de mes devuelve vacío, no revienta', () => {
-    expect(parsearValoresMensuales('<html><body>sin datos</body></html>')).toEqual([]);
+  // Este test decía lo contrario —"devuelve vacío, no revienta"— y se dio vuelta
+  // por un hallazgo del code review del PR #63. El vacío silencioso convive mal
+  // con el bloque de acá abajo, que para los tramos exige lo opuesto: la misma
+  // situación (el SII cambió su maquetado) daba error en un parser y una lista
+  // vacía en el otro.
+  //
+  // Y la lista vacía es peor que un error, porque afirma algo: el consumidor la
+  // lee como "el SII no publicó estos valores". El año que el SII realmente no
+  // publica llega como 404 y sale por RecursoNoEncontrado, así que no se pierde
+  // ese caso.
+  it('una página sin tablas de mes es un error, no un array vacío', () => {
+    expect(() => parsearValoresMensuales('<html><body>sin datos</body></html>'))
+      .toThrow(/no se reconocieron/i);
   });
 });
 
 describe('parsearTramosImpuesto — fallos ruidosos', () => {
+  // El hueco que quedaba: los tramos gritaban cuando reconocían las tablas pero
+  // no las filas, y CALLABAN cuando no reconocían ninguna tabla — justo el
+  // "vacío silencioso" que este mismo archivo arregla para diarios y mensuales.
+  it('una página sin tablas de mes reconocibles es un error, no un array vacío', () => {
+    const roto = '<h4>Enero 2025</h4><table><tbody>' +
+      '<tr><td>MENSUAL</td><td>-.-</td><td>$ 900.000</td><td>0,04</td><td>-.-</td><td>2,2%</td></tr>' +
+      '</tbody></table>';
+
+    expect(() => parsearTramosImpuesto(roto)).toThrow(/no se reconocieron/i);
+  });
+
   // Si el SII cambia el rótulo del período, cada tabla queda sin tramos y el
   // resultado sería un array vacío que se lee como "no publicó". Tiene que doler.
   it('tablas por mes sin ningún tramo reconocible es un error, no un array vacío', () => {
@@ -49,10 +71,13 @@ describe('parsearTramosImpuesto — fallos ruidosos', () => {
     expect(() => parsearTramosImpuesto(roto)).toThrow(/rótulo del período/);
   });
 
-  // Una página sin tablas de mes es otra cosa —un año que el SII no publica— y
-  // ahí el vacío sí es la respuesta.
-  it('una página sin tablas de mes devuelve vacío', () => {
-    expect(parsearTramosImpuesto('<html><body>nada</body></html>')).toEqual([]);
+  // Este test decía que el vacío era correcto acá, justificándolo con "un año
+  // que el SII no publica". Ese caso NO llega hasta el parser: el 404 de la
+  // página sale antes como `RecursoNoEncontrado`. Lo que sí llega es un
+  // rediseño del portal, y ahí el vacío miente.
+  it('una página sin tablas de mes también es un error', () => {
+    expect(() => parsearTramosImpuesto('<html><body>nada</body></html>'))
+      .toThrow(/no se reconocieron/i);
   });
 
   // El portal usa `<h2 class="...">` en varias páginas. Sin aceptar atributos, el
