@@ -611,9 +611,22 @@ Dos cosas: **`tasacion` devuelve todas las filas que coinciden** (un modelo tien
 | **`POST /v1/contribuyentes/actividades-economicas`** | `categoria?` (`"1"`, `"2"` u otro valor de la tabla), `afecta_iva?`, `texto?` | `datos`: `{codigo, descripcion, rubro, subrubro, afectaIva, categoriaTributaria, disponibleInternet}` |
 | **`POST /v1/contribuyentes/actividad-economica`** | `codigo` (seis dígitos) | una actividad; inexistente → `NO_ENCONTRADO` |
 | **`POST /v1/contribuyentes/verificar-rut`** | `rut` | `{rut, valido, cuerpo, dv, motivo?}`. **No consulta al SII** ni dice si el RUT existe: sólo módulo 11. |
-| **`POST /v1/misii/datos-contribuyente`** | credencial estándar | la ficha de Mi SII: `rut, razonSocial, nombres, tipoContribuyente, subtipoContribuyente, personaEmpresa, segmento, glosaActividad, email, telefonoMovil, fechaConstitucion, fechaInicioActividades, fechaTerminoGiro, unidadOperativa, capitalEnterado, capitalPorEnterar, autorizadoDeclararDia20, direcciones[], atributos[], alertas[]` |
+| **`POST /v1/misii/datos-contribuyente`** | credencial estándar | la ficha de Mi SII: `rut, razonSocial, nombres, tipoContribuyente, subtipoContribuyente, personaEmpresa, segmento, glosaActividad, email, telefonoMovil, fechaConstitucion, fechaInicioActividades, fechaTerminoGiro, unidadOperativa, capitalEnterado, capitalPorEnterar, autorizadoDeclararDia20, actividades[], regimen, direcciones[], atributos[], alertas[]`, más `capturadoEn` y `parserVersion` |
 
 `categoriaTributaria` es texto y viene tal como la publica el SII: la mayoría `"1"` o `"2"`, y alguna letra (`"G"`) que la tabla no explica. `atributos` son los regímenes y autorizaciones del contribuyente (por ejemplo `14D1` "Régimen Pro Pyme General") con `desde`/`hasta`. **Todas las fechas van en `YYYY-MM-DD`**: el SII las manda en dos formatos distintos dentro de la misma ficha y acá se normalizan.
+
+`actividades[]` son las actividades económicas de ESTE contribuyente —`{codigo, giro, categoria, afectaIva, desde}`—, que no es lo mismo que el catálogo público de `/v1/contribuyentes/actividades-economicas`: acá viene la fecha desde la que el contribuyente tiene cada una. El **código va como string**, no como número: varios códigos ACTECO empiezan con cero (`011101` es cultivo de trigo) y convertirlos se lo come.
+
+`capturadoEn` es **cuándo se leyó del SII**, no cuándo se armó la respuesta, y `parserVersion` viaja para poder auditar hacia atrás un dato que después resulte estar mal. Guardá los dos con cada captura.
+
+**Sobre `regimen`, y conviene leerlo entero antes de usarlo:**
+
+- Es el régimen **VIGENTE**, derivado del atributo `14*`, y el portal **no guarda el anterior**. Verificado con un caso real: una empresa que cambió de régimen no deja ningún rastro del que tenía antes.
+- Por eso `regimen.desde` **no es decorativo**: es el único dato que dice para qué períodos vale la respuesta. **Para un período anterior a esa fecha éste NO es el régimen que corresponde** — hay que buscarlo en otra fuente y nunca extrapolar el actual hacia atrás. Un F29 calculado así sale con el régimen equivocado y sin ninguna señal de error.
+- `regimen: null` significa "no se pudo determinar". No es un régimen por defecto y no debe tratarse como uno.
+- El código va **tal como lo da el SII** (`14D1` y su glosa), sin traducirlo a una clasificación propia: sólo se relevó uno, y clasificar los demás a ciegas daría un régimen plausible y equivocado.
+
+La respuesta trae datos personales (correo, teléfono, capital): **loguearla entera es loguear PII**.
 
 ### 6.10 Verificación de DTE
 
