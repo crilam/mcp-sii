@@ -1,7 +1,19 @@
-import { MipymeHttpScraper, BorradorMipyme, FiltrosDteEmitidos, DteEmitidosResult, FiltrosDteRecibidos, DteRecibidosResult, EmitirDteParams, PrevisualizacionDte, DteEmitido } from '../scrapers/mipymeHttp';
+import { createHash } from 'crypto';
+import { MipymeHttpScraper, BorradorMipyme, FiltrosDteEmitidos, DteEmitidosResult, FiltrosDteRecibidos, DteRecibidosResult, EmitirDteParams, PrevisualizacionDte, DteEmitido, BorradorGuardado } from '../scrapers/mipymeHttp';
 import { SiiHttpClient } from '../http';
 import { SessionManager, Empresa } from '../session';
 import { EjecutorSesion } from '../registroSesiones';
+import { VentanaIdempotencia } from '../idempotenciaEscritura';
+
+// Red anti-doble-click del guardado de borrador: como el SII no devuelve el id
+// de un borrador nuevo, dos llamadas idénticas grabarían dos borradores sin que
+// el consumidor lo note. Sólo protege el grabado real (confirmar:true).
+//
+// ES IN-PROCESS: el Map vive en la memoria de este proceso. En prod (ECS con más
+// de una task) NO protege contra un doble-click repartido entre dos tasks. Es
+// una red de último momento contra el reintento del MISMO cliente, aceptable
+// porque un borrador es reversible; no es una garantía transaccional.
+export const ventanaBorrador = new VentanaIdempotencia();
 
 export async function listEmpresas(
   ejecutor: EjecutorSesion<SessionManager>,
@@ -68,4 +80,33 @@ export async function emitirDte(
     const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
     return http.emitirDte(params, confirmar);
   });
+}
+
+// Guarda un DTE como BORRADOR (reversible, no lo emite). Con confirmar:false
+// simula; con true graba. `borradorId` edita un borrador existente.
+export async function guardarBorrador(
+  ejecutor: EjecutorSesion<SessionManager>,
+  rut: string,
+  params: EmitirDteParams,
+  confirmar: boolean,
+  borradorId?: string
+): Promise<BorradorGuardado> {
+  const grabar = () => ejecutor.ejecutar(rut, async sesion => {
+    const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
+    return http.guardarBorrador(params, confirmar, borradorId);
+  });
+  // La simulación no muta: no toca la ventana de idempotencia. El grabado sí.
+  if (!confirmar) return grabar();
+  // La clave depende del orden de campos de `params` al serializar. Hoy lo fija
+  // `paramsDocumento` (el único que arma EmitirDteParams para esta ruta); un
+  // llamador que arme el objeto a mano con otro orden generaría otra clave y no
+  // colisionaría con el suyo previo. Es aceptable: la red es una salvaguarda del
+  // MISMO cliente, no un lock global.
+  const clave = createHash('sha256')
+    .update(JSON.stringify([rut, borradorId ?? '', params]))
+    .digest('hex');
+  return ventanaBorrador.ejecutar(clave,
+    'Este borrador ya se está guardando o se guardó hace segundos. No se repite para no '
+    + 'duplicarlo; verificá con list-borradores antes de reintentar.',
+    grabar);
 }

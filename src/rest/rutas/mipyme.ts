@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaListBorradores, schemaEmitirDte } from '../../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaListBorradores, schemaEmitirDte, schemaGuardarBorrador, paramsDocumento } from '../../core/schemas/mipyme';
 import { ejecutorPara, ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCredencialCert } from './comun';
 
@@ -121,23 +122,39 @@ export function registrarRutasMipyme(
     }
 
     const ejecutor = ejecutorPassThroughCertDe(registro, credenciales, datos.rut, datos.certificado_base64, datos.certificado_password);
-    return ejecutar(() => core.emitirDte(ejecutor, datos.rut, {
-      empresaRut: datos.empresa_rut,
-      tipoDte: datos.tipo_dte,
-      receptor: {
-        rut: datos.receptor_rut, dv: datos.receptor_dv, razonSocial: datos.receptor_razon_social,
-        giro: datos.receptor_giro, direccion: datos.receptor_direccion, comuna: datos.receptor_comuna,
-        ciudad: datos.receptor_ciudad,
-      },
-      lineas: datos.lineas.map(l => ({
-        nombre: l.descripcion, cantidad: l.cantidad, precioUnitario: l.precio_unitario, unidad: l.unidad,
-      })),
-      formaPago: datos.forma_pago,
-      ciudadEmisor: datos.ciudad_emisor,
-      fechaEmision: datos.fecha_emision,
-      referencias: datos.referencias?.map(r => ({
-        tipoDoc: r.tipo_doc, folio: r.folio, fecha: r.fecha, razon: r.razon, codigo: r.codigo,
-      })),
-    }, false));
+    return ejecutar(() => core.emitirDte(ejecutor, datos.rut, paramsDocumento(datos), false));
+  });
+
+  // Guardar borrador: reversible, NO firma → acepta clave o certificado, y sí
+  // soporta confirmar:true (a diferencia de emitir-dte). El guardrail: sin
+  // confirmar, simula; con confirmar, graba.
+  const zodBorrador = conCredencial(schemaGuardarBorrador);
+  rutas.set('POST /v1/mipyme/borrador', async body => {
+    const parseo = zodBorrador.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const datos = parseo.data;
+    const doc = paramsDocumento(datos); // una sola vez: el hash de la traza cuadra con lo mandado
+    const ejecutor = ejecutorPara(registro, credenciales, datos.rut, credencialDe(datos));
+    const resp = await ejecutar(() => core.guardarBorrador(ejecutor, datos.rut, doc, datos.confirmar, datos.borrador_id));
+    // Traza de auditoría de la escritura (misma mecánica que el acuse del RCV).
+    const respBody = resp.body as { ok?: boolean; error?: string; borradorId?: string | null };
+    // Referencia del acto: el id del borrador cuando el SII lo da (edición), o
+    // tipo+receptor + un hash corto del documento cuando no (borrador nuevo), para
+    // que dos borradores distintos al mismo receptor no colisionen en la traza.
+    const hashDoc = createHash('sha256').update(JSON.stringify(doc)).digest('hex').slice(0, 8);
+    const referencia = `borrador:${respBody?.borradorId ?? `${datos.tipo_dte}-${datos.receptor_rut}-${hashDoc}`}`;
+    if (respBody?.ok && datos.confirmar) {
+      resp.auditoria = { efecto: 'ejecutado', referencia };
+    } else if (respBody?.ok) {
+      resp.auditoria = { efecto: 'simulado', referencia };
+    } else if (datos.confirmar && respBody?.error !== 'LIMITE_CONOCIDO') {
+      // 'fallido' = un intento de escritura que el SII rechazó. Un LIMITE_CONOCIDO
+      // acá es el bloqueo anti-doble-click: NO se tocó el SII, no es un intento
+      // fallido, así que no ensucia la traza.
+      resp.auditoria = { efecto: 'fallido', referencia };
+    }
+    // Una SIMULACIÓN que falla (!ok && !confirmar) NO deja traza: no se intentó
+    // escribir nada, así que no hay acto que auditar. Mismo criterio que el acuse.
+    return resp;
   });
 }

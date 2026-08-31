@@ -675,6 +675,16 @@ El **dry-run valida el evento contra el catálogo, pero NO verifica que los docu
 
 Fuera de esta ronda: `set_tipo_transaccion` (app legacy del SII, no API) y `set_resumen` (no existe). Ver el diseño completo de R11 en `docs/superpowers/specs/2026-08-31-ronda-11-escritura-design.md`.
 
+### 6.14 Mipyme — guardar borrador (ronda 11, ESCRITURA reversible)
+
+Guarda un DTE como BORRADOR en el portal mipyme. **No es un acto tributario**: no emite, no firma, no notifica, y es REVERSIBLE (se edita o descarta). Relevado del form real (`mipeGenFacEx.cgi`): el botón "Guardar Borrador" postea a `mipeGrabaBorrador.cgi` con `ES_BORR='TRUE'`; es el mismo documento que se emitiría.
+
+| Endpoint | Tool | Body |
+|---|---|---|
+| **`POST /v1/mipyme/borrador`** | `sii_mipyme_guardar_borrador` | mismos campos que emitir-dte + `borrador_id?` + `confirmar?` |
+
+A diferencia de `emitir-dte` (que exige certificado y bloquea `confirmar:true` vía REST), el borrador **acepta clave o certificado** (no firma) y **sí soporta `confirmar:true`**. Sin `confirmar` (default) SIMULA: valida el documento contra el portal y devuelve el resumen sin guardar. Con `confirmar:true` graba y devuelve el `borradorId` (EHDR_CODIGO). Pasar `borrador_id` EDITA uno existente en vez de crear uno nuevo. Al **crear** un borrador nuevo el SII **no devuelve el id del borrador** en la respuesta de grabado (`borradorId` viene `null`): para obtenerlo, consultá `list-borradores`. Al **editar** (con `borrador_id`), el `borradorId` es el que pasaste. La **simulación no verifica que un borrador a editar exista**: sólo valida el documento. El éxito del grabado se detecta por el mensaje de confirmación del portal, no por la presencia de un id. La traza de auditoría marca `simulado`/`ejecutado`/`fallido` (sólo REST). Hay una red anti-doble-click (un mismo borrador repetido en <60 s se rechaza), pero es **in-process**: con más de una instancia del servicio no protege un doble-click repartido entre instancias — es una salvaguarda de último momento, no una garantía (el borrador es reversible).
+
 ---
 
 ## 7. Limitaciones conocidas

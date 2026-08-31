@@ -20,13 +20,60 @@ const RECEPTOR_MINIMO = {
 describe('registrarRutasMipyme', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 6 rutas bajo /v1/mipyme', () => {
+  it('registra las 7 rutas bajo /v1/mipyme', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
       'POST /v1/mipyme/list-empresas', 'POST /v1/mipyme/list-dte-emitidos',
       'POST /v1/mipyme/list-dte-recibidos', 'POST /v1/mipyme/dte-pdf',
       'POST /v1/mipyme/list-borradores', 'POST /v1/mipyme/emitir-dte',
+      'POST /v1/mipyme/borrador',
     ]);
+  });
+
+  describe('borrador (R11)', () => {
+    const CRED = { rut: '11.111.111-1', clave: 'secreta', tipo_dte: 33, lineas: [LINEA_MINIMA], ...RECEPTOR_MINIMO };
+
+    // A diferencia de emitir-dte, el borrador ACEPTA CLAVE (no firma) y SÍ
+    // soporta confirmar:true.
+    it('sin confirmar simula y audita como simulado', async () => {
+      (core.guardarBorrador as jest.Mock).mockResolvedValue({ guardado: false, resumen: {}, borradorId: null });
+      const r = await armarRouter().get('POST /v1/mipyme/borrador')!(CRED);
+      expect((r.body as any).ok).toBe(true);
+      expect(r.auditoria).toMatchObject({ efecto: 'simulado' });
+      expect(r.auditoria!.referencia).toMatch(/^borrador:33-33333333-[0-9a-f]{8}$/);
+      expect(core.guardarBorrador).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.any(Object), false, undefined);
+    });
+
+    it('con confirmar:true guarda y audita como ejecutado con el id', async () => {
+      (core.guardarBorrador as jest.Mock).mockResolvedValue({ guardado: true, resumen: {}, borradorId: '998877' });
+      const r = await armarRouter().get('POST /v1/mipyme/borrador')!({ ...CRED, confirmar: true });
+      expect(r.auditoria).toEqual({ efecto: 'ejecutado', referencia: 'borrador:998877' });
+      expect(core.guardarBorrador).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.any(Object), true, undefined);
+    });
+
+    it('borrador_id se pasa al core para editar', async () => {
+      (core.guardarBorrador as jest.Mock).mockResolvedValue({ guardado: true, resumen: {}, borradorId: '555' });
+      await armarRouter().get('POST /v1/mipyme/borrador')!({ ...CRED, confirmar: true, borrador_id: '555' });
+      expect(core.guardarBorrador).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.any(Object), true, '555');
+    });
+
+    // Un bloqueo anti-doble-click (LimitacionConocida → LIMITE_CONOCIDO) NO se
+    // audita como escritura: no se tocó el SII.
+    it('un bloqueo por doble-click (LIMITE_CONOCIDO) no deja traza de escritura', async () => {
+      (core.guardarBorrador as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').LimitacionConocida)('ya en curso'));
+      const r = await armarRouter().get('POST /v1/mipyme/borrador')!({ ...CRED, confirmar: true });
+      expect((r.body as any).error).toBe('LIMITE_CONOCIDO');
+      expect(r.auditoria).toBeUndefined();
+    });
+
+    // Un confirmar:true que FALLA (rechazo del SII) se audita como 'fallido'.
+    it('un guardado fallido (confirmar:true) se audita como fallido', async () => {
+      (core.guardarBorrador as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').EscrituraRechazadaPorSii)('no se guardó'));
+      const r = await armarRouter().get('POST /v1/mipyme/borrador')!({ ...CRED, confirmar: true });
+      expect((r.body as any).ok).toBe(false);
+      expect(r.auditoria).toMatchObject({ efecto: 'fallido' });
+      expect(r.auditoria!.referencia).toMatch(/^borrador:33-33333333-[0-9a-f]{8}$/);
+    });
   });
 
   it('list-empresas: body válido llama al core', async () => {

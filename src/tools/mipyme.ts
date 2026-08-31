@@ -4,7 +4,7 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaListBorradores, schemaEmitirDte } from '../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaListBorradores, schemaEmitirDte, schemaGuardarBorrador, paramsDocumento } from '../core/schemas/mipyme';
 
 // Orden de resolución de la empresa, el mismo que el resto del proyecto: el
 // parámetro de la llamada gana, si no vino cae a SII_EMPRESA_RUT, y si tampoco
@@ -120,6 +120,34 @@ export function registerMipymeTools(server: McpServer, registro: RegistroSesione
             aviso: 'Documento NO emitido: esto es sólo la previsualización. Para emitirlo de ' +
               'verdad hay que llamar de nuevo con confirmar=true, y eso es irreversible.',
           };
+    })
+  );
+
+  server.tool(
+    'sii_mipyme_guardar_borrador',
+    'Guarda un DTE como BORRADOR en el Sistema de Facturación Gratuito del SII (mipyme). Un ' +
+    'borrador NO es un documento tributario: NO se emite, NO se firma, NO notifica a nadie, y ' +
+    'es REVERSIBLE (se puede editar o descartar). Toma los mismos datos que sii_mipyme_emitir_dte. ' +
+    'POR DEFECTO (confirmar ausente o false) NO guarda: SIMULA, valida el documento contra el ' +
+    'portal y devuelve el resumen. Con confirmar=true graba el borrador. Al ser reversible es de ' +
+    'bajo riesgo, pero igual conviene confirmarlo con el usuario. Para EDITAR un borrador ' +
+    'existente en vez de crear uno nuevo, pasar borrador_id (el EHDR_CODIGO que devuelve ' +
+    'sii_mipyme_list_borradores). No requiere certificado: alcanza la sesión.',
+    schemaGuardarBorrador,
+    async (args) => envolverParaMcp(async () => {
+      const r = await core.guardarBorrador(registro, args.rut,
+        { ...paramsDocumento(args), empresaRut: empresaPedida(args.empresa_rut) },
+        args.confirmar, args.borrador_id);
+
+      if (!r.guardado) {
+        return { guardado: false, resumen: r.resumen,
+          aviso: 'Sólo simulación: NO se guardó. Para guardar el borrador, llamá de nuevo con confirmar=true.' };
+      }
+      return { guardado: true, borradorId: r.borradorId, resumen: r.resumen,
+        aviso: r.borradorId
+          ? `Borrador ${r.borradorId} actualizado. Es reversible: se puede editar o descartar; NO se emitió nada.`
+          : 'Borrador guardado. El SII no devuelve su id al crear uno nuevo: buscalo con sii_mipyme_list_borradores. '
+            + 'Es reversible: se puede editar o descartar; NO se emitió nada.' };
     })
   );
 }
