@@ -50,8 +50,10 @@ export interface ResultadoAcuse {
   mensaje: string;
 }
 
-// El catálogo de eventos es casi estático; se cachea por proceso unos minutos
-// para no golpear getEventosDoc en CADA escritura (incluso en los dry-run).
+// El catálogo de eventos es casi estático y GLOBAL del SII (ERM/ERG, no depende
+// del contribuyente), así que se cachea por proceso unos minutos para no golpear
+// getEventosDoc en CADA escritura (incluso en los dry-run). Si algún día
+// dependiera del perfil, esta cache global habría que segmentarla por RUT.
 const CATALOGO_TTL_MS = 5 * 60_000;
 let catalogoCache: { ts: number; eventos: EventoAcuse[] } | null = null;
 
@@ -75,7 +77,9 @@ export class RcvEscrituraScraper {
       throw new LimitacionConocida(`El SII respondió código ${cod} al pedir el catálogo de eventos de acuse del RCV.`);
     }
     const eventos = (resp.dataEventosDocs ?? []).map(e => ({ codigo: e.dedCodEvento, descripcion: e.dedDescEvento.replace(/\s+/g, ' ').trim() }));
-    catalogoCache = { ts: Date.now(), eventos };
+    // No se cachea un catálogo vacío: sería un problema transitorio del SII que
+    // quedaría fijo 5 minutos, tumbando todo acuse con "catálogo vacío".
+    if (eventos.length > 0) catalogoCache = { ts: Date.now(), eventos };
     return eventos;
   }
 
@@ -87,34 +91,35 @@ export class RcvEscrituraScraper {
    */
   async acusar(documentos: DocumentoAcuse[], evento: string, confirmar: boolean): Promise<ResultadoAcuse> {
     this.session.assertPuedeEntregarCookieJar();
-    // Todo lo que ocurre ANTES de mandar el POST se marca `acuseSeguroDeLiberar`:
-    // el acto no salió, así que la red anti-doble-click puede liberar la reserva
-    // sin riesgo. Lo que NO lleve esa marca (un timeout de red tras el POST, un
-    // 100 ambiguo, o un error que otra capa envolvió y borró la marca) se trata
-    // como "pudo haber cursado" y la reserva se mantiene. El default es no
-    // duplicar.
-    if (documentos.length === 0) {
-      throw marcarSeguro(new Error('No se indicó ningún documento para acusar recibo.'));
-    }
 
-    // El evento tiene que estar en el catálogo del SII: un código inventado no se
-    // manda a ciegas a una operación de escritura.
-    const catalogo = await this.eventosAcuse();
-    if (!catalogo.some(e => e.codigo === evento)) {
-      throw marcarSeguro(new LimitacionConocida(
-        `El evento de acuse "${evento}" no está en el catálogo del SII (${catalogo.map(e => e.codigo).join(', ') || 'vacío'}). `
-        + 'Consultá los eventos válidos antes de acusar.'));
+    // FASE PRE-ENVÍO: validaciones y armado del payload. Nada de esto manda el
+    // acuse, así que CUALQUIER error acá es seguro de liberar (el consumidor que
+    // corrige un RUT o un evento puede reintentar sin esperar la ventana). Se
+    // envuelve entera para marcar todos sus errores, incluidos los de
+    // `eventosAcuse` y `partirRut`.
+    let dteAcuRe: { detRutDoc: string; detDvDoc: string; detTipoDoc: number; detNroDoc: number; dedCodEvento: string }[];
+    try {
+      if (documentos.length === 0) {
+        throw new Error('No se indicó ningún documento para acusar recibo.');
+      }
+      // El evento tiene que estar en el catálogo del SII: un código inventado no
+      // se manda a ciegas a una operación de escritura.
+      const catalogo = await this.eventosAcuse();
+      if (!catalogo.some(e => e.codigo === evento)) {
+        throw new LimitacionConocida(
+          `El evento de acuse "${evento}" no está en el catálogo del SII (${catalogo.map(e => e.codigo).join(', ') || 'vacío'}). `
+          + 'Consultá los eventos válidos antes de acusar.');
+      }
+      dteAcuRe = documentos.map(d => {
+        const { rut, dv } = partirRut(d.rutEmisor, 'RUT del emisor del documento');
+        return { detRutDoc: rut, detDvDoc: dv, detTipoDoc: d.tipoDoc, detNroDoc: d.folio, dedCodEvento: evento };
+      });
+    } catch (e) {
+      throw marcarSeguro(e as Error);
     }
-
-    // Se arma el payload SIEMPRE (para poder mostrarlo en la simulación), pero
-    // sólo se envía si confirmar es true.
-    const dteAcuRe = documentos.map(d => {
-      const { rut, dv } = partirRut(d.rutEmisor, 'RUT del emisor del documento');
-      return { detRutDoc: rut, detDvDoc: dv, detTipoDoc: d.tipoDoc, detNroDoc: d.folio, dedCodEvento: evento };
-    });
 
     if (!confirmar) {
-      // Una simulación no manda nada: es seguro liberar la reserva si algo falla.
+      // Una simulación no manda nada.
       return {
         ejecutado: false, evento, documentos,
         mensaje: `Simulación: se acusaría "${evento}" sobre ${documentos.length} documento(s). `
@@ -122,6 +127,7 @@ export class RcvEscrituraScraper {
       };
     }
 
+    // A partir de acá el error NO se marca por defecto: es la zona post-envío.
     const { rut: rutAut, dv: dvAut } = this.session.identidad();
     const resp = await this.http.postSdi(BASE, NAMESPACE, 'ingresarAceptacionReclamoDocs', {
       dteAcuRe, rutAutenticado: rutAut, dvAutenticado: dvAut,

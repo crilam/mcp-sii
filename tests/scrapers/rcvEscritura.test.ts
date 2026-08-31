@@ -112,4 +112,13 @@ describe('RcvEscrituraScraper.acusar', () => {
     const { scraper } = armar();
     await expect(scraper.acusar([], 'ERM', true)).rejects.toThrow(/ningún documento/);
   });
+
+  // Los errores PRE-envío (catálogo, evento inválido) quedan marcados seguros:
+  // el acto no salió, así que un reintento corregido no espera la ventana.
+  it('un error pre-envío queda marcado seguro de liberar', async () => {
+    const { http, scraper } = armar();
+    (http.postSdi as jest.Mock).mockResolvedValue(CATALOGO);
+    const err = await scraper.acusar(DOCS, 'XXX', true).catch(e => e); // evento fuera del catálogo
+    expect(acuseSeguroDeLiberar(err)).toBe(true);
+  });
 });

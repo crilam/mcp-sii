@@ -55,6 +55,17 @@ describe('registrarRutasRcvEscritura', () => {
     expect(r.auditoria).toEqual({ efecto: 'fallido', referencia: 'ERM:22222222-2/33-100' });
   });
 
+  // Un bloqueo por doble-click (LimitacionConocida del core) con confirmar:true
+  // también se audita como 'fallido' (mismo rama que un rechazo del SII).
+  it('un doble-click bloqueado (confirmar:true) se audita como fallido', async () => {
+    (core.acusar as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').LimitacionConocida)('ya está en curso'));
+
+    const r = await armar().get('POST /v1/rcv/acuse')!({ ...CRED, documentos: DOCS, evento: 'ERM', confirmar: true });
+
+    expect((r.body as any).ok).toBe(false);
+    expect(r.auditoria).toEqual({ efecto: 'fallido', referencia: 'ERM:22222222-2/33-100' });
+  });
+
   // Una SIMULACIÓN que falla no deja traza (no se intentó escribir).
   it('una simulación fallida no marca auditoría', async () => {
     (core.acusar as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').LimitacionConocida)('evento inválido'));
