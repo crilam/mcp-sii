@@ -662,6 +662,19 @@ El detalle síncrono (`/v1/rcv/detalle`) no garantiza más de ~393 documentos ni
 
 Detalles: el **estado va tal cual lo da el SII** (sin enum propio); hay que consultar `estado` hasta `TERMINADO` antes de pedir `detalle`. Si aún no terminó, `detalle` responde `LIMITE_CONOCIDO` («en proceso, reintentá»); si no hay solicitud, `NO_ENCONTRADO`. El **detalle trae las 26 columnas CRUDAS del CSV del SII** (claves = encabezados exactos, valores string sin reinterpretar tipos). `totalDocumentos` cuenta documentos por la columna `Nro` y **debe coincidir** con los registros que el SII declaró — si no, falla en vez de entregar un detalle truncado. Por MCP se exponen `sii_rcv_async_solicitar` y `sii_rcv_async_estado`; el **detalle async es sólo REST** (miles de filas no caben en la respuesta de una tool). Sin reCAPTCHA: la API lo acepta con token vacío.
 
+### 6.13 RCV — acuse de recibo (ronda 11, ESCRITURA)
+
+Primera operación que MODIFICA estado en el SII. **Con `confirmar:false` (default) NO escribe: simula.** Con `confirmar:true` cursa un acto real e irreversible: bajo la Ley 19.983 el acuse de recibo habilita la cesión del crédito del documento.
+
+| Endpoint | Body | Devuelve |
+|---|---|---|
+| **`POST /v1/rcv/eventos-acuse`** | — | catálogo de eventos válidos: ERM (recibo mercaderías/servicios), ERG (recibo guía mes anterior) |
+| **`POST /v1/rcv/acuse`** | `documentos:[{rut_emisor,tipo_doc,folio}], evento, confirmar?` | `{ejecutado, evento, documentos, mensaje}` |
+
+Salvaguardas: el `evento` se valida contra el catálogo del SII antes de escribir; la respuesta 100 del SII (alerta) NO se reporta como éxito; hay una red anti-doble-click (el mismo acuse repetido en <60 s se rechaza). La traza de auditoría distingue `simulado` de `ejecutado` y guarda la referencia (evento + documentos) en la tabla `auditoria` (columnas `efecto`/`referencia`, migración 0002).
+
+Fuera de esta ronda: `set_tipo_transaccion` (app legacy del SII, no API) y `set_resumen` (no existe). Ver el diseño completo de R11 en `docs/superpowers/specs/2026-08-31-ronda-11-escritura-design.md`.
+
 ---
 
 ## 7. Limitaciones conocidas

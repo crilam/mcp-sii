@@ -125,6 +125,9 @@ export function badRequest(error: z.ZodError): RespuestaRuta {
 export interface RespuestaRuta {
   status: number;
   body: unknown;
+  // Metadata de auditoría de ESCRITURA (ronda 11). No se envía al cliente: el
+  // servidor la vuelca en la tabla `auditoria`. Las rutas de lectura la omiten.
+  auditoria?: { efecto: 'simulado' | 'ejecutado'; referencia?: string };
 }
 
 export type RutaHandler = (body: unknown) => Promise<RespuestaRuta>;

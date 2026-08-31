@@ -22,6 +22,7 @@ import { registrarRutasActividadesEconomicas } from './rest/rutas/actividadesEco
 import { registrarRutasMisii } from './rest/rutas/misii';
 import { registrarRutasDteVerificacion } from './rest/rutas/dteVerificacion';
 import { registrarRutasF29 } from './rest/rutas/f29';
+import { registrarRutasRcvEscritura } from './rest/rutas/rcvEscritura';
 
 const LIMITE_AUTH_FALLIDA_POR_IP = 20;
 
@@ -69,6 +70,7 @@ export function crearRestServer(
   registrarRutasMisii(rutas, registro, credenciales);
   registrarRutasDteVerificacion(rutas, registro, credenciales);
   registrarRutasF29(rutas, registro, credenciales);
+  registrarRutasRcvEscritura(rutas, registro, credenciales);
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -181,13 +183,18 @@ async function manejarRequest(
     return;
   }
 
-  const { status, body: respBody } = await handler(body);
+  const { status, body: respBody, auditoria } = await handler(body);
   // El body todavía no pasó por el zod de la ruta acá afuera (eso lo hace
   // `handler`) — sólo se audita `rut` si efectivamente vino como string, para
   // no meter en la auditoría lo que un caller mande de basura en ese campo.
   const rutCrudo = (body as any)?.rut;
   const rut = typeof rutCrudo === 'string' ? rutCrudo : null;
   const error = (respBody as any)?.error ?? null;
-  await registrarAuditoria(pool, { tenantId: tenant.tenantId, ip, rut, ruta, status, error });
+  // `auditoria` (efecto/referencia) sólo lo traen las rutas de escritura; en las
+  // de lectura queda undefined y las columnas van NULL.
+  await registrarAuditoria(pool, {
+    tenantId: tenant.tenantId, ip, rut, ruta, status, error,
+    efecto: auditoria?.efecto, referencia: auditoria?.referencia,
+  });
   responderJson(res, status, respBody);
 }

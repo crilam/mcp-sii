@@ -11,6 +11,7 @@ import { registerActividadesEconomicasTools } from './tools/actividadesEconomica
 import { registerMisiiTools } from './tools/misii';
 import { registerDteVerificacionTools } from './tools/dteVerificacion';
 import { registerF29Tools } from './tools/f29';
+import { registerRcvEscrituraTools } from './tools/rcvEscritura';
 import { ProveedorCredencialesRuntime } from './credencialesRuntime';
 import { crearRegistroSesionesSii } from './registroSesionesSii';
 
@@ -43,6 +44,7 @@ export function createServer(): McpServer {
   registerMisiiTools(server, registro);
   registerDteVerificacionTools(server, registro);
   registerF29Tools(server, registro);
+  registerRcvEscrituraTools(server, registro);
 
   return server;
 }
