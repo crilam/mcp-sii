@@ -136,13 +136,19 @@ export function registrarRutasMipyme(
     const resp = await ejecutar(() => core.guardarBorrador(ejecutor, datos.rut, paramsDocumento(datos), datos.confirmar, datos.borrador_id));
     // Traza de auditoría de la escritura (misma mecánica que el acuse del RCV).
     const respBody = resp.body as { ok?: boolean; borradorId?: string | null };
+    // Referencia del acto: el id del borrador cuando el SII lo da (edición), o la
+    // combinación tipo+receptor cuando no (borrador nuevo) — nunca un '?' que no
+    // identifica nada.
+    const referencia = `borrador:${respBody?.borradorId ?? `${datos.tipo_dte}-${datos.receptor_rut}`}`;
     if (respBody?.ok && datos.confirmar) {
-      resp.auditoria = { efecto: 'ejecutado', referencia: `borrador:${respBody.borradorId ?? '?'}` };
+      resp.auditoria = { efecto: 'ejecutado', referencia };
     } else if (respBody?.ok) {
-      resp.auditoria = { efecto: 'simulado', referencia: `borrador:${datos.tipo_dte}-${datos.receptor_rut}` };
+      resp.auditoria = { efecto: 'simulado', referencia };
     } else if (datos.confirmar) {
-      resp.auditoria = { efecto: 'fallido', referencia: `borrador:${datos.tipo_dte}-${datos.receptor_rut}` };
+      resp.auditoria = { efecto: 'fallido', referencia };
     }
+    // Una SIMULACIÓN que falla (!ok && !confirmar) NO deja traza: no se intentó
+    // escribir nada, así que no hay acto que auditar. Mismo criterio que el acuse.
     return resp;
   });
 }

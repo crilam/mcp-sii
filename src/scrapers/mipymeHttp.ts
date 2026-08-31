@@ -2,6 +2,7 @@ import { SiiHttpClient } from '../http';
 import { Empresa, SessionManager } from '../session';
 import { rutEsValido } from '../rut';
 import { EscrituraRechazadaPorSii } from '../erroresConsulta';
+import { marcarSeguro } from '../idempotenciaEscritura';
 
 // Portal mipyme (Sistema de Facturación Gratuito) por HTTP directo, sin
 // navegador. Contratos relevados en vivo el 2026-08-03:
@@ -60,9 +61,11 @@ const PREVIEW_URL = `${CGI_BASE}/mipeDisplayPreView.cgi`;
 // no es un DTE tributario, es reversible (se puede editar o descartar).
 const GRABA_BORRADOR_URL = `${CGI_BASE}/mipeGrabaBorrador.cgi`;
 // Mensaje de la página de éxito de mipeGrabaBorrador.cgi, relevado de un grabado
-// real: "Su documento borrador ha sido grabado/actualizado con éxito". Tolerante
-// a la entidad HTML de la é (&eacute;) y al acento, y sirve para nuevo y editar.
-const GRABADO_OK = /borrador\s+ha\s+sido\s+grabado\/actualizado\s+con\s+(?:&eacute;|é|e)xito/i;
+// real: "Su documento borrador ha sido grabado/actualizado con éxito". Se afloja
+// para tolerar variantes que el portal podría usar según nuevo vs editar
+// ("grabado con éxito", "actualizado con éxito") y la entidad HTML de la é: un
+// grabado exitoso leído como rechazo haría reintentar y duplicar el borrador.
+const GRABADO_OK = /borrador\s+ha\s+sido\s+(?:grabado\/actualizado|grabado|actualizado)[^.<]{0,20}con\s+(?:&eacute;|é|e)xito/i;
 // OJO con el nombre: `mipeGenXMLFirma.cgi` NO emite. Arma el XML del DTE, le
 // propone un folio y devuelve la página que pide la firma. Faltan tres pasos
 // más, y el último es el que emite:
@@ -727,7 +730,13 @@ export class MipymeHttpScraper {
   private async prepararYGuardarBorrador(
     params: EmitirDteParams, confirmar: boolean, borradorId?: string
   ): Promise<BorradorGuardado> {
-    const { empresaRut, emisor, totales, campos } = await this.prepararCampos(params);
+    // La preparación (sel empresa, form, validación) es PRE-POST: no grabó nada,
+    // así que cualquier error acá es seguro de liberar en la red anti-doble-click.
+    const prep = await (async () => {
+      try { return await this.prepararCampos(params); }
+      catch (e) { throw marcarSeguro(e); }
+    })();
+    const { empresaRut, emisor, totales, campos } = prep;
     const resumen: ResumenDte = {
       tipoDte: params.tipoDte, emisorRut: empresaRut, emisorRazonSocial: emisor.razonSocial,
       receptorRut: `${params.receptor.rut}-${params.receptor.dv}`, receptorRazonSocial: params.receptor.razonSocial,
@@ -748,9 +757,13 @@ export class MipymeHttpScraper {
     // rechazo al EDITAR volvería igual y daría un falso positivo). Ante un
     // rechazo el CGI devuelve el formulario, sin este texto.
     if (!GRABADO_OK.test(html)) {
-      throw new EscrituraRechazadaPorSii(
+      // Rechazo DETERMINÍSTICO: el SII respondió el form sin el mensaje de éxito,
+      // no grabó. Es seguro liberar la reserva (marcarSeguro) para que un
+      // reintento corregido pueda grabar. Un error de RED en el POST de arriba,
+      // en cambio, no lleva marca y mantiene la reserva (el grabado pudo salir).
+      throw marcarSeguro(new EscrituraRechazadaPorSii(
         'El SII no confirmó el guardado del borrador (no devolvió el mensaje de éxito). '
-        + 'Revisá los datos del documento; NO se guardó.');
+        + 'Revisá los datos del documento; NO se guardó.'));
     }
     // El id sólo se conoce cuando se EDITÓ (el que entró); en un borrador nuevo
     // el SII no lo devuelve acá y hay que buscarlo con list-borradores.

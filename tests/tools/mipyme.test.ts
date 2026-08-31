@@ -32,6 +32,7 @@ describe('registerMipymeTools', () => {
   afterEach(() => {
     process.env = { ...envOriginal };
     jest.clearAllMocks();
+    require('../../src/core/mipyme')._resetIdempotenciaBorrador();
   });
 
   it('sii_mipyme_list_empresas consulta por HTTP', async () => {
@@ -155,6 +156,32 @@ describe('registerMipymeTools', () => {
 
     expect(MockHttp.prototype.emitirDte).toHaveBeenCalledWith(expect.anything(), true);
     expect(result.content[0].text).toContain('1234');
+  });
+
+  it('sii_mipyme_guardar_borrador simula por defecto y NO graba', async () => {
+    (MockHttp.prototype.guardarBorrador as jest.Mock).mockResolvedValue({ guardado: false, resumen: {}, borradorId: null });
+    const { tools } = armar();
+
+    const result = await tools['sii_mipyme_guardar_borrador'].handler(emisionMinima);
+
+    // El segundo arg (confirmar) llega false; el borrador_id (tercero) undefined.
+    expect(MockHttp.prototype.guardarBorrador).toHaveBeenCalledWith(expect.anything(), false, undefined);
+    expect(result.content[0].text).toMatch(/Sólo simulación|NO se guardó/i);
+  });
+
+  it('sii_mipyme_guardar_borrador: empresaPedida pisa el empresaRut del documento', async () => {
+    process.env.SII_EMPRESA_RUT = '99999999-9';
+    (MockHttp.prototype.guardarBorrador as jest.Mock).mockResolvedValue({ guardado: true, resumen: {}, borradorId: null });
+    const { tools } = armar();
+
+    // El body NO trae empresa_rut → debe usar SII_EMPRESA_RUT, no undefined.
+    const sinEmpresa: Record<string, unknown> = { ...emisionMinima };
+    delete sinEmpresa.empresa_rut;
+    await tools['sii_mipyme_guardar_borrador'].handler({ ...sinEmpresa, confirmar: true, borrador_id: '77' });
+
+    const params = (MockHttp.prototype.guardarBorrador as jest.Mock).mock.calls[0][0];
+    expect(params.empresaRut).toBe('99999999-9');
+    expect(MockHttp.prototype.guardarBorrador).toHaveBeenCalledWith(expect.anything(), true, '77');
   });
 
   it('sii_mipyme_emitir_dte avisa que el folio emitido está pendiente de verificación', async () => {

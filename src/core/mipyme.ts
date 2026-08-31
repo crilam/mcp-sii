@@ -1,7 +1,15 @@
+import { createHash } from 'crypto';
 import { MipymeHttpScraper, BorradorMipyme, FiltrosDteEmitidos, DteEmitidosResult, FiltrosDteRecibidos, DteRecibidosResult, EmitirDteParams, PrevisualizacionDte, DteEmitido, BorradorGuardado } from '../scrapers/mipymeHttp';
 import { SiiHttpClient } from '../http';
 import { SessionManager, Empresa } from '../session';
 import { EjecutorSesion } from '../registroSesiones';
+import { VentanaIdempotencia } from '../idempotenciaEscritura';
+
+// Red anti-doble-click del guardado de borrador: como el SII no devuelve el id
+// de un borrador nuevo, dos llamadas idénticas grabarían dos borradores sin que
+// el consumidor lo note. Sólo protege el grabado real (confirmar:true).
+const ventanaBorrador = new VentanaIdempotencia();
+export function _resetIdempotenciaBorrador(): void { ventanaBorrador._reset(); }
 
 export async function listEmpresas(
   ejecutor: EjecutorSesion<SessionManager>,
@@ -79,8 +87,17 @@ export async function guardarBorrador(
   confirmar: boolean,
   borradorId?: string
 ): Promise<BorradorGuardado> {
-  return ejecutor.ejecutar(rut, async sesion => {
+  const grabar = () => ejecutor.ejecutar(rut, async sesion => {
     const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
     return http.guardarBorrador(params, confirmar, borradorId);
   });
+  // La simulación no muta: no toca la ventana de idempotencia. El grabado sí.
+  if (!confirmar) return grabar();
+  const clave = createHash('sha256')
+    .update(JSON.stringify([rut, borradorId ?? '', params]))
+    .digest('hex');
+  return ventanaBorrador.ejecutar(clave,
+    'Este borrador ya se está guardando o se guardó hace segundos. No se repite para no '
+    + 'duplicarlo; verificá con list-borradores antes de reintentar.',
+    grabar);
 }

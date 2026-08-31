@@ -57,7 +57,11 @@ export const schemaListBorradores = {
     .describe('RUT de la empresa con dígito verificador. Si se omite, se resuelve solo si este RUT opera una única empresa en el portal.'),
 };
 
-export const schemaEmitirDte = {
+// Los campos del DOCUMENTO, sin `confirmar` ni nada específico de emitir o de
+// guardar-borrador. Los dos schemas se COMPONEN desde acá, en vez de que el
+// borrador derive del de emisión quitándole `confirmar`: así un campo que mañana
+// sea exclusivo de emisión (por ejemplo algo de firma) NO se filtra al borrador.
+export const camposDocumento = {
   rut: z.string().min(1).describe(RUT_DESC),
   empresa_rut: z.string().optional()
     .describe('RUT empresa. Si se omite, se resuelve solo si la persona opera una única empresa.'),
@@ -85,16 +89,19 @@ export const schemaEmitirDte = {
     razon: z.string().max(90).optional().describe('Razón de la referencia'),
     codigo: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional().describe('1=anula, 2=corrige texto, 3=corrige montos. Obligatorio en nota de crédito.'),
   })).max(3).optional().describe('Hasta 3 referencias. Una nota de crédito exige al menos una.'),
+};
+
+// Emitir = los campos del documento + confirmar (firma y emite).
+export const schemaEmitirDte = {
+  ...camposDocumento,
   confirmar: z.boolean().default(false).describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento, acto real e irreversible.'),
 };
 
-// Guardar borrador: los MISMOS campos del documento que emitir (sin el confirmar
-// de emisión), más `borrador_id` para editar uno existente y su propio
-// `confirmar`. Un borrador NO se firma —es reversible—, así que no exige
+// Guardar borrador = los mismos campos del documento + borrador_id + su propio
+// confirmar. Un borrador NO se firma —es reversible—, así que no exige
 // certificado: acepta clave o certificado como el resto.
-const { confirmar: _c, ...camposDte } = schemaEmitirDte;
 export const schemaGuardarBorrador = {
-  ...camposDte,
+  ...camposDocumento,
   borrador_id: z.string().optional()
     .describe('EHDR_CODIGO de un borrador existente a EDITAR. Si se omite, se crea uno nuevo.'),
   confirmar: z.boolean().default(false)
