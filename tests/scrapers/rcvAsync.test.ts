@@ -32,9 +32,12 @@ function armar() {
 // fila de continuación (otro impuesto) con "Nro" vacío que NO es un documento.
 const CSV = [
   'Nro;Tipo Compra;RUT Proveedor;Monto Total',
-  '1;Del Giro;76756633-6;597110;',
-  '2;Del Giro;77022092-0;280318;',
-  ';Del Giro;77022092-0;0;',   // continuación del doc 2: Nro vacío
+  // RUT ficticios de dígito repetido, distintos entre sí: son el convenio del
+  // repositorio, y el chequeo de anonimización los acepta. Los montos también
+  // son inventados — este CSV venía con datos de proveedores reales.
+  '1;Del Giro;22222222-2;100000;',
+  '2;Del Giro;33333333-3;200000;',
+  ';Del Giro;33333333-3;0;',   // continuación del doc 2: Nro vacío
 ].join('\n');
 
 describe('RcvAsyncScraper.solicitar', () => {
