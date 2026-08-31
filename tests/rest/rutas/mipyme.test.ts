@@ -39,7 +39,8 @@ describe('registrarRutasMipyme', () => {
       (core.guardarBorrador as jest.Mock).mockResolvedValue({ guardado: false, resumen: {}, borradorId: null });
       const r = await armarRouter().get('POST /v1/mipyme/borrador')!(CRED);
       expect((r.body as any).ok).toBe(true);
-      expect(r.auditoria).toEqual({ efecto: 'simulado', referencia: 'borrador:33-33333333' });
+      expect(r.auditoria).toMatchObject({ efecto: 'simulado' });
+      expect(r.auditoria!.referencia).toMatch(/^borrador:33-33333333-[0-9a-f]{8}$/);
       expect(core.guardarBorrador).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.any(Object), false, undefined);
     });
 
@@ -61,7 +62,8 @@ describe('registrarRutasMipyme', () => {
       (core.guardarBorrador as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').EscrituraRechazadaPorSii)('no se guardó'));
       const r = await armarRouter().get('POST /v1/mipyme/borrador')!({ ...CRED, confirmar: true });
       expect((r.body as any).ok).toBe(false);
-      expect(r.auditoria).toEqual({ efecto: 'fallido', referencia: 'borrador:33-33333333' });
+      expect(r.auditoria).toMatchObject({ efecto: 'fallido' });
+      expect(r.auditoria!.referencia).toMatch(/^borrador:33-33333333-[0-9a-f]{8}$/);
     });
   });
 

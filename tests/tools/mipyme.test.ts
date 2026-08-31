@@ -32,7 +32,7 @@ describe('registerMipymeTools', () => {
   afterEach(() => {
     process.env = { ...envOriginal };
     jest.clearAllMocks();
-    require('../../src/core/mipyme')._resetIdempotenciaBorrador();
+    require('../../src/core/mipyme').ventanaBorrador._reset();
   });
 
   it('sii_mipyme_list_empresas consulta por HTTP', async () => {

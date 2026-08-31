@@ -1,4 +1,4 @@
-import { listEmpresas, listDteEmitidos, emitirDte, guardarBorrador, _resetIdempotenciaBorrador } from '../../src/core/mipyme';
+import { listEmpresas, listDteEmitidos, emitirDte, guardarBorrador, ventanaBorrador } from '../../src/core/mipyme';
 import { MipymeHttpScraper } from '../../src/scrapers/mipymeHttp';
 import { RegistroSesiones } from '../../src/registroSesiones';
 import { LimitacionConocida } from '../../src/erroresConsulta';
@@ -13,7 +13,7 @@ function registroQueEjecuta() {
 const DOC = { empresaRut: '22222222-2', tipoDte: 33, receptor: { rut: '33333333', dv: '1' }, lineas: [{ nombre: 'X', cantidad: 1, precioUnitario: 1000 }] } as any;
 
 describe('core/mipyme', () => {
-  afterEach(() => { jest.clearAllMocks(); _resetIdempotenciaBorrador(); });
+  afterEach(() => { jest.clearAllMocks(); ventanaBorrador._reset(); });
 
   it('listEmpresas llama al scraper sin argumentos', async () => {
     (MockScraper.prototype.listEmpresas as jest.Mock).mockResolvedValue([]);

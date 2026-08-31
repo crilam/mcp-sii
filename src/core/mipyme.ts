@@ -8,8 +8,12 @@ import { VentanaIdempotencia } from '../idempotenciaEscritura';
 // Red anti-doble-click del guardado de borrador: como el SII no devuelve el id
 // de un borrador nuevo, dos llamadas idénticas grabarían dos borradores sin que
 // el consumidor lo note. Sólo protege el grabado real (confirmar:true).
-const ventanaBorrador = new VentanaIdempotencia();
-export function _resetIdempotenciaBorrador(): void { ventanaBorrador._reset(); }
+//
+// ES IN-PROCESS: el Map vive en la memoria de este proceso. En prod (ECS con más
+// de una task) NO protege contra un doble-click repartido entre dos tasks. Es
+// una red de último momento contra el reintento del MISMO cliente, aceptable
+// porque un borrador es reversible; no es una garantía transaccional.
+export const ventanaBorrador = new VentanaIdempotencia();
 
 export async function listEmpresas(
   ejecutor: EjecutorSesion<SessionManager>,

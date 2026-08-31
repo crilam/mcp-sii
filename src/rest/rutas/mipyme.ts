@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createHash } from 'crypto';
 import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
@@ -135,16 +136,20 @@ export function registrarRutasMipyme(
     const ejecutor = ejecutorPara(registro, credenciales, datos.rut, credencialDe(datos));
     const resp = await ejecutar(() => core.guardarBorrador(ejecutor, datos.rut, paramsDocumento(datos), datos.confirmar, datos.borrador_id));
     // Traza de auditoría de la escritura (misma mecánica que el acuse del RCV).
-    const respBody = resp.body as { ok?: boolean; borradorId?: string | null };
-    // Referencia del acto: el id del borrador cuando el SII lo da (edición), o la
-    // combinación tipo+receptor cuando no (borrador nuevo) — nunca un '?' que no
-    // identifica nada.
-    const referencia = `borrador:${respBody?.borradorId ?? `${datos.tipo_dte}-${datos.receptor_rut}`}`;
+    const respBody = resp.body as { ok?: boolean; error?: string; borradorId?: string | null };
+    // Referencia del acto: el id del borrador cuando el SII lo da (edición), o
+    // tipo+receptor + un hash corto del documento cuando no (borrador nuevo), para
+    // que dos borradores distintos al mismo receptor no colisionen en la traza.
+    const hashDoc = createHash('sha256').update(JSON.stringify(paramsDocumento(datos))).digest('hex').slice(0, 8);
+    const referencia = `borrador:${respBody?.borradorId ?? `${datos.tipo_dte}-${datos.receptor_rut}-${hashDoc}`}`;
     if (respBody?.ok && datos.confirmar) {
       resp.auditoria = { efecto: 'ejecutado', referencia };
     } else if (respBody?.ok) {
       resp.auditoria = { efecto: 'simulado', referencia };
-    } else if (datos.confirmar) {
+    } else if (datos.confirmar && respBody?.error !== 'LIMITE_CONOCIDO') {
+      // 'fallido' = un intento de escritura que el SII rechazó. Un LIMITE_CONOCIDO
+      // acá es el bloqueo anti-doble-click: NO se tocó el SII, no es un intento
+      // fallido, así que no ensucia la traza.
       resp.auditoria = { efecto: 'fallido', referencia };
     }
     // Una SIMULACIÓN que falla (!ok && !confirmar) NO deja traza: no se intentó

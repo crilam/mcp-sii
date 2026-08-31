@@ -627,7 +627,7 @@ describe('MipymeHttpScraper.guardarBorrador', () => {
   // real): el mensaje de éxito, con la é como entidad HTML. NO trae el id del
   // borrador. Cuando RECHAZA, devuelve el formulario sin ese texto.
   const GRABADO_OK = '<html><body>Su documento borrador ha sido grabado/actualizado con &eacute;xito. Administrador de Borradores</body></html>';
-  const GRABADO_RECHAZO = '<html><body>Revise los datos del documento</body></html>';
+  const GRABADO_RECHAZO = '<html><form name="VIEW_EFXP"><input name="ES_BORR" value="TRUE"></form>Revise los datos del documento</html>';
 
   function armarBorrador(grabado = GRABADO_OK) {
     const { scraper, http, session } = armar();
@@ -678,15 +678,22 @@ describe('MipymeHttpScraper.guardarBorrador', () => {
   // EHDR_CODIGO posteado. El éxito se detecta por el MENSAJE, no por el id, así
   // que ese caso NO se reporta como guardado.
   it('un rechazo al editar (form con el id posteado) NO es guardado', async () => {
-    const rechazoEdit = '<html><input name="EHDR_CODIGO" value="555"><body>Revise los datos</body></html>';
+    const rechazoEdit = '<html><form name="VIEW_EFXP"><input name="EHDR_CODIGO" value="555"></form>Revise los datos</html>';
     const { scraper } = armarBorrador(rechazoEdit);
-    await expect(scraper.guardarBorrador(params(), true, '555')).rejects.toThrow(/no confirmó el guardado/);
+    await expect(scraper.guardarBorrador(params(), true, '555')).rejects.toThrow(/rechazó el guardado/);
   });
 
   // Un rechazo (sin el texto de éxito) no se reporta como guardado.
   it('un rechazo del SII no se reporta como guardado', async () => {
     const { scraper } = armarBorrador(GRABADO_RECHAZO);
-    await expect(scraper.guardarBorrador(params(), true)).rejects.toThrow(/no confirmó el guardado/);
+    await expect(scraper.guardarBorrador(params(), true)).rejects.toThrow(/rechazó el guardado/);
+  });
+
+  // Respuesta sin éxito NI form de rechazo = AMBIGUA: el grabado pudo salir. No
+  // se marca seguro (la ventana de idempotencia mantiene la reserva).
+  it('una respuesta ambigua (ni éxito ni form) avisa que pudo grabarse', async () => {
+    const { scraper } = armarBorrador('<html><body>error inesperado del portal</body></html>');
+    await expect(scraper.guardarBorrador(params(), true)).rejects.toThrow(/Pudo haberse grabado o no|Respuesta inesperada/);
   });
 
   // Un borrador NO se firma: no exige certificado.

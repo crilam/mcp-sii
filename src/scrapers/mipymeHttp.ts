@@ -757,13 +757,21 @@ export class MipymeHttpScraper {
     // rechazo al EDITAR volvería igual y daría un falso positivo). Ante un
     // rechazo el CGI devuelve el formulario, sin este texto.
     if (!GRABADO_OK.test(html)) {
-      // Rechazo DETERMINÍSTICO: el SII respondió el form sin el mensaje de éxito,
-      // no grabó. Es seguro liberar la reserva (marcarSeguro) para que un
-      // reintento corregido pueda grabar. Un error de RED en el POST de arriba,
-      // en cambio, no lleva marca y mantiene la reserva (el grabado pudo salir).
-      throw marcarSeguro(new EscrituraRechazadaPorSii(
-        'El SII no confirmó el guardado del borrador (no devolvió el mensaje de éxito). '
-        + 'Revisá los datos del documento; NO se guardó.'));
+      // Sin el mensaje de éxito hay dos casos, y sólo uno es seguro de liberar:
+      //  - RECHAZO determinístico: el CGI devuelve el formulario de emisión (con
+      //    ES_BORR/VIEW_EFXP). No grabó nada → marcar seguro para reintentar.
+      //  - AMBIGUO: ni éxito ni el form de vuelta (una variante de mensaje no
+      //    cubierta, un HTML inesperado). El grabado PUDO salir, así que NO se
+      //    marca: la reserva se mantiene y no se arriesga un segundo borrador.
+      const volvioElForm = /name=["']?ES_BORR["']?|VIEW_EFXP|mipeDisplayPreView/i.test(html);
+      if (volvioElForm) {
+        throw marcarSeguro(new EscrituraRechazadaPorSii(
+          'El SII rechazó el guardado del borrador (devolvió el formulario). '
+          + 'Revisá los datos del documento; NO se guardó.'));
+      }
+      throw new EscrituraRechazadaPorSii(
+        'Respuesta inesperada del SII al guardar el borrador: no trae ni la confirmación de '
+        + 'éxito ni el formulario de rechazo. Pudo haberse grabado o no; verificá con list-borradores.');
     }
     // El id sólo se conoce cuando se EDITÓ (el que entró); en un borrador nuevo
     // el SII no lo devuelve acá y hay que buscarlo con list-borradores.

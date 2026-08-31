@@ -139,11 +139,15 @@ export function registerMipymeTools(server: McpServer, registro: RegistroSesione
         { ...paramsDocumento(args), empresaRut: empresaPedida(args.empresa_rut) },
         args.confirmar, args.borrador_id);
 
-      return r.guardado
-        ? { guardado: true, borradorId: r.borradorId, resumen: r.resumen,
-            aviso: `Borrador guardado (id ${r.borradorId}). Es reversible: se puede editar o descartar; NO se emitió nada.` }
-        : { guardado: false, resumen: r.resumen,
-            aviso: 'Sólo simulación: NO se guardó. Para guardar el borrador, llamá de nuevo con confirmar=true.' };
+      if (!r.guardado) {
+        return { guardado: false, resumen: r.resumen,
+          aviso: 'Sólo simulación: NO se guardó. Para guardar el borrador, llamá de nuevo con confirmar=true.' };
+      }
+      return { guardado: true, borradorId: r.borradorId, resumen: r.resumen,
+        aviso: r.borradorId
+          ? `Borrador ${r.borradorId} actualizado. Es reversible: se puede editar o descartar; NO se emitió nada.`
+          : 'Borrador guardado. El SII no devuelve su id al crear uno nuevo: buscalo con sii_mipyme_list_borradores. '
+            + 'Es reversible: se puede editar o descartar; NO se emitió nada.' };
     })
   );
 }
