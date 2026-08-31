@@ -28,6 +28,29 @@ describe('registrarAuditoria', () => {
     });
   });
 
+  // Ronda 11: la traza de escritura guarda efecto (simulado/ejecutado) y la
+  // referencia del acto. Las lecturas los dejan NULL.
+  it('persiste efecto y referencia en una escritura', async () => {
+    const { tenantId } = await crearTenant(pool, 'rdte-aud-escritura');
+
+    await registrarAuditoria(pool, {
+      tenantId, ip: '10.0.0.1', rut: '11.111.111-1', ruta: '/v1/rcv/acuse', status: 200, error: null,
+      efecto: 'ejecutado', referencia: 'ERM:33-100',
+    });
+
+    const { rows } = await pool.query('SELECT efecto, referencia FROM auditoria');
+    expect(rows[0]).toEqual({ efecto: 'ejecutado', referencia: 'ERM:33-100' });
+  });
+
+  it('una lectura deja efecto y referencia en NULL', async () => {
+    const { tenantId } = await crearTenant(pool, 'rdte-aud-lectura');
+    await registrarAuditoria(pool, {
+      tenantId, ip: '10.0.0.1', rut: null, ruta: '/v1/rcv/resumen', status: 200, error: null,
+    });
+    const { rows } = await pool.query('SELECT efecto, referencia FROM auditoria');
+    expect(rows[0]).toEqual({ efecto: null, referencia: null });
+  });
+
   it('acepta tenant_id y rut nulos (rechazo de transporte)', async () => {
     await registrarAuditoria(pool, {
       tenantId: null, ip: '10.0.0.1', rut: null, ruta: '/v1/rcv/resumen', status: 401, error: 'UNAUTHORIZED',

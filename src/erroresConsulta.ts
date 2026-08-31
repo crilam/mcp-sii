@@ -90,6 +90,19 @@ export class LimiteDeConsultasSii extends Error {
 //
 // Rechazar rápido es preferible a hacer esperar sin decir nada: el consumidor
 // recibe una respuesta inmediata y sabe que tiene que reintentar más tarde.
+// El SII RECHAZÓ una escritura por una regla de negocio (RUT inválido, sin
+// timbraje, documento en un estado que no admite el acto, etc.). No es un bug
+// del servicio ni algo que se arregle reintentando igual: es una respuesta
+// legítima del SII que el consumidor tiene que leer y corregir. Con el ERROR
+// genérico saldría como 500 "reintentá", que es lo contrario de lo que hay que
+// hacer. Lleva el mensaje del SII crudo.
+export class EscrituraRechazadaPorSii extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = new.target.name;
+  }
+}
+
 export class ServicioOcupado extends Error {
   constructor(mensaje: string) {
     super(mensaje);

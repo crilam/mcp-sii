@@ -1,5 +1,5 @@
 import { ejecutar } from '../../../src/rest/rutas/comun';
-import { SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado } from '../../../src/erroresConsulta';
+import { SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado, EscrituraRechazadaPorSii } from '../../../src/erroresConsulta';
 
 describe('ejecutar', () => {
   it('objeto: spreadea flat junto a ok:true', async () => {
@@ -55,6 +55,18 @@ describe('ejecutar', () => {
   // El SII corta por volumen con su propio 429, y eso NO puede llegar como
   // ERROR: `ERROR` significa "reintentá", y reintentar de inmediato un corte por
   // volumen es exactamente lo que lo mantiene cortado.
+  // Un rechazo de negocio del SII en una escritura es RECHAZO_SII, no ERROR:
+  // reintentar no lo arregla, hay que corregir el motivo.
+  it('EscrituraRechazadaPorSii sale como RECHAZO_SII con detalle', async () => {
+    const respuesta = await ejecutar(async () => {
+      throw new EscrituraRechazadaPorSii('El SII rechazó el acuse: RUT sin timbraje');
+    });
+
+    expect(respuesta.status).toBe(200);
+    expect((respuesta.body as { error: string }).error).toBe('RECHAZO_SII');
+    expect((respuesta.body as { detalle: string }).detalle).toMatch(/timbraje/);
+  });
+
   it('LimiteDeConsultasSii sale como LIMITE_SII y no como ERROR', async () => {
     const respuesta = await ejecutar(async () => {
       throw new LimiteDeConsultasSii('El SII cortó las consultas por volumen');

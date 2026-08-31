@@ -1,0 +1,152 @@
+import { SiiHttpClient } from '../http';
+import { SessionManager } from '../session';
+import { LimitacionConocida, EscrituraRechazadaPorSii } from '../erroresConsulta';
+import { partirRut } from '../rut';
+
+// PRIMERA operación de ESCRITURA del servicio (ronda 11): el acuse de recibo de
+// documentos del RCV (`ingresarAceptacionReclamoDocs`). Fija el guardrail que el
+// resto de la escritura reutiliza:
+//
+//  - Toda operación lleva `confirmar` (default false). Con false NO muta: valida
+//    y devuelve qué HARÍA. Con true ejecuta el acto real contra el SII.
+//  - Un acuse de recibo NO es cosmético: bajo la Ley 19.983 habilita la cesión
+//    del crédito del documento. Es un acto real, y por eso pasa por el guardrail.
+//
+// Relevado del bundle `consdcvinternetui` y verificado el catálogo en vivo:
+// getEventosDoc devuelve en `dataEventosDocs` los códigos válidos (ERM, ERG).
+const BASE = 'https://www4.sii.cl/consdcvinternetui/services/data/facadeService';
+const NAMESPACE = 'cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService';
+
+export interface EventoAcuse {
+  codigo: string;       // dedCodEvento, ej. 'ERM'
+  descripcion: string;  // dedDescEvento
+}
+
+// Marca un error como "el acto NO se cursó, es seguro liberar la reserva de
+// idempotencia". La AUSENCIA de la marca es el estado seguro por defecto (no
+// duplicar): un error de red ambiguo, o uno que otra capa envolvió perdiendo la
+// marca, mantiene la reserva. Ver `acuseSeguroDeLiberar`.
+export function marcarSeguro<E extends Error>(e: E): E {
+  (e as unknown as { acuseSeguroDeLiberar?: boolean }).acuseSeguroDeLiberar = true;
+  return e;
+}
+export function acuseSeguroDeLiberar(e: unknown): boolean {
+  return Boolean((e as { acuseSeguroDeLiberar?: boolean })?.acuseSeguroDeLiberar);
+}
+
+// Un documento a acusar: RUT del emisor del documento, su tipo y su folio.
+export interface DocumentoAcuse {
+  rutEmisor: string;    // con dígito verificador, 22222222-2
+  tipoDoc: number;
+  folio: number;
+}
+
+export interface ResultadoAcuse {
+  // false = fue una simulación (confirmar:false), no se acusó nada.
+  ejecutado: boolean;
+  evento: string;
+  documentos: DocumentoAcuse[];
+  // Mensaje del SII (sólo cuando se ejecuta). En simulación, qué se haría.
+  mensaje: string;
+}
+
+// El catálogo de eventos es casi estático y GLOBAL del SII (ERM/ERG, no depende
+// del contribuyente), así que se cachea por proceso unos minutos para no golpear
+// getEventosDoc en CADA escritura (incluso en los dry-run). Si algún día
+// dependiera del perfil, esta cache global habría que segmentarla por RUT.
+const CATALOGO_TTL_MS = 5 * 60_000;
+let catalogoCache: { ts: number; eventos: EventoAcuse[] } | null = null;
+
+/** Limpia el cache del catálogo. Sólo para tests. */
+export function _resetCatalogoAcuse(): void {
+  catalogoCache = null;
+}
+
+export class RcvEscrituraScraper {
+  constructor(private http: SiiHttpClient, private session: SessionManager) {}
+
+  /** Catálogo de eventos de acuse válidos (lectura, cacheado por proceso). */
+  async eventosAcuse(): Promise<EventoAcuse[]> {
+    this.session.assertPuedeEntregarCookieJar();
+    if (catalogoCache && Date.now() - catalogoCache.ts < CATALOGO_TTL_MS) return catalogoCache.eventos;
+    const resp = await this.http.postSdi(BASE, NAMESPACE, 'getEventosDoc', {}) as
+      { respEstado?: { codRespuesta?: number }; dataEventosDocs?: { dedCodEvento: string; dedDescEvento: string }[] };
+    const cod = resp?.respEstado?.codRespuesta;
+    if (cod !== 0) {
+      // Es lectura: un código inesperado no debe salir como 500 "reintentá".
+      throw new LimitacionConocida(`El SII respondió código ${cod} al pedir el catálogo de eventos de acuse del RCV.`);
+    }
+    const eventos = (resp.dataEventosDocs ?? []).map(e => ({ codigo: e.dedCodEvento, descripcion: e.dedDescEvento.replace(/\s+/g, ' ').trim() }));
+    // No se cachea un catálogo vacío: sería un problema transitorio del SII que
+    // quedaría fijo 5 minutos, tumbando todo acuse con "catálogo vacío".
+    if (eventos.length > 0) catalogoCache = { ts: Date.now(), eventos };
+    return eventos;
+  }
+
+  /**
+   * Acusa recibo de uno o más documentos. Con `confirmar:false` (default) NO
+   * llama al SII para mutar: valida el evento contra el catálogo y los documentos,
+   * y devuelve la simulación. Con `confirmar:true` cursa el acuse
+   * (`ingresarAceptacionReclamoDocs`) — acto real e irreversible.
+   */
+  async acusar(documentos: DocumentoAcuse[], evento: string, confirmar: boolean): Promise<ResultadoAcuse> {
+    this.session.assertPuedeEntregarCookieJar();
+
+    // FASE PRE-ENVÍO: validaciones y armado del payload. Nada de esto manda el
+    // acuse, así que CUALQUIER error acá es seguro de liberar (el consumidor que
+    // corrige un RUT o un evento puede reintentar sin esperar la ventana). Se
+    // envuelve entera para marcar todos sus errores, incluidos los de
+    // `eventosAcuse` y `partirRut`.
+    let dteAcuRe: { detRutDoc: string; detDvDoc: string; detTipoDoc: number; detNroDoc: number; dedCodEvento: string }[];
+    try {
+      if (documentos.length === 0) {
+        throw new Error('No se indicó ningún documento para acusar recibo.');
+      }
+      // El evento tiene que estar en el catálogo del SII: un código inventado no
+      // se manda a ciegas a una operación de escritura.
+      const catalogo = await this.eventosAcuse();
+      if (!catalogo.some(e => e.codigo === evento)) {
+        throw new LimitacionConocida(
+          `El evento de acuse "${evento}" no está en el catálogo del SII (${catalogo.map(e => e.codigo).join(', ') || 'vacío'}). `
+          + 'Consultá los eventos válidos antes de acusar.');
+      }
+      dteAcuRe = documentos.map(d => {
+        const { rut, dv } = partirRut(d.rutEmisor, 'RUT del emisor del documento');
+        return { detRutDoc: rut, detDvDoc: dv, detTipoDoc: d.tipoDoc, detNroDoc: d.folio, dedCodEvento: evento };
+      });
+    } catch (e) {
+      throw marcarSeguro(e as Error);
+    }
+
+    if (!confirmar) {
+      // Una simulación no manda nada.
+      return {
+        ejecutado: false, evento, documentos,
+        mensaje: `Simulación: se acusaría "${evento}" sobre ${documentos.length} documento(s). `
+          + 'Volvé a llamar con confirmar:true para cursar el acuse real.',
+      };
+    }
+
+    // A partir de acá el error NO se marca por defecto: es la zona post-envío.
+    const { rut: rutAut, dv: dvAut } = this.session.identidad();
+    const resp = await this.http.postSdi(BASE, NAMESPACE, 'ingresarAceptacionReclamoDocs', {
+      dteAcuRe, rutAutenticado: rutAut, dvAutenticado: dvAut,
+    }) as { respEstado?: { codRespuesta?: number; msgeRespuesta?: string } };
+    // Desde acá el POST ya salió. Un error de red del `postSdi` de arriba NO
+    // lleva marca de seguro → la reserva se mantiene (el acto pudo cursar).
+
+    const cod = resp?.respEstado?.codRespuesta;
+    const msg = resp?.respEstado?.msgeRespuesta ?? '';
+    // 0 = OK. 100 = alerta AMBIGUA (no cursó, o cursó con reparos): no se marca
+    // seguro, la reserva se mantiene. Otro código es un rechazo DETERMINÍSTICO:
+    // el SII respondió que no cursó, así que es seguro liberar y reintentar
+    // corregido.
+    if (cod === 100) {
+      throw new LimitacionConocida(`El SII no cursó el acuse (o lo cursó con reparos): ${msg || 'sin detalle'}.`);
+    }
+    if (cod !== 0) {
+      throw marcarSeguro(new EscrituraRechazadaPorSii(`El SII rechazó el acuse (código ${cod})${msg ? `: ${msg}` : '.'}`));
+    }
+    return { ejecutado: true, evento, documentos, mensaje: msg || 'Acuse cursado.' };
+  }
+}
