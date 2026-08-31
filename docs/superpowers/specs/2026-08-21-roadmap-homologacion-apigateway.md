@@ -179,6 +179,49 @@ nuevo al proyecto, R5 y R7 son el lugar por donde empezar.
 - **Un `null` significa "el SII no informa esto", nunca cero.** Y ante una
   respuesta que no se puede leer con confianza, se falla explícito en vez de
   devolver un dato incompleto que se lea como completo.
+- **El peor modo de falla de este repositorio no es la excepción: es el
+  resultado plausible.** Una consulta que revienta se arregla. Una que devuelve
+  un número creíble y equivocado se propaga hasta la contabilidad de alguien y
+  se descubre meses después, si se descubre.
+
+  No es una preocupación abstracta. Cuatro casos reales, todos de rondas ya
+  cerradas, y ninguno lo habría detectado una validación de forma:
+
+  1. **El vacío silencioso.** Un parser que no reconoce nada devuelve `[]`, y el
+     consumidor lo lee como "el SII no publicó estos datos" — una afirmación
+     sobre datos del SII, hecha por nosotros, y falsa. Estaba en tres parsers de
+     `scrapers/indicadores.ts` a la vez, y con dos tests vecinos exigiendo
+     comportamientos opuestos ante la misma situación: uno pedía error, el otro
+     pedía vacío. Corregido en el PR #66. Ojo con el caso legítimo: el año que
+     el SII realmente no publica llega como 404 y sale por `RecursoNoEncontrado`
+     antes de parsear, así que no se pierde nada por fallar ruidosamente.
+  2. **El dato destruido por conversión.** Los códigos ACTECO empiezan con cero
+     (`011101` es cultivo de trigo); pasarlos a número deja `11101`, que no es
+     el código de nadie, no cruza contra la tabla del SII y a la vista parece
+     perfectamente válido. La empresa con que se verificó no tenía ninguno con
+     cero inicial, así que la verificación en vivo tampoco lo habría mostrado.
+  3. **La pregunta equivocada.** El régimen tributario que publica Mi SII es el
+     VIGENTE y el portal borra el anterior. Usarlo para calcular un período
+     previo al cambio da el régimen que no era. El dato es correcto; lo que está
+     mal es para qué se usa. Por eso su `desde` viaja en la respuesta y está
+     documentado como parte del dato, no como metadato.
+  4. **La comparación que nunca coincide.** Del lado de un consumidor:
+     deduplicar comparando JSON serializado, cuando `jsonb` normaliza el orden
+     de las claves. Con más de un campo fallaba SIEMPRE, sin ruido.
+
+  **La regla: si el modo de falla es "resultado plausible", ninguna validación
+  de forma lo detecta.** Lo único que agarró los cuatro fue un **control de
+  resultado conocido** —contrastar contra un valor que se sabe cierto de
+  antemano: un año con 365 días, un RUT que tiene que ser el pedido, un código
+  que tiene que tener seis dígitos— y **ver el test fallar con una regresión
+  deliberada** antes de confiar en él. Un test que nunca se vio en rojo no
+  prueba nada.
+
+  Corolario para los relevamientos: cuando una respuesta puede venir vacía por
+  razones legítimas —un período sin movimientos, una solicitud en proceso—, hay
+  que separar "vacío porque no hay" de "vacío porque no supimos leerlo" **antes**
+  de escribir el parser, no después. Son estados distintos y el consumidor
+  necesita distinguirlos.
 
 ## Realidad de esfuerzo
 
