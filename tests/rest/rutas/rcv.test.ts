@@ -2,8 +2,10 @@ import { registrarRutasRcv } from '../../../src/rest/rutas/rcv';
 import { RegistroSesiones } from '../../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
 import * as core from '../../../src/core/rcv';
+import * as coreAsync from '../../../src/core/rcvAsync';
 
 jest.mock('../../../src/core/rcv');
+jest.mock('../../../src/core/rcvAsync');
 
 function armarRouter() {
   const rutas = new Map<string, Function>();
@@ -29,7 +31,49 @@ describe('registrarRutasRcv', () => {
       'POST /v1/rcv/empresas-autorizadas',
       'POST /v1/rcv/tipos-documento',
       'POST /v1/rcv/detalle',
+      'POST /v1/rcv/async/solicitar',
+      'POST /v1/rcv/async/estado',
+      'POST /v1/rcv/async/detalle',
     ]));
+  });
+
+  describe('async (cierre R1)', () => {
+    const cred = { rut: '11.111.111-1', clave: 'secreta', periodo: '202601', operacion: 'COMPRA', tipo_doc: 33 };
+
+    it('solicitar: valida y pasa período/operación/tipo_doc al core', async () => {
+      (coreAsync.solicitar as jest.Mock).mockResolvedValue({ solicitudId: 5, estado: 'CREADO' });
+      const rutas = armarRouter();
+
+      const r = await rutas.get('POST /v1/rcv/async/solicitar')!(cred);
+
+      expect(r.body).toEqual({ ok: true, solicitudId: 5, estado: 'CREADO' });
+      expect(coreAsync.solicitar).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', '202601', 'COMPRA', 33, undefined);
+    });
+
+    it('estado: un array se envuelve en datos', async () => {
+      (coreAsync.estado as jest.Mock).mockResolvedValue([{ solicitudId: 5, estado: 'TERMINADO' }]);
+      const rutas = armarRouter();
+
+      const r = await rutas.get('POST /v1/rcv/async/estado')!(cred);
+
+      expect(r.body).toEqual({ ok: true, datos: [{ solicitudId: 5, estado: 'TERMINADO' }] });
+    });
+
+    it('detalle: el objeto (columnas/filas) se spreadea', async () => {
+      (coreAsync.detalle as jest.Mock).mockResolvedValue({ totalDocumentos: 2, columnas: ['Nro'], filas: [{ Nro: '1' }, { Nro: '2' }] });
+      const rutas = armarRouter();
+
+      const r = await rutas.get('POST /v1/rcv/async/detalle')!(cred);
+
+      expect(r.body).toMatchObject({ ok: true, totalDocumentos: 2, columnas: ['Nro'] });
+    });
+
+    it('tipo_doc ausente es 400', async () => {
+      const rutas = armarRouter();
+      const r = await rutas.get('POST /v1/rcv/async/solicitar')!({ rut: '11.111.111-1', clave: 'x', periodo: '202601', operacion: 'COMPRA' });
+      expect(r.status).toBe(400);
+      expect(coreAsync.solicitar).not.toHaveBeenCalled();
+    });
   });
 
   it('resumen: body válido llama al core y devuelve {ok:true, ...datos}', async () => {

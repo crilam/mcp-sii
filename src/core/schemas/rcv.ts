@@ -3,8 +3,8 @@ import { z } from 'zod';
 export const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 
 const camposComunes = {
-  periodo: z.string().regex(/^\d{6}$/)
-    .describe('Período tributario en formato AAAAMM (por ejemplo 202607)'),
+  periodo: z.string().regex(/^\d{4}(0[1-9]|1[0-2])$/)
+    .describe('Período tributario en formato AAAAMM (por ejemplo 202607). El mes debe ser 01-12.'),
   operacion: z.enum(['COMPRA', 'VENTA'])
     .describe('COMPRA para el registro de compras, VENTA para el de ventas'),
   empresa_rut: z.string().optional()
@@ -34,3 +34,18 @@ export const schemaEmpresasAutorizadas = {
 export const schemaTiposDocumento = {
   rut: z.string().min(1).describe('RUT de la persona autenticada, con dígito verificador.'),
 };
+
+// --- RCV asíncrono (cierre R1) --------------------------------------------
+// Las tres consultas async piden lo mismo que el detalle síncrono: RUT +
+// período + operación + tipo de documento. La llave natural de una solicitud es
+// esa combinación, no un id opaco del SII, así que el consumidor no maneja ids.
+export const schemaAsyncSolicitar = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  ...camposComunes,
+  tipo_doc: z.number().int().positive()
+    .describe('Código del tipo de documento (33, 61, 46, 34, 110, 914, 56...), igual que en sii_rcv_detalle.'),
+};
+
+// estado y detalle piden exactamente lo mismo que solicitar.
+export const schemaAsyncEstado = schemaAsyncSolicitar;
+export const schemaAsyncDetalle = schemaAsyncSolicitar;

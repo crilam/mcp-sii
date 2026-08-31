@@ -92,7 +92,7 @@ verificación en prod + aviso a los consumidores si cambia el contrato.
 
 | # | Dominio | En catálogo | Hoy | Notas |
 |---|---|---:|---:|---|
-| **R1** | **rcv** | 12 | 4 | RCV asíncrono (el SII procesa detalles grandes en background) y escritura de registro. Ya especificado en parte, ver ronda 1. |
+| ~~R1~~ | **rcv** | 12 | **7** | ✅ Cierre: descarga ASÍNCRONA (solicitar/estado/detalle) para volúmenes que el síncrono no alcanza. Relevado del bundle: `getCtrlAsync` con `generaCtrl` crea y hace polling (sin reCAPTCHA), `obtenerArchivoBLOB` baja un `.csv.gz`. Verificado end-to-end. Falta sólo la escritura del registro (set_tipo_transaccion) → R11. |
 | R2 | **mipyme** | 11 | **6** | Hechas: list-dte-recibidos, dte-pdf, list-borradores. **Sin camino**: `dte-xml` (sólo descarga masiva, tras reCAPTCHA), `info-contribuyente` (el portal no expone consulta separada) y `borrador-pdf` (no hay borradores con qué relevar). Ver las notas de la ronda. |
 | ~~R3~~ | **bienes_raices** | 10 | **7** | ✅ **Completa en lo relevable.** El portal tiene una API REST/JSON detrás de la SPA (`/app/vica/{rut}/v1`), leída de su bundle; el listado dejó de usar navegador. Nuevas: comunas, consultar-rol (predio de terceros), multipropietarios, solicitudes, documento (PDF) y certificado-avaluo (PDF, los tres tipos verificados con PDF real). Sin hacer: certificado de **antecedentes** (el flujo de terceros exige motivo e institución receptora y no se verificó) y búsqueda **por dirección**. |
 | ~~R4~~ | **bhe** | 9 | **5** | ✅ Lectura completa: la paginación de recibidas >100 encadena `pagina_sig_codigo` (PR #69). Falta sólo escritura (emitir, anular, observar, email) → R11. |
