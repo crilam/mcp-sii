@@ -32,7 +32,7 @@ async function main() {
     await sesion.authenticateOnly();
     const jar = await sesion.rutaCookieJar();
     const bajar = (url: string, dest: string) => {
-      const code = execFileSync('curl', ['-sk', '-b', jar, '-c', jar, '-L', '--max-time', '30', '-A', UA, '-o', dest, '-w', '%{http_code}', url], { encoding: 'utf8' });
+      const code = execFileSync('curl', ['-s', '-b', jar, '-c', jar, '-L', '--max-time', '30', '-A', UA, '-o', dest, '-w', '%{http_code}', url], { encoding: 'utf8' });
       const size = fs.existsSync(dest) ? fs.statSync(dest).size : 0;
       return { code, size };
     };

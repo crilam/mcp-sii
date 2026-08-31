@@ -110,7 +110,11 @@ function normalizar(fila: any, operacionPedida: OperacionRcv): SolicitudAsyncRcv
 function parsearCsv(texto: string): { columnas: string[]; filas: Record<string, string>[] } {
   const lineas = texto.split(/\r?\n/).filter(l => l.trim() !== '');
   if (lineas.length === 0) throw new Error('El archivo del SII vino vacío (sin cabecera).');
-  const columnas = lineas[0].split(';').map(c => c.trim());
+  let columnas = lineas[0].split(';').map(c => c.trim());
+  // El SII no cierra la cabecera con `;` (sí las filas), pero si algún día lo
+  // hiciera quedaría una columna de nombre vacío y TODAS las filas fallarían el
+  // conteo. Se descarta esa columna final vacía igual que en las filas.
+  if (columnas.length > 1 && columnas[columnas.length - 1] === '') columnas = columnas.slice(0, -1);
   const filas: Record<string, string>[] = [];
   for (let i = 1; i < lineas.length; i++) {
     let celdas = lineas[i].split(';');
@@ -174,7 +178,14 @@ export class RcvAsyncScraper {
     }
   }
 
-  /** Crea la solicitud (generaCtrl:true) y devuelve su estado inicial. */
+  /**
+   * Crea la solicitud (generaCtrl:true) y devuelve su estado inicial. OJO: cada
+   * llamada le pide al SII generar de nuevo, así que puede acumular varias
+   * solicitudes de la misma combinación; se devuelve la de caId más alto (la
+   * recién creada). Si el SII ya tuviera una en curso y no creara otra, se
+   * devuelve esa, que es el comportamiento deseado: el consumidor sigue el
+   * estado de "la última".
+   */
   async solicitar(periodo: string, operacion: OperacionRcv, tipoDocCodigo: number, empresaRut?: string): Promise<SolicitudAsyncRcv> {
     this.validarPeriodo(periodo);
     const { rut, dv } = this.rutEmpresa(empresaRut);
@@ -200,10 +211,16 @@ export class RcvAsyncScraper {
    * Descarga y parsea el detalle de la solicitud TERMINADA más reciente de esa
    * combinación. Sin solicitudes → NO_ENCONTRADO. Con solicitudes pero ninguna
    * terminada → LimitacionConocida "en proceso" (el consumidor reintenta).
+   *
+   * `empresaRut` distinto del autenticado NO está verificado en vivo: el flujo
+   * se probó sólo con el RUT propio. La URL del BLOB usa el RUT autenticado como
+   * `usuario` y la empresa como `rutEmisor`; si un consumidor lo usa con otra
+   * empresa y falla, es acá donde hay que mirar.
    */
   async detalle(periodo: string, operacion: OperacionRcv, tipoDocCodigo: number, empresaRut?: string): Promise<DetalleAsyncRcv> {
     this.validarPeriodo(periodo);
     const { rut, dv } = this.rutEmpresa(empresaRut);
+    void dv;
     const solicitudes = await this.estado(periodo, operacion, tipoDocCodigo, empresaRut);
     if (solicitudes.length === 0) {
       throw new RecursoNoEncontrado(
@@ -213,6 +230,14 @@ export class RcvAsyncScraper {
     const lista = solicitudes.find(s => s.terminada && s.blobId);
     if (!lista) {
       const est = solicitudes[0];
+      // Una solicitud TERMINADA pero sin blob es un FALLO del SII (generó el
+      // control y no el archivo): reintentar el polling no lo va a arreglar, así
+      // que se distingue del caso "todavía en proceso".
+      if (est.terminada && !est.blobId) {
+        throw new Error(
+          `La solicitud asíncrona del RCV terminó sin archivo (blob) para ${operacion} ${tipoDocCodigo} en ${periodo}`
+          + `${est.error ? `: ${est.error}` : '.'} Volvé a crearla con /v1/rcv/async/solicitar; reintentar el detalle no la resuelve.`);
+      }
       throw new LimitacionConocida(
         `La solicitud asíncrona del RCV está en estado "${est.estado}", todavía no terminada. `
         + 'Reintentá el detalle en unos segundos.');

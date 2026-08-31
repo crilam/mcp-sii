@@ -84,6 +84,27 @@ describe('RcvAsyncScraper.estado', () => {
     (http.postSdi as jest.Mock).mockResolvedValue({ respEstado: { codRespuesta: 2, msgeRespuesta: 'Error X' } });
     await expect(scraper.estado('202601', 'COMPRA', 33)).rejects.toThrow(/código 2.*Error X/);
   });
+
+  // El código 1 es una respuesta CON datos y un aviso: se acepta, no falla.
+  it('el código 1 (con aviso) se acepta como respuesta con datos', async () => {
+    const { http, scraper } = armar();
+    (http.postSdi as jest.Mock).mockResolvedValue({
+      respEstado: { codRespuesta: 1, msgeRespuesta: 'Aviso del SII' },
+      data: [ctrl({ caId: 700, caEstado: 'TERMINADO', caIdBLOB: 'uuid-1' })],
+    });
+    const lista = await scraper.estado('202601', 'COMPRA', 33);
+    expect(lista).toHaveLength(1);
+  });
+
+  // Con empresa_rut la consulta va por esa empresa (rutEmisor), no por el
+  // RUT autenticado.
+  it('empresa_rut viaja como rutEmisor/dvEmisor en el sobre', async () => {
+    const { http, scraper } = armar();
+    (http.postSdi as jest.Mock).mockResolvedValue({ respEstado: { codRespuesta: 0 }, data: [] });
+    await scraper.estado('202601', 'COMPRA', 33, '22222222-2');
+    const data = (http.postSdi as jest.Mock).mock.calls[0][3];
+    expect(data).toMatchObject({ rutEmisor: '22222222', dvEmisor: '2' });
+  });
 });
 
 describe('RcvAsyncScraper.detalle', () => {
@@ -117,6 +138,25 @@ describe('RcvAsyncScraper.detalle', () => {
   it('con solicitud EN PROCESO es LimitacionConocida (reintentar), no un vacío', async () => {
     const { scraper } = conEstado([ctrl({ caId: 700, caEstado: 'EN PROCESO' })]);
     await expect(scraper.detalle('202601', 'COMPRA', 33)).rejects.toBeInstanceOf(LimitacionConocida);
+  });
+
+  // TERMINADO pero SIN blob es un fallo del SII: reintentar no lo arregla, así
+  // que NO es LimitacionConocida (que invita a reintentar) sino un error duro.
+  it('TERMINADO sin blob es un error duro, no invita a reintentar', async () => {
+    const { scraper } = conEstado([ctrl({ caId: 700, caEstado: 'TERMINADO', caIdBLOB: 'SIN-BLOB', caDescError: 'sin archivo' })]);
+    const p = scraper.detalle('202601', 'COMPRA', 33);
+    await expect(p).rejects.toThrow(/terminó sin archivo.*sin archivo/);
+    await expect(p).rejects.not.toBeInstanceOf(LimitacionConocida);
+  });
+
+  // Con empresa_rut la URL del BLOB usa la empresa como rutEmisor y el RUT
+  // autenticado como `usuario`.
+  it('empresa_rut: la URL del BLOB separa usuario (autenticado) y rutEmisor (empresa)', async () => {
+    const { http, scraper } = conEstado([ctrl({ caProceso: 'CONSDCV_C_RG', caId: 700, caEstado: 'TERMINADO', caIdBLOB: 'uuid-1', caNumLineas: 2 })]);
+    (http.getBinario as jest.Mock).mockResolvedValue(gz(CSV));
+    await scraper.detalle('202601', 'COMPRA', 33, '22222222-2');
+    const url = (http.getBinario as jest.Mock).mock.calls[0][0];
+    expect(url).toContain('/obtenerArchivoBLOB/uuid-1/11111111/22222222/700');
   });
 
   it('si los documentos no cuadran con los registros del SII, falla', async () => {

@@ -3,8 +3,8 @@ import { z } from 'zod';
 export const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 
 const camposComunes = {
-  periodo: z.string().regex(/^\d{6}$/)
-    .describe('Período tributario en formato AAAAMM (por ejemplo 202607)'),
+  periodo: z.string().regex(/^\d{4}(0[1-9]|1[0-2])$/)
+    .describe('Período tributario en formato AAAAMM (por ejemplo 202607). El mes debe ser 01-12.'),
   operacion: z.enum(['COMPRA', 'VENTA'])
     .describe('COMPRA para el registro de compras, VENTA para el de ventas'),
   empresa_rut: z.string().optional()
