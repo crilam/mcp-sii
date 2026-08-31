@@ -153,6 +153,20 @@ export class SiiHttpClient {
     return this.curl([...argsDe(opciones), `${url}${query}`]);
   }
 
+  // POST con un cuerpo y un Content-Type ARBITRARIOS. Lo usa el F29, que habla
+  // GWT-RPC: el cuerpo es texto serializado propio (`7|0|...`) con su propio
+  // Content-Type y headers `X-GWT-*`, y no encaja en postForm ni postJson.
+  async postCrudo(
+    url: string,
+    cuerpo: string,
+    contentType: string,
+    headersExtra: Record<string, string> = {}
+  ): Promise<string> {
+    const hs: string[] = ['-H', `Content-Type: ${contentType}`];
+    for (const [k, v] of Object.entries(headersExtra)) hs.push('-H', `${k}: ${v}`);
+    return this.curl([...hs, '--data-binary', cuerpo, url]);
+  }
+
   // JSON plano en el cuerpo, sin el sobre SDI: es lo que esperan las APIs REST
   // "de verdad" del SII, como la del portal de bienes raíces (`/app/vica/`).
   async postJson(url: string, body: unknown, opciones?: OpcionesPedido): Promise<string> {
