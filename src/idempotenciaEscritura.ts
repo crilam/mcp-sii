@@ -12,9 +12,13 @@ import { LimitacionConocida } from './erroresConsulta';
 
 const MARCA = '__escrituraSeguraDeLiberar';
 
-/** Marca un error como "el acto NO se cursó, es seguro liberar la reserva". */
+/**
+ * Marca un error como "el acto NO se cursó, es seguro liberar la reserva". La
+ * propiedad se define NO enumerable para que no se filtre si alguna capa
+ * serializa el error (`{...e}` o un logger que vuelca props).
+ */
 export function marcarSeguro<E>(e: E): E {
-  if (e && typeof e === 'object') (e as Record<string, unknown>)[MARCA] = true;
+  if (e && typeof e === 'object') Object.defineProperty(e, MARCA, { value: true, enumerable: false, configurable: true });
   return e;
 }
 export function esSeguroDeLiberar(e: unknown): boolean {
@@ -22,35 +26,39 @@ export function esSeguroDeLiberar(e: unknown): boolean {
 }
 
 export class VentanaIdempotencia {
-  // clave → timestamp de la reserva. Mientras una clave esté acá, un segundo
-  // acto idéntico se rechaza.
-  private enCurso = new Map<string, number>();
+  // clave → { ts, enVuelo }. `enVuelo` = la operación todavía corre contra el
+  // SII; mientras lo esté, la reserva NO expira (una operación lenta —el caso
+  // más probable de doble-click, porque el usuario reintenta PORQUE tardó— no
+  // debe barrerse a mitad). Terminada, `ts` marca desde cuándo cuenta la ventana.
+  private enCurso = new Map<string, { ts: number; enVuelo: boolean }>();
 
   constructor(private ventanaMs = 60_000) {}
 
   /**
    * Ejecuta `fn` protegido por la ventana. Si otra ejecución con la misma
-   * `clave` está en curso o terminó hace menos de `ventanaMs`, lanza
-   * LimitacionConocida sin llamar a `fn`. Al terminar con éxito, refresca la
-   * reserva; al fallar, la libera SÓLO si el error está marcado seguro.
+   * `clave` está EN VUELO, o terminó hace menos de `ventanaMs`, lanza
+   * LimitacionConocida sin llamar a `fn`. Al terminar con éxito refresca la
+   * reserva; al fallar, la libera SÓLO si el error está marcado seguro (un fallo
+   * ambiguo la mantiene, pero ya no en vuelo, para que la ventana la venza).
    */
   async ejecutar<T>(clave: string, mensajeDuplicado: string, fn: () => Promise<T>): Promise<T> {
     const ahora = Date.now();
-    for (const [k, ts] of this.enCurso) if (ahora - ts > this.ventanaMs) this.enCurso.delete(k);
+    for (const [k, v] of this.enCurso) if (!v.enVuelo && ahora - v.ts > this.ventanaMs) this.enCurso.delete(k);
     if (this.enCurso.has(clave)) throw new LimitacionConocida(mensajeDuplicado);
     // Reserva SÍNCRONA: entre este set y el await no hay suspensión, así que un
     // segundo request concurrente ya la encuentra.
-    this.enCurso.set(clave, Date.now());
+    this.enCurso.set(clave, { ts: ahora, enVuelo: true });
     try {
       const r = await fn();
-      this.enCurso.set(clave, Date.now());
+      this.enCurso.set(clave, { ts: Date.now(), enVuelo: false });
       return r;
     } catch (e) {
       if (esSeguroDeLiberar(e)) this.enCurso.delete(clave);
+      else this.enCurso.set(clave, { ts: Date.now(), enVuelo: false });
       throw e;
     }
   }
 
-  /** Sólo para tests. */
+  /** @internal Sólo para tests. */
   _reset(): void { this.enCurso.clear(); }
 }

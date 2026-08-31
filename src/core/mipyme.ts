@@ -97,6 +97,11 @@ export async function guardarBorrador(
   });
   // La simulación no muta: no toca la ventana de idempotencia. El grabado sí.
   if (!confirmar) return grabar();
+  // La clave depende del orden de campos de `params` al serializar. Hoy lo fija
+  // `paramsDocumento` (el único que arma EmitirDteParams para esta ruta); un
+  // llamador que arme el objeto a mano con otro orden generaría otra clave y no
+  // colisionaría con el suyo previo. Es aceptable: la red es una salvaguarda del
+  // MISMO cliente, no un lock global.
   const clave = createHash('sha256')
     .update(JSON.stringify([rut, borradorId ?? '', params]))
     .digest('hex');

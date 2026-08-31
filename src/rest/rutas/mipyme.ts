@@ -133,14 +133,15 @@ export function registrarRutasMipyme(
     const parseo = zodBorrador.safeParse(body);
     if (!parseo.success) return badRequest(parseo.error);
     const datos = parseo.data;
+    const doc = paramsDocumento(datos); // una sola vez: el hash de la traza cuadra con lo mandado
     const ejecutor = ejecutorPara(registro, credenciales, datos.rut, credencialDe(datos));
-    const resp = await ejecutar(() => core.guardarBorrador(ejecutor, datos.rut, paramsDocumento(datos), datos.confirmar, datos.borrador_id));
+    const resp = await ejecutar(() => core.guardarBorrador(ejecutor, datos.rut, doc, datos.confirmar, datos.borrador_id));
     // Traza de auditoría de la escritura (misma mecánica que el acuse del RCV).
     const respBody = resp.body as { ok?: boolean; error?: string; borradorId?: string | null };
     // Referencia del acto: el id del borrador cuando el SII lo da (edición), o
     // tipo+receptor + un hash corto del documento cuando no (borrador nuevo), para
     // que dos borradores distintos al mismo receptor no colisionen en la traza.
-    const hashDoc = createHash('sha256').update(JSON.stringify(paramsDocumento(datos))).digest('hex').slice(0, 8);
+    const hashDoc = createHash('sha256').update(JSON.stringify(doc)).digest('hex').slice(0, 8);
     const referencia = `borrador:${respBody?.borradorId ?? `${datos.tipo_dte}-${datos.receptor_rut}-${hashDoc}`}`;
     if (respBody?.ok && datos.confirmar) {
       resp.auditoria = { efecto: 'ejecutado', referencia };
