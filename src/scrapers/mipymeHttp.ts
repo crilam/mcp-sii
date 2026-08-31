@@ -52,6 +52,12 @@ const BORRADORES_LISTADO_URL = `${BORRADORES_BASE}/listaBorrador`;
 // directo y ese salto se ahorra.
 const FORM_EMISION_URL = `${CGI_BASE}/mipeGenFacEx.cgi`;
 const PREVIEW_URL = `${CGI_BASE}/mipeDisplayPreView.cgi`;
+// Guardar un BORRADOR: el botón "Guardar Borrador" del form de emisión cambia el
+// action a este CGI y pone ES_BORR='TRUE'. Es el MISMO form (mismos campos que
+// arma `armarCamposEmision`), no un endpoint aparte. Relevado del form real
+// (relevarMipymeBorrador.ts). A diferencia de emitir, un borrador NO se firma:
+// no es un DTE tributario, es reversible (se puede editar o descartar).
+const GRABA_BORRADOR_URL = `${CGI_BASE}/mipeGrabaBorrador.cgi`;
 // OJO con el nombre: `mipeGenXMLFirma.cgi` NO emite. Arma el XML del DTE, le
 // propone un folio y devuelve la página que pide la firma. Faltan tres pasos
 // más, y el último es el que emite:
@@ -424,6 +430,15 @@ export interface DteEmitido {
   resumen: ResumenDte;
 }
 
+export interface BorradorGuardado {
+  // false = simulación (confirmar:false), no se guardó nada.
+  guardado: boolean;
+  resumen: ResumenDte;
+  // EHDR_CODIGO del borrador: el id devuelto por el SII si se guardó, el id que
+  // se editó, o null en una simulación de un borrador nuevo.
+  borradorId: string | null;
+}
+
 export class MipymeHttpScraper {
   constructor(
     private http: SiiHttpClient,
@@ -659,15 +674,31 @@ export class MipymeHttpScraper {
     return this.session.conEmpresaExclusiva(() => this.prepararYEmitir(params, confirmar));
   }
 
-  // El cuerpo de la emisión, YA dentro de la sección crítica. Vive aparte para
-  // que `verificarFirma` pueda encadenar la previsualización y la firma sin
-  // soltar el candado en el medio: la empresa activa es estado del servidor, y
-  // soltarlo dejaría que otra consulta la cambiara entre un paso y el
-  // siguiente.
-  private async prepararYEmitir(
-    params: EmitirDteParams,
-    confirmar: boolean
-  ): Promise<PrevisualizacionDte | DteEmitido> {
+  /**
+   * Guarda un DTE como BORRADOR (no lo emite: no es un acto tributario, es
+   * reversible). Con `confirmar=false` (default) SIMULA: prepara los campos pero
+   * NO postea al CGI de grabado, y devuelve el resumen de lo que se guardaría.
+   * Con `confirmar=true` graba el borrador (`mipeGrabaBorrador.cgi`). Si viene
+   * `borradorId` (EHDR_CODIGO), edita ese borrador en vez de crear uno nuevo.
+   *
+   * NO exige certificado: un borrador no se firma. Alcanza la sesión.
+   */
+  async guardarBorrador(params: EmitirDteParams, confirmar = false, borradorId?: string): Promise<BorradorGuardado> {
+    if (!TIPOS_SOPORTADOS.includes(params.tipoDte as (typeof TIPOS_SOPORTADOS)[number])) {
+      throw new Error(
+        `El tipo de documento ${params.tipoDte} no está soportado para borrador: sólo se relevó el `
+        + `formulario de ${TIPOS_SOPORTADOS.join(', ')}.`);
+    }
+    this.session.assertPuedeEntregarCookieJar();
+    return this.session.conEmpresaExclusiva(() => this.prepararYGuardarBorrador(params, confirmar, borradorId));
+  }
+
+  // Sel empresa + form + emisor + validación + campos. Lo comparten la emisión y
+  // el guardado de borrador: es el mismo formulario del portal, así que un
+  // borrador se arma con exactamente los campos que se emitirían.
+  private async prepararCampos(params: EmitirDteParams): Promise<{
+    empresaRut: string; emisor: EmisorFormulario; totales: TotalesDte; campos: Record<string, string>;
+  }> {
     const empresas = this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
     const empresaRut = this.resolverEmpresa(empresas, params.empresaRut);
     await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: empresaRut });
@@ -683,8 +714,56 @@ export class MipymeHttpScraper {
 
     const totales = calcularTotales(params.lineas);
     this.validarEmision(params, emisor, totales);
+    return { empresaRut, emisor, totales, campos: this.armarCamposEmision(params, emisor, totales) };
+  }
 
-    const campos = this.armarCamposEmision(params, emisor, totales);
+  private async prepararYGuardarBorrador(
+    params: EmitirDteParams, confirmar: boolean, borradorId?: string
+  ): Promise<BorradorGuardado> {
+    const { empresaRut, emisor, totales, campos } = await this.prepararCampos(params);
+    const resumen: ResumenDte = {
+      tipoDte: params.tipoDte, emisorRut: empresaRut, emisorRazonSocial: emisor.razonSocial,
+      receptorRut: `${params.receptor.rut}-${params.receptor.dv}`, receptorRazonSocial: params.receptor.razonSocial,
+      fechaEmision: campos.EFXP_FCH_EMIS ?? '', neto: totales.neto, iva: totales.iva, total: totales.total,
+    };
+
+    if (!confirmar) {
+      return { guardado: false, resumen, borradorId: borradorId ?? null };
+    }
+
+    // Grabado real: el mismo form, con ES_BORR='TRUE' y el id del borrador a
+    // editar (vacío = nuevo). Va a mipeGrabaBorrador.cgi, no al preview.
+    const camposBorrador = { ...campos, ES_BORR: 'TRUE', EHDR_CODIGO: borradorId ?? '' };
+    const html = await this.http.postForm(GRABA_BORRADOR_URL, camposBorrador, { charset: 'latin1' });
+    // El CGI devuelve el form de vuelta ante un rechazo (mismo patrón que el
+    // preview): si no confirma el guardado, no se reporta como éxito.
+    const idGuardado = this.parseBorradorGuardado(html);
+    if (idGuardado === null) {
+      throw new Error(
+        'El SII no confirmó el guardado del borrador (devolvió el formulario). '
+        + 'Revisá los datos; NO se guardó.');
+    }
+    return { guardado: true, resumen, borradorId: idGuardado };
+  }
+
+  // Del HTML de respuesta de mipeGrabaBorrador.cgi, el EHDR_CODIGO del borrador
+  // ya guardado. `null` si no aparece (el CGI devolvió el form = rechazo).
+  private parseBorradorGuardado(html: string): string | null {
+    const m = /EHDR_CODIGO["'\s]*(?:value|=)["'\s]*["']?(\d+)/i.exec(html)
+      ?? /name=["']EHDR_CODIGO["'][^>]*value=["'](\d+)["']/i.exec(html);
+    return m ? m[1] : null;
+  }
+
+  // El cuerpo de la emisión, YA dentro de la sección crítica. Vive aparte para
+  // que `verificarFirma` pueda encadenar la previsualización y la firma sin
+  // soltar el candado en el medio: la empresa activa es estado del servidor, y
+  // soltarlo dejaría que otra consulta la cambiara entre un paso y el
+  // siguiente.
+  private async prepararYEmitir(
+    params: EmitirDteParams,
+    confirmar: boolean
+  ): Promise<PrevisualizacionDte | DteEmitido> {
+    const { empresaRut, emisor, totales, campos } = await this.prepararCampos(params);
     const previewHtml = await this.http.postForm(PREVIEW_URL, campos, { charset: 'latin1' });
     // El CGI no responde con un error cuando el documento no le sirve:
     // devuelve el formulario de vuelta. Sin este chequeo, un rechazo se lee

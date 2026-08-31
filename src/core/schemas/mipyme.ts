@@ -86,3 +86,16 @@ export const schemaEmitirDte = {
   })).max(3).optional().describe('Hasta 3 referencias. Una nota de crédito exige al menos una.'),
   confirmar: z.boolean().default(false).describe('false (default) = sólo previsualiza. true = FIRMA Y EMITE el documento, acto real e irreversible.'),
 };
+
+// Guardar borrador: los MISMOS campos del documento que emitir (sin el confirmar
+// de emisión), más `borrador_id` para editar uno existente y su propio
+// `confirmar`. Un borrador NO se firma —es reversible—, así que no exige
+// certificado: acepta clave o certificado como el resto.
+const { confirmar: _c, ...camposDte } = schemaEmitirDte;
+export const schemaGuardarBorrador = {
+  ...camposDte,
+  borrador_id: z.string().optional()
+    .describe('EHDR_CODIGO de un borrador existente a EDITAR. Si se omite, se crea uno nuevo.'),
+  confirmar: z.boolean().default(false)
+    .describe('false (default) = SIMULA: valida el documento y devuelve el resumen sin guardar. true = GUARDA el borrador (reversible: se puede editar o descartar; NO emite ni firma nada).'),
+};

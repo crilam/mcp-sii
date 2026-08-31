@@ -620,3 +620,68 @@ describe('decodificarEntidades', () => {
     expect(decodificarEntidades('AT&amp;#205;T')).toBe('AT&#205;T');
   });
 });
+
+
+describe('MipymeHttpScraper.guardarBorrador', () => {
+  // Respuesta de mipeGrabaBorrador.cgi cuando GRABA: trae el EHDR_CODIGO del
+  // borrador guardado. Cuando RECHAZA, devuelve el form sin ese id.
+  const GRABADO_OK = '<html><input type="hidden" name="EHDR_CODIGO" value="998877"></html>';
+  const GRABADO_RECHAZO = '<html><body>Revise los datos del documento</body></html>';
+
+  function armarBorrador(grabado = GRABADO_OK) {
+    const { scraper, http, session } = armar();
+    (http.postForm as jest.Mock).mockImplementation(async (url: string) => {
+      if (url.includes('mipeSelEmpresa')) return '<html>ok</html>';
+      if (url.includes('mipeGrabaBorrador')) return grabado;
+      if (url.includes('mipeDisplayPreView')) return PREVIEW_33;
+      return PAGINA_FIRMA;
+    });
+    return { scraper, http, session };
+  }
+
+  // LA barrera: confirmar:false NO postea a mipeGrabaBorrador.
+  it('confirmar:false simula y NO graba', async () => {
+    const { scraper, http } = armarBorrador();
+
+    const r = await scraper.guardarBorrador(params(), false);
+
+    expect(r.guardado).toBe(false);
+    expect(r.resumen.total).toBe(4); // neto 3 + iva 1
+    expect(urlsPosteadas(http).some(u => u.includes('mipeGrabaBorrador'))).toBe(false);
+  });
+
+  it('confirmar:true postea a mipeGrabaBorrador con ES_BORR=TRUE y devuelve el id', async () => {
+    const { scraper, http } = armarBorrador();
+
+    const r = await scraper.guardarBorrador(params(), true);
+
+    expect(r.guardado).toBe(true);
+    expect(r.borradorId).toBe('998877');
+    const call = (http.postForm as jest.Mock).mock.calls.find(c => (c[0] as string).includes('mipeGrabaBorrador'));
+    expect(call).toBeDefined();
+    expect((call![1] as Record<string, string>).ES_BORR).toBe('TRUE');
+    expect((call![1] as Record<string, string>).EHDR_CODIGO).toBe(''); // nuevo
+  });
+
+  it('con borradorId edita ese borrador (EHDR_CODIGO seteado)', async () => {
+    const { scraper, http } = armarBorrador();
+
+    await scraper.guardarBorrador(params(), true, '555');
+
+    const call = (http.postForm as jest.Mock).mock.calls.find(c => (c[0] as string).includes('mipeGrabaBorrador'));
+    expect((call![1] as Record<string, string>).EHDR_CODIGO).toBe('555');
+  });
+
+  // Si el CGI rechaza (devuelve el form sin id), NO se reporta como guardado.
+  it('un rechazo del SII no se reporta como guardado', async () => {
+    const { scraper } = armarBorrador(GRABADO_RECHAZO);
+    await expect(scraper.guardarBorrador(params(), true)).rejects.toThrow(/no confirmó el guardado/);
+  });
+
+  // Un borrador NO se firma: no exige certificado.
+  it('no exige certificado (no llama assertPuedeFirmar)', async () => {
+    const { scraper, session } = armarBorrador();
+    await scraper.guardarBorrador(params(), true);
+    expect(session.assertPuedeFirmar).not.toHaveBeenCalled();
+  });
+});

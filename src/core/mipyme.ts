@@ -1,4 +1,4 @@
-import { MipymeHttpScraper, BorradorMipyme, FiltrosDteEmitidos, DteEmitidosResult, FiltrosDteRecibidos, DteRecibidosResult, EmitirDteParams, PrevisualizacionDte, DteEmitido } from '../scrapers/mipymeHttp';
+import { MipymeHttpScraper, BorradorMipyme, FiltrosDteEmitidos, DteEmitidosResult, FiltrosDteRecibidos, DteRecibidosResult, EmitirDteParams, PrevisualizacionDte, DteEmitido, BorradorGuardado } from '../scrapers/mipymeHttp';
 import { SiiHttpClient } from '../http';
 import { SessionManager, Empresa } from '../session';
 import { EjecutorSesion } from '../registroSesiones';
@@ -67,5 +67,20 @@ export async function emitirDte(
   return ejecutor.ejecutar(rut, async sesion => {
     const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
     return http.emitirDte(params, confirmar);
+  });
+}
+
+// Guarda un DTE como BORRADOR (reversible, no lo emite). Con confirmar:false
+// simula; con true graba. `borradorId` edita un borrador existente.
+export async function guardarBorrador(
+  ejecutor: EjecutorSesion<SessionManager>,
+  rut: string,
+  params: EmitirDteParams,
+  confirmar: boolean,
+  borradorId?: string
+): Promise<BorradorGuardado> {
+  return ejecutor.ejecutar(rut, async sesion => {
+    const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
+    return http.guardarBorrador(params, confirmar, borradorId);
   });
 }

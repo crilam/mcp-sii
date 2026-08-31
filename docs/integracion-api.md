@@ -675,6 +675,16 @@ El **dry-run valida el evento contra el catálogo, pero NO verifica que los docu
 
 Fuera de esta ronda: `set_tipo_transaccion` (app legacy del SII, no API) y `set_resumen` (no existe). Ver el diseño completo de R11 en `docs/superpowers/specs/2026-08-31-ronda-11-escritura-design.md`.
 
+### 6.14 Mipyme — guardar borrador (ronda 11, ESCRITURA reversible)
+
+Guarda un DTE como BORRADOR en el portal mipyme. **No es un acto tributario**: no emite, no firma, no notifica, y es REVERSIBLE (se edita o descarta). Relevado del form real (`mipeGenFacEx.cgi`): el botón "Guardar Borrador" postea a `mipeGrabaBorrador.cgi` con `ES_BORR='TRUE'`; es el mismo documento que se emitiría.
+
+| Endpoint | Tool | Body |
+|---|---|---|
+| **`POST /v1/mipyme/borrador`** | `sii_mipyme_guardar_borrador` | mismos campos que emitir-dte + `borrador_id?` + `confirmar?` |
+
+A diferencia de `emitir-dte` (que exige certificado y bloquea `confirmar:true` vía REST), el borrador **acepta clave o certificado** (no firma) y **sí soporta `confirmar:true`**. Sin `confirmar` (default) SIMULA: valida el documento contra el portal y devuelve el resumen sin guardar. Con `confirmar:true` graba y devuelve el `borradorId` (EHDR_CODIGO). Pasar `borrador_id` EDITA uno existente en vez de crear uno nuevo. La traza de auditoría marca `simulado`/`ejecutado`/`fallido` (sólo REST).
+
 ---
 
 ## 7. Limitaciones conocidas
