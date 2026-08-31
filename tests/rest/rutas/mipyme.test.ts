@@ -55,6 +55,14 @@ describe('registrarRutasMipyme', () => {
       await armarRouter().get('POST /v1/mipyme/borrador')!({ ...CRED, confirmar: true, borrador_id: '555' });
       expect(core.guardarBorrador).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.any(Object), true, '555');
     });
+
+    // Un confirmar:true que FALLA (rechazo del SII) se audita como 'fallido'.
+    it('un guardado fallido (confirmar:true) se audita como fallido', async () => {
+      (core.guardarBorrador as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').EscrituraRechazadaPorSii)('no se guardó'));
+      const r = await armarRouter().get('POST /v1/mipyme/borrador')!({ ...CRED, confirmar: true });
+      expect((r.body as any).ok).toBe(false);
+      expect(r.auditoria).toEqual({ efecto: 'fallido', referencia: 'borrador:33-33333333' });
+    });
   });
 
   it('list-empresas: body válido llama al core', async () => {

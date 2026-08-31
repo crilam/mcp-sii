@@ -623,9 +623,10 @@ describe('decodificarEntidades', () => {
 
 
 describe('MipymeHttpScraper.guardarBorrador', () => {
-  // Respuesta de mipeGrabaBorrador.cgi cuando GRABA: trae el EHDR_CODIGO del
-  // borrador guardado. Cuando RECHAZA, devuelve el form sin ese id.
-  const GRABADO_OK = '<html><input type="hidden" name="EHDR_CODIGO" value="998877"></html>';
+  // Respuesta REAL de mipeGrabaBorrador.cgi cuando GRABA (relevada de un grabado
+  // real): el mensaje de éxito, con la é como entidad HTML. NO trae el id del
+  // borrador. Cuando RECHAZA, devuelve el formulario sin ese texto.
+  const GRABADO_OK = '<html><body>Su documento borrador ha sido grabado/actualizado con &eacute;xito. Administrador de Borradores</body></html>';
   const GRABADO_RECHAZO = '<html><body>Revise los datos del documento</body></html>';
 
   function armarBorrador(grabado = GRABADO_OK) {
@@ -650,29 +651,39 @@ describe('MipymeHttpScraper.guardarBorrador', () => {
     expect(urlsPosteadas(http).some(u => u.includes('mipeGrabaBorrador'))).toBe(false);
   });
 
-  it('confirmar:true postea a mipeGrabaBorrador con ES_BORR=TRUE y devuelve el id', async () => {
+  it('confirmar:true postea con ES_BORR=TRUE; un borrador nuevo no trae id', async () => {
     const { scraper, http } = armarBorrador();
 
     const r = await scraper.guardarBorrador(params(), true);
 
     expect(r.guardado).toBe(true);
-    expect(r.borradorId).toBe('998877');
+    expect(r.borradorId).toBeNull(); // nuevo: el SII no devuelve el id
     const call = (http.postForm as jest.Mock).mock.calls.find(c => (c[0] as string).includes('mipeGrabaBorrador'));
     expect(call).toBeDefined();
     expect((call![1] as Record<string, string>).ES_BORR).toBe('TRUE');
     expect((call![1] as Record<string, string>).EHDR_CODIGO).toBe(''); // nuevo
   });
 
-  it('con borradorId edita ese borrador (EHDR_CODIGO seteado)', async () => {
+  it('con borradorId edita ese borrador (EHDR_CODIGO seteado) y devuelve ese id', async () => {
     const { scraper, http } = armarBorrador();
 
-    await scraper.guardarBorrador(params(), true, '555');
+    const r = await scraper.guardarBorrador(params(), true, '555');
 
+    expect(r.borradorId).toBe('555');
     const call = (http.postForm as jest.Mock).mock.calls.find(c => (c[0] as string).includes('mipeGrabaBorrador'));
     expect((call![1] as Record<string, string>).EHDR_CODIGO).toBe('555');
   });
 
-  // Si el CGI rechaza (devuelve el form sin id), NO se reporta como guardado.
+  // EL bloqueante del review: al EDITAR, un rechazo devuelve el form CON el
+  // EHDR_CODIGO posteado. El éxito se detecta por el MENSAJE, no por el id, así
+  // que ese caso NO se reporta como guardado.
+  it('un rechazo al editar (form con el id posteado) NO es guardado', async () => {
+    const rechazoEdit = '<html><input name="EHDR_CODIGO" value="555"><body>Revise los datos</body></html>';
+    const { scraper } = armarBorrador(rechazoEdit);
+    await expect(scraper.guardarBorrador(params(), true, '555')).rejects.toThrow(/no confirmó el guardado/);
+  });
+
+  // Un rechazo (sin el texto de éxito) no se reporta como guardado.
   it('un rechazo del SII no se reporta como guardado', async () => {
     const { scraper } = armarBorrador(GRABADO_RECHAZO);
     await expect(scraper.guardarBorrador(params(), true)).rejects.toThrow(/no confirmó el guardado/);

@@ -683,7 +683,7 @@ Guarda un DTE como BORRADOR en el portal mipyme. **No es un acto tributario**: n
 |---|---|---|
 | **`POST /v1/mipyme/borrador`** | `sii_mipyme_guardar_borrador` | mismos campos que emitir-dte + `borrador_id?` + `confirmar?` |
 
-A diferencia de `emitir-dte` (que exige certificado y bloquea `confirmar:true` vía REST), el borrador **acepta clave o certificado** (no firma) y **sí soporta `confirmar:true`**. Sin `confirmar` (default) SIMULA: valida el documento contra el portal y devuelve el resumen sin guardar. Con `confirmar:true` graba y devuelve el `borradorId` (EHDR_CODIGO). Pasar `borrador_id` EDITA uno existente en vez de crear uno nuevo. La traza de auditoría marca `simulado`/`ejecutado`/`fallido` (sólo REST).
+A diferencia de `emitir-dte` (que exige certificado y bloquea `confirmar:true` vía REST), el borrador **acepta clave o certificado** (no firma) y **sí soporta `confirmar:true`**. Sin `confirmar` (default) SIMULA: valida el documento contra el portal y devuelve el resumen sin guardar. Con `confirmar:true` graba y devuelve el `borradorId` (EHDR_CODIGO). Pasar `borrador_id` EDITA uno existente en vez de crear uno nuevo. Al **crear** un borrador nuevo el SII **no devuelve el id del borrador** en la respuesta de grabado (`borradorId` viene `null`): para obtenerlo, consultá `list-borradores`. Al **editar** (con `borrador_id`), el `borradorId` es el que pasaste. La **simulación no verifica que un borrador a editar exista**: sólo valida el documento. El éxito del grabado se detecta por el mensaje de confirmación del portal, no por la presencia de un id. La traza de auditoría marca `simulado`/`ejecutado`/`fallido` (sólo REST).
 
 ---
 

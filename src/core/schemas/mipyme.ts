@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EmitirDteParams } from '../../scrapers/mipymeHttp';
 
 export const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
@@ -99,3 +100,29 @@ export const schemaGuardarBorrador = {
   confirmar: z.boolean().default(false)
     .describe('false (default) = SIMULA: valida el documento y devuelve el resumen sin guardar. true = GUARDA el borrador (reversible: se puede editar o descartar; NO emite ni firma nada).'),
 };
+
+// Campos de un documento tal como llegan del body REST/MCP (snake_case). Lo
+// comparten emitir-dte y guardar-borrador: es el mismo documento.
+export interface CamposDocumentoBody {
+  empresa_rut?: string; tipo_dte: number;
+  receptor_rut: string; receptor_dv: string; receptor_razon_social: string; receptor_giro: string;
+  receptor_direccion: string; receptor_comuna: string; receptor_ciudad: string;
+  lineas: { descripcion: string; cantidad: number; precio_unitario: number; unidad?: string }[];
+  forma_pago?: 1 | 2 | 3; ciudad_emisor?: string; fecha_emision?: string;
+  referencias?: { tipo_doc: number; folio: number; fecha: string; razon?: string; codigo?: 1 | 2 | 3 }[];
+}
+
+/** Traduce los campos del body (snake_case) a EmitirDteParams. Único lugar. */
+export function paramsDocumento(datos: CamposDocumentoBody): EmitirDteParams {
+  return {
+    empresaRut: datos.empresa_rut, tipoDte: datos.tipo_dte,
+    receptor: {
+      rut: datos.receptor_rut, dv: datos.receptor_dv, razonSocial: datos.receptor_razon_social,
+      giro: datos.receptor_giro, direccion: datos.receptor_direccion, comuna: datos.receptor_comuna,
+      ciudad: datos.receptor_ciudad,
+    },
+    lineas: datos.lineas.map(l => ({ nombre: l.descripcion, cantidad: l.cantidad, precioUnitario: l.precio_unitario, unidad: l.unidad })),
+    formaPago: datos.forma_pago, ciudadEmisor: datos.ciudad_emisor, fechaEmision: datos.fecha_emision,
+    referencias: datos.referencias?.map(r => ({ tipoDoc: r.tipo_doc, folio: r.folio, fecha: r.fecha, razon: r.razon, codigo: r.codigo })),
+  };
+}

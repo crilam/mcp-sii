@@ -4,7 +4,7 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaListBorradores, schemaEmitirDte, schemaGuardarBorrador } from '../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaListBorradores, schemaEmitirDte, schemaGuardarBorrador, paramsDocumento } from '../core/schemas/mipyme';
 
 // Orden de resolución de la empresa, el mismo que el resto del proyecto: el
 // parámetro de la llamada gana, si no vino cae a SII_EMPRESA_RUT, y si tampoco
@@ -135,18 +135,9 @@ export function registerMipymeTools(server: McpServer, registro: RegistroSesione
     'sii_mipyme_list_borradores). No requiere certificado: alcanza la sesión.',
     schemaGuardarBorrador,
     async (args) => envolverParaMcp(async () => {
-      const r = await core.guardarBorrador(registro, args.rut, {
-        empresaRut: empresaPedida(args.empresa_rut),
-        tipoDte: args.tipo_dte,
-        receptor: {
-          rut: args.receptor_rut, dv: args.receptor_dv, razonSocial: args.receptor_razon_social,
-          giro: args.receptor_giro, direccion: args.receptor_direccion, comuna: args.receptor_comuna,
-          ciudad: args.receptor_ciudad,
-        },
-        lineas: args.lineas.map(l => ({ nombre: l.descripcion, cantidad: l.cantidad, precioUnitario: l.precio_unitario, unidad: l.unidad })),
-        formaPago: args.forma_pago, ciudadEmisor: args.ciudad_emisor, fechaEmision: args.fecha_emision,
-        referencias: args.referencias?.map(r => ({ tipoDoc: r.tipo_doc, folio: r.folio, fecha: r.fecha, razon: r.razon, codigo: r.codigo })),
-      }, args.confirmar, args.borrador_id);
+      const r = await core.guardarBorrador(registro, args.rut,
+        { ...paramsDocumento(args), empresaRut: empresaPedida(args.empresa_rut) },
+        args.confirmar, args.borrador_id);
 
       return r.guardado
         ? { guardado: true, borradorId: r.borradorId, resumen: r.resumen,

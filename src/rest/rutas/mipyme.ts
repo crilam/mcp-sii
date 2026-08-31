@@ -3,33 +3,9 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaListBorradores, schemaEmitirDte, schemaGuardarBorrador } from '../../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaListBorradores, schemaEmitirDte, schemaGuardarBorrador, paramsDocumento } from '../../core/schemas/mipyme';
 import { ejecutorPara, ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCredencialCert } from './comun';
-import { EmitirDteParams } from '../../scrapers/mipymeHttp';
-
-// Arma los EmitirDteParams desde el body ya validado (mismo mapeo para emitir y
-// para guardar borrador: es el mismo documento).
-function paramsDocumento(datos: {
-  empresa_rut?: string; tipo_dte: number;
-  receptor_rut: string; receptor_dv: string; receptor_razon_social: string; receptor_giro: string;
-  receptor_direccion: string; receptor_comuna: string; receptor_ciudad: string;
-  lineas: { descripcion: string; cantidad: number; precio_unitario: number; unidad?: string }[];
-  forma_pago?: 1 | 2 | 3; ciudad_emisor?: string; fecha_emision?: string;
-  referencias?: { tipo_doc: number; folio: number; fecha: string; razon?: string; codigo?: 1 | 2 | 3 }[];
-}): EmitirDteParams {
-  return {
-    empresaRut: datos.empresa_rut, tipoDte: datos.tipo_dte,
-    receptor: {
-      rut: datos.receptor_rut, dv: datos.receptor_dv, razonSocial: datos.receptor_razon_social,
-      giro: datos.receptor_giro, direccion: datos.receptor_direccion, comuna: datos.receptor_comuna,
-      ciudad: datos.receptor_ciudad,
-    },
-    lineas: datos.lineas.map(l => ({ nombre: l.descripcion, cantidad: l.cantidad, precioUnitario: l.precio_unitario, unidad: l.unidad })),
-    formaPago: datos.forma_pago, ciudadEmisor: datos.ciudad_emisor, fechaEmision: datos.fecha_emision,
-    referencias: datos.referencias?.map(r => ({ tipoDoc: r.tipo_doc, folio: r.folio, fecha: r.fecha, razon: r.razon, codigo: r.codigo })),
-  };
-}
 
 // Las dos LECTURAS aceptan clave tributaria O certificado, igual que BHE:
 // verificado contra el SII con clave real (list-empresas devolvió las cinco
@@ -159,9 +135,10 @@ export function registrarRutasMipyme(
     const ejecutor = ejecutorPara(registro, credenciales, datos.rut, credencialDe(datos));
     const resp = await ejecutar(() => core.guardarBorrador(ejecutor, datos.rut, paramsDocumento(datos), datos.confirmar, datos.borrador_id));
     // Traza de auditoría de la escritura (misma mecánica que el acuse del RCV).
-    if ((resp.body as { ok?: boolean; borradorId?: string | null })?.ok && datos.confirmar) {
-      resp.auditoria = { efecto: 'ejecutado', referencia: `borrador:${(resp.body as { borradorId?: string | null }).borradorId ?? '?'}` };
-    } else if ((resp.body as { ok?: boolean })?.ok) {
+    const respBody = resp.body as { ok?: boolean; borradorId?: string | null };
+    if (respBody?.ok && datos.confirmar) {
+      resp.auditoria = { efecto: 'ejecutado', referencia: `borrador:${respBody.borradorId ?? '?'}` };
+    } else if (respBody?.ok) {
       resp.auditoria = { efecto: 'simulado', referencia: `borrador:${datos.tipo_dte}-${datos.receptor_rut}` };
     } else if (datos.confirmar) {
       resp.auditoria = { efecto: 'fallido', referencia: `borrador:${datos.tipo_dte}-${datos.receptor_rut}` };

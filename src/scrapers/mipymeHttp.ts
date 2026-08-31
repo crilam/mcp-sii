@@ -1,6 +1,7 @@
 import { SiiHttpClient } from '../http';
 import { Empresa, SessionManager } from '../session';
 import { rutEsValido } from '../rut';
+import { EscrituraRechazadaPorSii } from '../erroresConsulta';
 
 // Portal mipyme (Sistema de Facturación Gratuito) por HTTP directo, sin
 // navegador. Contratos relevados en vivo el 2026-08-03:
@@ -58,6 +59,10 @@ const PREVIEW_URL = `${CGI_BASE}/mipeDisplayPreView.cgi`;
 // (relevarMipymeBorrador.ts). A diferencia de emitir, un borrador NO se firma:
 // no es un DTE tributario, es reversible (se puede editar o descartar).
 const GRABA_BORRADOR_URL = `${CGI_BASE}/mipeGrabaBorrador.cgi`;
+// Mensaje de la página de éxito de mipeGrabaBorrador.cgi, relevado de un grabado
+// real: "Su documento borrador ha sido grabado/actualizado con éxito". Tolerante
+// a la entidad HTML de la é (&eacute;) y al acento, y sirve para nuevo y editar.
+const GRABADO_OK = /borrador\s+ha\s+sido\s+grabado\/actualizado\s+con\s+(?:&eacute;|é|e)xito/i;
 // OJO con el nombre: `mipeGenXMLFirma.cgi` NO emite. Arma el XML del DTE, le
 // propone un folio y devuelve la página que pide la firma. Faltan tres pasos
 // más, y el último es el que emite:
@@ -434,8 +439,10 @@ export interface BorradorGuardado {
   // false = simulación (confirmar:false), no se guardó nada.
   guardado: boolean;
   resumen: ResumenDte;
-  // EHDR_CODIGO del borrador: el id devuelto por el SII si se guardó, el id que
-  // se editó, o null en una simulación de un borrador nuevo.
+  // EHDR_CODIGO del borrador. Al EDITAR es el id que se pasó; al crear uno NUEVO
+  // es `null`, porque la respuesta de grabado del SII no lo devuelve — hay que
+  // buscarlo con list-borradores. La simulación NO verifica que un borrador a
+  // editar exista: sólo valida el documento y devuelve el id de entrada.
   borradorId: string | null;
 }
 
@@ -735,23 +742,19 @@ export class MipymeHttpScraper {
     // editar (vacío = nuevo). Va a mipeGrabaBorrador.cgi, no al preview.
     const camposBorrador = { ...campos, ES_BORR: 'TRUE', EHDR_CODIGO: borradorId ?? '' };
     const html = await this.http.postForm(GRABA_BORRADOR_URL, camposBorrador, { charset: 'latin1' });
-    // El CGI devuelve el form de vuelta ante un rechazo (mismo patrón que el
-    // preview): si no confirma el guardado, no se reporta como éxito.
-    const idGuardado = this.parseBorradorGuardado(html);
-    if (idGuardado === null) {
-      throw new Error(
-        'El SII no confirmó el guardado del borrador (devolvió el formulario). '
-        + 'Revisá los datos; NO se guardó.');
+    // La página de éxito trae este texto (relevado de un grabado real). El SII
+    // NO devuelve el id del borrador en esta respuesta, así que el éxito se
+    // detecta por el mensaje, no por la presencia de un EHDR_CODIGO (que ante un
+    // rechazo al EDITAR volvería igual y daría un falso positivo). Ante un
+    // rechazo el CGI devuelve el formulario, sin este texto.
+    if (!GRABADO_OK.test(html)) {
+      throw new EscrituraRechazadaPorSii(
+        'El SII no confirmó el guardado del borrador (no devolvió el mensaje de éxito). '
+        + 'Revisá los datos del documento; NO se guardó.');
     }
-    return { guardado: true, resumen, borradorId: idGuardado };
-  }
-
-  // Del HTML de respuesta de mipeGrabaBorrador.cgi, el EHDR_CODIGO del borrador
-  // ya guardado. `null` si no aparece (el CGI devolvió el form = rechazo).
-  private parseBorradorGuardado(html: string): string | null {
-    const m = /EHDR_CODIGO["'\s]*(?:value|=)["'\s]*["']?(\d+)/i.exec(html)
-      ?? /name=["']EHDR_CODIGO["'][^>]*value=["'](\d+)["']/i.exec(html);
-    return m ? m[1] : null;
+    // El id sólo se conoce cuando se EDITÓ (el que entró); en un borrador nuevo
+    // el SII no lo devuelve acá y hay que buscarlo con list-borradores.
+    return { guardado: true, resumen, borradorId: borradorId ?? null };
   }
 
   // El cuerpo de la emisión, YA dentro de la sección crítica. Vive aparte para
