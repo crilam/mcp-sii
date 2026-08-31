@@ -34,6 +34,10 @@ RUN npm install -g agent-browser@0.34.0
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
+# Las migraciones son .sql (no las compila tsc). El runner las busca en
+# dist/db/migraciones (path relativo a dist/src/scripts), así que se copian ahí
+# para que `db:migrar` funcione dentro del contenedor (run-task en ECS).
+COPY db ./dist/db
 
 # Corre como `node` (no root): Chromium headless como root necesitaría
 # --no-sandbox y ampliaría el impacto de cualquier RCE en el proceso web.
