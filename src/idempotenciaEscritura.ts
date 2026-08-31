@@ -18,7 +18,11 @@ const MARCA = '__escrituraSeguraDeLiberar';
  * serializa el error (`{...e}` o un logger que vuelca props).
  */
 export function marcarSeguro<E>(e: E): E {
-  if (e && typeof e === 'object') Object.defineProperty(e, MARCA, { value: true, enumerable: false, configurable: true });
+  // `defineProperty` sobre un objeto congelado/no extensible tiraría TypeError
+  // desde dentro de un catch, tapando el error original. Se chequea antes.
+  if (e && typeof e === 'object' && Object.isExtensible(e)) {
+    Object.defineProperty(e, MARCA, { value: true, enumerable: false, configurable: true });
+  }
   return e;
 }
 export function esSeguroDeLiberar(e: unknown): boolean {
@@ -32,7 +36,14 @@ export class VentanaIdempotencia {
   // debe barrerse a mitad). Terminada, `ts` marca desde cuándo cuenta la ventana.
   private enCurso = new Map<string, { ts: number; enVuelo: boolean }>();
 
-  constructor(private ventanaMs = 60_000) {}
+  // Tope duro para una reserva EN VUELO cuya promesa nunca resuelve (un cuelgue
+  // de `fn`): pasado esto se barre igual, para no bloquear esa clave para
+  // siempre. Muy por encima de cualquier operación real contra el SII.
+  private readonly topeEnVueloMs: number;
+
+  constructor(private ventanaMs = 60_000) {
+    this.topeEnVueloMs = Math.max(ventanaMs * 10, 5 * 60_000);
+  }
 
   /**
    * Ejecuta `fn` protegido por la ventana. Si otra ejecución con la misma
@@ -43,7 +54,10 @@ export class VentanaIdempotencia {
    */
   async ejecutar<T>(clave: string, mensajeDuplicado: string, fn: () => Promise<T>): Promise<T> {
     const ahora = Date.now();
-    for (const [k, v] of this.enCurso) if (!v.enVuelo && ahora - v.ts > this.ventanaMs) this.enCurso.delete(k);
+    for (const [k, v] of this.enCurso) {
+      const vencida = v.enVuelo ? ahora - v.ts > this.topeEnVueloMs : ahora - v.ts > this.ventanaMs;
+      if (vencida) this.enCurso.delete(k);
+    }
     if (this.enCurso.has(clave)) throw new LimitacionConocida(mensajeDuplicado);
     // Reserva SÍNCRONA: entre este set y el await no hay suspensión, así que un
     // segundo request concurrente ya la encuentra.

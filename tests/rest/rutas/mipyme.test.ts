@@ -57,6 +57,15 @@ describe('registrarRutasMipyme', () => {
       expect(core.guardarBorrador).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.any(Object), true, '555');
     });
 
+    // Un bloqueo anti-doble-click (LimitacionConocida → LIMITE_CONOCIDO) NO se
+    // audita como escritura: no se tocó el SII.
+    it('un bloqueo por doble-click (LIMITE_CONOCIDO) no deja traza de escritura', async () => {
+      (core.guardarBorrador as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').LimitacionConocida)('ya en curso'));
+      const r = await armarRouter().get('POST /v1/mipyme/borrador')!({ ...CRED, confirmar: true });
+      expect((r.body as any).error).toBe('LIMITE_CONOCIDO');
+      expect(r.auditoria).toBeUndefined();
+    });
+
     // Un confirmar:true que FALLA (rechazo del SII) se audita como 'fallido'.
     it('un guardado fallido (confirmar:true) se audita como fallido', async () => {
       (core.guardarBorrador as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').EscrituraRechazadaPorSii)('no se guardó'));

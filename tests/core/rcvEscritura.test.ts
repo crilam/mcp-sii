@@ -17,7 +17,7 @@ const DOCS = [{ rutEmisor: '22222222-2', tipoDoc: 33, folio: 100 }];
 const registro = { ejecutar: (_rut: string, fn: any) => fn({}) } as any;
 
 describe('core.acusar — idempotencia anti-doble-click', () => {
-  afterEach(() => { jest.clearAllMocks(); core._resetIdempotencia(); jest.useRealTimers(); });
+  afterEach(() => { jest.clearAllMocks(); core.ventanaAcuse._reset(); jest.useRealTimers(); });
 
   // EL bloqueante: dos requests concurrentes idénticos (el doble-click real) NO
   // deben cursar el acto dos veces. La reserva es síncrona, antes del await.

@@ -22,17 +22,11 @@ export interface EventoAcuse {
   descripcion: string;  // dedDescEvento
 }
 
-// Marca un error como "el acto NO se cursó, es seguro liberar la reserva de
-// idempotencia". La AUSENCIA de la marca es el estado seguro por defecto (no
-// duplicar): un error de red ambiguo, o uno que otra capa envolvió perdiendo la
-// marca, mantiene la reserva. Ver `acuseSeguroDeLiberar`.
-export function marcarSeguro<E extends Error>(e: E): E {
-  (e as unknown as { acuseSeguroDeLiberar?: boolean }).acuseSeguroDeLiberar = true;
-  return e;
-}
-export function acuseSeguroDeLiberar(e: unknown): boolean {
-  return Boolean((e as { acuseSeguroDeLiberar?: boolean })?.acuseSeguroDeLiberar);
-}
+// La marca "el acto NO se cursó, es seguro liberar la reserva" es el helper
+// genérico compartido con el borrador de mipyme. Se reexporta acá (con el nombre
+// histórico `acuseSeguroDeLiberar`) para no cambiar los imports existentes.
+export { marcarSeguro, esSeguroDeLiberar as acuseSeguroDeLiberar } from '../idempotenciaEscritura';
+import { marcarSeguro } from '../idempotenciaEscritura';
 
 // Un documento a acusar: RUT del emisor del documento, su tipo y su folio.
 export interface DocumentoAcuse {

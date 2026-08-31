@@ -744,6 +744,12 @@ export class MipymeHttpScraper {
     };
 
     if (!confirmar) {
+      // El dry-run valida CONTRA EL PORTAL, no sólo localmente: postea al preview
+      // (ES_BORR=FALSE, que NO graba) igual que la previsualización de emitir, y
+      // detecta un rechazo del SII antes de prometer que el grabado saldría. Sin
+      // esto, un dry-run "ok" podía terminar en un confirmar:true rechazado.
+      const previewHtml = await this.http.postForm(PREVIEW_URL, campos, { charset: 'latin1' });
+      this.assertPrevisualizacionValida(previewHtml);
       return { guardado: false, resumen, borradorId: borradorId ?? null };
     }
 
