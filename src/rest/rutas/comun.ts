@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado } from '../../erroresConsulta';
+import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado, EscrituraRechazadaPorSii } from '../../erroresConsulta';
 
 // Fragmento zod para la única ruta que recibe SÓLO certificado digital:
 // `/v1/mipyme/emitir-dte`, porque firmar un DTE necesita el certificado de
@@ -199,6 +199,12 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
     // este código, quien integra sabe que tiene que esperar.
     if (e instanceof LimiteDeConsultasSii) {
       return { status: 200, body: { ok: false, error: 'LIMITE_SII', detalle: e.message } };
+    }
+    // El SII rechazó la escritura por regla de negocio: no es un bug ni un
+    // "reintentá", es un motivo que el consumidor tiene que corregir. Código
+    // propio con el mensaje del SII.
+    if (e instanceof EscrituraRechazadaPorSii) {
+      return { status: 200, body: { ok: false, error: 'RECHAZO_SII', detalle: e.message } };
     }
     if (e instanceof SesionesSimultaneas) {
       return { status: 200, body: { ok: false, error: 'SESIONES_SIMULTANEAS', detalle: e.message } };

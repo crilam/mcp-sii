@@ -29,7 +29,7 @@ describe('registrarRutasRcvEscritura', () => {
     const r = await armar().get('POST /v1/rcv/acuse')!({ ...CRED, documentos: DOCS, evento: 'ERM' });
 
     expect((r.body as any).ok).toBe(true);
-    expect(r.auditoria).toEqual({ efecto: 'simulado', referencia: 'ERM:33-100' });
+    expect(r.auditoria).toEqual({ efecto: 'simulado', referencia: 'ERM:22222222-2/33-100' });
     // confirmar llegó como false (default) al core.
     expect(core.acusar).toHaveBeenCalledWith(expect.anything(), '11.111.111-1',
       [{ rutEmisor: '22222222-2', tipoDoc: 33, folio: 100 }], 'ERM', false);
@@ -40,7 +40,7 @@ describe('registrarRutasRcvEscritura', () => {
 
     const r = await armar().get('POST /v1/rcv/acuse')!({ ...CRED, documentos: DOCS, evento: 'ERM', confirmar: true });
 
-    expect(r.auditoria).toEqual({ efecto: 'ejecutado', referencia: 'ERM:33-100' });
+    expect(r.auditoria).toEqual({ efecto: 'ejecutado', referencia: 'ERM:22222222-2/33-100' });
     expect(core.acusar).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.anything(), 'ERM', true);
   });
 

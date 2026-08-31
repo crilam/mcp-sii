@@ -17,12 +17,14 @@ export async function eventosAcuse(
 
 // Red anti-doble-click: una MISMA escritura (mismo RUT, documentos y evento)
 // ejecutada dos veces en una ventana corta es casi siempre un reintento del
-// consumidor, no dos actos deliberados. Se recuerda el resultado por
-// `VENTANA_MS` y se devuelve el mismo en vez de cursar de nuevo. NO se persiste:
-// es una salvaguarda de último momento en el proceso, no una garantía
-// transaccional (el SII es la autoridad). Sólo se recuerdan ÉXITOS ejecutados.
+// consumidor, no dos actos deliberados. La clave se RESERVA de forma síncrona
+// —antes de tocar el SII— para que dos requests concurrentes (el doble-click
+// real, dos POST casi simultáneos) no pasen ambos el chequeo: el segundo ve la
+// reserva del primero. NO se persiste: es una salvaguarda de último momento en
+// el proceso, no una garantía transaccional (el SII es la autoridad).
 const VENTANA_MS = 60_000;
-const ejecutadasRecientes = new Map<string, { ts: number; resultado: ResultadoAcuse }>();
+// `enVuelo`: reservada, todavía sin respuesta del SII. `hecho`: ya cursada.
+const enCurso = new Map<string, { ts: number; estado: 'enVuelo' | 'hecho' }>();
 
 function claveDe(rut: string, documentos: DocumentoAcuse[], evento: string): string {
   const docs = documentos.map(d => `${d.rutEmisor}|${d.tipoDoc}|${d.folio}`).sort().join(';');
@@ -30,7 +32,7 @@ function claveDe(rut: string, documentos: DocumentoAcuse[], evento: string): str
 }
 
 function purgar(ahora: number) {
-  for (const [k, v] of ejecutadasRecientes) if (ahora - v.ts > VENTANA_MS) ejecutadasRecientes.delete(k);
+  for (const [k, v] of enCurso) if (ahora - v.ts > VENTANA_MS) enCurso.delete(k);
 }
 
 /**
@@ -44,25 +46,40 @@ export async function acusar(
   evento: string,
   confirmar: boolean
 ): Promise<ResultadoAcuse> {
-  const ahora = Date.now();
-  purgar(ahora);
-  const clave = claveDe(rut, documentos, evento);
-
-  if (confirmar) {
-    const previa = ejecutadasRecientes.get(clave);
-    if (previa) {
-      // Ya se cursó este mismo acuse hace instantes: no se repite el acto contra
-      // el SII. Se devuelve el resultado anterior, marcado para que el consumidor
-      // sepa que no se ejecutó una segunda vez.
-      throw new LimitacionConocida(
-        `Este acuse ("${evento}" sobre ${documentos.length} documento(s)) ya se cursó hace unos segundos. `
-        + 'No se repite para no duplicar el acto; si de verdad querés cursarlo otra vez, esperá un minuto.');
-    }
+  // Una simulación no muta nada: no toca la ventana de idempotencia.
+  if (!confirmar) {
+    return registro.ejecutar(rut, async sesion =>
+      new RcvEscrituraScraper(new SiiHttpClient(sesion), sesion).acusar(documentos, evento, false));
   }
 
-  const resultado = await registro.ejecutar(rut, async sesion =>
-    new RcvEscrituraScraper(new SiiHttpClient(sesion), sesion).acusar(documentos, evento, confirmar));
+  const clave = claveDe(rut, documentos, evento);
+  purgar(Date.now());
+  if (enCurso.has(clave)) {
+    // Otro request con este mismo acuse está en vuelo o se cursó hace instantes:
+    // no se dispara un segundo acto contra el SII.
+    throw new LimitacionConocida(
+      `Este acuse ("${evento}" sobre ${documentos.length} documento(s)) ya está en curso o se cursó hace segundos. `
+      + 'No se repite para no duplicar el acto; verificá en el RCV si ya quedó cursado antes de reintentar.');
+  }
+  // Reserva SÍNCRONA: entre este set y el await no hay punto de suspensión, así
+  // que un segundo request concurrente ya la encuentra.
+  enCurso.set(clave, { ts: Date.now(), estado: 'enVuelo' });
 
-  if (resultado.ejecutado) ejecutadasRecientes.set(clave, { ts: Date.now(), resultado });
-  return resultado;
+  try {
+    const resultado = await registro.ejecutar(rut, async sesion =>
+      new RcvEscrituraScraper(new SiiHttpClient(sesion), sesion).acusar(documentos, evento, true));
+    // Cursado: la reserva pasa a "hecho" y bloquea repeticiones el resto de la
+    // ventana.
+    enCurso.set(clave, { ts: Date.now(), estado: 'hecho' });
+    return resultado;
+  } catch (e) {
+    // Falló: se libera la reserva para que un reintento legítimo pueda cursarlo.
+    enCurso.delete(clave);
+    throw e;
+  }
+}
+
+/** Limpia la ventana de idempotencia. Sólo para tests. */
+export function _resetIdempotencia(): void {
+  enCurso.clear();
 }

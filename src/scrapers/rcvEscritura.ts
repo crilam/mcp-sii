@@ -1,6 +1,6 @@
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
-import { LimitacionConocida } from '../erroresConsulta';
+import { LimitacionConocida, EscrituraRechazadaPorSii } from '../erroresConsulta';
 import { partirRut } from '../rut';
 
 // PRIMERA operación de ESCRITURA del servicio (ronda 11): el acuse de recibo de
@@ -38,19 +38,32 @@ export interface ResultadoAcuse {
   mensaje: string;
 }
 
+// El catálogo de eventos es casi estático; se cachea por proceso unos minutos
+// para no golpear getEventosDoc en CADA escritura (incluso en los dry-run).
+const CATALOGO_TTL_MS = 5 * 60_000;
+let catalogoCache: { ts: number; eventos: EventoAcuse[] } | null = null;
+
+/** Limpia el cache del catálogo. Sólo para tests. */
+export function _resetCatalogoAcuse(): void {
+  catalogoCache = null;
+}
+
 export class RcvEscrituraScraper {
   constructor(private http: SiiHttpClient, private session: SessionManager) {}
 
-  /** Catálogo de eventos de acuse válidos (lectura). */
+  /** Catálogo de eventos de acuse válidos (lectura, cacheado por proceso). */
   async eventosAcuse(): Promise<EventoAcuse[]> {
     this.session.assertPuedeEntregarCookieJar();
+    if (catalogoCache && Date.now() - catalogoCache.ts < CATALOGO_TTL_MS) return catalogoCache.eventos;
     const resp = await this.http.postSdi(BASE, NAMESPACE, 'getEventosDoc', {}) as
       { respEstado?: { codRespuesta?: number }; dataEventosDocs?: { dedCodEvento: string; dedDescEvento: string }[] };
     const cod = resp?.respEstado?.codRespuesta;
     if (cod !== 0) {
       throw new Error(`El SII respondió código ${cod} al pedir el catálogo de eventos de acuse del RCV.`);
     }
-    return (resp.dataEventosDocs ?? []).map(e => ({ codigo: e.dedCodEvento, descripcion: e.dedDescEvento.replace(/\s+/g, ' ').trim() }));
+    const eventos = (resp.dataEventosDocs ?? []).map(e => ({ codigo: e.dedCodEvento, descripcion: e.dedDescEvento.replace(/\s+/g, ' ').trim() }));
+    catalogoCache = { ts: Date.now(), eventos };
+    return eventos;
   }
 
   /**
@@ -103,7 +116,9 @@ export class RcvEscrituraScraper {
       throw new LimitacionConocida(`El SII no cursó el acuse: ${msg || 'sin detalle'}.`);
     }
     if (cod !== 0) {
-      throw new Error(`El SII respondió código ${cod} al acusar recibo${msg ? `: ${msg}` : '.'}`);
+      // No es un bug del servicio: el SII rechazó el acto. Se reporta como tal
+      // (RECHAZO_SII) con su mensaje, no como error interno.
+      throw new EscrituraRechazadaPorSii(`El SII rechazó el acuse (código ${cod})${msg ? `: ${msg}` : '.'}`);
     }
     return { ejecutado: true, evento, documentos, mensaje: msg || 'Acuse cursado.' };
   }

@@ -143,7 +143,7 @@ certificado). El cuerpo lleva siempre `confirmar` (default false).
 
 `POST /v1/rcv/acuse`
 ```
-{ rut, documentos: [{ rut_doc, tipo_doc, folio }], evento, confirmar? }
+{ rut, documentos: [{ rut_emisor, tipo_doc, folio }], evento, confirmar? }
 ```
 - `evento`: código del catálogo `getEventosDoc` (se expone también
   `GET/POST /v1/rcv/eventos-acuse` para listarlos, lectura).
@@ -151,6 +151,11 @@ certificado). El cuerpo lleva siempre `confirmar` (default false).
   evento. `true` → llama `ingresarAceptacionReclamoDocs`.
 - Reversibilidad: un acuse puede corregirse con otro evento; es el de menor
   impacto. Buen primer candidato.
+- **Implementado (PR #79):** el contrato usa `rut_emisor` (no `rut_doc`). Errores
+  tipados vivos: `LimitacionConocida` (código 100 del SII, evento fuera de
+  catálogo, doble-click), `EscrituraRechazadaPorSii` → `RECHAZO_SII` (código de
+  rechazo de negocio). Idempotencia con reserva SÍNCRONA (anti-race del
+  doble-click concurrente). Catálogo de eventos cacheado 5 min por proceso.
 
 ### 3.2 Mipyme — guardar borrador (menor riesgo, falta relevar el form)
 

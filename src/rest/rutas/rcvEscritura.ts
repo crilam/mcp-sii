@@ -35,7 +35,7 @@ export function registrarRutasRcvEscritura(
     if ((resp.body as { ok?: boolean })?.ok) {
       resp.auditoria = {
         efecto: confirmar ? 'ejecutado' : 'simulado',
-        referencia: `${evento}:${docs.map(d => `${d.tipoDoc}-${d.folio}`).join(',')}`,
+        referencia: `${evento}:${docs.map(d => `${d.rutEmisor}/${d.tipoDoc}-${d.folio}`).join(',')}`,
       };
     }
     return resp;

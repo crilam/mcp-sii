@@ -1,7 +1,8 @@
 import { RcvEscrituraScraper } from '../../src/scrapers/rcvEscritura';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
-import { LimitacionConocida } from '../../src/erroresConsulta';
+import { LimitacionConocida, EscrituraRechazadaPorSii } from '../../src/erroresConsulta';
+import { _resetCatalogoAcuse } from '../../src/scrapers/rcvEscritura';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -22,6 +23,8 @@ function armar() {
   (session.identidad as jest.Mock).mockReturnValue({ rut: '11111111', dv: '1' });
   return { http, session, scraper: new RcvEscrituraScraper(http, session) };
 }
+
+beforeEach(() => _resetCatalogoAcuse());
 
 describe('RcvEscrituraScraper.eventosAcuse', () => {
   it('lee el catálogo de dataEventosDocs y normaliza descripciones', async () => {
@@ -82,6 +85,16 @@ describe('RcvEscrituraScraper.acusar', () => {
       .mockResolvedValueOnce(CATALOGO)
       .mockResolvedValueOnce({ respEstado: { codRespuesta: 100, msgeRespuesta: 'Ya acusado' } });
     await expect(scraper.acusar(DOCS, 'ERM', true)).rejects.toThrow(/no cursó el acuse: Ya acusado/);
+  });
+
+  // Un rechazo de negocio del SII (código != 0 y != 100) es EscrituraRechazada,
+  // no un Error genérico que saldría 500 por REST.
+  it('un código de rechazo del SII es EscrituraRechazadaPorSii', async () => {
+    const { http, scraper } = armar();
+    (http.postSdi as jest.Mock)
+      .mockResolvedValueOnce(CATALOGO)
+      .mockResolvedValueOnce({ respEstado: { codRespuesta: 2, msgeRespuesta: 'RUT sin timbraje' } });
+    await expect(scraper.acusar(DOCS, 'ERM', true)).rejects.toBeInstanceOf(EscrituraRechazadaPorSii);
   });
 
   it('sin documentos falla antes de tocar el SII', async () => {
