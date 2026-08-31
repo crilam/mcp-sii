@@ -3,7 +3,8 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/rcv';
-import { schemaResumen, schemaDetalle, schemaEmpresasAutorizadas, schemaTiposDocumento } from '../core/schemas/rcv';
+import * as coreAsync from '../core/rcvAsync';
+import { schemaResumen, schemaDetalle, schemaEmpresasAutorizadas, schemaTiposDocumento, schemaAsyncSolicitar, schemaAsyncEstado } from '../core/schemas/rcv';
 
 export function registerRcvTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
@@ -75,5 +76,32 @@ export function registerRcvTools(server: McpServer, registro: RegistroSesiones<S
     'Catálogo de tipos de documento del Registro de Compras y Ventas: los códigos que el registro conoce, con su nombre y si ingresan como electrónico o papel. Sirve para saber qué tipo_doc pedirle a sii_rcv_detalle, que exige uno — no existe "el detalle del período entero". OJO: el catálogo trae código y nombre, NO el signo del documento: que exista el tipo 61 no dice que las notas de crédito resten.',
     schemaTiposDocumento,
     async ({ rut }) => envolverParaMcp(() => core.tiposDocumento(registro, rut))
+  );
+
+  server.tool(
+    'sii_rcv_async_solicitar',
+    'Pide al SII que GENERE el detalle del RCV de un período de forma asíncrona, para volúmenes grandes que ' +
+    'sii_rcv_detalle no alcanza (el detalle síncrono no garantiza más de ~393 documentos). No devuelve el ' +
+    'detalle: crea la solicitud y devuelve su estado inicial (solicitudId y estado CRUDO del SII, ' +
+    'normalmente "CREADO"). Después hay que consultar sii_rcv_async_estado hasta que el estado sea ' +
+    '"TERMINADO", y recién ahí descargar el archivo por REST (POST /v1/rcv/async/detalle). Pide lo mismo ' +
+    'que sii_rcv_detalle: período, operación (COMPRA/VENTA) y tipo_doc. El SII es el dueño del estado; el ' +
+    'servicio no guarda nada. Es solo lectura: genera un archivo para descargar, no modifica el registro.',
+    schemaAsyncSolicitar,
+    async ({ rut, periodo, operacion, tipo_doc, empresa_rut }) =>
+      envolverParaMcp(() => coreAsync.solicitar(registro, rut, periodo, operacion, tipo_doc, empresa_rut))
+  );
+
+  server.tool(
+    'sii_rcv_async_estado',
+    'Consulta el estado de la(s) solicitud(es) asíncrona(s) del RCV de un período/operación/tipo_doc creadas ' +
+    'con sii_rcv_async_solicitar. Devuelve, por solicitud, el estado CRUDO del SII ("CREADO", "EN PROCESO" o ' +
+    '"TERMINADO"), la cantidad de registros y las marcas de tiempo. Cuando el estado es "TERMINADO", el ' +
+    'archivo se descarga por REST en POST /v1/rcv/async/detalle (no por MCP: puede traer miles de filas y ' +
+    'no cabe en la respuesta de una tool). El estado va tal cual lo da el SII, sin traducir a un enum ' +
+    'propio. Es solo lectura.',
+    schemaAsyncEstado,
+    async ({ rut, periodo, operacion, tipo_doc, empresa_rut }) =>
+      envolverParaMcp(() => coreAsync.estado(registro, rut, periodo, operacion, tipo_doc, empresa_rut))
   );
 }

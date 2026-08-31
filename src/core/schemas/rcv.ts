@@ -34,3 +34,18 @@ export const schemaEmpresasAutorizadas = {
 export const schemaTiposDocumento = {
   rut: z.string().min(1).describe('RUT de la persona autenticada, con dígito verificador.'),
 };
+
+// --- RCV asíncrono (cierre R1) --------------------------------------------
+// Las tres consultas async piden lo mismo que el detalle síncrono: RUT +
+// período + operación + tipo de documento. La llave natural de una solicitud es
+// esa combinación, no un id opaco del SII, así que el consumidor no maneja ids.
+export const schemaAsyncSolicitar = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  ...camposComunes,
+  tipo_doc: z.number().int().positive()
+    .describe('Código del tipo de documento (33, 61, 46, 34, 110, 914, 56...), igual que en sii_rcv_detalle.'),
+};
+
+// estado y detalle piden exactamente lo mismo que solicitar.
+export const schemaAsyncEstado = schemaAsyncSolicitar;
+export const schemaAsyncDetalle = schemaAsyncSolicitar;

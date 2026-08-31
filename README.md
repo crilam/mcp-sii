@@ -230,6 +230,8 @@ hash interno y hay que re-relevarlo—, y falla explícito cuando eso pasa.
 | `sii_rcv_resumen` | Registro de Compras y Ventas, resumen del período |
 | `sii_rcv_detalle` | Registro de Compras y Ventas, documento por documento |
 | `sii_rcv_tipos_documento` | Catálogo de los 46 tipos de documento del registro |
+| `sii_rcv_async_solicitar` | Genera el detalle del RCV en background para volúmenes grandes |
+| `sii_rcv_async_estado` | Estado (CREADO/EN PROCESO/TERMINADO) de una solicitud async del RCV |
 | `sii_rcv_empresas_autorizadas` | Empresas que el RUT puede **consultar** en el RCV |
 | `sii_renta_get_f22` | Formulario 22 completo de un año tributario |
 | `sii_renta_estado_declaracion` | Estado de la declaración de renta |

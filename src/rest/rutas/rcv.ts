@@ -3,7 +3,8 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/rcv';
-import { schemaResumen, schemaDetalle, schemaEmpresasAutorizadas, schemaTiposDocumento } from '../../core/schemas/rcv';
+import * as coreAsync from '../../core/rcvAsync';
+import { schemaResumen, schemaDetalle, schemaEmpresasAutorizadas, schemaTiposDocumento, schemaAsyncSolicitar, schemaAsyncEstado, schemaAsyncDetalle } from '../../core/schemas/rcv';
 import { ejecutorPara } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from './comun';
 
@@ -17,6 +18,9 @@ const zodResumen = conCredencial(schemaResumen);
 const zodDetalle = conCredencial(schemaDetalle);
 const zodEmpresasAutorizadas = conCredencial(schemaEmpresasAutorizadas);
 const zodTiposDocumento = conCredencial(schemaTiposDocumento);
+const zodAsyncSolicitar = conCredencial(schemaAsyncSolicitar);
+const zodAsyncEstado = conCredencial(schemaAsyncEstado);
+const zodAsyncDetalle = conCredencial(schemaAsyncDetalle);
 
 export function registrarRutasRcv(
   rutas: Map<string, RutaHandler>,
@@ -61,5 +65,34 @@ export function registrarRutasRcv(
 
     const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(() => core.detalle(ejecutor, rut, periodo, operacion, tipo_doc, empresa_rut));
+  });
+
+  // --- Descarga asíncrona (cierre R1) --------------------------------------
+  // Para volúmenes que el detalle síncrono no alcanza. Tres pasos que el
+  // consumidor orquesta: solicitar → estado (polling) → detalle. El servicio no
+  // guarda estado: cada llamada consulta al SII con la misma llave natural
+  // (período + operación + tipo_doc).
+  rutas.set('POST /v1/rcv/async/solicitar', async body => {
+    const parseo = zodAsyncSolicitar.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, periodo, operacion, tipo_doc, empresa_rut } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(() => coreAsync.solicitar(ejecutor, rut, periodo, operacion, tipo_doc, empresa_rut));
+  });
+
+  rutas.set('POST /v1/rcv/async/estado', async body => {
+    const parseo = zodAsyncEstado.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, periodo, operacion, tipo_doc, empresa_rut } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(() => coreAsync.estado(ejecutor, rut, periodo, operacion, tipo_doc, empresa_rut));
+  });
+
+  rutas.set('POST /v1/rcv/async/detalle', async body => {
+    const parseo = zodAsyncDetalle.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, periodo, operacion, tipo_doc, empresa_rut } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(() => coreAsync.detalle(ejecutor, rut, periodo, operacion, tipo_doc, empresa_rut));
   });
 }

@@ -1,10 +1,13 @@
 import { registerRcvTools } from '../../src/tools/rcv';
 import { RcvScraper } from '../../src/scrapers/rcv';
+import { RcvAsyncScraper } from '../../src/scrapers/rcvAsync';
 import { RegistroSesiones } from '../../src/registroSesiones';
 
 jest.mock('../../src/scrapers/rcv');
+jest.mock('../../src/scrapers/rcvAsync');
 
 const MockScraper = RcvScraper as jest.MockedClass<typeof RcvScraper>;
+const MockAsync = RcvAsyncScraper as jest.MockedClass<typeof RcvAsyncScraper>;
 
 function registrar(rutRegistrado?: string) {
   const tools: Record<string, { descripcion: string; schema: any; handler: Function }> = {};
@@ -33,8 +36,24 @@ describe('registerRcvTools', () => {
 
     expect(Object.keys(tools)).toEqual([
       'sii_rcv_resumen', 'sii_rcv_detalle', 'sii_rcv_empresas_autorizadas',
-      'sii_rcv_tipos_documento',
+      'sii_rcv_tipos_documento', 'sii_rcv_async_solicitar', 'sii_rcv_async_estado',
     ]);
+  });
+
+  // El detalle async NO se expone por MCP a propósito: baja miles de filas y no
+  // cabe en la respuesta de una tool. Sólo solicitar y estado.
+  it('async: solicitar y estado llaman al scraper; el detalle no es una tool', async () => {
+    (MockAsync.prototype.solicitar as jest.Mock).mockResolvedValue({ solicitudId: 9, estado: 'CREADO' });
+    (MockAsync.prototype.estado as jest.Mock).mockResolvedValue([]);
+    const { tools } = registrar();
+
+    expect(tools['sii_rcv_async_detalle']).toBeUndefined();
+
+    await tools['sii_rcv_async_solicitar'].handler({ rut: '11111111', periodo: '202601', operacion: 'COMPRA', tipo_doc: 33 });
+    expect(MockAsync.prototype.solicitar).toHaveBeenCalledWith('202601', 'COMPRA', 33, undefined);
+
+    await tools['sii_rcv_async_estado'].handler({ rut: '11111111', periodo: '202601', operacion: 'COMPRA', tipo_doc: 33 });
+    expect(MockAsync.prototype.estado).toHaveBeenCalledWith('202601', 'COMPRA', 33, undefined);
   });
 
   it('exige el rut de la sesión en el schema de las dos tools', () => {

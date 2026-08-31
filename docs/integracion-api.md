@@ -650,6 +650,18 @@ Credencial estándar. `periodo` es AAAAMM (año 2007-2100). La Consulta Integral
 
 Dos cosas: **el monto pagado NO se expone en el estado** —la respuesta GWT trae varios enteros grandes sin una posición fiable, y publicar el equivocado es peor que no publicarlo; los montos están en el PDF—; y **`formulario-compacto` resuelve el folio por período**, así que el consumidor pide por período y no necesita conocer el folio.
 
+### 6.12 RCV asíncrono (cierre R1)
+
+El detalle síncrono (`/v1/rcv/detalle`) no garantiza más de ~393 documentos ni supera el techo de 4 MiB del transporte. Para períodos grandes, el SII genera el detalle en background y esta vía lo descarga. **El servicio no persiste estado**: el consumidor orquesta los tres pasos, y la llave de una solicitud es la combinación `periodo + operacion + tipo_doc` (no un id opaco).
+
+| Endpoint | Body | Devuelve |
+|---|---|---|
+| **`POST /v1/rcv/async/solicitar`** | `periodo, operacion, tipo_doc` | `{solicitudId, estado, terminada, registros, ...}` — crea la solicitud (estado inicial `CREADO`) |
+| **`POST /v1/rcv/async/estado`** | idem | `datos[]` con cada solicitud y su `estado` CRUDO del SII (`CREADO`/`EN PROCESO`/`TERMINADO`) |
+| **`POST /v1/rcv/async/detalle`** | idem | `{totalDocumentos, columnas[], filas[]}` de la solicitud TERMINADA más reciente |
+
+Detalles: el **estado va tal cual lo da el SII** (sin enum propio); hay que consultar `estado` hasta `TERMINADO` antes de pedir `detalle`. Si aún no terminó, `detalle` responde `LIMITE_CONOCIDO` («en proceso, reintentá»); si no hay solicitud, `NO_ENCONTRADO`. El **detalle trae las 26 columnas CRUDAS del CSV del SII** (claves = encabezados exactos, valores string sin reinterpretar tipos). `totalDocumentos` cuenta documentos por la columna `Nro` y **debe coincidir** con los registros que el SII declaró — si no, falla en vez de entregar un detalle truncado. Por MCP se exponen `sii_rcv_async_solicitar` y `sii_rcv_async_estado`; el **detalle async es sólo REST** (miles de filas no caben en la respuesta de una tool). Sin reCAPTCHA: la API lo acepta con token vacío.
+
 ---
 
 ## 7. Limitaciones conocidas
