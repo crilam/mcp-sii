@@ -44,14 +44,35 @@ describe('registrarRutasRcvEscritura', () => {
     expect(core.acusar).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.anything(), 'ERM', true);
   });
 
-  // Un error del core (p.ej. idempotencia) no lleva traza de escritura.
-  it('un acuse fallido no marca auditoría de escritura', async () => {
-    (core.acusar as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').LimitacionConocida)('ya cursado'));
+  // Un intento con confirmar:true que FALLA sí se audita (efecto 'fallido'):
+  // para un acto irreversible, "qué se intentó y no cursó" es lo que importa.
+  it('un acuse con confirmar:true que falla se audita como fallido', async () => {
+    (core.acusar as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').EscrituraRechazadaPorSii)('rechazado'));
 
     const r = await armar().get('POST /v1/rcv/acuse')!({ ...CRED, documentos: DOCS, evento: 'ERM', confirmar: true });
 
     expect((r.body as any).ok).toBe(false);
+    expect(r.auditoria).toEqual({ efecto: 'fallido', referencia: 'ERM:22222222-2/33-100' });
+  });
+
+  // Una SIMULACIÓN que falla no deja traza (no se intentó escribir).
+  it('una simulación fallida no marca auditoría', async () => {
+    (core.acusar as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').LimitacionConocida)('evento inválido'));
+
+    const r = await armar().get('POST /v1/rcv/acuse')!({ ...CRED, documentos: DOCS, evento: 'ERM' });
+
+    expect((r.body as any).ok).toBe(false);
     expect(r.auditoria).toBeUndefined();
+  });
+
+  // La referencia se trunca en acuses muy grandes.
+  it('la referencia de auditoría se trunca con muchos documentos', async () => {
+    (core.acusar as jest.Mock).mockResolvedValue({ ejecutado: true, evento: 'ERM', documentos: [], mensaje: 'ok' });
+    const muchos = Array.from({ length: 25 }, (_, i) => ({ rut_emisor: '22222222-2', tipo_doc: 33, folio: i + 1 }));
+
+    const r = await armar().get('POST /v1/rcv/acuse')!({ ...CRED, documentos: muchos, evento: 'ERM', confirmar: true });
+
+    expect((r.auditoria!.referencia)).toMatch(/\+5 más$/);
   });
 
   it('documentos vacíos es 400', async () => {

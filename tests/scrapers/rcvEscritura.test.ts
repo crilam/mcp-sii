@@ -84,7 +84,7 @@ describe('RcvEscrituraScraper.acusar', () => {
     (http.postSdi as jest.Mock)
       .mockResolvedValueOnce(CATALOGO)
       .mockResolvedValueOnce({ respEstado: { codRespuesta: 100, msgeRespuesta: 'Ya acusado' } });
-    await expect(scraper.acusar(DOCS, 'ERM', true)).rejects.toThrow(/no cursó el acuse: Ya acusado/);
+    await expect(scraper.acusar(DOCS, 'ERM', true)).rejects.toThrow(/no cursó el acuse.*Ya acusado/);
   });
 
   // Un rechazo de negocio del SII (código != 0 y != 100) es EscrituraRechazada,

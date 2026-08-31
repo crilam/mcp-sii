@@ -23,8 +23,9 @@ export async function eventosAcuse(
 // reserva del primero. NO se persiste: es una salvaguarda de último momento en
 // el proceso, no una garantía transaccional (el SII es la autoridad).
 const VENTANA_MS = 60_000;
-// `enVuelo`: reservada, todavía sin respuesta del SII. `hecho`: ya cursada.
-const enCurso = new Map<string, { ts: number; estado: 'enVuelo' | 'hecho' }>();
+// clave → timestamp de la reserva. Mientras una clave esté acá (reservada o ya
+// cursada), un segundo acuse idéntico se rechaza.
+const enCurso = new Map<string, number>();
 
 function claveDe(rut: string, documentos: DocumentoAcuse[], evento: string): string {
   const docs = documentos.map(d => `${d.rutEmisor}|${d.tipoDoc}|${d.folio}`).sort().join(';');
@@ -32,7 +33,7 @@ function claveDe(rut: string, documentos: DocumentoAcuse[], evento: string): str
 }
 
 function purgar(ahora: number) {
-  for (const [k, v] of enCurso) if (ahora - v.ts > VENTANA_MS) enCurso.delete(k);
+  for (const [k, ts] of enCurso) if (ahora - ts > VENTANA_MS) enCurso.delete(k);
 }
 
 /**
@@ -63,18 +64,21 @@ export async function acusar(
   }
   // Reserva SÍNCRONA: entre este set y el await no hay punto de suspensión, así
   // que un segundo request concurrente ya la encuentra.
-  enCurso.set(clave, { ts: Date.now(), estado: 'enVuelo' });
+  enCurso.set(clave, Date.now());
 
   try {
     const resultado = await registro.ejecutar(rut, async sesion =>
       new RcvEscrituraScraper(new SiiHttpClient(sesion), sesion).acusar(documentos, evento, true));
-    // Cursado: la reserva pasa a "hecho" y bloquea repeticiones el resto de la
-    // ventana.
-    enCurso.set(clave, { ts: Date.now(), estado: 'hecho' });
+    // Cursado: la reserva se refresca y bloquea repeticiones el resto de la ventana.
+    enCurso.set(clave, Date.now());
     return resultado;
   } catch (e) {
-    // Falló: se libera la reserva para que un reintento legítimo pueda cursarlo.
-    enCurso.delete(clave);
+    // Sólo se libera la reserva si el fallo fue ANTES de mandar el POST (evento
+    // inválido, sesión, etc.): ahí no se cursó nada y un reintento es seguro. Si
+    // el POST ya salió (`postEnvio`), el acto pudo quedar cursado aunque acá
+    // falle —timeout de red, o un 100 "cursó con reparos"—, y liberar la reserva
+    // habilitaría un segundo acto: se MANTIENE la ventana completa.
+    if (!(e as { postEnvio?: boolean }).postEnvio) enCurso.delete(clave);
     throw e;
   }
 }

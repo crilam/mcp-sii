@@ -31,16 +31,29 @@ describe('core.acusar — idempotencia anti-doble-click', () => {
     expect(MockScraper.prototype.acusar).toHaveBeenCalledTimes(1);
   });
 
-  // Un fallo libera la reserva: un reintento legítimo sí puede cursar.
-  it('si el primer intento falla, la reserva se libera y el reintento cursa', async () => {
+  // Un fallo PRE-envío libera la reserva: un reintento legítimo sí puede cursar.
+  it('un fallo pre-envío libera la reserva y el reintento cursa', async () => {
     (MockScraper.prototype.acusar as jest.Mock)
-      .mockRejectedValueOnce(new Error('caída del SII'))
+      .mockRejectedValueOnce(new Error('evento inválido')) // sin postEnvio → pre-envío
       .mockResolvedValueOnce({ ejecutado: true, evento: 'ERM', documentos: DOCS, mensaje: 'ok' });
 
-    await expect(core.acusar(registro, '55555555', DOCS, 'ERM', true)).rejects.toThrow(/caída/);
+    await expect(core.acusar(registro, '55555555', DOCS, 'ERM', true)).rejects.toThrow(/evento inválido/);
     const r = await core.acusar(registro, '55555555', DOCS, 'ERM', true);
     expect(r.ejecutado).toBe(true);
     expect(MockScraper.prototype.acusar).toHaveBeenCalledTimes(2);
+  });
+
+  // EL caso más peligroso: un fallo POST-envío (el POST ya salió, el acto pudo
+  // cursarse) NO libera la reserva — un reintento inmediato se bloquea en vez de
+  // arriesgar un segundo acto.
+  it('un fallo post-envío mantiene la reserva y bloquea el reintento', async () => {
+    const ambiguo = Object.assign(new Error('timeout tras el POST'), { postEnvio: true });
+    (MockScraper.prototype.acusar as jest.Mock).mockRejectedValue(ambiguo);
+
+    await expect(core.acusar(registro, '77777777', DOCS, 'ERM', true)).rejects.toThrow(/timeout/);
+    // Reintento inmediato: rechazado por la reserva, NO vuelve a llamar al SII.
+    await expect(core.acusar(registro, '77777777', DOCS, 'ERM', true)).rejects.toBeInstanceOf(LimitacionConocida);
+    expect(MockScraper.prototype.acusar).toHaveBeenCalledTimes(1);
   });
 
   it('un acuse ejecutado dos veces en la ventana se rechaza la segunda vez', async () => {

@@ -103,23 +103,32 @@ export class RcvEscrituraScraper {
     }
 
     const { rut: rutAut, dv: dvAut } = this.session.identidad();
-    const resp = await this.http.postSdi(BASE, NAMESPACE, 'ingresarAceptacionReclamoDocs', {
-      dteAcuRe, rutAutenticado: rutAut, dvAutenticado: dvAut,
-    }) as { respEstado?: { codRespuesta?: number; msgeRespuesta?: string } };
+    // TODO lo que sigue es POST-ENVÍO: una vez que se manda el POST, el acto pudo
+    // haber quedado cursado en el SII aunque acá falle (timeout de red antes de
+    // leer la respuesta, o un 100 "cursó con reparos"). Se marca el error para
+    // que la red anti-doble-click NO libere la reserva en esos casos ambiguos.
+    try {
+      const resp = await this.http.postSdi(BASE, NAMESPACE, 'ingresarAceptacionReclamoDocs', {
+        dteAcuRe, rutAutenticado: rutAut, dvAutenticado: dvAut,
+      }) as { respEstado?: { codRespuesta?: number; msgeRespuesta?: string } };
 
-    const cod = resp?.respEstado?.codRespuesta;
-    const msg = resp?.respEstado?.msgeRespuesta ?? '';
-    // 0 = OK. 100 = alerta del SII (no cursó, o cursó con reparos): se reporta
-    // como limitación conocida con el mensaje del SII, no como éxito. Cualquier
-    // otro código es un error.
-    if (cod === 100) {
-      throw new LimitacionConocida(`El SII no cursó el acuse: ${msg || 'sin detalle'}.`);
+      const cod = resp?.respEstado?.codRespuesta;
+      const msg = resp?.respEstado?.msgeRespuesta ?? '';
+      // 0 = OK. 100 = alerta del SII (no cursó, o cursó con reparos): se reporta
+      // como limitación conocida con el mensaje del SII, no como éxito. Cualquier
+      // otro código es un rechazo de negocio.
+      if (cod === 100) {
+        throw new LimitacionConocida(`El SII no cursó el acuse (o lo cursó con reparos): ${msg || 'sin detalle'}.`);
+      }
+      if (cod !== 0) {
+        throw new EscrituraRechazadaPorSii(`El SII rechazó el acuse (código ${cod})${msg ? `: ${msg}` : '.'}`);
+      }
+      return { ejecutado: true, evento, documentos, mensaje: msg || 'Acuse cursado.' };
+    } catch (e) {
+      // Marca de "el POST ya salió": el acto pudo cursarse. `AcusePostEnvio` es
+      // sólo una bandera; el error original se propaga tal cual.
+      (e as { postEnvio?: boolean }).postEnvio = true;
+      throw e;
     }
-    if (cod !== 0) {
-      // No es un bug del servicio: el SII rechazó el acto. Se reporta como tal
-      // (RECHAZO_SII) con su mensaje, no como error interno.
-      throw new EscrituraRechazadaPorSii(`El SII rechazó el acuse (código ${cod})${msg ? `: ${msg}` : '.'}`);
-    }
-    return { ejecutado: true, evento, documentos, mensaje: msg || 'Acuse cursado.' };
   }
 }

@@ -127,7 +127,7 @@ export interface RespuestaRuta {
   body: unknown;
   // Metadata de auditoría de ESCRITURA (ronda 11). No se envía al cliente: el
   // servidor la vuelca en la tabla `auditoria`. Las rutas de lectura la omiten.
-  auditoria?: { efecto: 'simulado' | 'ejecutado'; referencia?: string };
+  auditoria?: { efecto: 'simulado' | 'ejecutado' | 'fallido'; referencia?: string };
 }
 
 export type RutaHandler = (body: unknown) => Promise<RespuestaRuta>;

@@ -7,5 +7,8 @@
 -- Ambas nullable: las rutas de LECTURA no las llenan, y quedan NULL sin cambiar
 -- su comportamiento.
 ALTER TABLE auditoria
-  ADD COLUMN efecto     text,  -- 'simulado' | 'ejecutado' en escrituras; NULL en lecturas
+  ADD COLUMN efecto     text CHECK (efecto IN ('simulado', 'ejecutado', 'fallido')),
   ADD COLUMN referencia text;  -- id del acto: folio, código, evento; NULL si no aplica
+
+-- 'simulado' = dry-run; 'ejecutado' = acto cursado; 'fallido' = confirmar:true
+-- que no cursó (rechazo del SII o error). NULL en lecturas.

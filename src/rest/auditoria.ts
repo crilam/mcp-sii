@@ -10,7 +10,7 @@ export interface EntradaAuditoria {
   // Sólo las rutas de ESCRITURA (ronda 11) las llenan; las de lectura las dejan
   // sin definir y quedan NULL. `efecto` distingue el dry-run del acto real;
   // `referencia` guarda el identificador del acto (folio, código, evento).
-  efecto?: 'simulado' | 'ejecutado';
+  efecto?: 'simulado' | 'ejecutado' | 'fallido';
   referencia?: string;
 }
 
