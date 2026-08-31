@@ -22,6 +22,18 @@ export interface EventoAcuse {
   descripcion: string;  // dedDescEvento
 }
 
+// Marca un error como "el acto NO se cursó, es seguro liberar la reserva de
+// idempotencia". La AUSENCIA de la marca es el estado seguro por defecto (no
+// duplicar): un error de red ambiguo, o uno que otra capa envolvió perdiendo la
+// marca, mantiene la reserva. Ver `acuseSeguroDeLiberar`.
+export function marcarSeguro<E extends Error>(e: E): E {
+  (e as unknown as { acuseSeguroDeLiberar?: boolean }).acuseSeguroDeLiberar = true;
+  return e;
+}
+export function acuseSeguroDeLiberar(e: unknown): boolean {
+  return Boolean((e as { acuseSeguroDeLiberar?: boolean })?.acuseSeguroDeLiberar);
+}
+
 // Un documento a acusar: RUT del emisor del documento, su tipo y su folio.
 export interface DocumentoAcuse {
   rutEmisor: string;    // con dígito verificador, 22222222-2
@@ -59,7 +71,8 @@ export class RcvEscrituraScraper {
       { respEstado?: { codRespuesta?: number }; dataEventosDocs?: { dedCodEvento: string; dedDescEvento: string }[] };
     const cod = resp?.respEstado?.codRespuesta;
     if (cod !== 0) {
-      throw new Error(`El SII respondió código ${cod} al pedir el catálogo de eventos de acuse del RCV.`);
+      // Es lectura: un código inesperado no debe salir como 500 "reintentá".
+      throw new LimitacionConocida(`El SII respondió código ${cod} al pedir el catálogo de eventos de acuse del RCV.`);
     }
     const eventos = (resp.dataEventosDocs ?? []).map(e => ({ codigo: e.dedCodEvento, descripcion: e.dedDescEvento.replace(/\s+/g, ' ').trim() }));
     catalogoCache = { ts: Date.now(), eventos };
@@ -74,17 +87,23 @@ export class RcvEscrituraScraper {
    */
   async acusar(documentos: DocumentoAcuse[], evento: string, confirmar: boolean): Promise<ResultadoAcuse> {
     this.session.assertPuedeEntregarCookieJar();
+    // Todo lo que ocurre ANTES de mandar el POST se marca `acuseSeguroDeLiberar`:
+    // el acto no salió, así que la red anti-doble-click puede liberar la reserva
+    // sin riesgo. Lo que NO lleve esa marca (un timeout de red tras el POST, un
+    // 100 ambiguo, o un error que otra capa envolvió y borró la marca) se trata
+    // como "pudo haber cursado" y la reserva se mantiene. El default es no
+    // duplicar.
     if (documentos.length === 0) {
-      throw new Error('No se indicó ningún documento para acusar recibo.');
+      throw marcarSeguro(new Error('No se indicó ningún documento para acusar recibo.'));
     }
 
     // El evento tiene que estar en el catálogo del SII: un código inventado no se
     // manda a ciegas a una operación de escritura.
     const catalogo = await this.eventosAcuse();
     if (!catalogo.some(e => e.codigo === evento)) {
-      throw new LimitacionConocida(
+      throw marcarSeguro(new LimitacionConocida(
         `El evento de acuse "${evento}" no está en el catálogo del SII (${catalogo.map(e => e.codigo).join(', ') || 'vacío'}). `
-        + 'Consultá los eventos válidos antes de acusar.');
+        + 'Consultá los eventos válidos antes de acusar.'));
     }
 
     // Se arma el payload SIEMPRE (para poder mostrarlo en la simulación), pero
@@ -95,6 +114,7 @@ export class RcvEscrituraScraper {
     });
 
     if (!confirmar) {
+      // Una simulación no manda nada: es seguro liberar la reserva si algo falla.
       return {
         ejecutado: false, evento, documentos,
         mensaje: `Simulación: se acusaría "${evento}" sobre ${documentos.length} documento(s). `
@@ -103,32 +123,24 @@ export class RcvEscrituraScraper {
     }
 
     const { rut: rutAut, dv: dvAut } = this.session.identidad();
-    // TODO lo que sigue es POST-ENVÍO: una vez que se manda el POST, el acto pudo
-    // haber quedado cursado en el SII aunque acá falle (timeout de red antes de
-    // leer la respuesta, o un 100 "cursó con reparos"). Se marca el error para
-    // que la red anti-doble-click NO libere la reserva en esos casos ambiguos.
-    try {
-      const resp = await this.http.postSdi(BASE, NAMESPACE, 'ingresarAceptacionReclamoDocs', {
-        dteAcuRe, rutAutenticado: rutAut, dvAutenticado: dvAut,
-      }) as { respEstado?: { codRespuesta?: number; msgeRespuesta?: string } };
+    const resp = await this.http.postSdi(BASE, NAMESPACE, 'ingresarAceptacionReclamoDocs', {
+      dteAcuRe, rutAutenticado: rutAut, dvAutenticado: dvAut,
+    }) as { respEstado?: { codRespuesta?: number; msgeRespuesta?: string } };
+    // Desde acá el POST ya salió. Un error de red del `postSdi` de arriba NO
+    // lleva marca de seguro → la reserva se mantiene (el acto pudo cursar).
 
-      const cod = resp?.respEstado?.codRespuesta;
-      const msg = resp?.respEstado?.msgeRespuesta ?? '';
-      // 0 = OK. 100 = alerta del SII (no cursó, o cursó con reparos): se reporta
-      // como limitación conocida con el mensaje del SII, no como éxito. Cualquier
-      // otro código es un rechazo de negocio.
-      if (cod === 100) {
-        throw new LimitacionConocida(`El SII no cursó el acuse (o lo cursó con reparos): ${msg || 'sin detalle'}.`);
-      }
-      if (cod !== 0) {
-        throw new EscrituraRechazadaPorSii(`El SII rechazó el acuse (código ${cod})${msg ? `: ${msg}` : '.'}`);
-      }
-      return { ejecutado: true, evento, documentos, mensaje: msg || 'Acuse cursado.' };
-    } catch (e) {
-      // Marca de "el POST ya salió": el acto pudo cursarse. `AcusePostEnvio` es
-      // sólo una bandera; el error original se propaga tal cual.
-      (e as { postEnvio?: boolean }).postEnvio = true;
-      throw e;
+    const cod = resp?.respEstado?.codRespuesta;
+    const msg = resp?.respEstado?.msgeRespuesta ?? '';
+    // 0 = OK. 100 = alerta AMBIGUA (no cursó, o cursó con reparos): no se marca
+    // seguro, la reserva se mantiene. Otro código es un rechazo DETERMINÍSTICO:
+    // el SII respondió que no cursó, así que es seguro liberar y reintentar
+    // corregido.
+    if (cod === 100) {
+      throw new LimitacionConocida(`El SII no cursó el acuse (o lo cursó con reparos): ${msg || 'sin detalle'}.`);
     }
+    if (cod !== 0) {
+      throw marcarSeguro(new EscrituraRechazadaPorSii(`El SII rechazó el acuse (código ${cod})${msg ? `: ${msg}` : '.'}`));
+    }
+    return { ejecutado: true, evento, documentos, mensaje: msg || 'Acuse cursado.' };
   }
 }

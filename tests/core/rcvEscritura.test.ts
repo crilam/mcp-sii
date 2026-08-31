@@ -1,10 +1,16 @@
 import * as core from '../../src/core/rcvEscritura';
-import { RcvEscrituraScraper } from '../../src/scrapers/rcvEscritura';
+import { RcvEscrituraScraper, marcarSeguro } from '../../src/scrapers/rcvEscritura';
 import { LimitacionConocida } from '../../src/erroresConsulta';
 
-jest.mock('../../src/scrapers/rcvEscritura');
+// Se mockea SÓLO la clase; `marcarSeguro`/`acuseSeguroDeLiberar` quedan reales,
+// porque la lógica de idempotencia del core depende de ellas.
+jest.mock('../../src/scrapers/rcvEscritura', () => {
+  const actual = jest.requireActual('../../src/scrapers/rcvEscritura');
+  return { ...actual, RcvEscrituraScraper: jest.fn() };
+});
 
 const MockScraper = RcvEscrituraScraper as jest.MockedClass<typeof RcvEscrituraScraper>;
+(MockScraper.prototype as any).acusar = jest.fn();
 const DOCS = [{ rutEmisor: '22222222-2', tipoDoc: 33, folio: 100 }];
 
 // Ejecutor que corre la fn con una sesión dummy (el scraper está mockeado).
@@ -31,10 +37,10 @@ describe('core.acusar — idempotencia anti-doble-click', () => {
     expect(MockScraper.prototype.acusar).toHaveBeenCalledTimes(1);
   });
 
-  // Un fallo PRE-envío libera la reserva: un reintento legítimo sí puede cursar.
-  it('un fallo pre-envío libera la reserva y el reintento cursa', async () => {
+  // Un error MARCADO seguro (el acto no se cursó) libera la reserva: reintento OK.
+  it('un error marcado seguro libera la reserva y el reintento cursa', async () => {
     (MockScraper.prototype.acusar as jest.Mock)
-      .mockRejectedValueOnce(new Error('evento inválido')) // sin postEnvio → pre-envío
+      .mockRejectedValueOnce(marcarSeguro(new Error('evento inválido')))
       .mockResolvedValueOnce({ ejecutado: true, evento: 'ERM', documentos: DOCS, mensaje: 'ok' });
 
     await expect(core.acusar(registro, '55555555', DOCS, 'ERM', true)).rejects.toThrow(/evento inválido/);
@@ -43,12 +49,11 @@ describe('core.acusar — idempotencia anti-doble-click', () => {
     expect(MockScraper.prototype.acusar).toHaveBeenCalledTimes(2);
   });
 
-  // EL caso más peligroso: un fallo POST-envío (el POST ya salió, el acto pudo
-  // cursarse) NO libera la reserva — un reintento inmediato se bloquea en vez de
-  // arriesgar un segundo acto.
-  it('un fallo post-envío mantiene la reserva y bloquea el reintento', async () => {
-    const ambiguo = Object.assign(new Error('timeout tras el POST'), { postEnvio: true });
-    (MockScraper.prototype.acusar as jest.Mock).mockRejectedValue(ambiguo);
+  // EL caso más peligroso: un error SIN marca (ambiguo — el POST pudo cursar, o
+  // una capa envolvió el error perdiendo la marca) NO libera la reserva. Fail-safe
+  // hacia no duplicar: el reintento inmediato se bloquea.
+  it('un error sin marca mantiene la reserva y bloquea el reintento', async () => {
+    (MockScraper.prototype.acusar as jest.Mock).mockRejectedValue(new Error('timeout tras el POST'));
 
     await expect(core.acusar(registro, '77777777', DOCS, 'ERM', true)).rejects.toThrow(/timeout/);
     // Reintento inmediato: rechazado por la reserva, NO vuelve a llamar al SII.

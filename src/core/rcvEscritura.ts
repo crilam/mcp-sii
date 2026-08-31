@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { RcvEscrituraScraper, EventoAcuse, DocumentoAcuse, ResultadoAcuse } from '../scrapers/rcvEscritura';
+import { RcvEscrituraScraper, EventoAcuse, DocumentoAcuse, ResultadoAcuse, acuseSeguroDeLiberar } from '../scrapers/rcvEscritura';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { EjecutorSesion } from '../registroSesiones';
@@ -73,12 +73,12 @@ export async function acusar(
     enCurso.set(clave, Date.now());
     return resultado;
   } catch (e) {
-    // Sólo se libera la reserva si el fallo fue ANTES de mandar el POST (evento
-    // inválido, sesión, etc.): ahí no se cursó nada y un reintento es seguro. Si
-    // el POST ya salió (`postEnvio`), el acto pudo quedar cursado aunque acá
-    // falle —timeout de red, o un 100 "cursó con reparos"—, y liberar la reserva
-    // habilitaría un segundo acto: se MANTIENE la ventana completa.
-    if (!(e as { postEnvio?: boolean }).postEnvio) enCurso.delete(clave);
+    // Se libera la reserva SÓLO si el error está marcado como seguro (el acto no
+    // se cursó: validación pre-envío, o un rechazo determinístico del SII). El
+    // DEFAULT es NO liberar: un timeout de red ambiguo, un 100 "cursó con
+    // reparos", o un error que otra capa envolvió perdiendo la marca, mantienen
+    // la ventana para no arriesgar un segundo acto. Fail-safe hacia no duplicar.
+    if (acuseSeguroDeLiberar(e)) enCurso.delete(clave);
     throw e;
   }
 }

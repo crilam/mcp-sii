@@ -2,7 +2,7 @@ import { RcvEscrituraScraper } from '../../src/scrapers/rcvEscritura';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
 import { LimitacionConocida, EscrituraRechazadaPorSii } from '../../src/erroresConsulta';
-import { _resetCatalogoAcuse } from '../../src/scrapers/rcvEscritura';
+import { _resetCatalogoAcuse, acuseSeguroDeLiberar } from '../../src/scrapers/rcvEscritura';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -94,7 +94,18 @@ describe('RcvEscrituraScraper.acusar', () => {
     (http.postSdi as jest.Mock)
       .mockResolvedValueOnce(CATALOGO)
       .mockResolvedValueOnce({ respEstado: { codRespuesta: 2, msgeRespuesta: 'RUT sin timbraje' } });
-    await expect(scraper.acusar(DOCS, 'ERM', true)).rejects.toBeInstanceOf(EscrituraRechazadaPorSii);
+    // Un rechazo determinístico (el SII respondió que no cursó) es seguro liberar.
+    const err = await scraper.acusar(DOCS, 'ERM', true).catch(e => e);
+    expect(err).toBeInstanceOf(EscrituraRechazadaPorSii);
+    expect(acuseSeguroDeLiberar(err)).toBe(true);
+  });
+
+  // El 100 es AMBIGUO (pudo cursar con reparos): NO se marca seguro, la reserva
+  // se mantiene.
+  it('el código 100 NO se marca seguro (ambiguo)', async () => {
+    const { http, scraper } = armar();
+    (http.postSdi as jest.Mock).mockResolvedValueOnce(CATALOGO).mockResolvedValueOnce({ respEstado: { codRespuesta: 100, msgeRespuesta: 'reparos' } });
+    await scraper.acusar(DOCS, 'ERM', true).catch(e => expect(acuseSeguroDeLiberar(e)).toBe(false));
   });
 
   it('sin documentos falla antes de tocar el SII', async () => {

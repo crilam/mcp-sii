@@ -11,4 +11,5 @@ ALTER TABLE auditoria
   ADD COLUMN referencia text;  -- id del acto: folio, código, evento; NULL si no aplica
 
 -- 'simulado' = dry-run; 'ejecutado' = acto cursado; 'fallido' = confirmar:true
--- que no cursó (rechazo del SII o error). NULL en lecturas.
+-- que no cursó (rechazo del SII, error, o bloqueo de la red anti-doble-click,
+-- que ni siquiera tocó el SII). NULL en lecturas.
