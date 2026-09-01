@@ -1,104 +1,101 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import {
   parsearSituacionTributaria,
-  codigoCaptcha,
   consultarSituacionTributaria,
   TransporteSituacion,
 } from '../../src/scrapers/situacionTributaria';
-import { RecursoNoEncontrado } from '../../src/erroresConsulta';
+import { RecursoNoEncontrado, LimitacionConocida } from '../../src/erroresConsulta';
 
-// El getstc del SII responde ISO-8859-1: el fixture se lee como latin1, igual
-// que hace el transporte real al decodificar la respuesta.
-function fixture(nombre: string): string {
-  return fs.readFileSync(path.join(__dirname, '../fixtures', nombre), 'latin1');
+/** Forma real de `getConsultaData` para un contribuyente encontrado (recortada a lo que se usa). */
+function respuestaOk(overrides: Record<string, unknown> = {}) {
+  return {
+    registrado: true,
+    nombre: 'EMPRESA DE EJEMPLO SPA',
+    inicioActividades: true,
+    fechaInicioActividades: '08-07-2016',
+    tieneEMTP: true,
+    girosNegocio: [
+      { codigo: '262000', categoriaTributaria: '1', descripcion: 'FABRICACION DE COMPUTADORES', indicadorAfectoIva: 'S' },
+      { codigo: '620200', categoriaTributaria: '2', descripcion: 'CONSULTORIA DE INFORMATICA', indicadorAfectoIva: 'N' },
+    ],
+    ...overrides,
+  };
 }
 
-const HTML = fixture('situacion-tributaria.html');
-
 describe('parsearSituacionTributaria', () => {
-  const sit = parsearSituacionTributaria(HTML, '22222222-2');
-
-  it('extrae identificación y razón social', () => {
+  it('extrae identificación, inicio de actividades y pro-pyme', () => {
+    const sit = parsearSituacionTributaria(respuestaOk(), '22222222-2');
     expect(sit.rut).toBe('22222222-2');
     expect(sit.razonSocial).toBe('EMPRESA DE EJEMPLO SPA');
-  });
-
-  it('extrae inicio de actividades, fecha, pro-pyme y moneda', () => {
     expect(sit.inicioActividades).toBe(true);
     expect(sit.fechaInicioActividades).toBe('08-07-2016');
     expect(sit.proPyme).toBe(true);
-    expect(sit.monedaExtranjera).toBe(false);
   });
 
-  it('extrae las actividades económicas (y sólo esas, no las filas de otras tablas)', () => {
+  it('la API nueva no expone moneda extranjera: siempre null', () => {
+    expect(parsearSituacionTributaria(respuestaOk(), '22222222-2').monedaExtranjera).toBeNull();
+  });
+
+  it('extrae las actividades: código numérico, categoría 1/2, IVA S/N', () => {
+    const sit = parsearSituacionTributaria(respuestaOk(), '22222222-2');
     expect(sit.actividades).toEqual([
-      { giro: 'FABRICACION DE COMPUTADORES Y EQUIPO PERIFERICO', codigo: 262000, categoria: 1, afectaIva: true },
-      { giro: 'ACTIVIDADES DE CONSULTORIA DE INFORMATICA Y DE GESTION DE INSTALACIONE', codigo: 620200, categoria: 1, afectaIva: true },
-      { giro: 'PROCESAMIENTO DE DATOS, HOSPEDAJE Y ACTIVIDADES CONEXAS', codigo: 631100, categoria: 1, afectaIva: true },
+      { giro: 'FABRICACION DE COMPUTADORES', codigo: 262000, categoria: 1, afectaIva: true },
+      { giro: 'CONSULTORIA DE INFORMATICA', codigo: 620200, categoria: 2, afectaIva: false },
     ]);
   });
 
-  it('no deja entrar las fechas de la tabla de autorización no electrónica', () => {
-    // "01-02-2017" es una celda de otra tabla class="tabla"; jamás debe aparecer
-    // como código/giro de una actividad.
-    expect(sit.actividades.some(a => a.giro?.includes('2017'))).toBe(false);
-    expect(sit.actividades).toHaveLength(3);
+  it('sin giros → lista vacía, no explota', () => {
+    expect(parsearSituacionTributaria(respuestaOk({ girosNegocio: [] }), '22222222-2').actividades).toEqual([]);
   });
 
-  // El HTML lleva el título del informe: un RUT que el SII no reconoce SÍ
-  // devuelve esta página, sólo que sin los campos del contribuyente.
-  it('RUT no reconocido → RecursoNoEncontrado', () => {
-    const sinDatos = '<html><title>Consultar Situaci&oacute;n Tributaria de Terceros</title><body>' +
-      'El RUT consultado no presenta informaci&oacute;n</body></html>';
-    expect(() => parsearSituacionTributaria(sinDatos, '11111111-1'))
+  // La propia API dice `registrado: false` cuando el RUT no existe — a
+  // diferencia del CGI viejo, donde había que inferirlo de campos ausentes.
+  it('registrado=false → RecursoNoEncontrado', () => {
+    expect(() => parsearSituacionTributaria(respuestaOk({ registrado: false }), '11111111-1'))
       .toThrow(RecursoNoEncontrado);
   });
 
-  // Éste es el que importa: sin la marca del informe, una página de mantención o
-  // un rediseño del CGI se reportaban como NO_ENCONTRADO, o sea el SII caído era
-  // indistinguible de "este RUT no existe". El consumidor archivaba un "no
-  // existe" permanente sobre un fallo transitorio y nadie volvía a mirarlo.
-  it('respuesta que no es el informe → Error genérico, no NO_ENCONTRADO', () => {
-    const mantencion = '<html><body>Servicio temporalmente no disponible</body></html>';
-    expect(() => parsearSituacionTributaria(mantencion, '11111111-1'))
-      .toThrow(/no devolvió la página de situación tributaria/);
-    expect(() => parsearSituacionTributaria(mantencion, '11111111-1'))
+  it('una respuesta que no es un objeto → Error genérico, no NO_ENCONTRADO', () => {
+    expect(() => parsearSituacionTributaria('<html>mantención</html>', '11111111-1'))
+      .toThrow(/no devolvió un JSON reconocible/);
+    expect(() => parsearSituacionTributaria('<html>mantención</html>', '11111111-1'))
       .not.toThrow(RecursoNoEncontrado);
   });
 
-  // Con el DV equivocado el SII resuelve por el cuerpo y devuelve los datos con
-  // SU dígito: comparar sólo el cuerpo dejaba pasar un RUT inexistente como
-  // válido. Se compara cuerpo Y dígito.
-  it('mismo cuerpo con DV distinto → RecursoNoEncontrado', () => {
-    expect(() => parsearSituacionTributaria(HTML, '22222222-9')).toThrow(RecursoNoEncontrado);
-  });
-
-  it('RUT reportado distinto del pedido → RecursoNoEncontrado (no atribuir datos ajenos)', () => {
-    expect(() => parsearSituacionTributaria(HTML, '11111111-1')).toThrow(RecursoNoEncontrado);
-  });
-});
-
-describe('codigoCaptcha', () => {
-  it('extrae los 4 caracteres del blob (bytes 36..40)', () => {
-    const bytes = Buffer.concat([Buffer.alloc(36, 0), Buffer.from('3331', 'latin1'), Buffer.alloc(4, 0)]);
-    expect(codigoCaptcha(bytes.toString('base64'))).toBe('3331');
+  it('nombre en blanco (contribuyente sin razón social) no se confunde con NO_ENCONTRADO', () => {
+    // Visto en vivo: registrado=true con nombre="**" para un RUT sin nombre
+    // asociado. Sólo `registrado: false` es NO_ENCONTRADO.
+    const sit = parsearSituacionTributaria(respuestaOk({ nombre: '**' }), '22222222-2');
+    expect(sit.razonSocial).toBe('**');
   });
 });
 
 describe('consultarSituacionTributaria', () => {
-  it('arma los campos del getstc y parsea la respuesta', async () => {
-    const bytes = Buffer.concat([Buffer.alloc(36, 0), Buffer.from('AB12', 'latin1'), Buffer.alloc(4, 0)]);
-    const captchaB64 = bytes.toString('base64');
-    let camposEnviados: Record<string, string> = {};
-    const transporte: TransporteSituacion = {
-      obtenerCaptcha: async () => captchaB64,
-      consultarGetstc: async campos => { camposEnviados = campos; return HTML; },
+  function transporte(overrides: Partial<TransporteSituacion> = {}): TransporteSituacion {
+    return {
+      recaptchaHabilitado: async () => false,
+      consultarDatos: async () => respuestaOk(),
+      ...overrides,
     };
-    const sit = await consultarSituacionTributaria('22.222.222-2', transporte);
-    expect(sit.razonSocial).toBe('EMPRESA DE EJEMPLO SPA');
-    expect(camposEnviados).toEqual({
-      RUT: '22222222', DV: '2', PRG: 'STC', OPC: 'NOR', txt_code: 'AB12', txt_captcha: captchaB64,
+  }
+
+  it('arma rut/dv normalizados y parsea la respuesta', async () => {
+    let rutEnviado = ''; let dvEnviado = '';
+    const t = transporte({
+      consultarDatos: async (rut, dv) => { rutEnviado = rut; dvEnviado = dv; return respuestaOk(); },
     });
+    const sit = await consultarSituacionTributaria('22.222.222-2', t);
+    expect(rutEnviado).toBe('22222222');
+    expect(dvEnviado).toBe('2');
+    expect(sit.razonSocial).toBe('EMPRESA DE EJEMPLO SPA');
+  });
+
+  // El SII puede prender reCAPTCHA en cualquier momento (hoy, 01-09-2026, está
+  // apagado). Sin esto, se mandaría un token vacío y el SII lo rechazaría con
+  // un error genérico e indistinguible de un fallo real.
+  it('reCAPTCHA activo → LimitacionConocida, no consulta datos', async () => {
+    const consultarDatos = jest.fn();
+    const t = transporte({ recaptchaHabilitado: async () => true, consultarDatos });
+    await expect(consultarSituacionTributaria('22.222.222-2', t)).rejects.toThrow(LimitacionConocida);
+    expect(consultarDatos).not.toHaveBeenCalled();
   });
 });
