@@ -1,4 +1,4 @@
-import { BheEmisionScraper, parsearCamposForm, parsearXmlValues, parsearCamposOcultosJs, parsearCamposPagina, EmitirBheParams } from '../../src/scrapers/bheEmision';
+import { BheEmisionScraper, parsearCamposForm, parsearXmlValues, parsearCamposOcultosJs, parsearCamposPagina, parsearCamposConfirmacion, EmitirBheParams } from '../../src/scrapers/bheEmision';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
 import { EscrituraRechazadaPorSii, LimitacionConocida } from '../../src/erroresConsulta';
@@ -107,6 +107,37 @@ describe('parsearXmlValues / parsearCamposOcultosJs / parsearCamposPagina', () =
     expect(c.sin_destinatario).toBe('NO');
   });
 
+  it('xml_values: uppercase() se aplica y las concatenaciones se resuelven', () => {
+    const x = parsearXmlValues(
+      "xml_values['nombre'] = uppercase(\"Orsan Sa\");\n"
+      + "xml_values['apellido'] = \"X\";\n"
+      + "xml_values['completo'] = xml_values['nombre'] +' '+ xml_values['apellido']\n");
+    expect(x.nombre).toBe('ORSAN SA');
+    expect(x.completo).toBe('ORSAN SA X');
+  });
+
+  it('selects armados por JS con restos de código quedan vacíos (no van al WAF)', () => {
+    const campos = parsearCamposForm(
+      '<select name="cbo_dia"><option value="\\"\'+">basura</option></select>');
+    expect(campos.cbo_dia).toBe('');
+  });
+
+  it('una variable JS reasignada usa la ÚLTIMA asignación', () => {
+    const c = parsearCamposOcultosJs(
+      'CantidadFilas=0\n CampoOculto("CantidadFilas",CantidadFilas);\n CantidadFilas=2\n');
+    expect(c.CantidadFilas).toBe('2');
+  });
+
+  it('las prestaciones de arr_detalle_boleta se expanden con uppercase aplicado', () => {
+    const c = parsearCamposConfirmacion(
+      "arr_detalle_boleta['desc_prestacion_1'] = uppercase(\"Dieta x\")\n"
+      + "arr_detalle_boleta['valor_prestacion_1'] = \"100\"\n"
+      + "arr_detalle_boleta['valor_prestacion_miles_1'] = formatMiles(\"100\",\".\")\n");
+    expect(c.desc_prestacion_1).toBe('DIETA X');
+    expect(c.valor_prestacion_1).toBe('100');
+    expect(c.valor_prestacion_miles_1).toBeUndefined();
+  });
+
   it('la página completa: CampoOculto pisa al tag, excluye el otro form y los names truncados', () => {
     const c = parsearCamposPagina(HTML);
     expect(c.rut_arrastre).toBe('11111111'); // xml_values del <head>, fuera del form
@@ -192,6 +223,26 @@ describe('BheEmisionScraper.emitir — dry-run (confirmar:false)', () => {
 });
 
 describe('BheEmisionScraper.emitir — emisión real (confirmar:true)', () => {
+  // La forma REAL de la página de éxito (emisión verificada del folio 341):
+  // texto plano casi vacío, la boleta entera renderizada por JS con los montos
+  // en xml_values. Sin frase de éxito y sin "Boleta N°" en el texto.
+  it('reconoce la boleta emitida renderizada por JS (xml_values, texto vacío)', async () => {
+    const paso4 = '<html><head><title>BOLETA DE HONORARIOS ELECTRONICA</title><script>'
+      + 'var xml_values = new Array();'
+      + 'xml_values[\'folio\'] = "341";'
+      + 'xml_values[\'Monto_Boleta\'] = formatMiles("2043689",".");'
+      + 'xml_values[\'Monto_Retencion\'] = formatMiles("311663",".");'
+      + 'xml_values[\'Monto_Liquido\'] = formatMiles("1732026",".");'
+      + '</script></head><body></body></html>';
+    const { scraper } = armar({ paso4 });
+    const r = await scraper.emitir(PARAMS, true);
+    expect(r.emitida).toBe(true);
+    expect((r as { folio: number | null }).folio).toBe(341);
+    expect(r.bruto).toBe(2043689);
+    expect(r.retencion).toBe(311663);
+    expect(r.liquido).toBe(1732026);
+  });
+
   it('postea el paso 4 con los campos de la previsualización y devuelve el folio', async () => {
     const { scraper, http } = armar();
 
