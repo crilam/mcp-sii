@@ -26,7 +26,10 @@ export async function emitirBhe(
   if (!confirmar) return correr();
   // Clave estable: canonicaliza el orden de las claves del objeto, así la ruta y
   // la tool (que arman `params` en órdenes distintos) generan la misma reserva.
-  const clave = createHash('sha256').update(claveEstable([rut, params])).digest('hex');
+  // El rut se normaliza (sin puntos, DV en mayúscula): dos formatos del mismo
+  // contribuyente deben caer en la misma reserva.
+  const rutNormal = rut.replace(/\./g, '').toUpperCase();
+  const clave = createHash('sha256').update(claveEstable([rutNormal, params])).digest('hex');
   return ventanaBhe.ejecutar(clave,
     'Esta misma boleta ya se está emitiendo o se emitió hace segundos. No se repite para no '
     + 'duplicar el documento; verificá con la lectura de boletas emitidas antes de reintentar.',

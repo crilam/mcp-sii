@@ -9,7 +9,7 @@ import * as coreEmision from '../../core/bheEmision';
 import * as coreAnulacion from '../../core/bheAnulacion';
 import { schemaResumen, schemaMes, schemaPdf, schemaEmitirBhe, schemaAnularBhe } from '../../core/schemas/bhe';
 import { ejecutorPara } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from './comun';
+import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, ERROR_LIMITE_CONOCIDO } from './comun';
 
 // Las tres aceptan clave tributaria O certificado digital: las dos autentican y
 // las dos producen el cookie jar que estas consultas necesitan.
@@ -121,7 +121,7 @@ export function registrarRutasBhe(
       resp.auditoria = { efecto: 'ejecutado', referencia };
     } else if (respBody?.ok) {
       resp.auditoria = { efecto: 'simulado', referencia };
-    } else if (d.confirmar && respBody?.error !== 'LIMITE_CONOCIDO') {
+    } else if (d.confirmar && respBody?.error !== ERROR_LIMITE_CONOCIDO) {
       resp.auditoria = { efecto: 'fallido', referencia };
     }
     return resp;
@@ -141,7 +141,7 @@ export function registrarRutasBhe(
       resp.auditoria = { efecto: 'ejecutado', referencia };
     } else if (respBody?.ok) {
       resp.auditoria = { efecto: 'simulado', referencia };
-    } else if (d.confirmar && respBody?.error !== 'LIMITE_CONOCIDO') {
+    } else if (d.confirmar && respBody?.error !== ERROR_LIMITE_CONOCIDO) {
       resp.auditoria = { efecto: 'fallido', referencia };
     }
     return resp;

@@ -31,6 +31,20 @@ describe('core.anularBhe — idempotencia', () => {
     expect(anularMock).toHaveBeenCalledTimes(1);
   });
 
+  it('folios DISTINTOS con confirmar:true no se estorban', async () => {
+    anularMock.mockResolvedValue({ anulada: true });
+    await core.anularBhe(registro, '22222222', 341, 3, true);
+    await core.anularBhe(registro, '22222222', 342, 3, true);
+    expect(anularMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('el mismo folio con el rut en otro formato cae en la MISMA reserva', async () => {
+    anularMock.mockResolvedValue({ anulada: true });
+    await core.anularBhe(registro, '11.111.111-1', 341, 3, true);
+    await expect(core.anularBhe(registro, '11111111-1', 341, 3, true)).rejects.toBeInstanceOf(LimitacionConocida);
+    expect(anularMock).toHaveBeenCalledTimes(1);
+  });
+
   it('un rechazo marcado seguro libera y el reintento entra', async () => {
     anularMock
       .mockRejectedValueOnce(marcarSeguro(new Error('rechazo del SII')))

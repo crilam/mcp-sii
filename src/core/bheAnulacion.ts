@@ -24,7 +24,10 @@ export async function anularBhe(
     new BheAnulacionScraper(new SiiHttpClient(sesion), sesion).anular(folio, causa, confirmar));
   // La previsualización no anula: fuera de la ventana.
   if (!confirmar) return correr();
-  const clave = createHash('sha256').update(claveEstable([rut, folio])).digest('hex');
+  // El rut se normaliza (sin puntos, DV en mayúscula): '11.111.111-1' y
+  // '11111111-1' son el mismo contribuyente y deben caer en la misma reserva.
+  const rutNormal = rut.replace(/\./g, '').toUpperCase();
+  const clave = createHash('sha256').update(claveEstable([rutNormal, folio])).digest('hex');
   return ventanaAnulacion.ejecutar(clave,
     `La boleta ${folio} ya se está anulando o se anuló hace segundos. Verificá con la lectura de `
     + 'boletas emitidas antes de reintentar.',
