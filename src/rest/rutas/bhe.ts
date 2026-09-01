@@ -7,7 +7,9 @@ import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/bhe';
 import * as coreEmision from '../../core/bheEmision';
 import * as coreAnulacion from '../../core/bheAnulacion';
-import { schemaResumen, schemaMes, schemaPdf, schemaEmitirBhe, schemaAnularBhe } from '../../core/schemas/bhe';
+import * as coreObservacion from '../../core/bheObservacion';
+import * as coreEmail from '../../core/bheEmail';
+import { schemaResumen, schemaMes, schemaPdf, schemaEmitirBhe, schemaAnularBhe, schemaObservarBhe, schemaEmailBhe } from '../../core/schemas/bhe';
 import { ejecutorPara } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, ERROR_LIMITE_CONOCIDO } from './comun';
 
@@ -18,6 +20,8 @@ const zodMes = conCredencial(schemaMes);
 const zodPdf = conCredencial(schemaPdf);
 const zodEmitir = conCredencial(schemaEmitirBhe);
 const zodAnular = conCredencial(schemaAnularBhe);
+const zodObservar = conCredencial(schemaObservarBhe);
+const zodEmail = conCredencial(schemaEmailBhe);
 
 export function registrarRutasBhe(
   rutas: Map<string, RutaHandler>,
@@ -137,6 +141,46 @@ export function registrarRutasBhe(
     const resp = await ejecutar(() => coreAnulacion.anularBhe(ejecutor, d.rut, d.folio, d.causa, d.confirmar));
     const respBody = resp.body as { ok?: boolean; error?: string };
     const referencia = `bhe-anulacion:${d.folio}`;
+    if (respBody?.ok && d.confirmar) {
+      resp.auditoria = { efecto: 'ejecutado', referencia };
+    } else if (respBody?.ok) {
+      resp.auditoria = { efecto: 'simulado', referencia };
+    } else if (d.confirmar && respBody?.error !== ERROR_LIMITE_CONOCIDO) {
+      resp.auditoria = { efecto: 'fallido', referencia };
+    }
+    return resp;
+  });
+
+  // Observación del RECEPTOR sobre una boleta recibida. confirmar:false
+  // previsualiza; confirmar:true observa (irreversible: el comentario queda).
+  rutas.set('POST /v1/bhe/observar', async body => {
+    const parseo = zodObservar.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const d = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, d.rut, credencialDe(d));
+    const resp = await ejecutar(() => coreObservacion.observarBhe(ejecutor, d.rut, d.anio, d.mes, d.folio, d.causa, d.confirmar, d.emisor_rut));
+    const respBody = resp.body as { ok?: boolean; error?: string };
+    const referencia = `bhe-observacion:${d.folio}`;
+    if (respBody?.ok && d.confirmar) {
+      resp.auditoria = { efecto: 'ejecutado', referencia };
+    } else if (respBody?.ok) {
+      resp.auditoria = { efecto: 'simulado', referencia };
+    } else if (d.confirmar && respBody?.error !== ERROR_LIMITE_CONOCIDO) {
+      resp.auditoria = { efecto: 'fallido', referencia };
+    }
+    return resp;
+  });
+
+  // Reenvío de una boleta emitida por email (por código de barras).
+  // confirmar:false previsualiza (a qué email iría); confirmar:true envía.
+  rutas.set('POST /v1/bhe/email', async body => {
+    const parseo = zodEmail.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const d = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, d.rut, credencialDe(d));
+    const resp = await ejecutar(() => coreEmail.enviarBheEmail(ejecutor, d.rut, d.codigo_barras, d.email, d.confirmar));
+    const respBody = resp.body as { ok?: boolean; error?: string };
+    const referencia = `bhe-email:${d.codigo_barras}`;
     if (respBody?.ok && d.confirmar) {
       resp.auditoria = { efecto: 'ejecutado', referencia };
     } else if (respBody?.ok) {

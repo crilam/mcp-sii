@@ -5,7 +5,9 @@ import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/bhe';
 import * as coreEmision from '../core/bheEmision';
 import * as coreAnulacion from '../core/bheAnulacion';
-import { schemaResumen, schemaMes, schemaEmitirBhe, schemaAnularBhe } from '../core/schemas/bhe';
+import * as coreObservacion from '../core/bheObservacion';
+import * as coreEmail from '../core/bheEmail';
+import { schemaResumen, schemaMes, schemaEmitirBhe, schemaAnularBhe, schemaObservarBhe, schemaEmailBhe } from '../core/schemas/bhe';
 
 export function registerBheTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
@@ -66,5 +68,27 @@ export function registerBheTools(server: McpServer, registro: RegistroSesiones<S
     'obligatoria: 1 = no se pagó el servicio, 2 = no se prestó el servicio, 3 = error en la digitación.',
     schemaAnularBhe,
     async (args) => envolverParaMcp(() => coreAnulacion.anularBhe(registro, args.rut, args.folio, args.causa, args.confirmar))
+  );
+
+  server.tool(
+    'sii_bhe_observar',
+    'OBSERVA (rechaza como receptor) una boleta de honorarios RECIBIDA. ES UNA ESCRITURA: con ' +
+    'confirmar=true es un acto REAL e IRREVERSIBLE — la observación queda registrada y no se puede ' +
+    'borrar. POR DEFECTO (confirmar ausente o false) NO observa: devuelve la previsualización del ' +
+    'portal. Mostrale siempre esa previsualización al usuario y pedí su autorización explícita antes ' +
+    'de pasar confirmar=true; nunca lo uses para probar. La causa es obligatoria: 1 = no se pagó el ' +
+    'servicio, 2 = no se prestó el servicio. anio/mes ubican la boleta en el informe de recibidas.',
+    schemaObservarBhe,
+    async (args) => envolverParaMcp(() => coreObservacion.observarBhe(registro, args.rut, args.anio, args.mes, args.folio, args.causa, args.confirmar, args.emisor_rut))
+  );
+
+  server.tool(
+    'sii_bhe_email',
+    'REENVÍA por email una boleta de honorarios EMITIDA, identificada por su CÓDIGO DE BARRAS (el ' +
+    'mismo del PDF, no el folio). Con confirmar=false (default) NO envía: muestra a qué email iría ' +
+    '(el indicado, o el que el portal tiene registrado para el receptor). Con confirmar=true envía ' +
+    'el correo de verdad. Pedí autorización explícita del usuario antes de confirmar.',
+    schemaEmailBhe,
+    async (args) => envolverParaMcp(() => coreEmail.enviarBheEmail(registro, args.rut, args.codigo_barras, args.email, args.confirmar))
   );
 }
