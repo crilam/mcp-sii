@@ -36,7 +36,7 @@ export interface LineaBhe {
 
 export interface EmitirBheParams {
   receptor: {
-    rut: string; // con DV: 96949020-K
+    rut: string; // con DV: 66666666-6
     nombre: string;
     direccion?: string;
     comuna?: string;
@@ -163,14 +163,20 @@ export class BheEmisionScraper {
         + 'Verificá con la lectura de boletas emitidas antes de reintentar.');
     }
     // El folio de la boleta emitida. Se busca por las formas conocidas
-    // ("Boleta N° 123", "boleta de honorarios electrónica N° 123").
+    // ("Boleta N° 123"), exigiendo un separador NO alfabético antes del número
+    // para que la "o" del símbolo de grado no se pegue a otra palabra.
     const folio = (() => {
-      const m = /[Bb]oleta[^0-9]{0,40}N[°º·o]?\s*([\d.]+)/.exec(texto4);
+      const m = /[Bb]oleta[^0-9]{0,40}N[°º·o]?[\s:.-]+([\d.]+)/.exec(texto4);
       return m ? parseInt(m[1].replace(/\./g, ''), 10) : null;
     })();
-    if (folio === null && !/emitid|generad|éxito|exito/i.test(texto4)) {
-      // Ni folio ni palabra de éxito: no se afirma la emisión. El mensaje del
-      // SII va crudo para diagnóstico. NO se marca seguro (pudo emitirse).
+    // Éxito sin folio: SÓLO si hay una frase de éxito POSITIVA y ninguna
+    // negación cerca. Un `/emitid/` suelto matchea "no fue emitida", así que no
+    // alcanza — sería un falso positivo de emisión.
+    const exitoPositivo = /(?:ha sido|fue|se)\s+(?:emitid|generad)\w*\s+(?:con\s+éxito|correctamente|exitosamente)|emitid\w*\s+con\s+éxito/i.test(texto4);
+    const hayNegacion = /\bno\s+(?:se|fue|pudo|ha)\b|error|problema|rechaz|inconveniente/i.test(texto4);
+    if (folio === null && (!exitoPositivo || hayNegacion)) {
+      // No se afirma la emisión: el mensaje del SII va crudo para diagnóstico.
+      // NO se marca seguro (pudo emitirse).
       throw new EscrituraRechazadaPorSii(
         `El SII no confirmó la emisión de la boleta. Respondió: ${texto4.slice(0, 300)}`);
     }

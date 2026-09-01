@@ -3,7 +3,7 @@ import { BheEmisionScraper, EmitirBheParams, PrevisualizacionBhe, BheEmitida } f
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { EjecutorSesion } from '../registroSesiones';
-import { VentanaIdempotencia } from '../idempotenciaEscritura';
+import { VentanaIdempotencia, claveEstable } from '../idempotenciaEscritura';
 
 export type { EmitirBheParams, PrevisualizacionBhe, BheEmitida, LineaBhe } from '../scrapers/bheEmision';
 
@@ -24,10 +24,9 @@ export async function emitirBhe(
     new BheEmisionScraper(new SiiHttpClient(sesion), sesion).emitir(params, confirmar));
   // La previsualización no emite: fuera de la ventana.
   if (!confirmar) return correr();
-  // La clave serializa `params` con el orden que fija la ruta/tool (único
-  // constructor); un llamador manual con otro orden no colisiona — aceptable
-  // para una red del mismo cliente.
-  const clave = createHash('sha256').update(JSON.stringify([rut, params])).digest('hex');
+  // Clave estable: canonicaliza el orden de las claves del objeto, así la ruta y
+  // la tool (que arman `params` en órdenes distintos) generan la misma reserva.
+  const clave = createHash('sha256').update(claveEstable([rut, params])).digest('hex');
   return ventanaBhe.ejecutar(clave,
     'Esta misma boleta ya se está emitiendo o se emitió hace segundos. No se repite para no '
     + 'duplicar el documento; verificá con la lectura de boletas emitidas antes de reintentar.',

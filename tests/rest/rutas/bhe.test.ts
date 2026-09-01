@@ -38,7 +38,8 @@ describe('registrarRutasBhe', () => {
       (coreEmision.emitirBhe as jest.Mock).mockResolvedValue({ emitida: false, bruto: 2043689 });
       const r = await armarRouter().get('POST /v1/bhe/emitir')!(BODY);
       expect((r.body as any).ok).toBe(true);
-      expect(r.auditoria).toEqual({ efecto: 'simulado', referencia: 'bhe:66666666-6-2043689' });
+      expect(r.auditoria).toMatchObject({ efecto: 'simulado' });
+      expect(r.auditoria!.referencia).toMatch(/^bhe:66666666-6-2043689-[0-9a-f]{8}$/);
       expect(coreEmision.emitirBhe).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.objectContaining({
         retieneReceptor: true,
       }), false);
@@ -59,6 +60,13 @@ describe('registrarRutasBhe', () => {
       (coreEmision.emitirBhe as jest.Mock).mockRejectedValueOnce(new (require('../../../src/erroresConsulta').LimitacionConocida)('ya en curso'));
       const r2 = await armarRouter().get('POST /v1/bhe/emitir')!({ ...BODY, confirmar: true });
       expect(r2.auditoria).toBeUndefined();
+    });
+
+    it('una previsualización que falla (confirmar:false) no deja traza', async () => {
+      (coreEmision.emitirBhe as jest.Mock).mockRejectedValue(new (require('../../../src/erroresConsulta').EscrituraRechazadaPorSii)('sin segunda categoría'));
+      const r = await armarRouter().get('POST /v1/bhe/emitir')!(BODY);
+      expect((r.body as any).ok).toBe(false);
+      expect(r.auditoria).toBeUndefined();
     });
 
     it('más de 4 líneas es 400 sin llamar al core', async () => {

@@ -13,7 +13,7 @@ const MockScraper = BheEmisionScraper as jest.MockedClass<typeof BheEmisionScrap
 
 const registro = { ejecutar: (_r: string, fn: any) => fn({}) } as any;
 const PARAMS = {
-  receptor: { rut: '96949020-K', nombre: 'ORSAN' },
+  receptor: { rut: '66666666-6', nombre: 'RECEPTORA' },
   lineas: [{ descripcion: 'Dieta', valor: 1226213 }],
 } as any;
 

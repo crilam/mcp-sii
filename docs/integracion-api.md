@@ -693,7 +693,7 @@ Emite una BHE recorriendo la cadena CGI del portal (`TMBECN_*`). **Con `confirma
 |---|---|---|
 | **`POST /v1/bhe/emitir`** | `sii_bhe_emitir` | `receptor_rut, receptor_nombre, lineas[{descripcion,valor}], retiene_receptor?, fecha?, confirmar?` |
 
-`retiene_receptor` (default true) = la retención la efectúa la empresa receptora. Hasta 4 líneas. El estado del wizard viaja en campos ocultos del portal (incluido `tiempo`, anti-replay) que el servicio propaga sin regenerar. Guardrail: dry-run (pasos 1→3) + red anti-doble-click (in-process; una boleta repetida en <60 s se rechaza) + auditoría (efecto/referencia, sólo REST). Si la sesión se cae EN el paso que emite, la respuesta lo dice como AMBIGUO (la boleta pudo o no emitirse; verificar con la lectura de emitidas) y NO libera la reserva.
+`retiene_receptor` (default true) = la retención la efectúa la empresa receptora. Hasta 4 líneas. El estado del wizard viaja en campos ocultos del portal (incluido `tiempo`, anti-replay) que el servicio propaga sin regenerar. Los valores de las líneas se mandan como entero sin separador de miles (pendiente de verificar contra una emisión real que el CGI lo acepte así). Guardrail: dry-run (pasos 1→3) + red anti-doble-click (in-process; una boleta repetida en <60 s se rechaza) + auditoría (efecto/referencia, sólo REST). Si la sesión se cae EN el paso que emite, la respuesta lo dice como AMBIGUO (la boleta pudo o no emitirse; verificar con la lectura de emitidas) y NO libera la reserva.
 
 Pendiente: anular/observar/reenviar (email) — necesitan una boleta emitida real para relevar sus formularios; quedan diseñados (ver el spec de R11).
 
