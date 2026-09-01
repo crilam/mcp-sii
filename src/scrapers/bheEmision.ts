@@ -143,15 +143,22 @@ export function parsearXmlValues(html: string): Record<string, string> {
   // de profesionales que no aplica venía después de la asignación efectiva).
   // Una rama de if/else sin llaves se reconoce porque el último carácter
   // no-blanco antes de la asignación es ')' o la palabra 'else'.
+  // Condicional = el no-blanco previo cierra la condición de un if/else/for/
+  // while (no cualquier ')': una llamada sin ';' en la línea anterior no debe
+  // descartar la asignación que sigue).
   const esCondicional = (idx: number) => {
     const antes = html.slice(Math.max(0, idx - 200), idx).replace(/\s+$/, '');
-    return antes.endsWith(')') || /\belse$/.test(antes);
+    if (/\belse$/.test(antes)) return true;
+    if (!antes.endsWith(')')) return false;
+    return /\b(?:if|for|while)\s*\([^()]*(?:\([^()]*\)[^()]*)*\)$/.test(antes);
   };
-  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*(uppercase\(\s*)?"([^"]*)"/g)) {
+  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*(uppercase\(\s*|formatMiles\(\s*)?"([^"]*)"/g)) {
     if (esCondicional(m.index!)) continue;
-    valores[m[1]] = m[2] ? m[3].toUpperCase() : m[3];
+    // formatMiles("N",".") entrega el número crudo (el formato de miles es
+    // presentación); uppercase se aplica como lo haría el JS del portal.
+    valores[m[1]] = m[2]?.startsWith('uppercase') ? m[3].toUpperCase() : m[3];
   }
-  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*((?:xml_values\['[A-Za-z0-9_]+'\]|'[^'\n]*'|"[^"\n]*"|[ \t]|\+)+)[;\n]/g)) {
+  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*((?:xml_values\['[A-Za-z0-9_]+'\]|'[^'\n]*'|"[^"\n]*"|[ \t]|\+)+)(?:[;\n]|$)/g)) {
     if (m[1] in valores) continue;
     let resuelto = '';
     for (const t of m[2].matchAll(/xml_values\['([A-Za-z0-9_]+)'\]|'([^']*)'|"([^"]*)"/g)) {
@@ -225,7 +232,7 @@ export function parsearCamposPagina(html: string): Record<string, string> {
 }
 
 /** Reduce una página a texto plano legible (para detalle y mensajes). */
-function textoPlano(html: string): string {
+export function textoPlano(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')

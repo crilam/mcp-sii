@@ -2,7 +2,7 @@ import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { EscrituraRechazadaPorSii } from '../erroresConsulta';
 import { marcarSeguro } from '../idempotenciaEscritura';
-import { parsearCamposPagina, parsearXmlValues } from './bheEmision';
+import { parsearCamposPagina, parsearXmlValues, textoPlano } from './bheEmision';
 
 // ANULACIÓN de una BHE emitida (ronda 11). Cadena CGI del portal, el mismo
 // patrón de wizard por campos ocultos que la emisión (ver bheEmision.ts):
@@ -40,17 +40,6 @@ export interface BheAnulada {
 
 const ES_LOGIN = /IngresoRutClave|Ingresar Clave Tributaria|CAutInicio/i;
 
-function textoPlano(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&aacute;/gi, 'á').replace(/&eacute;/gi, 'é').replace(/&iacute;/gi, 'í')
-    .replace(/&oacute;/gi, 'ó').replace(/&uacute;/gi, 'ú').replace(/&ntilde;/gi, 'ñ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 export class BheAnulacionScraper {
   constructor(private http: SiiHttpClient, private session: SessionManager) {}
 
@@ -69,13 +58,13 @@ export class BheAnulacionScraper {
         throw new EscrituraRechazadaPorSii(
           `El SII no habilitó la anulación de BHE para este RUT: ${textoPlano(h1).slice(0, 250)}`);
       }
-      const xml1 = parsearXmlValues(h1);
-      if (!xml1['rut_autentificado']) throw new Error('El form de anulación no trajo el RUT autenticado (xml_values).');
-
+      // Los campos del form del paso 1 (rut_arrastre/dv_arrastre/origen vienen
+      // por CampoOculto) se propagan tal cual, como hace la emisión: si el CGI
+      // agrega un hidden nuevo, viaja sin tocar el código.
+      const campos1 = parsearCamposPagina(h1);
+      if (!campos1.rut_arrastre) throw new Error('El form de anulación no trajo el RUT autenticado (rut_arrastre).');
       const h2 = await this.http.postForm(ANU2_URL, {
-        rut_arrastre: xml1['rut_autentificado'],
-        dv_arrastre: xml1['dv_autentificado'] ?? '',
-        origen: 'SEXTO',
+        ...campos1,
         Txt_BoletaAnular: String(folio),
         OptCausaAnulacion: String(causa),
       }, { charset: 'latin1' });
