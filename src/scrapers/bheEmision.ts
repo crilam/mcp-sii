@@ -114,16 +114,34 @@ export function parsearCamposForm(html: string): Record<string, string> {
     if (options.length === 0) { campos[s[1]] = ''; continue; }
     const elegida = options.find(o => /\bselected\b/i.test(o[1])) ?? options[0];
     const conValor = /value=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(elegida[1]);
-    campos[s[1]] = conValor ? (conValor[1] ?? conValor[2] ?? conValor[3]) : elegida[2].trim();
+    const valor = conValor ? (conValor[1] ?? conValor[2] ?? conValor[3]) : elegida[2].trim();
+    // Un select armado por document.write con concatenación ('value="'+dia+'"')
+    // deja restos de código JS como "value": no son reconstruibles en estático,
+    // y mandarlos al POST dispara el WAF del SII (firma de inyección). Quedan
+    // vacíos y los defaults de llenarFormulario los completan.
+    campos[s[1]] = /['"+\\]/.test(valor) ? '' : valor;
   }
   return campos;
 }
 
-/** Los literales `xml_values['k'] = "v"` con que el server inyecta datos. */
+/**
+ * Los `xml_values['k'] = ...` con que el server inyecta datos. Formas vistas:
+ * `= "v"`, `= uppercase("v")` (se aplica el upper), y expresiones que
+ * concatenan otros xml_values con literales (`= xml_values['a'] +' '+ ...`),
+ * que se resuelven en una segunda pasada con los valores ya conocidos.
+ */
 export function parsearXmlValues(html: string): Record<string, string> {
   const valores: Record<string, string> = {};
-  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*"([^"]*)"/g)) {
-    valores[m[1]] = m[2];
+  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*(uppercase\(\s*)?"([^"]*)"/g)) {
+    valores[m[1]] = m[2] ? m[3].toUpperCase() : m[3];
+  }
+  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*((?:xml_values\['[A-Za-z0-9_]+'\]|'[^'\n]*'|"[^"\n]*"|[ \t]|\+)+)[;\n]/g)) {
+    if (m[1] in valores) continue;
+    let resuelto = '';
+    for (const t of m[2].matchAll(/xml_values\['([A-Za-z0-9_]+)'\]|'([^']*)'|"([^"]*)"/g)) {
+      resuelto += t[1] !== undefined ? (valores[t[1]] ?? '') : (t[2] ?? t[3]);
+    }
+    valores[m[1]] = resuelto;
   }
   return valores;
 }
@@ -131,11 +149,42 @@ export function parsearXmlValues(html: string): Record<string, string> {
 // Los hidden que el portal crea por JS con CampoOculto("name", valor), donde
 // valor es xml_values['k'] o un literal. Sin ejecutarlos, el POST queda sin los
 // campos que el CGI siguiente exige (rut_arrastre y compañía).
-export function parsearCamposOcultosJs(html: string, xml?: Record<string, string>): Record<string, string> {
+export function parsearCamposOcultosJs(
+  html: string,
+  xml?: Record<string, string>,
+  htmlCompleto?: string
+): Record<string, string> {
   const valores = xml ?? parsearXmlValues(html);
+  const pagina = htmlCompleto ?? html;
   const campos: Record<string, string> = {};
-  for (const m of html.matchAll(/CampoOculto\(\s*"([A-Za-z0-9_]+)"\s*,\s*(?:xml_values\['([A-Za-z0-9_]+)'\]|"([^"]*)")\s*\)/g)) {
-    campos[m[1]] = m[2] !== undefined ? (valores[m[2]] ?? '') : m[3];
+  // Un mismo name puede tener varios CampoOculto (el portal duplica
+  // cantidad_filas_ingreso, uno con valor y otro vacío): el vacío no pisa.
+  const poner = (k: string, v: string) => {
+    if (v !== '' || !(k in campos)) campos[k] = v;
+  };
+  // Formas vistas en el portal: CampoOculto("n", xml_values['k']),
+  // CampoOculto('n', "literal") y CampoOculto("n", VariableJs). El name viene
+  // con comilla simple o doble según la página.
+  for (const m of html.matchAll(/CampoOculto\(\s*["']([A-Za-z0-9_]+)["']\s*,\s*(?:xml_values\['([A-Za-z0-9_]+)'\]|"([^"]*)"|([A-Za-z_][A-Za-z0-9_]*))\s*\)/g)) {
+    if (m[2] !== undefined) { poner(m[1], valores[m[2]] ?? ''); continue; }
+    if (m[3] !== undefined) { poner(m[1], m[3]); continue; }
+    // Variable JS simple (p.ej. CantidadFilas=2, que vive FUERA del form): se
+    // resuelve buscando su asignación literal en la página completa; si no
+    // aparece, se omite el campo antes que inventar un valor.
+    const asig = new RegExp(`(?:^|[^.\\w])${m[4]}\\s*=\\s*"?([\\w.]+)"?`).exec(pagina);
+    if (asig) poner(m[1], asig[1]);
+  }
+  return campos;
+}
+
+// Los campos del formulario de confirmación (paso 3 → paso 4). Además de los
+// CampoOculto directos, las prestaciones se escriben en un bucle JS desde
+// arr_detalle_boleta: se expanden acá. Sin ellos el paso 4 responde el mismo
+// "host no definido" (--I047--) que los pasos anteriores sin sus hidden.
+export function parsearCamposConfirmacion(html: string): Record<string, string> {
+  const campos = parsearCamposPagina(html);
+  for (const m of html.matchAll(/arr_detalle_boleta\['((?:desc|valor)_prestacion_\d+)'\]\s*=\s*(?:uppercase\(\s*)?"([^"]*)"/g)) {
+    campos[m[1]] = m[2];
   }
   return campos;
 }
@@ -149,7 +198,7 @@ export function parsearCamposPagina(html: string): Record<string, string> {
   const region = m ? m[0] : html;
   // Los xml_values viven en el <head>, FUERA del form: se resuelven contra la
   // página entera aunque los CampoOculto se busquen sólo dentro del form.
-  const campos = { ...parsearCamposForm(region), ...parsearCamposOcultosJs(region, parsearXmlValues(html)) };
+  const campos = { ...parsearCamposForm(region), ...parsearCamposOcultosJs(region, parsearXmlValues(html), html) };
   // Names truncados que el des-escape recoge de JS con concatenación
   // ('desc_prestacion_'+i): no existen en el form real.
   for (const k of Object.keys(campos)) if (k.endsWith('_')) delete campos[k];
@@ -210,7 +259,7 @@ export class BheEmisionScraper {
       preview = this.leerPrevisualizacion(previewHtml, params);
       // Los campos del paso 3 (los que el server devolvió en la previsualización)
       // son los que el paso 4 reenvía. Se parsean del HTML real, no se inventan.
-      camposPaso3 = parsearCamposPagina(previewHtml);
+      camposPaso3 = parsearCamposConfirmacion(previewHtml);
     } catch (e) {
       throw marcarSeguro(e as Error);
     }
@@ -227,30 +276,44 @@ export class BheEmisionScraper {
         'La sesión del SII se cayó justo en el paso de emisión: la boleta PUDO o no haberse emitido. '
         + 'Verificá con la lectura de boletas emitidas antes de reintentar.');
     }
-    // El folio de la boleta emitida. Se busca por las formas conocidas
-    // ("Boleta N° 123"), exigiendo un separador NO alfabético antes del número
-    // para que la "o" del símbolo de grado no se pegue a otra palabra.
+    // El folio de la boleta emitida: primero en xml_values (la página de la
+    // boleta emitida se renderiza entera por JS y su texto plano queda casi
+    // vacío — verificado con una emisión real), después las formas de texto
+    // ("Boleta N° 123") con separador NO alfabético antes del número.
+    const xml4 = parsearXmlValues(html4);
     const folio = (() => {
+      for (const k of Object.keys(xml4)) {
+        if (/^(folio|numero_boleta|nro_boleta|num_boleta)$/i.test(k) && /^\d+$/.test(xml4[k])) {
+          return parseInt(xml4[k], 10);
+        }
+      }
       const m = /[Bb]oleta[^0-9]{0,40}N[°º·o]?[\s:.-]+([\d.]+)/.exec(texto4);
       return m ? parseInt(m[1].replace(/\./g, ''), 10) : null;
     })();
     // Una negación/error en la página descarta la emisión SIEMPRE, tenga folio o
     // no: "Boleta N° 1234 no fue emitida" trae un número que NO es un folio
-    // asignado. Y sin folio, además hace falta una frase de éxito POSITIVA (un
-    // `/emitid/` suelto matchea "no fue emitida", que no alcanza).
+    // asignado. Sin negación, cuentan como éxito: el folio, una frase positiva,
+    // o la boleta renderizada por JS (xml_values con Monto_Boleta) — esta
+    // última fue la forma real de la primera emisión verificada.
     const hayNegacion = /\bno\s+(?:se|fue|pudo|ha)\b|error|problema|rechaz|inconveniente/i.test(texto4);
-    const exitoPositivo = /(?:ha sido|fue|se)\s+(?:emitid|generad)\w*\s+(?:con\s+éxito|correctamente|exitosamente)|emitid\w*\s+con\s+éxito/i.test(texto4);
+    const exitoPositivo = /(?:ha sido|fue|se)\s+(?:emitid|generad)\w*\s+(?:con\s+éxito|correctamente|exitosamente)|emitid\w*\s+con\s+éxito/i.test(texto4)
+      || 'Monto_Boleta' in xml4;
     if (hayNegacion || (folio === null && !exitoPositivo)) {
       // No se afirma la emisión: el mensaje del SII va crudo para diagnóstico.
       // NO se marca seguro (pudo emitirse).
       throw new EscrituraRechazadaPorSii(
-        `El SII no confirmó la emisión de la boleta. Respondió: ${texto4.slice(0, 300)}`);
+        `El SII no confirmó la emisión de la boleta. Respondió: ${texto4.slice(0, 300)}. `
+        + 'ANTES de reintentar, verificá con la lectura de boletas emitidas: la boleta pudo quedar emitida.');
     }
+    const montoXml4 = (k: string) => {
+      const m = new RegExp(`xml_values\\['${k}'\\]\\s*=\\s*formatMiles\\("(\\d+)"`).exec(html4);
+      return m ? parseInt(m[1], 10) : null;
+    };
     return {
       emitida: true, folio,
-      bruto: montoTras(texto4, /Total\s+Honorarios[^:]*:?/i) ?? preview.bruto,
-      retencion: montoTras(texto4, /Retenci[oó]n[^:]*:?/i) ?? preview.retencion,
-      liquido: montoTras(texto4, /L[ií]quido[^:]*:?/i) ?? preview.liquido,
+      bruto: montoXml4('Monto_Boleta') ?? montoTras(texto4, /Total\s+Honorarios[^:]*:?/i) ?? preview.bruto,
+      retencion: montoXml4('Monto_Retencion') ?? montoTras(texto4, /Retenci[oó]n[^:]*:?/i) ?? preview.retencion,
+      liquido: montoXml4('Monto_Liquido') ?? montoTras(texto4, /L[ií]quido[^:]*:?/i) ?? preview.liquido,
       detalle: texto4.slice(0, 800),
     };
   }

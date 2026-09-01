@@ -192,6 +192,26 @@ describe('BheEmisionScraper.emitir — dry-run (confirmar:false)', () => {
 });
 
 describe('BheEmisionScraper.emitir — emisión real (confirmar:true)', () => {
+  // La forma REAL de la página de éxito (emisión verificada del folio 341):
+  // texto plano casi vacío, la boleta entera renderizada por JS con los montos
+  // en xml_values. Sin frase de éxito y sin "Boleta N°" en el texto.
+  it('reconoce la boleta emitida renderizada por JS (xml_values, texto vacío)', async () => {
+    const paso4 = '<html><head><title>BOLETA DE HONORARIOS ELECTRONICA</title><script>'
+      + 'var xml_values = new Array();'
+      + 'xml_values[\'folio\'] = "341";'
+      + 'xml_values[\'Monto_Boleta\'] = formatMiles("2043689",".");'
+      + 'xml_values[\'Monto_Retencion\'] = formatMiles("311663",".");'
+      + 'xml_values[\'Monto_Liquido\'] = formatMiles("1732026",".");'
+      + '</script></head><body></body></html>';
+    const { scraper } = armar({ paso4 });
+    const r = await scraper.emitir(PARAMS, true);
+    expect(r.emitida).toBe(true);
+    expect((r as { folio: number | null }).folio).toBe(341);
+    expect(r.bruto).toBe(2043689);
+    expect(r.retencion).toBe(311663);
+    expect(r.liquido).toBe(1732026);
+  });
+
   it('postea el paso 4 con los campos de la previsualización y devuelve el folio', async () => {
     const { scraper, http } = armar();
 

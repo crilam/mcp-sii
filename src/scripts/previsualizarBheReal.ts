@@ -3,9 +3,12 @@ import { crearRegistroSesionesSii } from '../registroSesionesSii';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { SiiHttpClient } from '../http';
 import { BheEmisionScraper } from '../scrapers/bheEmision';
+import { cerrarSesionSii } from '../cerrarSesionSii';
 
 // PREVISUALIZA la boleta real del usuario (pasos 1→3, NO emite). Los montos que
-// imprime son los que calculó EL SII. La emisión real es una decisión aparte.
+// imprime son los que calculó EL SII. La emisión real es una decisión aparte:
+// sólo con BHE_CONFIRMAR=SI en el entorno se ejecuta el paso 4 (acto tributario
+// REAL e irreversible, notifica al receptor).
 async function main() {
   const rut = process.env.SII_RUT!;
   const clave = process.env.SII_CLAVE!;
@@ -25,18 +28,30 @@ async function main() {
   if (!receptorRut || !receptorNombre || lineas.length === 0) {
     throw new Error('Faltan BHE_RECEPTOR_RUT / BHE_RECEPTOR_NOMBRE / BHE_LINEAS en el entorno.');
   }
-  const params = { receptor: { rut: receptorRut, nombre: receptorNombre }, lineas, retieneReceptor: true };
+  const confirmar = process.env.BHE_CONFIRMAR === 'SI';
+  const fecha = process.env.BHE_FECHA; // AAAA-MM-DD; si falta, la del portal
+  const params = { receptor: { rut: receptorRut, nombre: receptorNombre }, lineas, retieneReceptor: true, fecha };
 
   await registro.ejecutar(rut, async sesion => {
-    const scraper = new BheEmisionScraper(new SiiHttpClient(sesion), sesion);
-    console.log(`Emisor ${rut} — PREVISUALIZACIÓN (no emite)\n`);
-    const r = await scraper.emitir(params, false);
-    if (r.emitida) throw new Error('imposible: confirmar era false');
-    console.log(`  Bruto (SII):     $ ${r.bruto?.toLocaleString('es-CL') ?? '?'}`);
-    console.log(`  Retención (SII): $ ${r.retencion?.toLocaleString('es-CL') ?? '?'}`);
-    console.log(`  Líquido (SII):   $ ${r.liquido?.toLocaleString('es-CL') ?? '?'}`);
-    console.log(`\n  Detalle de la previsualización:\n  ${r.detalle.slice(0, 600)}`);
-    console.log('\n  NO SE EMITIÓ NADA. Para emitir hace falta el OK explícito.');
+    try {
+      const scraper = new BheEmisionScraper(new SiiHttpClient(sesion), sesion);
+      console.log(`Emisor ${rut} — ${confirmar ? 'EMISIÓN REAL' : 'PREVISUALIZACIÓN (no emite)'}\n`);
+      const r = await scraper.emitir(params, confirmar);
+      console.log(`  Bruto (SII):     $ ${r.bruto?.toLocaleString('es-CL') ?? '?'}`);
+      console.log(`  Retención (SII): $ ${r.retencion?.toLocaleString('es-CL') ?? '?'}`);
+      console.log(`  Líquido (SII):   $ ${r.liquido?.toLocaleString('es-CL') ?? '?'}`);
+      if (r.emitida) {
+        console.log(`\n  BOLETA EMITIDA. Folio: ${r.folio ?? 'no legible — confirmar con la lectura de emitidas'}`);
+        console.log(`\n  Detalle:\n  ${r.detalle.slice(0, 600)}`);
+      } else {
+        console.log(`\n  Detalle de la previsualización:\n  ${r.detalle.slice(0, 600)}`);
+        console.log('\n  NO SE EMITIÓ NADA. Para emitir: BHE_CONFIRMAR=SI.');
+      }
+    } finally {
+      // No dejar la sesión viva en el SII: los scripts sueltos no pasan por el
+      // desalojo del registro y acumulan "Numero excesivo de sesiones".
+      await cerrarSesionSii(sesion).catch(() => undefined);
+    }
   });
 }
 main().catch(e => { console.error('ERROR:', e.constructor?.name, '-', e.message); process.exit(1); });
