@@ -3,7 +3,8 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/bhe';
-import { schemaResumen, schemaMes } from '../core/schemas/bhe';
+import * as coreEmision from '../core/bheEmision';
+import { schemaResumen, schemaMes, schemaEmitirBhe } from '../core/schemas/bhe';
 
 export function registerBheTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
@@ -32,5 +33,25 @@ export function registerBheTools(server: McpServer, registro: RegistroSesiones<S
     'Lista las boletas de honorarios electrónicas recibidas por el RUT persona autenticado en un mes: folio, fecha, emisor de la boleta (en contraparteRut/contraparteNombre, con contraparteRol="emisor"), honorario bruto, retención del receptor, total líquido y si está anulada. El SII no informa la retención del emisor en las recibidas, así que retencionEmisor viene en null. No requiere SII_EMPRESA_RUT: cuelga de la persona, no de la empresa.',
     schemaMes,
     async ({ rut, anio, mes }) => envolverParaMcp(() => core.listRecibidas(registro, rut, anio, mes))
+  );
+
+  server.tool(
+    'sii_bhe_emitir',
+    'EMITE una boleta de honorarios electrónica (BHE). ES UNA ESCRITURA: con confirmar=true es un ' +
+    'ACTO TRIBUTARIO REAL E IRREVERSIBLE que asigna folio y notifica al receptor; sólo se deshace ' +
+    'anulándola después. POR DEFECTO (confirmar ausente o false) NO emite: recorre la cadena del ' +
+    'portal hasta la PREVISUALIZACIÓN y devuelve los montos que calculó EL SII (bruto, retención, ' +
+    'líquido) para revisarlos. Mostrale siempre esa previsualización al usuario y pedí su ' +
+    'autorización explícita antes de pasar confirmar=true; nunca lo uses para probar. ' +
+    'retiene_receptor=true (default) significa que la retención la efectúa la empresa receptora. ' +
+    'Hasta 4 líneas de prestación. Hay una red anti-doble-click: la misma boleta repetida en menos ' +
+    'de un minuto se rechaza en vez de duplicarse.',
+    schemaEmitirBhe,
+    async (args) => envolverParaMcp(() => coreEmision.emitirBhe(registro, args.rut, {
+      receptor: { rut: args.receptor_rut, nombre: args.receptor_nombre, direccion: args.receptor_direccion, comuna: args.receptor_comuna },
+      lineas: args.lineas,
+      retieneReceptor: args.retiene_receptor,
+      fecha: args.fecha,
+    }, args.confirmar))
   );
 }

@@ -3,7 +3,8 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/bhe';
-import { schemaResumen, schemaMes, schemaPdf } from '../../core/schemas/bhe';
+import * as coreEmision from '../../core/bheEmision';
+import { schemaResumen, schemaMes, schemaPdf, schemaEmitirBhe } from '../../core/schemas/bhe';
 import { ejecutorPara } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from './comun';
 
@@ -12,6 +13,7 @@ import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from '
 const zodResumen = conCredencial(schemaResumen);
 const zodMes = conCredencial(schemaMes);
 const zodPdf = conCredencial(schemaPdf);
+const zodEmitir = conCredencial(schemaEmitirBhe);
 
 export function registrarRutasBhe(
   rutas: Map<string, RutaHandler>,
@@ -86,5 +88,34 @@ export function registrarRutasBhe(
         pdf_base64: contenido.toString('base64'),
       };
     });
+  });
+
+  // --- Emisión (ronda 11, ESCRITURA) ---------------------------------------
+  // confirmar:false (default) PREVISUALIZA con los montos del SII sin emitir;
+  // confirmar:true EMITE (irreversible, notifica al receptor). Guardrail de la
+  // ronda 11: dry-run + ventana de idempotencia + auditoría.
+  rutas.set('POST /v1/bhe/emitir', async body => {
+    const parseo = zodEmitir.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const d = parseo.data;
+    const params = {
+      receptor: { rut: d.receptor_rut, nombre: d.receptor_nombre, direccion: d.receptor_direccion, comuna: d.receptor_comuna },
+      lineas: d.lineas,
+      retieneReceptor: d.retiene_receptor,
+      fecha: d.fecha,
+    };
+    const ejecutor = ejecutorPara(registro, credenciales, d.rut, credencialDe(d));
+    const resp = await ejecutar(() => coreEmision.emitirBhe(ejecutor, d.rut, params, d.confirmar));
+    const respBody = resp.body as { ok?: boolean; error?: string; folio?: number | null };
+    const total = d.lineas.reduce((a, l) => a + l.valor, 0);
+    const referencia = `bhe:${respBody?.folio ?? `${d.receptor_rut}-${total}`}`;
+    if (respBody?.ok && d.confirmar) {
+      resp.auditoria = { efecto: 'ejecutado', referencia };
+    } else if (respBody?.ok) {
+      resp.auditoria = { efecto: 'simulado', referencia };
+    } else if (d.confirmar && respBody?.error !== 'LIMITE_CONOCIDO') {
+      resp.auditoria = { efecto: 'fallido', referencia };
+    }
+    return resp;
   });
 }

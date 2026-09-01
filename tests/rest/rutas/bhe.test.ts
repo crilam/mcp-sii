@@ -2,9 +2,11 @@ import { registrarRutasBhe } from '../../../src/rest/rutas/bhe';
 import { RegistroSesiones } from '../../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
 import * as core from '../../../src/core/bhe';
+import * as coreEmision from '../../../src/core/bheEmision';
 import { LimitacionConocida, RecursoNoEncontrado } from '../../../src/erroresConsulta';
 
 jest.mock('../../../src/core/bhe');
+jest.mock('../../../src/core/bheEmision');
 
 function armarRouter() {
   const rutas = new Map<string, Function>();
@@ -15,13 +17,57 @@ function armarRouter() {
 describe('registrarRutasBhe', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 5 rutas bajo /v1/bhe', () => {
+  it('registra las 6 rutas bajo /v1/bhe', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
       'POST /v1/bhe/resumen', 'POST /v1/bhe/resumen-recibidas',
       'POST /v1/bhe/list-emitidas',
       'POST /v1/bhe/list-recibidas', 'POST /v1/bhe/pdf',
+      'POST /v1/bhe/emitir',
     ]);
+  });
+
+  describe('emitir (R11)', () => {
+    const BODY = {
+      rut: '11.111.111-1', clave: 'x',
+      receptor_rut: '66666666-6', receptor_nombre: 'RECEPTORA FICTICIA SPA',
+      lineas: [{ descripcion: 'Dieta', valor: 1226213 }, { descripcion: 'Comite', valor: 817476 }],
+    };
+
+    it('sin confirmar previsualiza y audita como simulado', async () => {
+      (coreEmision.emitirBhe as jest.Mock).mockResolvedValue({ emitida: false, bruto: 2043689 });
+      const r = await armarRouter().get('POST /v1/bhe/emitir')!(BODY);
+      expect((r.body as any).ok).toBe(true);
+      expect(r.auditoria).toEqual({ efecto: 'simulado', referencia: 'bhe:66666666-6-2043689' });
+      expect(coreEmision.emitirBhe).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.objectContaining({
+        retieneReceptor: true,
+      }), false);
+    });
+
+    it('con confirmar:true emite y audita como ejecutado con el folio', async () => {
+      (coreEmision.emitirBhe as jest.Mock).mockResolvedValue({ emitida: true, folio: 1234 });
+      const r = await armarRouter().get('POST /v1/bhe/emitir')!({ ...BODY, confirmar: true });
+      expect(r.auditoria).toEqual({ efecto: 'ejecutado', referencia: 'bhe:1234' });
+      expect(coreEmision.emitirBhe).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', expect.anything(), true);
+    });
+
+    it('un rechazo con confirmar:true se audita como fallido; el doble-click no', async () => {
+      (coreEmision.emitirBhe as jest.Mock).mockRejectedValueOnce(new (require('../../../src/erroresConsulta').EscrituraRechazadaPorSii)('no'));
+      const r1 = await armarRouter().get('POST /v1/bhe/emitir')!({ ...BODY, confirmar: true });
+      expect(r1.auditoria).toMatchObject({ efecto: 'fallido' });
+
+      (coreEmision.emitirBhe as jest.Mock).mockRejectedValueOnce(new (require('../../../src/erroresConsulta').LimitacionConocida)('ya en curso'));
+      const r2 = await armarRouter().get('POST /v1/bhe/emitir')!({ ...BODY, confirmar: true });
+      expect(r2.auditoria).toBeUndefined();
+    });
+
+    it('más de 4 líneas es 400 sin llamar al core', async () => {
+      const r = await armarRouter().get('POST /v1/bhe/emitir')!({
+        ...BODY, lineas: Array(5).fill({ descripcion: 'x', valor: 1 }),
+      });
+      expect(r.status).toBe(400);
+      expect(coreEmision.emitirBhe).not.toHaveBeenCalled();
+    });
   });
 
   it('resumen-recibidas: llama al core de recibidas, no al de emitidas', async () => {
