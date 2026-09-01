@@ -685,6 +685,18 @@ Guarda un DTE como BORRADOR en el portal mipyme. **No es un acto tributario**: n
 
 A diferencia de `emitir-dte` (que exige certificado y bloquea `confirmar:true` vía REST), el borrador **acepta clave o certificado** (no firma) y **sí soporta `confirmar:true`**. Sin `confirmar` (default) SIMULA: valida el documento contra el portal y devuelve el resumen sin guardar. Con `confirmar:true` graba y devuelve el `borradorId` (EHDR_CODIGO). Pasar `borrador_id` EDITA uno existente en vez de crear uno nuevo. Al **crear** un borrador nuevo el SII **no devuelve el id del borrador** en la respuesta de grabado (`borradorId` viene `null`): para obtenerlo, consultá `list-borradores`. Al **editar** (con `borrador_id`), el `borradorId` es el que pasaste. La **simulación no verifica que un borrador a editar exista**: sólo valida el documento. El éxito del grabado se detecta por el mensaje de confirmación del portal, no por la presencia de un id. La traza de auditoría marca `simulado`/`ejecutado`/`fallido` (sólo REST). Hay una red anti-doble-click (un mismo borrador repetido en <60 s se rechaza), pero es **in-process**: con más de una instancia del servicio no protege un doble-click repartido entre instancias — es una salvaguarda de último momento, no una garantía (el borrador es reversible).
 
+### 6.15 BHE — emitir boleta de honorarios (ronda 11, ESCRITURA)
+
+Emite una BHE recorriendo la cadena CGI del portal (`TMBECN_*`). **Con `confirmar:false` (default) NO emite: PREVISUALIZA** y devuelve los montos que calcula el SII (bruto, retención, líquido). Con `confirmar:true` emite — acto tributario **real e irreversible** que asigna folio y notifica al receptor.
+
+| Endpoint | Tool | Body |
+|---|---|---|
+| **`POST /v1/bhe/emitir`** | `sii_bhe_emitir` | `receptor_rut, receptor_nombre, lineas[{descripcion,valor}], retiene_receptor?, fecha?, confirmar?` |
+
+`retiene_receptor` (default true) = la retención la efectúa la empresa receptora. Hasta 4 líneas. El estado del wizard viaja en campos ocultos del portal (incluido `tiempo`, anti-replay) que el servicio propaga sin regenerar. Los valores de las líneas se mandan como entero sin separador de miles (pendiente de verificar contra una emisión real que el CGI lo acepte así). Guardrail: dry-run (pasos 1→3) + red anti-doble-click (in-process; una boleta repetida en <60 s se rechaza) + auditoría (efecto/referencia, sólo REST). Si la sesión se cae EN el paso que emite, la respuesta lo dice como AMBIGUO (la boleta pudo o no emitirse; verificar con la lectura de emitidas) y NO libera la reserva.
+
+Pendiente: anular/observar/reenviar (email) — necesitan una boleta emitida real para relevar sus formularios; quedan diseñados (ver el spec de R11).
+
 ---
 
 ## 7. Limitaciones conocidas

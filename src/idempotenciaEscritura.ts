@@ -29,6 +29,18 @@ export function esSeguroDeLiberar(e: unknown): boolean {
   return Boolean(e && typeof e === 'object' && (e as Record<string, unknown>)[MARCA]);
 }
 
+/**
+ * Serializa un valor con las claves de cada objeto ORDENADAS, para que la clave
+ * de idempotencia sea la misma sin importar en qué orden el llamador armó el
+ * objeto (la ruta y la tool pueden diferir). Determinístico por contenido.
+ */
+export function claveEstable(valor: unknown): string {
+  return JSON.stringify(valor, (_k, v) =>
+    (v && typeof v === 'object' && !Array.isArray(v))
+      ? Object.fromEntries(Object.keys(v).sort().map(k => [k, (v as Record<string, unknown>)[k]]))
+      : v);
+}
+
 export class VentanaIdempotencia {
   // clave → { ts, enVuelo }. `enVuelo` = la operación todavía corre contra el
   // SII; mientras lo esté, la reserva NO expira (una operación lenta —el caso

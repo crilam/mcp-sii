@@ -1,4 +1,4 @@
-import { VentanaIdempotencia, marcarSeguro, esSeguroDeLiberar } from '../src/idempotenciaEscritura';
+import { VentanaIdempotencia, marcarSeguro, esSeguroDeLiberar, claveEstable } from '../src/idempotenciaEscritura';
 import { LimitacionConocida } from '../src/erroresConsulta';
 
 describe('marcarSeguro / esSeguroDeLiberar', () => {
@@ -6,6 +6,20 @@ describe('marcarSeguro / esSeguroDeLiberar', () => {
     expect(esSeguroDeLiberar(marcarSeguro(new Error('x')))).toBe(true);
     expect(esSeguroDeLiberar(new Error('x'))).toBe(false);
     expect(esSeguroDeLiberar(undefined)).toBe(false);
+  });
+});
+
+describe('claveEstable', () => {
+  it('el mismo objeto con las claves en otro orden da la misma serialización', () => {
+    const a = { rut: '1', params: { retieneReceptor: true, fecha: 'x', lineas: [{ valor: 1, descripcion: 'd' }] } };
+    const b = { params: { fecha: 'x', lineas: [{ descripcion: 'd', valor: 1 }], retieneReceptor: true }, rut: '1' };
+    expect(claveEstable(a)).toBe(claveEstable(b));
+  });
+  it('objetos distintos dan claves distintas', () => {
+    expect(claveEstable({ a: 1 })).not.toBe(claveEstable({ a: 2 }));
+  });
+  it('respeta el orden de los ARRAYS (no los ordena)', () => {
+    expect(claveEstable([1, 2])).not.toBe(claveEstable([2, 1]));
   });
 });
 

@@ -47,3 +47,23 @@ export const schemaPdf = {
     'true para una boleta recibida; false (default) para una emitida'
   ),
 };
+
+// --- Emisión (ronda 11, ESCRITURA) -----------------------------------------
+export const schemaEmitirBhe = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  receptor_rut: z.string().min(3).describe('RUT del receptor con dígito verificador (66666666-6).'),
+  receptor_nombre: z.string().min(1).describe('Nombre o razón social del receptor.'),
+  receptor_direccion: z.string().optional().describe('Dirección del receptor, si el portal la exige.'),
+  receptor_comuna: z.string().optional().describe('Comuna del receptor, si el portal la exige.'),
+  lineas: z.array(z.object({
+    descripcion: z.string().min(1).describe('Descripción de la prestación.'),
+    valor: z.number().int().positive().describe('Valor en pesos (entero, bruto).'),
+  })).min(1).max(4).describe('Hasta 4 líneas de prestación (límite del portal).'),
+  retiene_receptor: z.boolean().default(true)
+    .describe('true (default): la retención la efectúa el RECEPTOR (empresa). false: la retiene el emisor.'),
+  fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+    .describe('Fecha de la boleta AAAA-MM-DD. Si se omite, la del día según el portal.'),
+  confirmar: z.boolean().default(false)
+    .describe('false (default): PREVISUALIZA con los montos que calcula el SII, sin emitir. true: EMITE la boleta — acto tributario REAL e IRREVERSIBLE que notifica al receptor.'),
+};
+
