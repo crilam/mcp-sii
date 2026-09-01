@@ -14,10 +14,18 @@ const MockSession = SessionManager as jest.MockedClass<typeof SessionManager>;
 const INFORME = '<html><script>var xml_values = new Array();'
   + 'xml_values[\'anio_consulta\'] = "2026";'
   + 'arr_informe_mensual[\'nroboleta_1\'] = "4514";'
-  + 'arr_informe_mensual[\'codigobarras_1\'] = "06699678045141AAAAAA";'
+  + 'arr_informe_mensual[\'codigobarras_1\'] = "22222222045141AAAAAA";'
+  + 'arr_informe_mensual[\'rutemisor_1\'] = "22222222";'
   + '</script><form name="formulario"><script>'
   + 'CampoOculto("rut_arrastre","11111111"); CampoOculto("dv_arrastre","1");'
   + '</script></form></html>';
+
+// El MISMO folio repetido por dos emisores distintos (el folio es por emisor).
+const INFORME_DUPLICADO = INFORME.replace('</script><form',
+  'arr_informe_mensual[\'nroboleta_2\'] = "4514";'
+  + 'arr_informe_mensual[\'codigobarras_2\'] = "33333333045142BBBBBB";'
+  + 'arr_informe_mensual[\'rutemisor_2\'] = "33333333";'
+  + '</script><form');
 
 // Paso 2: filas con checkbox/select por índice y ConfirmarRespuestaRechazo().
 const PASO2 = '<html><script>'
@@ -49,7 +57,7 @@ describe('BheObservacionScraper.observar', () => {
     const urls = (http.postForm as jest.Mock).mock.calls.map(c => c[0] as string);
     expect(urls.some(u => u.includes('RecepcionRespuestaRechazo'))).toBe(false);
     const paso2 = (http.postForm as jest.Mock).mock.calls.find(c => (c[0] as string).includes('ListarBheRechazar'));
-    expect((paso2![1] as Record<string, string>).txt_codigobarras).toBe('06699678045141AAAAAA');
+    expect((paso2![1] as Record<string, string>).txt_codigobarras).toBe('22222222045141AAAAAA');
     expect((paso2![1] as Record<string, string>).nro_boleta).toBe('4514');
   });
 
@@ -65,6 +73,21 @@ describe('BheObservacionScraper.observar', () => {
     expect(campos.cbRechazo_2).toBe('');
     expect(campos.nroboleta_1).toBe('4514');
     expect(campos.nroboleta_2).toBe('4520');
+  });
+
+  it('el folio duplicado entre emisores se rechaza pidiendo desambiguar', async () => {
+    const { scraper } = armar({ informe: INFORME_DUPLICADO });
+    const err = await scraper.observar('11111111-1', 2026, 8, 4514, 1, true).catch(e => e);
+    expect(err).toBeInstanceOf(EscrituraRechazadaPorSii);
+    expect(err.message).toMatch(/desambiguar|emisor/i);
+    expect(esSeguroDeLiberar(err)).toBe(true);
+  });
+
+  it('con el RUT del emisor, el folio duplicado se resuelve a la boleta correcta', async () => {
+    const { scraper, http } = armar({ informe: INFORME_DUPLICADO });
+    await scraper.observar('11111111-1', 2026, 8, 4514, 1, false, '33333333-3');
+    const paso2 = (http.postForm as jest.Mock).mock.calls.find(c => (c[0] as string).includes('ListarBheRechazar'));
+    expect((paso2![1] as Record<string, string>).txt_codigobarras).toBe('33333333045142BBBBBB');
   });
 
   it('un folio que no está en el informe es rechazo seguro de liberar', async () => {

@@ -79,7 +79,7 @@ export function registerBheTools(server: McpServer, registro: RegistroSesiones<S
     'de pasar confirmar=true; nunca lo uses para probar. La causa es obligatoria: 1 = no se pagó el ' +
     'servicio, 2 = no se prestó el servicio. anio/mes ubican la boleta en el informe de recibidas.',
     schemaObservarBhe,
-    async (args) => envolverParaMcp(() => coreObservacion.observarBhe(registro, args.rut, args.anio, args.mes, args.folio, args.causa, args.confirmar))
+    async (args) => envolverParaMcp(() => coreObservacion.observarBhe(registro, args.rut, args.anio, args.mes, args.folio, args.causa, args.confirmar, args.emisor_rut))
   );
 
   server.tool(

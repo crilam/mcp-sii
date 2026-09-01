@@ -42,7 +42,7 @@ describe('registrarRutasBhe', () => {
       const r = await armarRouter().get('POST /v1/bhe/observar')!(BODY);
       expect((r.body as any).ok).toBe(true);
       expect(r.auditoria).toEqual({ efecto: 'simulado', referencia: 'bhe-observacion:4514' });
-      expect(coreObservacion.observarBhe).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', 2026, 8, 4514, 1, false);
+      expect(coreObservacion.observarBhe).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', 2026, 8, 4514, 1, false, undefined);
     });
 
     it('con confirmar:true observa y audita como ejecutado', async () => {

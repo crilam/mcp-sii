@@ -18,13 +18,18 @@ export async function observarBhe(
   mes: number,
   folio: number,
   causa: CausaObservacion,
-  confirmar: boolean
+  confirmar: boolean,
+  emisorRut?: string
 ): Promise<ObservacionPrevisualizada | BheObservada> {
   const correr = () => registro.ejecutar(rut, async sesion =>
-    new BheObservacionScraper(new SiiHttpClient(sesion), sesion).observar(rut, anio, mes, folio, causa, confirmar));
+    new BheObservacionScraper(new SiiHttpClient(sesion), sesion).observar(rut, anio, mes, folio, causa, confirmar, emisorRut));
   if (!confirmar) return correr();
   const rutNormal = rut.replace(/\./g, '').toUpperCase();
-  const clave = createHash('sha256').update(claveEstable([rutNormal, 'observar', folio])).digest('hex');
+  // El folio es por emisor y se repite entre períodos: la clave lleva el
+  // período y el emisor para no bloquear una observación legítima distinta.
+  const clave = createHash('sha256')
+    .update(claveEstable([rutNormal, 'observar', anio, mes, folio, emisorRut?.replace(/\./g, '').toUpperCase() ?? '']))
+    .digest('hex');
   return ventanaObservacion.ejecutar(clave,
     `La boleta ${folio} ya se está observando o se observó hace segundos. Verificá con la lectura `
     + 'de boletas recibidas antes de reintentar.',

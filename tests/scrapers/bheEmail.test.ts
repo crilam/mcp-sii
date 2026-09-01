@@ -45,11 +45,11 @@ describe('BheEmailScraper.enviar', () => {
 
   it('confirmar:true postea al CGI del PDF con el email pedido y el origen del form', async () => {
     const { scraper, http } = armar();
-    const r = await scraper.enviar(CB, 'otro@destino.cl', true);
+    const r = await scraper.enviar(CB, 'otro@ejemplo.cl', true);
     expect(r.enviado).toBe(true);
     const [url, campos] = (http.postForm as jest.Mock).mock.calls[0] as [string, Record<string, string>];
     expect(url).toContain('TMBCOT_ConsultaBoletaPdf');
-    expect(campos.txt_email).toBe('otro@destino.cl');
+    expect(campos.txt_email).toBe('otro@ejemplo.cl');
     expect(campos.origen).toBe('QUINTO');
     expect(campos.txt_codigobarras).toBe(CB);
   });

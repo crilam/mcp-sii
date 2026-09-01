@@ -158,7 +158,7 @@ export function registrarRutasBhe(
     if (!parseo.success) return badRequest(parseo.error);
     const d = parseo.data;
     const ejecutor = ejecutorPara(registro, credenciales, d.rut, credencialDe(d));
-    const resp = await ejecutar(() => coreObservacion.observarBhe(ejecutor, d.rut, d.anio, d.mes, d.folio, d.causa, d.confirmar));
+    const resp = await ejecutar(() => coreObservacion.observarBhe(ejecutor, d.rut, d.anio, d.mes, d.folio, d.causa, d.confirmar, d.emisor_rut));
     const respBody = resp.body as { ok?: boolean; error?: string };
     const referencia = `bhe-observacion:${d.folio}`;
     if (respBody?.ok && d.confirmar) {

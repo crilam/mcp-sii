@@ -52,7 +52,8 @@ export class BheObservacionScraper {
     mes: number,
     folio: number,
     causa: CausaObservacion,
-    confirmar = false
+    confirmar = false,
+    emisorRut?: string
   ): Promise<ObservacionPrevisualizada | BheObservada> {
     this.session.assertPuedeEntregarCookieJar();
 
@@ -69,18 +70,34 @@ export class BheObservacionScraper {
         cbanoinformemensual: String(anio),
       }, { charset: 'latin1' });
       if (ES_LOGIN.test(h1)) throw new Error('La sesión del SII no quedó activa para el informe de recibidas. Reintentá.');
-      // El informe llega como arrays JS: nroboleta_i / codigobarras_i.
-      let codigoBarras: string | null = null;
+      // El informe llega como arrays JS: nroboleta_i / codigobarras_i /
+      // rutemisor_i. El FOLIO es por emisor, así que dos emisores distintos
+      // pueden repetirlo en el mismo mes: si hay más de una coincidencia y no
+      // vino el RUT del emisor, se rechaza pidiendo desambiguar — observar es
+      // irreversible y la boleta equivocada no se puede desobservar.
+      const dato = (k: string, i: string) =>
+        new RegExp(`arr_informe_mensual\\['${k}_${i}'\\]\\s*=\\s*"([^"]*)"`).exec(h1)?.[1] ?? '';
+      const emisorPedido = emisorRut ? partirRut(emisorRut, 'RUT del emisor').rut : null;
+      const coincidencias: Array<{ i: string; codigoBarras: string; emisor: string }> = [];
       for (const m of h1.matchAll(/arr_informe_mensual\['nroboleta_(\d+)'\]\s*=\s*"(\d+)"/g)) {
-        if (parseInt(m[2], 10) === folio) {
-          codigoBarras = new RegExp(`arr_informe_mensual\\['codigobarras_${m[1]}'\\]\\s*=\\s*"([A-Za-z0-9]+)"`).exec(h1)?.[1] ?? null;
-          break;
-        }
+        if (parseInt(m[2], 10) !== folio) continue;
+        const emisor = dato('rutemisor', m[1]);
+        if (emisorPedido && emisor !== emisorPedido) continue;
+        coincidencias.push({ i: m[1], codigoBarras: dato('codigobarras', m[1]), emisor });
       }
-      if (!codigoBarras) {
+      if (coincidencias.length === 0) {
         throw new EscrituraRechazadaPorSii(
-          `La boleta ${folio} no aparece en el informe de recibidas de ${String(mes).padStart(2, '0')}/${anio}. `
-          + 'Verificá el período con la lectura de recibidas.');
+          `La boleta ${folio}${emisorPedido ? ` del emisor ${emisorPedido}` : ''} no aparece en el informe de `
+          + `recibidas de ${String(mes).padStart(2, '0')}/${anio}. Verificá el período con la lectura de recibidas.`);
+      }
+      if (coincidencias.length > 1) {
+        throw new EscrituraRechazadaPorSii(
+          `Hay ${coincidencias.length} boletas recibidas con folio ${folio} en el período (emisores: `
+          + `${coincidencias.map(c => c.emisor).join(', ')}). Indicá el RUT del emisor para desambiguar.`);
+      }
+      const codigoBarras = coincidencias[0].codigoBarras;
+      if (!codigoBarras) {
+        throw new EscrituraRechazadaPorSii(`La boleta ${folio} aparece en el informe pero sin código de barras legible.`);
       }
 
       // Paso 2: la previsualización con las causas (replica el POST que arma

@@ -37,6 +37,9 @@ export interface BheEnviada {
 
 const ES_LOGIN = /IngresoRutClave|Ingresar Clave Tributaria|CAutInicio/i;
 const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Compartida con schemaEmailBhe (core/schemas/bhe.ts): si el formato del
+// código de barras cambia, actualizar ambos o extraer a un módulo común.
+export const CODIGO_BARRAS_VALIDO = /^[A-Za-z0-9]{10,30}$/;
 
 export class BheEmailScraper {
   constructor(private http: SiiHttpClient, private session: SessionManager) {}
@@ -52,7 +55,7 @@ export class BheEmailScraper {
     let emailDestino: string;
     let emailPortal: string;
     try {
-      if (!/^[A-Za-z0-9]{10,30}$/.test(codigoBarras)) {
+      if (!CODIGO_BARRAS_VALIDO.test(codigoBarras)) {
         throw new Error('El código de barras de la boleta no tiene la forma esperada (alfanumérico, ~20 caracteres).');
       }
       if (email !== undefined && !EMAIL_VALIDO.test(email)) {
@@ -95,9 +98,9 @@ export class BheEmailScraper {
       throw new Error('La sesión del SII se cayó en el paso que envía: el email PUDO o no haber salido.');
     }
     const hayNegacion = /\bno\s+(?:se|fue|pudo|ha)\b|error|problema|rechaz|inconveniente/i.test(texto2);
-    // El CGI de éxito confirma el envío mencionándolo (o devuelve el PDF/boleta;
-    // un content-type no-HTML ya habría fallado antes en el transporte).
-    const exitoPositivo = /enviad|env[ií]o\s+(?:de\s+)?(?:la\s+)?boleta|correo|e-?mail/i.test(texto2);
+    // Sólo la frase de confirmación real cuenta como éxito: un patrón laxo
+    // (p.ej. la palabra "e-mail" del label) matchearía el form re-mostrado.
+    const exitoPositivo = /enviad/i.test(texto2);
     if (hayNegacion || !exitoPositivo) {
       throw new EscrituraRechazadaPorSii(
         `El SII no confirmó el envío del email. Respondió: ${texto2.slice(0, 300)}`);
