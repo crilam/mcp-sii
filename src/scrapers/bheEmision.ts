@@ -83,6 +83,10 @@ const MAX_LINEAS = 4;
 // así que esos campos no están como tags reales: se los des-escapa antes de
 // parsear (`<\/` → `</`, `\'` → `'`). Verificado en el form de retención de BHE,
 // que trae TipoEmision y sin_destinatario sólo por esta vía.
+// Riesgo asumido: el des-escape corre sobre TODO el HTML, no sólo dentro de
+// document.write, así que strings de JS con '<input' fabrican "tags" ruido.
+// Los names truncados que eso produce ('desc_prestacion_'+i) se filtran en
+// parsearCamposPagina.
 function desescaparDocumentWrite(html: string): string {
   return html.replace(/<\\\//g, '</').replace(/\\'/g, "'").replace(/\\"/g, '"');
 }
@@ -103,12 +107,14 @@ export function parsearCamposForm(html: string): Record<string, string> {
     campos[name] = value;
   }
   // Selects: el value es el del <option selected>, o la primera option si
-  // ninguna lo está (semántica del navegador).
+  // ninguna lo está; una option sin atributo value usa su texto (semántica
+  // del navegador).
   for (const s of limpio.matchAll(/<select\b[^>]*name=["']?([A-Za-z0-9_]+)[^>]*>([\s\S]*?)<\/select>/gi)) {
-    const options = [...s[2].matchAll(/<option\b([^>]*)>/gi)];
+    const options = [...s[2].matchAll(/<option\b([^>]*)>([^<]*)/gi)];
     if (options.length === 0) { campos[s[1]] = ''; continue; }
     const elegida = options.find(o => /\bselected\b/i.test(o[1])) ?? options[0];
-    campos[s[1]] = /value=["']?([^"'>\s]*)/i.exec(elegida[1])?.[1] ?? '';
+    const conValor = /value=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(elegida[1]);
+    campos[s[1]] = conValor ? (conValor[1] ?? conValor[2] ?? conValor[3]) : elegida[2].trim();
   }
   return campos;
 }
@@ -143,7 +149,11 @@ export function parsearCamposPagina(html: string): Record<string, string> {
   const region = m ? m[0] : html;
   // Los xml_values viven en el <head>, FUERA del form: se resuelven contra la
   // página entera aunque los CampoOculto se busquen sólo dentro del form.
-  return { ...parsearCamposForm(region), ...parsearCamposOcultosJs(region, parsearXmlValues(html)) };
+  const campos = { ...parsearCamposForm(region), ...parsearCamposOcultosJs(region, parsearXmlValues(html)) };
+  // Names truncados que el des-escape recoge de JS con concatenación
+  // ('desc_prestacion_'+i): no existen en el form real.
+  for (const k of Object.keys(campos)) if (k.endsWith('_')) delete campos[k];
+  return campos;
 }
 
 /** Reduce una página a texto plano legible (para detalle y mensajes). */
@@ -311,9 +321,6 @@ export class BheEmisionScraper {
   private llenarFormulario(campos: Record<string, string>, params: EmitirBheParams, html: string): Record<string, string> {
     const { rut, dv } = partirRut(params.receptor.rut, 'RUT del receptor');
     const llenos: Record<string, string> = { ...campos };
-    // Nombres truncados que el parseo estático recoge de JS con concatenación
-    // ('desc_prestacion_'+i): no existen en el form real, se descartan.
-    for (const k of Object.keys(llenos)) if (k.endsWith('_')) delete llenos[k];
 
     // El domicilio del emisor lo llena el JS del portal desde arr_direcciones
     // (el navegador postea cbo_domicilio con el id de la dirección). Con una

@@ -1,4 +1,4 @@
-import { BheEmisionScraper, parsearCamposForm, EmitirBheParams } from '../../src/scrapers/bheEmision';
+import { BheEmisionScraper, parsearCamposForm, parsearXmlValues, parsearCamposOcultosJs, parsearCamposPagina, EmitirBheParams } from '../../src/scrapers/bheEmision';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
 import { EscrituraRechazadaPorSii, LimitacionConocida } from '../../src/erroresConsulta';
@@ -74,6 +74,45 @@ describe('parsearCamposForm', () => {
     const campos = parsearCamposForm(PASO1_OK + '<input type="submit" name="cmd" value="x">');
     expect(campos.OptTipoRetencion).toBe('RETCONTRIBUYENTE'); // el checked
     expect(campos.cmd).toBeUndefined();
+  });
+
+  it('selects: option selected gana; sin selected la primera; sin value el texto', () => {
+    const campos = parsearCamposForm(
+      '<select name="a"><option value="1">uno</option><option value="2" selected>dos</option></select>'
+      + '<select name="b"><option value="x y">con espacio</option><option value="z">z</option></select>'
+      + '<select name="c"><option>Texto pelado</option></select>');
+    expect(campos.a).toBe('2');
+    expect(campos.b).toBe('x y'); // value con espacios entre comillas, entero
+    expect(campos.c).toBe('Texto pelado'); // sin atributo value: el texto
+  });
+});
+
+describe('parsearXmlValues / parsearCamposOcultosJs / parsearCamposPagina', () => {
+  const HTML = '<html><head><script>'
+    + 'var xml_values = new Array(); xml_values[\'rut_autentificado\'] = "11111111"; xml_values[\'dv_autentificado\'] = "1";'
+    + '</script></head><body><form name="hidden_formulario"><input type="hidden" name="hidden_data_cantidad" value="0"></form>'
+    + '<form name="formulario"><script>'
+    + 'CampoOculto("rut_arrastre",xml_values[\'rut_autentificado\']); CampoOculto("dv_arrastre" ,xml_values[\'dv_autentificado\']); CampoOculto("sin_destinatario","NO");'
+    + '</script><input type="hidden" name="sin_destinatario" value="PISADO">'
+    + '<input type="text" name="desc_prestacion_" value="basura-js"></form></body></html>';
+
+  it('extrae los literales xml_values', () => {
+    expect(parsearXmlValues(HTML)).toMatchObject({ rut_autentificado: '11111111', dv_autentificado: '1' });
+  });
+
+  it('resuelve CampoOculto contra xml_values y literales', () => {
+    const c = parsearCamposOcultosJs(HTML);
+    expect(c.rut_arrastre).toBe('11111111');
+    expect(c.dv_arrastre).toBe('1');
+    expect(c.sin_destinatario).toBe('NO');
+  });
+
+  it('la página completa: CampoOculto pisa al tag, excluye el otro form y los names truncados', () => {
+    const c = parsearCamposPagina(HTML);
+    expect(c.rut_arrastre).toBe('11111111'); // xml_values del <head>, fuera del form
+    expect(c.sin_destinatario).toBe('NO'); // CampoOculto pisa al tag
+    expect(c.hidden_data_cantidad).toBeUndefined(); // el form hidden_formulario no viaja
+    expect(c.desc_prestacion_).toBeUndefined(); // name truncado de JS
   });
 });
 
