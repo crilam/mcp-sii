@@ -21,15 +21,15 @@ async function main() {
   // Los datos de la boleta van por env, NUNCA hardcodeados acá: son datos reales
   // (RUT del receptor, glosas) y este archivo se versiona.
   //   BHE_RECEPTOR_RUT, BHE_RECEPTOR_NOMBRE, BHE_LINEAS='desc|valor;desc|valor'
-  const receptorRut = process.env.BHE_RECEPTOR_RUT!;
-  const receptorNombre = process.env.BHE_RECEPTOR_NOMBRE!;
-  const lineas = process.env.BHE_LINEAS!.split(';').map(l => {
+  const receptorRut = process.env.BHE_RECEPTOR_RUT;
+  const receptorNombre = process.env.BHE_RECEPTOR_NOMBRE;
+  if (!receptorRut || !receptorNombre || !process.env.BHE_LINEAS) {
+    throw new Error('Faltan BHE_RECEPTOR_RUT / BHE_RECEPTOR_NOMBRE / BHE_LINEAS en el entorno.');
+  }
+  const lineas = process.env.BHE_LINEAS.split(';').map(l => {
     const [descripcion, valor] = l.split('|');
     return { descripcion, valor: parseInt(valor, 10) };
   });
-  if (!receptorRut || !receptorNombre || lineas.length === 0) {
-    throw new Error('Faltan BHE_RECEPTOR_RUT / BHE_RECEPTOR_NOMBRE / BHE_LINEAS en el entorno.');
-  }
   const confirmar = process.env.BHE_CONFIRMAR === 'SI';
   const fecha = process.env.BHE_FECHA; // AAAA-MM-DD; si falta, la del portal
   const params = { receptor: { rut: receptorRut, nombre: receptorNombre }, lineas, retieneReceptor: true, fecha };
@@ -46,6 +46,7 @@ async function main() {
         console.log(`\n  BOLETA EMITIDA. Folio: ${r.folio ?? 'no legible — confirmar con la lectura de emitidas'}`);
         console.log(`\n  Detalle:\n  ${r.detalle.slice(0, 600)}`);
       } else {
+        console.log(`  Tipo retención (SII): ${r.tipoRetencion ?? 'no legible'}`);
         console.log(`\n  Detalle de la previsualización:\n  ${r.detalle.slice(0, 600)}`);
         console.log('\n  NO SE EMITIÓ NADA. Para emitir: BHE_CONFIRMAR=SI.');
       }

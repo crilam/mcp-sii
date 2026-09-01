@@ -52,6 +52,11 @@ export interface EmitirBheParams {
 
 export interface PrevisualizacionBhe {
   emitida: false;
+  // El tipo de retención que ENTENDIÓ el SII para esta boleta
+  // (xml_values['tipo_retencion'] del borrador): 'RETRECEPTOR' la retiene la
+  // empresa receptora, 'RETCONTRIBUYENTE' la retiene el emisor. Clave para
+  // confirmar: el portal puede cambiarlo respecto de lo pedido.
+  tipoRetencion: string | null;
   // Montos que calculó EL SII en la previsualización (no nosotros).
   bruto: number | null;
   retencion: number | null;
@@ -132,10 +137,28 @@ export function parsearCamposForm(html: string): Record<string, string> {
  */
 export function parsearXmlValues(html: string): Record<string, string> {
   const valores: Record<string, string> = {};
-  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*(uppercase\(\s*)?"([^"]*)"/g)) {
-    valores[m[1]] = m[2] ? m[3].toUpperCase() : m[3];
+  // Sólo asignaciones incondicionales: el portal también escribe
+  // `if (cond)\n  xml_values['k'] = "otro";` y tomar esas ramas condicionales
+  // pisa el valor real (visto con tipo_retencion, donde un if de sociedades
+  // de profesionales que no aplica venía después de la asignación efectiva).
+  // Una rama de if/else sin llaves se reconoce porque el último carácter
+  // no-blanco antes de la asignación es ')' o la palabra 'else'.
+  // Condicional = el no-blanco previo cierra la condición de un if/else/for/
+  // while (no cualquier ')': una llamada sin ';' en la línea anterior no debe
+  // descartar la asignación que sigue).
+  const esCondicional = (idx: number) => {
+    const antes = html.slice(Math.max(0, idx - 200), idx).replace(/\s+$/, '');
+    if (/\belse$/.test(antes)) return true;
+    if (!antes.endsWith(')')) return false;
+    return /\b(?:if|for|while)\s*\([^()]*(?:\([^()]*\)[^()]*)*\)$/.test(antes);
+  };
+  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*(uppercase\(\s*|formatMiles\(\s*)?"([^"]*)"/g)) {
+    if (esCondicional(m.index!)) continue;
+    // formatMiles("N",".") entrega el número crudo (el formato de miles es
+    // presentación); uppercase se aplica como lo haría el JS del portal.
+    valores[m[1]] = m[2]?.startsWith('uppercase') ? m[3].toUpperCase() : m[3];
   }
-  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*((?:xml_values\['[A-Za-z0-9_]+'\]|'[^'\n]*'|"[^"\n]*"|[ \t]|\+)+)[;\n]/g)) {
+  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*((?:xml_values\['[A-Za-z0-9_]+'\]|'[^'\n]*'|"[^"\n]*"|[ \t]|\+)+)(?:[;\n]|$)/g)) {
     if (m[1] in valores) continue;
     let resuelto = '';
     for (const t of m[2].matchAll(/xml_values\['([A-Za-z0-9_]+)'\]|'([^']*)'|"([^"]*)"/g)) {
@@ -209,7 +232,7 @@ export function parsearCamposPagina(html: string): Record<string, string> {
 }
 
 /** Reduce una página a texto plano legible (para detalle y mensajes). */
-function textoPlano(html: string): string {
+export function textoPlano(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -303,10 +326,25 @@ export class BheEmisionScraper {
       || 'Monto_Boleta' in xml4;
     if (hayNegacion || (folio === null && !exitoPositivo)) {
       // No se afirma la emisión: el mensaje del SII va crudo para diagnóstico.
-      // NO se marca seguro (pudo emitirse).
+      // NO se marca seguro (pudo emitirse). El HTML completo queda en un
+      // archivo temporal: dos emisiones reales cayeron acá siendo éxitos
+      // (la página se renderiza entera por JS), y sin el HTML no se puede
+      // afinar el detector.
+      let volcado = '';
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const os = require('os') as typeof import('os');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const fs = require('fs') as typeof import('fs');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const path = require('path') as typeof import('path');
+        const ruta = path.join(os.tmpdir(), `sii_bhe_paso4_${Date.now()}.html`);
+        fs.writeFileSync(ruta, html4, 'latin1');
+        volcado = ` HTML de la respuesta: ${ruta}.`;
+      } catch { /* el volcado es best-effort */ }
       throw new EscrituraRechazadaPorSii(
         `El SII no confirmó la emisión de la boleta. Respondió: ${texto4.slice(0, 300)}. `
-        + 'ANTES de reintentar, verificá con la lectura de boletas emitidas: la boleta pudo quedar emitida.');
+        + `ANTES de reintentar, verificá con la lectura de boletas emitidas: la boleta pudo quedar emitida.${volcado}`);
     }
     const montoXml4 = (k: string) => {
       const m = new RegExp(`xml_values\\['${k}'\\]\\s*=\\s*formatMiles\\("(\\d+)"`).exec(html4);
@@ -411,9 +449,12 @@ export class BheEmisionScraper {
     if (params.receptor.comuna) llenos.txt_comuna_destinatario = params.receptor.comuna;
 
     if (params.fecha) {
+      // Con DOS dígitos, como los manda el navegador (xml_values trae '08'):
+      // un mes '8' dispara la validación "inconsistencia en las fechas"
+      // (FECHAEMISION) del CGI.
       const [anio, mes, dia] = params.fecha.split('-');
-      llenos.cbo_dia_boleta = String(parseInt(dia, 10));
-      llenos.cbo_mes_boleta = String(parseInt(mes, 10));
+      llenos.cbo_dia_boleta = dia.padStart(2, '0');
+      llenos.cbo_mes_boleta = mes.padStart(2, '0');
       llenos.cbo_anio_boleta = anio;
     }
 
@@ -461,6 +502,7 @@ export class BheEmisionScraper {
     }
     return {
       emitida: false, bruto, retencion, liquido,
+      tipoRetencion: parsearXmlValues(html)['tipo_retencion'] ?? null,
       receptorRut: params.receptor.rut, receptorNombre: params.receptor.nombre,
       lineas: params.lineas,
       detalle: texto.slice(0, 800),
