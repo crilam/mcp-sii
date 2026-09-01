@@ -174,12 +174,13 @@ export class BheEmisionScraper {
       const m = /[Bb]oleta[^0-9]{0,40}N[°º·o]?[\s:.-]+([\d.]+)/.exec(texto4);
       return m ? parseInt(m[1].replace(/\./g, ''), 10) : null;
     })();
-    // Éxito sin folio: SÓLO si hay una frase de éxito POSITIVA y ninguna
-    // negación cerca. Un `/emitid/` suelto matchea "no fue emitida", así que no
-    // alcanza — sería un falso positivo de emisión.
-    const exitoPositivo = /(?:ha sido|fue|se)\s+(?:emitid|generad)\w*\s+(?:con\s+éxito|correctamente|exitosamente)|emitid\w*\s+con\s+éxito/i.test(texto4);
+    // Una negación/error en la página descarta la emisión SIEMPRE, tenga folio o
+    // no: "Boleta N° 1234 no fue emitida" trae un número que NO es un folio
+    // asignado. Y sin folio, además hace falta una frase de éxito POSITIVA (un
+    // `/emitid/` suelto matchea "no fue emitida", que no alcanza).
     const hayNegacion = /\bno\s+(?:se|fue|pudo|ha)\b|error|problema|rechaz|inconveniente/i.test(texto4);
-    if (folio === null && (!exitoPositivo || hayNegacion)) {
+    const exitoPositivo = /(?:ha sido|fue|se)\s+(?:emitid|generad)\w*\s+(?:con\s+éxito|correctamente|exitosamente)|emitid\w*\s+con\s+éxito/i.test(texto4);
+    if (hayNegacion || (folio === null && !exitoPositivo)) {
       // No se afirma la emisión: el mensaje del SII va crudo para diagnóstico.
       // NO se marca seguro (pudo emitirse).
       throw new EscrituraRechazadaPorSii(
