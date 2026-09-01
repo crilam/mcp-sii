@@ -79,3 +79,26 @@ export const schemaAnularBhe = {
       + 'true: ANULA la boleta — acto tributario REAL e IRREVERSIBLE.'),
 };
 
+// --- Observación (ronda 11, ESCRITURA del RECEPTOR) --------------------------
+export const schemaObservarBhe = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  anio: z.number().int().min(2000).describe('Año del período en que la boleta figura como recibida.'),
+  mes: z.number().int().min(1).max(12).describe('Mes del período (1-12).'),
+  folio: z.number().int().positive().describe('Folio de la boleta RECIBIDA a observar.'),
+  causa: z.union([z.literal(1), z.literal(2)])
+    .describe('Causa según el portal: 1 = no se efectuó el pago de los servicios, 2 = no se efectuó la prestación de servicios.'),
+  confirmar: z.boolean().default(false)
+    .describe('false (default): PREVISUALIZA sin observar. true: OBSERVA la boleta — acto REAL e IRREVERSIBLE (el comentario no se puede borrar).'),
+};
+
+// --- Reenvío por email (ronda 11, ESCRITURA leve) -----------------------------
+export const schemaEmailBhe = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  codigo_barras: z.string().regex(/^[A-Za-z0-9]{10,30}$/)
+    .describe('Código de barras de la boleta emitida (el mismo que usa el PDF), NO el folio.'),
+  email: z.string().email().optional()
+    .describe('Email de destino. Si se omite, el que el portal tiene registrado para el receptor.'),
+  confirmar: z.boolean().default(false)
+    .describe('false (default): PREVISUALIZA (muestra a qué email se enviaría) sin enviar. true: ENVÍA el correo con la boleta.'),
+};
+

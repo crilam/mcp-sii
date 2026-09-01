@@ -4,11 +4,15 @@ import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
 import * as core from '../../../src/core/bhe';
 import * as coreEmision from '../../../src/core/bheEmision';
 import * as coreAnulacion from '../../../src/core/bheAnulacion';
+import * as coreObservacion from '../../../src/core/bheObservacion';
+import * as coreEmail from '../../../src/core/bheEmail';
 import { LimitacionConocida, RecursoNoEncontrado } from '../../../src/erroresConsulta';
 
 jest.mock('../../../src/core/bhe');
 jest.mock('../../../src/core/bheEmision');
 jest.mock('../../../src/core/bheAnulacion');
+jest.mock('../../../src/core/bheObservacion');
+jest.mock('../../../src/core/bheEmail');
 
 function armarRouter() {
   const rutas = new Map<string, Function>();
@@ -19,14 +23,64 @@ function armarRouter() {
 describe('registrarRutasBhe', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 7 rutas bajo /v1/bhe', () => {
+  it('registra las 9 rutas bajo /v1/bhe', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
       'POST /v1/bhe/resumen', 'POST /v1/bhe/resumen-recibidas',
       'POST /v1/bhe/list-emitidas',
       'POST /v1/bhe/list-recibidas', 'POST /v1/bhe/pdf',
       'POST /v1/bhe/emitir', 'POST /v1/bhe/anular',
+      'POST /v1/bhe/observar', 'POST /v1/bhe/email',
     ]);
+  });
+
+  describe('observar (R11)', () => {
+    const BODY = { rut: '11.111.111-1', clave: 'x', anio: 2026, mes: 8, folio: 4514, causa: 1 };
+
+    it('sin confirmar previsualiza y audita como simulado', async () => {
+      (coreObservacion.observarBhe as jest.Mock).mockResolvedValue({ observada: false, folio: 4514 });
+      const r = await armarRouter().get('POST /v1/bhe/observar')!(BODY);
+      expect((r.body as any).ok).toBe(true);
+      expect(r.auditoria).toEqual({ efecto: 'simulado', referencia: 'bhe-observacion:4514' });
+      expect(coreObservacion.observarBhe).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', 2026, 8, 4514, 1, false);
+    });
+
+    it('con confirmar:true observa y audita como ejecutado', async () => {
+      (coreObservacion.observarBhe as jest.Mock).mockResolvedValue({ observada: true, folio: 4514 });
+      const r = await armarRouter().get('POST /v1/bhe/observar')!({ ...BODY, confirmar: true });
+      expect(r.auditoria).toEqual({ efecto: 'ejecutado', referencia: 'bhe-observacion:4514' });
+    });
+
+    it('una causa fuera de 1-2 es 400 sin llamar al core', async () => {
+      const r = await armarRouter().get('POST /v1/bhe/observar')!({ ...BODY, causa: 3 });
+      expect(r.status).toBe(400);
+      expect(coreObservacion.observarBhe).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('email (R11)', () => {
+    const BODY = { rut: '11.111.111-1', clave: 'x', codigo_barras: '11111111003415AAAAAA' };
+
+    it('sin confirmar previsualiza y audita como simulado', async () => {
+      (coreEmail.enviarBheEmail as jest.Mock).mockResolvedValue({ enviado: false, emailDestino: 'a@ejemplo.cl' });
+      const r = await armarRouter().get('POST /v1/bhe/email')!(BODY);
+      expect((r.body as any).ok).toBe(true);
+      expect(r.auditoria).toEqual({ efecto: 'simulado', referencia: 'bhe-email:11111111003415AAAAAA' });
+      expect(coreEmail.enviarBheEmail).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', '11111111003415AAAAAA', undefined, false);
+    });
+
+    it('con confirmar:true envía y audita como ejecutado; el email viaja', async () => {
+      (coreEmail.enviarBheEmail as jest.Mock).mockResolvedValue({ enviado: true, emailDestino: 'a@ejemplo.cl' });
+      const r = await armarRouter().get('POST /v1/bhe/email')!({ ...BODY, email: 'a@ejemplo.cl', confirmar: true });
+      expect(r.auditoria).toMatchObject({ efecto: 'ejecutado' });
+      expect(coreEmail.enviarBheEmail).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', '11111111003415AAAAAA', 'a@ejemplo.cl', true);
+    });
+
+    it('un email inválido es 400 sin llamar al core', async () => {
+      const r = await armarRouter().get('POST /v1/bhe/email')!({ ...BODY, email: 'no-es-email' });
+      expect(r.status).toBe(400);
+      expect(coreEmail.enviarBheEmail).not.toHaveBeenCalled();
+    });
   });
 
   describe('anular (R11)', () => {
