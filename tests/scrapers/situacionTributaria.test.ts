@@ -47,11 +47,32 @@ describe('parsearSituacionTributaria', () => {
     expect(parsearSituacionTributaria(respuestaOk({ girosNegocio: [] }), '22222222-2').actividades).toEqual([]);
   });
 
+  it('girosNegocio ausente o con forma inesperada (no-array) → lista vacía, no explota', () => {
+    expect(parsearSituacionTributaria(respuestaOk({ girosNegocio: undefined }), '22222222-2').actividades).toEqual([]);
+    expect(parsearSituacionTributaria(respuestaOk({ girosNegocio: {} }), '22222222-2').actividades).toEqual([]);
+  });
+
   // La propia API dice `registrado: false` cuando el RUT no existe — a
   // diferencia del CGI viejo, donde había que inferirlo de campos ausentes.
   it('registrado=false → RecursoNoEncontrado', () => {
     expect(() => parsearSituacionTributaria(respuestaOk({ registrado: false }), '11111111-1'))
       .toThrow(RecursoNoEncontrado);
+  });
+
+  // El bloqueante del review: sin exigir `registrado === true` explícito, una
+  // página de mantención u otro JSON del SII (sin el campo, o con otra forma)
+  // se colaba como consulta válida con todo en null.
+  it('registrado ausente → Error genérico, NO una consulta válida vacía', () => {
+    const { registrado, ...sinRegistrado } = respuestaOk();
+    expect(() => parsearSituacionTributaria(sinRegistrado, '22222222-2'))
+      .toThrow(/no devolvió el informe de situación tributaria esperado/);
+    expect(() => parsearSituacionTributaria(sinRegistrado, '22222222-2'))
+      .not.toThrow(RecursoNoEncontrado);
+  });
+
+  it('registrado con otra forma (no boolean) → Error genérico', () => {
+    expect(() => parsearSituacionTributaria(respuestaOk({ registrado: 'si' }), '22222222-2'))
+      .toThrow(/no devolvió el informe de situación tributaria esperado/);
   });
 
   it('una respuesta que no es un objeto → Error genérico, no NO_ENCONTRADO', () => {

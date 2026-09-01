@@ -79,19 +79,19 @@ function comoTextoONull(valor: unknown): string | null {
 }
 
 function parsearActividades(crudo: unknown): ActividadEconomica[] {
-  if (!Array.isArray(crudo)) return []
+  if (!Array.isArray(crudo)) return [];
   return crudo
     .filter((g): g is GiroCrudo => typeof g === 'object' && g !== null)
     .map((g) => {
-      const codigoTxt = typeof g.codigo === 'string' || typeof g.codigo === 'number' ? String(g.codigo) : null
-      const categoriaTxt = typeof g.categoriaTributaria === 'string' ? g.categoriaTributaria : null
+      const codigoTxt = typeof g.codigo === 'string' || typeof g.codigo === 'number' ? String(g.codigo) : null;
+      const categoriaTxt = typeof g.categoriaTributaria === 'string' ? g.categoriaTributaria : null;
       return {
         giro: comoTextoONull(g.descripcion),
         codigo: codigoTxt && /^\d+$/.test(codigoTxt) ? Number(codigoTxt) : null,
         categoria: categoriaTxt === '1' || categoriaTxt === '2' ? Number(categoriaTxt) : null,
         afectaIva: g.indicadorAfectoIva == null ? null : String(g.indicadorAfectoIva).toUpperCase() === 'S',
-      }
-    })
+      };
+    });
 }
 
 /**
@@ -99,6 +99,13 @@ function parsearActividades(crudo: unknown): ActividadEconomica[] {
  * `RecursoNoEncontrado` si `registrado` es `false` — la propia API lo dice
  * explícito, a diferencia del CGI viejo que había que inferirlo de campos
  * ausentes.
+ *
+ * Se exige `registrado === true` explícito (no basta con `!== false`): una
+ * página de mantención, un error `{codigo, mensaje}` u otro JSON del SII que
+ * no sea este informe no trae `registrado` en absoluto, y sin este chequeo se
+ * habría colado como una consulta válida con todo en `null` — exactamente lo
+ * que `MARCA_INFORME` evitaba en la versión HTML: un fallo del portal
+ * indistinguible de un dato real.
  */
 export function parsearSituacionTributaria(cruda: unknown, rutPedido: string): SituacionTributaria {
   if (typeof cruda !== 'object' || cruda === null) {
@@ -108,6 +115,9 @@ export function parsearSituacionTributaria(cruda: unknown, rutPedido: string): S
 
   if (r.registrado === false) {
     throw new RecursoNoEncontrado(`El SII no tiene datos para el RUT ${rutPedido}.`);
+  }
+  if (r.registrado !== true) {
+    throw new Error('El SII no devolvió el informe de situación tributaria esperado (sin `registrado`).');
   }
 
   return {
@@ -151,32 +161,50 @@ export async function consultarSituacionTributaria(
 
 // --- Transporte real --------------------------------------------------------
 
+// La versión CGI vieja medía ~25% de fallos TLS intermitentes contra
+// zeus.sii.cl y reintentaba 3 veces. No hay medición equivalente todavía para
+// www2.sii.cl, pero el reintento es barato (GET y POST idempotente acá, sin
+// side effects del lado del SII) y no cuesta nada conservarlo por las dudas.
+const INTENTOS_CONEXION = 3;
+
 async function fetchConTimeout(url: string, init: RequestInit): Promise<Response> {
-  try {
-    return await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
-  } catch (e) {
-    const causa = (e as Error)?.name === 'TimeoutError' ? 'expiró el tiempo de espera' : 'falló la conexión';
-    throw new Error(`No se pudo consultar el SII: ${causa}.`);
+  let ultimo: unknown;
+  for (let intento = 1; intento <= INTENTOS_CONEXION; intento++) {
+    try {
+      return await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    } catch (e) {
+      ultimo = e;
+      // Un timeout no se reintenta: si el portal tardó más de TIMEOUT_MS,
+      // pedirle lo mismo dos veces más sólo suma esa espera de nuevo.
+      if ((e as Error)?.name === 'TimeoutError') break;
+    }
   }
+  const causa = (ultimo as Error)?.name === 'TimeoutError' ? 'expiró el tiempo de espera' : `falló la conexión tras ${INTENTOS_CONEXION} intento(s)`;
+  throw new Error(`No se pudo consultar el SII: ${causa}.`);
 }
 
 export function transporteFetch(): TransporteSituacion {
   return {
     async recaptchaHabilitado(): Promise<boolean> {
       const resp = await fetchConTimeout(URL_RECAPTCHA_KEY, { method: 'GET' });
+      // Un fallo acá (status o JSON) es un error genérico reintentable, NO
+      // "reCAPTCHA activo": eso último sólo lo dice `enable === true`. Tratar
+      // un 500 transitorio del endpoint de key como reCAPTCHA activo reporta
+      // al consumidor un estado permanente ("el SII lo activó") sobre lo que
+      // en realidad es "el portal falló, reintentá".
       if (!resp.ok) {
-        // Un fallo acá es indicio de que el SII cambió esta ruta también: se
-        // trata como reCAPTCHA activo (falla cerrado) en vez de asumir que
-        // sigue apagado y arriesgar mandar un token vacío al SII.
-        return true;
+        throw new Error(`El SII respondió ${resp.status} a la consulta de reCAPTCHA.`);
       }
       let cuerpo: { enable?: unknown };
       try {
         cuerpo = (await resp.json()) as { enable?: unknown };
       } catch {
-        return true;
+        throw new Error('El SII no devolvió un JSON válido para la consulta de reCAPTCHA.');
       }
-      return cuerpo.enable !== false;
+      if (typeof cuerpo.enable !== 'boolean') {
+        throw new Error('El SII devolvió un `enable` de reCAPTCHA con forma inesperada.');
+      }
+      return cuerpo.enable;
     },
     async consultarDatos(rut: string, dv: string): Promise<unknown> {
       const resp = await fetchConTimeout(URL_CONSULTA, {
