@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createHash } from 'crypto';
+import { claveEstable } from '../../idempotenciaEscritura';
 import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
@@ -112,7 +113,7 @@ export function registrarRutasBhe(
     // Con folio (emisión real) se usa ese. Sin folio (previsualización o fallo)
     // se agrega un hash corto del documento, así dos previsualizaciones
     // distintas al mismo receptor+total no colisionan en la traza.
-    const hashDoc = createHash('sha256').update(JSON.stringify(params)).digest('hex').slice(0, 8);
+    const hashDoc = createHash('sha256').update(claveEstable(params)).digest('hex').slice(0, 8);
     const referencia = `bhe:${respBody?.folio ?? `${d.receptor_rut}-${total}-${hashDoc}`}`;
     if (respBody?.ok && d.confirmar) {
       resp.auditoria = { efecto: 'ejecutado', referencia };

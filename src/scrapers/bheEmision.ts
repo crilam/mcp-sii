@@ -109,11 +109,16 @@ function textoPlano(html: string): string {
     .trim();
 }
 
-// Un monto del SII: "$ 2.043.689" o "2.043.689". Devuelve null si no aparece.
+// Un monto del SII que viene PEGADO a su etiqueta: "Total Honorarios: $ 2.043.689".
+// Exige el `$` inmediatamente después de la etiqueta (los montos del portal lo
+// traen), para NO tomar un número de otro campo por proximidad si el layout
+// cambia. Ante la duda devuelve null —que se lee como "no se pudo leer"— en vez
+// de una cifra equivocada sobre la que el usuario confirmaría una emisión.
 function montoTras(texto: string, etiquetas: RegExp): number | null {
   const m = etiquetas.exec(texto);
   if (!m) return null;
-  const n = /\$?\s*([\d.]+)/.exec(texto.slice(m.index + m[0].length, m.index + m[0].length + 60));
+  const despues = texto.slice(m.index + m[0].length, m.index + m[0].length + 18);
+  const n = /^\s*:?\s*\$\s*([\d]{1,3}(?:\.[\d]{3})*|\d+)/.exec(despues);
   if (!n) return null;
   return parseInt(n[1].replace(/\./g, ''), 10);
 }

@@ -131,6 +131,16 @@ describe('BheEmisionScraper.emitir — dry-run (confirmar:false)', () => {
     await expect(scraper.emitir(PARAMS, false)).rejects.toBeInstanceOf(LimitacionConocida);
   });
 
+  // El bloqueante del review: un monto de OTRO campo, lejos de la etiqueta, no
+  // se debe tomar. Preview con "Total Honorarios" sin $ pegado y otro número
+  // lejos → el monto queda null (no una cifra equivocada), y sin bruto ni
+  // líquido legibles la previsualización se rechaza.
+  it('no toma un monto lejano de otro campo (falla en vez de mentir)', async () => {
+    const rara = '<html><body>Total Honorarios (ver detalle abajo) muchas palabras aca 999 y despues Retención sin signo</body></html>';
+    const { scraper } = armar({ paso3: rara });
+    await expect(scraper.emitir(PARAMS, false)).rejects.toBeInstanceOf(LimitacionConocida);
+  });
+
   it('valida las líneas antes de tocar el SII', async () => {
     const { scraper, http } = armar();
     await expect(scraper.emitir({ ...PARAMS, lineas: [] }, false)).rejects.toThrow(/al menos una línea/);
