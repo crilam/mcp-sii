@@ -79,10 +79,23 @@ const MAX_LINEAS = 4;
 
 // --- parsing ---------------------------------------------------------------
 
+// El portal arma parte de sus formularios con document.write('<input ...>'),
+// así que esos campos no están como tags reales: se los des-escapa antes de
+// parsear (`<\/` → `</`, `\'` → `'`). Verificado en el form de retención de BHE,
+// que trae TipoEmision y sin_destinatario sólo por esta vía.
+// Riesgo asumido: el des-escape corre sobre TODO el HTML, no sólo dentro de
+// document.write, así que strings de JS con '<input' fabrican "tags" ruido.
+// Los names truncados que eso produce ('desc_prestacion_'+i) se filtran en
+// parsearCamposPagina.
+function desescaparDocumentWrite(html: string): string {
+  return html.replace(/<\\\//g, '</').replace(/\\'/g, "'").replace(/\\"/g, '"');
+}
+
 /** Todos los inputs/selects con name del HTML, con su value (crudos del server). */
 export function parsearCamposForm(html: string): Record<string, string> {
+  const limpio = desescaparDocumentWrite(html);
   const campos: Record<string, string> = {};
-  for (const m of html.matchAll(/<(?:input|select|textarea)\b[^>]*>/gi)) {
+  for (const m of limpio.matchAll(/<(?:input|textarea)\b[^>]*>/gi)) {
     const tag = m[0];
     const name = /name=["']?([A-Za-z0-9_]+)/i.exec(tag)?.[1];
     if (!name) continue;
@@ -93,6 +106,53 @@ export function parsearCamposForm(html: string): Record<string, string> {
     if (tipo === 'radio' && !/\bchecked\b/i.test(tag)) continue;
     campos[name] = value;
   }
+  // Selects: el value es el del <option selected>, o la primera option si
+  // ninguna lo está; una option sin atributo value usa su texto (semántica
+  // del navegador).
+  for (const s of limpio.matchAll(/<select\b[^>]*name=["']?([A-Za-z0-9_]+)[^>]*>([\s\S]*?)<\/select>/gi)) {
+    const options = [...s[2].matchAll(/<option\b([^>]*)>([^<]*)/gi)];
+    if (options.length === 0) { campos[s[1]] = ''; continue; }
+    const elegida = options.find(o => /\bselected\b/i.test(o[1])) ?? options[0];
+    const conValor = /value=(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(elegida[1]);
+    campos[s[1]] = conValor ? (conValor[1] ?? conValor[2] ?? conValor[3]) : elegida[2].trim();
+  }
+  return campos;
+}
+
+/** Los literales `xml_values['k'] = "v"` con que el server inyecta datos. */
+export function parsearXmlValues(html: string): Record<string, string> {
+  const valores: Record<string, string> = {};
+  for (const m of html.matchAll(/xml_values\['([A-Za-z0-9_]+)'\]\s*=\s*"([^"]*)"/g)) {
+    valores[m[1]] = m[2];
+  }
+  return valores;
+}
+
+// Los hidden que el portal crea por JS con CampoOculto("name", valor), donde
+// valor es xml_values['k'] o un literal. Sin ejecutarlos, el POST queda sin los
+// campos que el CGI siguiente exige (rut_arrastre y compañía).
+export function parsearCamposOcultosJs(html: string, xml?: Record<string, string>): Record<string, string> {
+  const valores = xml ?? parsearXmlValues(html);
+  const campos: Record<string, string> = {};
+  for (const m of html.matchAll(/CampoOculto\(\s*"([A-Za-z0-9_]+)"\s*,\s*(?:xml_values\['([A-Za-z0-9_]+)'\]|"([^"]*)")\s*\)/g)) {
+    campos[m[1]] = m[2] !== undefined ? (valores[m[2]] ?? '') : m[3];
+  }
+  return campos;
+}
+
+// La vista completa de un paso del wizard: tags reales + hidden creados por JS
+// (CampoOculto pisa al tag si ambos existen, igual que en el DOM). Se recorta
+// al form `formulario` cuando existe: las páginas traen un segundo form
+// (`hidden_formulario`) cuyos campos el navegador NO postea con el principal.
+export function parsearCamposPagina(html: string): Record<string, string> {
+  const m = /<form[^>]*name=["']?formulario["'\s>][\s\S]*?<\/form>/i.exec(html);
+  const region = m ? m[0] : html;
+  // Los xml_values viven en el <head>, FUERA del form: se resuelven contra la
+  // página entera aunque los CampoOculto se busquen sólo dentro del form.
+  const campos = { ...parsearCamposForm(region), ...parsearCamposOcultosJs(region, parsearXmlValues(html)) };
+  // Names truncados que el des-escape recoge de JS con concatenación
+  // ('desc_prestacion_'+i): no existen en el form real.
+  for (const k of Object.keys(campos)) if (k.endsWith('_')) delete campos[k];
   return campos;
 }
 
@@ -144,13 +204,13 @@ export class BheEmisionScraper {
     let preview: PrevisualizacionBhe;
     try {
       this.validarParams(params);
-      const campos2 = await this.cargarFormulario(params.retieneReceptor !== false);
-      const camposLlenos = this.llenarFormulario(campos2, params);
+      const { campos: campos2, html: html2 } = await this.cargarFormulario(params.retieneReceptor !== false);
+      const camposLlenos = this.llenarFormulario(campos2, params, html2);
       const previewHtml = await this.http.postForm(PASO3_URL, camposLlenos, { charset: 'latin1' });
       preview = this.leerPrevisualizacion(previewHtml, params);
       // Los campos del paso 3 (los que el server devolvió en la previsualización)
       // son los que el paso 4 reenvía. Se parsean del HTML real, no se inventan.
-      camposPaso3 = parsearCamposForm(previewHtml);
+      camposPaso3 = parsearCamposPagina(previewHtml);
     } catch (e) {
       throw marcarSeguro(e as Error);
     }
@@ -211,7 +271,7 @@ export class BheEmisionScraper {
 
   // Pasos 1 y 2: valida que el contribuyente pueda emitir, y trae el formulario
   // con TODOS sus campos (defaults del server incluidos).
-  private async cargarFormulario(retieneReceptor: boolean): Promise<Record<string, string>> {
+  private async cargarFormulario(retieneReceptor: boolean): Promise<{ campos: Record<string, string>; html: string }> {
     const h1 = await this.http.get(PASO1_URL, { modo: '1' });
     if (ES_LOGIN.test(h1)) {
       throw new Error('La sesión del SII no quedó activa para el portal de BHE (rebotó al login). Reintentá.');
@@ -223,27 +283,59 @@ export class BheEmisionScraper {
         `El SII no habilitó la emisión de BHE para este RUT: ${textoPlano(h1).slice(0, 250)}`);
     }
 
+    // El form de retención agrega por JS dos hidden que el paso 2 EXIGE:
+    // rut_arrastre/dv_arrastre (sin ellos el CGI responde "I015: host no
+    // definido"). Sus valores vienen como literales xml_values en el HTML.
+    // Verificado contra el DOM real: el POST del navegador lleva exactamente
+    // rut_arrastre, dv_arrastre, sin_destinatario y OptTipoRetencion
+    // (TipoEmision viaja disabled y no se envía).
+    const rutAut = /xml_values\['rut_autentificado'\]\s*=\s*"(\d+)"/.exec(h1);
+    const dvAut = /xml_values\['dv_autentificado'\]\s*=\s*"([\dkK])"/.exec(h1);
+    if (!rutAut || !dvAut) {
+      throw new Error('El paso 1 de la emisión de BHE no trajo el RUT autenticado (xml_values), no se puede continuar.');
+    }
     const h2 = await this.http.postForm(PASO2_URL, {
+      rut_arrastre: rutAut[1],
+      dv_arrastre: dvAut[1],
+      sin_destinatario: 'NO',
       OptTipoRetencion: retieneReceptor ? 'RETRECEPTOR' : 'RETCONTRIBUYENTE',
     }, { charset: 'latin1' });
     if (ES_LOGIN.test(h2)) {
       throw new Error('La sesión del SII se cayó al cargar el formulario de la boleta. Reintentá.');
     }
-    const campos = parsearCamposForm(h2);
-    // El formulario real trae el RUT del emisor y el `tiempo` del server. Si no
-    // están, esto no es el formulario y no se puede seguir.
-    if (!campos.rut_arrastre || !campos.tiempo) {
+    // Tags reales + hidden que el JS del portal crea (CampoOculto/xml_values):
+    // el POST del navegador lleva exactamente esa unión, verificado contra el
+    // DOM real del formulario.
+    const campos = parsearCamposPagina(h2);
+    // El formulario real trae el RUT del emisor como hidden. Si no está, esto
+    // no es el formulario y no se puede seguir.
+    if (!campos.rut_arrastre) {
       throw new Error(
-        `El portal no devolvió el formulario de emisión esperado (sin ${!campos.rut_arrastre ? 'rut_arrastre' : 'tiempo'}). `
+        `El portal no devolvió el formulario de emisión esperado (sin rut_arrastre). `
         + `Respondió: ${textoPlano(h2).slice(0, 250)}`);
     }
-    return campos;
+    return { campos, html: h2 };
   }
 
   // Propaga los campos del server y sobreescribe SÓLO lo que aporta el emisor.
-  private llenarFormulario(campos: Record<string, string>, params: EmitirBheParams): Record<string, string> {
+  private llenarFormulario(campos: Record<string, string>, params: EmitirBheParams, html: string): Record<string, string> {
     const { rut, dv } = partirRut(params.receptor.rut, 'RUT del receptor');
     const llenos: Record<string, string> = { ...campos };
+
+    // El domicilio del emisor lo llena el JS del portal desde arr_direcciones
+    // (el navegador postea cbo_domicilio con el id de la dirección). Con una
+    // sola dirección se toma la primera; el CGI exige el campo.
+    const xml = parsearXmlValues(html);
+    const dir = (k: string) => new RegExp(`arr_direcciones\\['${k}1'\\]\\s*=\\s*"([^"]*)"`).exec(html)?.[1] ?? '';
+    if (!llenos.cbo_domicilio) llenos.cbo_domicilio = dir('iddir');
+    if (!llenos.txt_telefono) llenos.txt_telefono = dir('fono');
+    if (!llenos.txt_fax) llenos.txt_fax = dir('fax');
+
+    // Los combos de fecha se arman por JS y el HTML no trae selected: default
+    // fecha actual del server (misma que preselecciona el navegador).
+    if (!llenos.cbo_dia_boleta) llenos.cbo_dia_boleta = xml['dia_actual'] ?? '';
+    if (!llenos.cbo_mes_boleta) llenos.cbo_mes_boleta = xml['mes_actual'] ?? '';
+    if (!llenos.cbo_anio_boleta) llenos.cbo_anio_boleta = xml['anio_actual'] ?? '';
 
     llenos.sin_destinatario = 'NO';
     llenos.txt_rut_destinatario = rut;
@@ -275,16 +367,26 @@ export class BheEmisionScraper {
       throw new Error('La sesión del SII se cayó al previsualizar la boleta. Reintentá.');
     }
     const texto = textoPlano(html);
-    // El paso 3 devuelve el FORMULARIO de vuelta cuando rechaza (mismo patrón
-    // que mipyme): si sigue pidiendo los datos en vez de mostrar la boleta, es
-    // un rechazo con motivo en el texto.
-    if (/OptTipoRetencion|desc_prestacion_1/.test(html) && !/[Vv]ista [Pp]revia|[Cc]onfirmar|[Tt]otal\s+[Hh]onorarios/i.test(texto)) {
+    // La previsualización real no es un rechazo cuando trae el borrador ("ESTE
+    // ES UN BORRADOR") o los montos como xml_values. Si en cambio devuelve el
+    // FORMULARIO pidiendo los datos de nuevo, es un rechazo con motivo en el
+    // texto (mismo patrón que mipyme).
+    const esBorrador = /ESTE ES UN BORRADOR|Monto_Boleta/i.test(html);
+    if (!esBorrador && /OptTipoRetencion|desc_prestacion_1/.test(html)) {
       throw new EscrituraRechazadaPorSii(
         `El SII rechazó los datos de la boleta: ${texto.slice(0, 300)}`);
     }
-    const bruto = montoTras(texto, /Total\s+Honorarios[^:$]*:?/i);
-    const retencion = montoTras(texto, /Retenci[oó]n[^:$]*:?/i);
-    const liquido = montoTras(texto, /L[ií]quido[^:$]*:?/i);
+    // Los montos que calculó el SII viajan como xml_values (el layout visible
+    // se arma por JS): Monto_Boleta/Monto_Retencion/Monto_Liquido, enteros en
+    // pesos dentro de formatMiles("..."). Fallback al texto visible por si el
+    // portal cambia.
+    const montoXml = (k: string) => {
+      const m = new RegExp(`xml_values\\['${k}'\\]\\s*=\\s*formatMiles\\("(\\d+)"`).exec(html);
+      return m ? parseInt(m[1], 10) : null;
+    };
+    const bruto = montoXml('Monto_Boleta') ?? montoTras(texto, /Total\s+Honorarios[^:$]*:?/i);
+    const retencion = montoXml('Monto_Retencion') ?? montoTras(texto, /Retenci[oó]n[^:$]*:?/i);
+    const liquido = montoXml('Monto_Liquido') ?? montoTras(texto, /L[ií]quido[^:$]*:?/i);
     // La previsualización sin ningún monto legible no se entrega como si
     // estuviera bien: el consumidor va a confirmar una emisión sobre esos números.
     if (bruto === null && liquido === null) {
