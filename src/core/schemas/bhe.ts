@@ -67,3 +67,15 @@ export const schemaEmitirBhe = {
     .describe('false (default): PREVISUALIZA con los montos que calcula el SII, sin emitir. true: EMITE la boleta — acto tributario REAL e IRREVERSIBLE que notifica al receptor.'),
 };
 
+// --- Anulación (ronda 11, ESCRITURA) -----------------------------------------
+export const schemaAnularBhe = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  folio: z.number().int().positive().describe('Folio (número) de la boleta emitida a anular.'),
+  causa: z.union([z.literal(1), z.literal(2), z.literal(3)])
+    .describe('Causa de la anulación según el portal: 1 = no se efectuó el pago de los servicios, '
+      + '2 = no se efectuó la prestación de servicios, 3 = error en la digitación.'),
+  confirmar: z.boolean().default(false)
+    .describe('false (default): PREVISUALIZA la anulación (muestra la boleta que se anularía) sin anular. '
+      + 'true: ANULA la boleta — acto tributario REAL e IRREVERSIBLE.'),
+};
+

@@ -4,7 +4,8 @@ import { RegistroSesiones } from '../registroSesiones';
 import { envolverParaMcp } from '../erroresSesion';
 import * as core from '../core/bhe';
 import * as coreEmision from '../core/bheEmision';
-import { schemaResumen, schemaMes, schemaEmitirBhe } from '../core/schemas/bhe';
+import * as coreAnulacion from '../core/bheAnulacion';
+import { schemaResumen, schemaMes, schemaEmitirBhe, schemaAnularBhe } from '../core/schemas/bhe';
 
 export function registerBheTools(server: McpServer, registro: RegistroSesiones<SessionManager>): void {
   server.tool(
@@ -53,5 +54,17 @@ export function registerBheTools(server: McpServer, registro: RegistroSesiones<S
       retieneReceptor: args.retiene_receptor,
       fecha: args.fecha,
     }, args.confirmar))
+  );
+
+  server.tool(
+    'sii_bhe_anular',
+    'ANULA una boleta de honorarios electrónica (BHE) emitida, por folio. ES UNA ESCRITURA: con ' +
+    'confirmar=true es un ACTO TRIBUTARIO REAL E IRREVERSIBLE. POR DEFECTO (confirmar ausente o ' +
+    'false) NO anula: devuelve la previsualización del portal con los datos de la boleta que se ' +
+    'anularía, para revisarlos. Mostrale siempre esa previsualización al usuario y pedí su ' +
+    'autorización explícita antes de pasar confirmar=true; nunca lo uses para probar. La causa es ' +
+    'obligatoria: 1 = no se pagó el servicio, 2 = no se prestó el servicio, 3 = error en la digitación.',
+    schemaAnularBhe,
+    async (args) => envolverParaMcp(() => coreAnulacion.anularBhe(registro, args.rut, args.folio, args.causa, args.confirmar))
   );
 }
