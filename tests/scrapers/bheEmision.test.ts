@@ -12,7 +12,9 @@ const MockSession = SessionManager as jest.MockedClass<typeof SessionManager>;
 
 // --- fixtures sintéticas, con las formas relevadas del portal ---------------
 
-const PASO1_OK = '<html><form name="formulario" method="post" action="TMBECN_PresentaDatosBoleta.cgi">'
+const PASO1_OK = '<html><script>var xml_values = new Array(); '
+  + 'xml_values[\'rut_autentificado\'] = "11111111"; xml_values[\'dv_autentificado\'] = "1";</script>'
+  + '<form name="formulario" method="post" action="TMBECN_PresentaDatosBoleta.cgi">'
   + '<input name="OptTipoRetencion" type="radio" value="RETRECEPTOR">'
   + '<input name="OptTipoRetencion" type="radio" value="RETCONTRIBUYENTE" checked></form></html>';
 
@@ -121,9 +123,9 @@ describe('BheEmisionScraper.emitir — dry-run (confirmar:false)', () => {
     await expect(scraper.emitir(PARAMS, false)).rejects.toThrow(/sesión.*login|login/i);
   });
 
-  it('un paso 2 sin el formulario esperado (sin tiempo) falla explícito', async () => {
-    const { scraper } = armar({ paso2: '<html><input name="rut_arrastre" value="1"></html>' });
-    await expect(scraper.emitir(PARAMS, false)).rejects.toThrow(/tiempo/);
+  it('un paso 2 sin el formulario esperado (sin rut_arrastre) falla explícito', async () => {
+    const { scraper } = armar({ paso2: '<html><body>Sr. Contribuyente: no ha sido posible</body></html>' });
+    await expect(scraper.emitir(PARAMS, false)).rejects.toThrow(/rut_arrastre/);
   });
 
   it('una previsualización sin montos legibles no se entrega', async () => {
