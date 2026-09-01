@@ -46,6 +46,7 @@ async function main() {
         console.log(`\n  BOLETA EMITIDA. Folio: ${r.folio ?? 'no legible — confirmar con la lectura de emitidas'}`);
         console.log(`\n  Detalle:\n  ${r.detalle.slice(0, 600)}`);
       } else {
+        console.log(`  Tipo retención (SII): ${r.tipoRetencion ?? 'no legible'}`);
         console.log(`\n  Detalle de la previsualización:\n  ${r.detalle.slice(0, 600)}`);
         console.log('\n  NO SE EMITIÓ NADA. Para emitir: BHE_CONFIRMAR=SI.');
       }
