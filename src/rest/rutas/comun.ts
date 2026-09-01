@@ -20,6 +20,11 @@ import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeC
 // `camposCredencial`: `base64` sin `-w0` corta la salida en líneas, y sin este
 // saneo el mismo certificado sería válido en las rutas de BHE e inválido acá.
 // Una inconsistencia así es de las peores de diagnosticar desde afuera.
+// Código de error del contrato para LimitacionConocida. Las rutas de escritura
+// lo comparan para NO auditar como "fallido" el rechazo de la red
+// anti-doble-click: compartido para que no diverja del que arma `ejecutar`.
+export const ERROR_LIMITE_CONOCIDO = 'LIMITE_CONOCIDO';
+
 export const zodCredencialCert = {
   certificado_base64: z.string().min(1)
     .transform(s => s.replace(/\s+/g, ''))
@@ -181,7 +186,7 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
     // Va después de RecursoNoEncontrado a propósito: es su clase madre, así que
     // el orden decide, y el caso más específico tiene que ganar.
     if (e instanceof LimitacionConocida) {
-      return { status: 200, body: { ok: false, error: 'LIMITE_CONOCIDO', detalle: e.message } };
+      return { status: 200, body: { ok: false, error: ERROR_LIMITE_CONOCIDO, detalle: e.message } };
     }
     // El RUT ya tiene demasiadas sesiones abiertas en el SII. A diferencia de los
     // dos de arriba, esto SÍ se arregla reintentando —igual que ERROR—, así que

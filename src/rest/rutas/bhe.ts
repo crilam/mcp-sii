@@ -6,9 +6,10 @@ import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/bhe';
 import * as coreEmision from '../../core/bheEmision';
-import { schemaResumen, schemaMes, schemaPdf, schemaEmitirBhe } from '../../core/schemas/bhe';
+import * as coreAnulacion from '../../core/bheAnulacion';
+import { schemaResumen, schemaMes, schemaPdf, schemaEmitirBhe, schemaAnularBhe } from '../../core/schemas/bhe';
 import { ejecutorPara } from '../ejecutorPassThrough';
-import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from './comun';
+import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, ERROR_LIMITE_CONOCIDO } from './comun';
 
 // Las tres aceptan clave tributaria O certificado digital: las dos autentican y
 // las dos producen el cookie jar que estas consultas necesitan.
@@ -16,6 +17,7 @@ const zodResumen = conCredencial(schemaResumen);
 const zodMes = conCredencial(schemaMes);
 const zodPdf = conCredencial(schemaPdf);
 const zodEmitir = conCredencial(schemaEmitirBhe);
+const zodAnular = conCredencial(schemaAnularBhe);
 
 export function registrarRutasBhe(
   rutas: Map<string, RutaHandler>,
@@ -119,7 +121,27 @@ export function registrarRutasBhe(
       resp.auditoria = { efecto: 'ejecutado', referencia };
     } else if (respBody?.ok) {
       resp.auditoria = { efecto: 'simulado', referencia };
-    } else if (d.confirmar && respBody?.error !== 'LIMITE_CONOCIDO') {
+    } else if (d.confirmar && respBody?.error !== ERROR_LIMITE_CONOCIDO) {
+      resp.auditoria = { efecto: 'fallido', referencia };
+    }
+    return resp;
+  });
+
+  // confirmar:false PREVISUALIZA la anulación (muestra qué boleta se anularía);
+  // confirmar:true ANULA (irreversible). Mismo guardrail que la emisión.
+  rutas.set('POST /v1/bhe/anular', async body => {
+    const parseo = zodAnular.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const d = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, d.rut, credencialDe(d));
+    const resp = await ejecutar(() => coreAnulacion.anularBhe(ejecutor, d.rut, d.folio, d.causa, d.confirmar));
+    const respBody = resp.body as { ok?: boolean; error?: string };
+    const referencia = `bhe-anulacion:${d.folio}`;
+    if (respBody?.ok && d.confirmar) {
+      resp.auditoria = { efecto: 'ejecutado', referencia };
+    } else if (respBody?.ok) {
+      resp.auditoria = { efecto: 'simulado', referencia };
+    } else if (d.confirmar && respBody?.error !== ERROR_LIMITE_CONOCIDO) {
       resp.auditoria = { efecto: 'fallido', referencia };
     }
     return resp;

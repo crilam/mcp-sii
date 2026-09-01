@@ -692,10 +692,13 @@ Emite una BHE recorriendo la cadena CGI del portal (`TMBECN_*`). **Con `confirma
 | Endpoint | Tool | Body |
 |---|---|---|
 | **`POST /v1/bhe/emitir`** | `sii_bhe_emitir` | `receptor_rut, receptor_nombre, lineas[{descripcion,valor}], retiene_receptor?, fecha?, confirmar?` |
+| **`POST /v1/bhe/anular`** | `sii_bhe_anular` | `folio, causa (1\|2\|3), confirmar?` |
 
-`retiene_receptor` (default true) = la retención la efectúa la empresa receptora. Hasta 4 líneas. El estado del wizard viaja en campos ocultos del portal (incluido `tiempo`, anti-replay) que el servicio propaga sin regenerar. Los valores de las líneas se mandan como entero sin separador de miles (pendiente de verificar contra una emisión real que el CGI lo acepte así). Guardrail: dry-run (pasos 1→3) + red anti-doble-click (in-process; una boleta repetida en <60 s se rechaza) + auditoría (efecto/referencia, sólo REST). Si la sesión se cae EN el paso que emite, la respuesta lo dice como AMBIGUO (la boleta pudo o no emitirse; verificar con la lectura de emitidas) y NO libera la reserva.
+`retiene_receptor` (default true) = la retención la efectúa la empresa receptora. Hasta 4 líneas. El estado del wizard viaja en campos ocultos del portal que el servicio reconstruye del HTML (incluidos los que el JS crea con `CampoOculto`/`xml_values`). `fecha` (AAAA-MM-DD, opcional) hasta el día actual — el SII rechaza fechas futuras. La previsualización devuelve `tipoRetencion` con lo que el SII entendió: revisarlo antes de confirmar. Guardrail: dry-run (pasos 1→3) + red anti-doble-click (in-process; una boleta repetida en <60 s se rechaza) + auditoría (efecto/referencia, sólo REST). Si la sesión se cae EN el paso que emite, la respuesta lo dice como AMBIGUO (la boleta pudo o no emitirse; verificar con la lectura de emitidas) y NO libera la reserva. **Verificado con emisiones reales** (folios 341/342).
 
-Pendiente: anular/observar/reenviar (email) — necesitan una boleta emitida real para relevar sus formularios; quedan diseñados (ver el spec de R11).
+Anular: `causa` obligatoria — 1 = no se pagó el servicio, 2 = no se prestó el servicio, 3 = error en la digitación. `confirmar:false` previsualiza (muestra la boleta que se anularía); `confirmar:true` anula, acto **irreversible**. Mismos guardrails que la emisión. **Verificado con la anulación real del folio 341.**
+
+Pendiente: observar/reenviar (email) — quedan diseñados (ver el spec de R11).
 
 ---
 

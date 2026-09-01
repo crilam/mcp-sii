@@ -3,10 +3,12 @@ import { RegistroSesiones } from '../../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
 import * as core from '../../../src/core/bhe';
 import * as coreEmision from '../../../src/core/bheEmision';
+import * as coreAnulacion from '../../../src/core/bheAnulacion';
 import { LimitacionConocida, RecursoNoEncontrado } from '../../../src/erroresConsulta';
 
 jest.mock('../../../src/core/bhe');
 jest.mock('../../../src/core/bheEmision');
+jest.mock('../../../src/core/bheAnulacion');
 
 function armarRouter() {
   const rutas = new Map<string, Function>();
@@ -17,14 +19,48 @@ function armarRouter() {
 describe('registrarRutasBhe', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 6 rutas bajo /v1/bhe', () => {
+  it('registra las 7 rutas bajo /v1/bhe', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
       'POST /v1/bhe/resumen', 'POST /v1/bhe/resumen-recibidas',
       'POST /v1/bhe/list-emitidas',
       'POST /v1/bhe/list-recibidas', 'POST /v1/bhe/pdf',
-      'POST /v1/bhe/emitir',
+      'POST /v1/bhe/emitir', 'POST /v1/bhe/anular',
     ]);
+  });
+
+  describe('anular (R11)', () => {
+    const BODY = { rut: '11.111.111-1', clave: 'x', folio: 341, causa: 3 };
+
+    it('sin confirmar previsualiza y audita como simulado', async () => {
+      (coreAnulacion.anularBhe as jest.Mock).mockResolvedValue({ anulada: false, folio: 341, causa: 3 });
+      const r = await armarRouter().get('POST /v1/bhe/anular')!(BODY);
+      expect((r.body as any).ok).toBe(true);
+      expect(r.auditoria).toEqual({ efecto: 'simulado', referencia: 'bhe-anulacion:341' });
+      expect(coreAnulacion.anularBhe).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', 341, 3, false);
+    });
+
+    it('con confirmar:true anula y audita como ejecutado', async () => {
+      (coreAnulacion.anularBhe as jest.Mock).mockResolvedValue({ anulada: true, folio: 341, causa: 3 });
+      const r = await armarRouter().get('POST /v1/bhe/anular')!({ ...BODY, confirmar: true });
+      expect(r.auditoria).toEqual({ efecto: 'ejecutado', referencia: 'bhe-anulacion:341' });
+    });
+
+    it('un rechazo con confirmar:true se audita como fallido; el doble-click no', async () => {
+      (coreAnulacion.anularBhe as jest.Mock).mockRejectedValueOnce(new (require('../../../src/erroresConsulta').EscrituraRechazadaPorSii)('ya anulada'));
+      const r1 = await armarRouter().get('POST /v1/bhe/anular')!({ ...BODY, confirmar: true });
+      expect(r1.auditoria).toMatchObject({ efecto: 'fallido' });
+
+      (coreAnulacion.anularBhe as jest.Mock).mockRejectedValueOnce(new LimitacionConocida('ya en curso'));
+      const r2 = await armarRouter().get('POST /v1/bhe/anular')!({ ...BODY, confirmar: true });
+      expect(r2.auditoria).toBeUndefined();
+    });
+
+    it('una causa fuera de 1-3 es 400 sin llamar al core', async () => {
+      const r = await armarRouter().get('POST /v1/bhe/anular')!({ ...BODY, causa: 4 });
+      expect(r.status).toBe(400);
+      expect(coreAnulacion.anularBhe).not.toHaveBeenCalled();
+    });
   });
 
   describe('emitir (R11)', () => {
