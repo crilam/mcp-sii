@@ -169,10 +169,11 @@ export function parsearCamposOcultosJs(
     if (m[2] !== undefined) { poner(m[1], valores[m[2]] ?? ''); continue; }
     if (m[3] !== undefined) { poner(m[1], m[3]); continue; }
     // Variable JS simple (p.ej. CantidadFilas=2, que vive FUERA del form): se
-    // resuelve buscando su asignación literal en la página completa; si no
-    // aparece, se omite el campo antes que inventar un valor.
-    const asig = new RegExp(`(?:^|[^.\\w])${m[4]}\\s*=\\s*"?([\\w.]+)"?`).exec(pagina);
-    if (asig) poner(m[1], asig[1]);
+    // resuelve buscando su asignación literal en la página completa — la
+    // ÚLTIMA, porque estos CGI suelen inicializar en 0 y reasignar después.
+    // Si no aparece, se omite el campo antes que inventar un valor.
+    const asigs = [...pagina.matchAll(new RegExp(`(?:^|[^.\\w])${m[4]}\\s*=\\s*"?([\\w.]+)"?`, 'g'))];
+    if (asigs.length > 0) poner(m[1], asigs[asigs.length - 1][1]);
   }
   return campos;
 }
@@ -183,8 +184,10 @@ export function parsearCamposOcultosJs(
 // "host no definido" (--I047--) que los pasos anteriores sin sus hidden.
 export function parsearCamposConfirmacion(html: string): Record<string, string> {
   const campos = parsearCamposPagina(html);
-  for (const m of html.matchAll(/arr_detalle_boleta\['((?:desc|valor)_prestacion_\d+)'\]\s*=\s*(?:uppercase\(\s*)?"([^"]*)"/g)) {
-    campos[m[1]] = m[2];
+  for (const m of html.matchAll(/arr_detalle_boleta\['((?:desc|valor)_prestacion_\d+)'\]\s*=\s*(uppercase\(\s*)?"([^"]*)"/g)) {
+    // uppercase() se aplica igual que lo haría el JS del portal: el paso 4
+    // debe recibir lo mismo que postea el navegador.
+    campos[m[1]] = m[2] ? m[3].toUpperCase() : m[3];
   }
   return campos;
 }

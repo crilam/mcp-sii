@@ -5,10 +5,12 @@ import { SiiHttpClient } from '../http';
 import { BheEmisionScraper } from '../scrapers/bheEmision';
 import { cerrarSesionSii } from '../cerrarSesionSii';
 
-// PREVISUALIZA la boleta real del usuario (pasos 1→3, NO emite). Los montos que
-// imprime son los que calculó EL SII. La emisión real es una decisión aparte:
-// sólo con BHE_CONFIRMAR=SI en el entorno se ejecuta el paso 4 (acto tributario
-// REAL e irreversible, notifica al receptor).
+// Boleta de honorarios REAL por env. Por defecto PREVISUALIZA (pasos 1→3, NO
+// emite) e imprime los montos que calculó EL SII. Sólo con BHE_CONFIRMAR=SI se
+// ejecuta el paso 4: acto tributario REAL e irreversible que notifica al
+// receptor — por eso el flag es explícito y no un default, y conviene correr
+// el script con el env limpio (un BHE_CONFIRMAR heredado de otra corrida
+// emitiría de verdad).
 async function main() {
   const rut = process.env.SII_RUT!;
   const clave = process.env.SII_CLAVE!;

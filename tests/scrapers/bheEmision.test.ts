@@ -1,4 +1,4 @@
-import { BheEmisionScraper, parsearCamposForm, parsearXmlValues, parsearCamposOcultosJs, parsearCamposPagina, EmitirBheParams } from '../../src/scrapers/bheEmision';
+import { BheEmisionScraper, parsearCamposForm, parsearXmlValues, parsearCamposOcultosJs, parsearCamposPagina, parsearCamposConfirmacion, EmitirBheParams } from '../../src/scrapers/bheEmision';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
 import { EscrituraRechazadaPorSii, LimitacionConocida } from '../../src/erroresConsulta';
@@ -105,6 +105,37 @@ describe('parsearXmlValues / parsearCamposOcultosJs / parsearCamposPagina', () =
     expect(c.rut_arrastre).toBe('11111111');
     expect(c.dv_arrastre).toBe('1');
     expect(c.sin_destinatario).toBe('NO');
+  });
+
+  it('xml_values: uppercase() se aplica y las concatenaciones se resuelven', () => {
+    const x = parsearXmlValues(
+      "xml_values['nombre'] = uppercase(\"Orsan Sa\");\n"
+      + "xml_values['apellido'] = \"X\";\n"
+      + "xml_values['completo'] = xml_values['nombre'] +' '+ xml_values['apellido']\n");
+    expect(x.nombre).toBe('ORSAN SA');
+    expect(x.completo).toBe('ORSAN SA X');
+  });
+
+  it('selects armados por JS con restos de código quedan vacíos (no van al WAF)', () => {
+    const campos = parsearCamposForm(
+      '<select name="cbo_dia"><option value="\\"\'+">basura</option></select>');
+    expect(campos.cbo_dia).toBe('');
+  });
+
+  it('una variable JS reasignada usa la ÚLTIMA asignación', () => {
+    const c = parsearCamposOcultosJs(
+      'CantidadFilas=0\n CampoOculto("CantidadFilas",CantidadFilas);\n CantidadFilas=2\n');
+    expect(c.CantidadFilas).toBe('2');
+  });
+
+  it('las prestaciones de arr_detalle_boleta se expanden con uppercase aplicado', () => {
+    const c = parsearCamposConfirmacion(
+      "arr_detalle_boleta['desc_prestacion_1'] = uppercase(\"Dieta x\")\n"
+      + "arr_detalle_boleta['valor_prestacion_1'] = \"100\"\n"
+      + "arr_detalle_boleta['valor_prestacion_miles_1'] = formatMiles(\"100\",\".\")\n");
+    expect(c.desc_prestacion_1).toBe('DIETA X');
+    expect(c.valor_prestacion_1).toBe('100');
+    expect(c.valor_prestacion_miles_1).toBeUndefined();
   });
 
   it('la página completa: CampoOculto pisa al tag, excluye el otro form y los names truncados', () => {
