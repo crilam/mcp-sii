@@ -22,7 +22,8 @@ const FORM = '<html><script>var xml_values = new Array();'
   + '<script>document.formulario.txt_email.value = xml_values[\'email\'];</script>'
   + '</form></html>';
 
-const ENVIADA = '<html><body>La boleta ha sido enviada al correo indicado.</body></html>';
+// Texto REAL del portal tras un envío verificado (boleta 342, 2026-09-02).
+const ENVIADA = '<html><body>Sr Contribuyente La Boleta de Honorarios Electr&oacute;nica se envi&oacute; exitosamente</body></html>';
 const LOGIN = '<html>Ingresar Clave Tributaria IngresoRutClave</html>';
 
 function armar(r: { form?: string; envio?: string } = {}) {
@@ -65,6 +66,19 @@ describe('BheEmailScraper.enviar', () => {
     const { scraper, http } = armar();
     await expect(scraper.enviar(CB, 'no-valido', true)).rejects.toThrow(/no es válido/);
     expect(http.get).not.toHaveBeenCalled();
+  });
+
+  it('la ó llega como carácter latin1 decodificado y también cuenta como éxito', async () => {
+    const { scraper } = armar({ envio: '<html><body>La Boleta se envió exitosamente</body></html>' });
+    const r = await scraper.enviar(CB, undefined, true);
+    expect(r.enviado).toBe(true);
+  });
+
+  it('el form re-mostrado (con el label E-mail pero sin confirmación) es rechazo', async () => {
+    const { scraper } = armar({ envio: FORM });
+    const err = await scraper.enviar(CB, undefined, true).catch(e => e);
+    expect(err).toBeInstanceOf(EscrituraRechazadaPorSii);
+    expect(esSeguroDeLiberar(err)).toBe(false); // post-envío: la reserva se mantiene
   });
 
   it('la sesión caída en el paso que envía NO se marca segura', async () => {
