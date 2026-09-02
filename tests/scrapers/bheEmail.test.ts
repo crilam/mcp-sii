@@ -22,7 +22,8 @@ const FORM = '<html><script>var xml_values = new Array();'
   + '<script>document.formulario.txt_email.value = xml_values[\'email\'];</script>'
   + '</form></html>';
 
-const ENVIADA = '<html><body>La boleta ha sido enviada al correo indicado.</body></html>';
+// Texto REAL del portal tras un envío verificado (boleta 342, 2026-09-02).
+const ENVIADA = '<html><body>Sr Contribuyente La Boleta de Honorarios Electr&oacute;nica se envi&oacute; exitosamente</body></html>';
 const LOGIN = '<html>Ingresar Clave Tributaria IngresoRutClave</html>';
 
 function armar(r: { form?: string; envio?: string } = {}) {
