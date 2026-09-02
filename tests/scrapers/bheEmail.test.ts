@@ -68,6 +68,19 @@ describe('BheEmailScraper.enviar', () => {
     expect(http.get).not.toHaveBeenCalled();
   });
 
+  it('la ó llega como carácter latin1 decodificado y también cuenta como éxito', async () => {
+    const { scraper } = armar({ envio: '<html><body>La Boleta se envió exitosamente</body></html>' });
+    const r = await scraper.enviar(CB, undefined, true);
+    expect(r.enviado).toBe(true);
+  });
+
+  it('el form re-mostrado (con el label E-mail pero sin confirmación) es rechazo', async () => {
+    const { scraper } = armar({ envio: FORM });
+    const err = await scraper.enviar(CB, undefined, true).catch(e => e);
+    expect(err).toBeInstanceOf(EscrituraRechazadaPorSii);
+    expect(esSeguroDeLiberar(err)).toBe(false); // post-envío: la reserva se mantiene
+  });
+
   it('la sesión caída en el paso que envía NO se marca segura', async () => {
     const { scraper } = armar({ envio: LOGIN });
     const err = await scraper.enviar(CB, undefined, true).catch(e => e);

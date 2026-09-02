@@ -101,8 +101,11 @@ export class BheEmailScraper {
     // Sólo la frase de confirmación real cuenta como éxito: un patrón laxo
     // (p.ej. la palabra "e-mail" del label) matchearía el form re-mostrado.
     // La forma real del portal: "La Boleta de Honorarios Electrónica se envió
-    // exitosamente" — cubre "envió" (pretérito) y "enviada/enviado".
-    const exitoPositivo = /envi(?:ad\w*|[oó])\s+exitosam|enviad/i.test(texto2);
+    // exitosamente" (verificado con envíos reales). Se exige el par
+    // envió/enviada + "exitosam": "enviad" suelto matchearía textos que no
+    // confirman nada. El transporte ya decodifica latin1, así que la ó llega
+    // como carácter, no como entidad.
+    const exitoPositivo = /envi(?:ad\w*|[oó])\s+exitosam/i.test(texto2);
     if (hayNegacion || !exitoPositivo) {
       throw new EscrituraRechazadaPorSii(
         `El SII no confirmó el envío del email. Respondió: ${texto2.slice(0, 300)}`);
