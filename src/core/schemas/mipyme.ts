@@ -47,6 +47,49 @@ export const schemaDtePdf = {
     .describe('Código del documento, tal como lo devuelve list-dte-emitidos o list-dte-recibidos'),
 };
 
+// El respaldo XML pide las fechas OBLIGATORIAS, al revés que los listados: sin
+// rango, el portal devuelve todo el histórico y choca contra su propio tope de
+// 20 documentos por descarga en la primera llamada. Pedirlas explícitamente
+// evita una consulta al SII que se sabe de antemano que va a fallar.
+// No alcanza con el formato: `2026-02-31` y `2026-13-01` lo cumplen y NO son
+// fechas. Importa porque el troceo del respaldo hace aritmética con ellas —
+// `Date.parse` de una fecha imposible da NaN y `toISOString()` sobre NaN lanza
+// un RangeError sin nada que le diga al caller qué mandó mal. El round-trip a
+// ISO es lo que descarta el 31 de febrero: el Date normaliza al 3 de marzo y
+// deja de coincidir con lo pedido.
+const FechaRequerida = z.string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'La fecha va en formato YYYY-MM-DD')
+  // El `refine` corre AUNQUE el regex haya fallado —zod acumula los errores en
+  // vez de cortar—, así que acá puede llegar cualquier string. Sin el guard por
+  // NaN, `toISOString` lanza el mismo RangeError que este chequeo viene a
+  // evitar, sólo que ahora desde la validación.
+  .refine(f => {
+    const d = new Date(`${f}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === f;
+  }, 'La fecha tiene que existir en el calendario (ojo con el 31 de un mes de 30)');
+
+export const schemaRespaldoXml = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  empresa_rut: z.string().optional()
+    .describe('RUT de la empresa con dígito verificador. Si se omite, se resuelve solo si este RUT opera una única empresa en el portal.'),
+  origen: z.enum(['recibidos', 'emitidos']).default('recibidos')
+    .describe('Lado del respaldo: recibidos (default) o emitidos'),
+  fecha_desde: FechaRequerida.describe('Inicio del rango, YYYY-MM-DD'),
+  fecha_hasta: FechaRequerida.describe('Fin del rango, YYYY-MM-DD'),
+  tipo_dte: z.number().int().optional()
+    .describe('Filtrar por tipo: 33=factura, 34=exenta, 61=N.crédito, 56=N.débito, 52=guía, 46=F.compra'),
+  // El tope existe para que un rango ancho no se convierta en un barrido: el
+  // SII entrega 20 documentos por descarga, así que cada tramo extra es otra
+  // llamada al portal dentro de la misma request.
+  // Default 10 y no 24: cada tramo es una descarga con su pausa de ritmo, y la
+  // request retiene el lock de la empresa mientras dura. Con 24 el techo de
+  // latencia pasa de los dos minutos y todo lo demás sobre ese RUT responde
+  // SERVICIO_OCUPADO mientras tanto. Diez cubre un mes normal de sobra; quien
+  // necesite más lo pide explícitamente y sabe lo que eso cuesta.
+  max_tramos: z.number().int().min(1).max(48).default(10)
+    .describe('Máximo de descargas al SII para cubrir el rango (default 10). Cada tramo agrega ~2s de latencia y retiene el lock de la empresa.'),
+};
+
 export const schemaListBorradores = {
   rut: z.string().min(1).describe(RUT_DESC),
   // Los borradores cuelgan de la empresa ACTIVA de la sesión del portal. Sin

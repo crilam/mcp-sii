@@ -4,7 +4,7 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/mipyme';
-import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaListBorradores, schemaEmitirDte, schemaGuardarBorrador, paramsDocumento } from '../../core/schemas/mipyme';
+import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaRespaldoXml, schemaListBorradores, schemaEmitirDte, schemaGuardarBorrador, paramsDocumento } from '../../core/schemas/mipyme';
 import { ejecutorPara, ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCredencialCert } from './comun';
 
@@ -17,6 +17,15 @@ const zodListEmpresas = conCredencial(schemaListEmpresas);
 const zodListDteEmitidos = conCredencial(schemaListDteEmitidos);
 const zodListDteRecibidos = conCredencial(schemaListDteRecibidos);
 const zodDtePdf = conCredencial(schemaDtePdf);
+// El rango invertido se valida ACÁ y no sólo en el scraper: el scraper también
+// lo rechaza —es su invariante y no depende de quién lo llame—, pero desde allá
+// sale como Error genérico, y `ejecutar` lo devuelve como 200 con
+// `error:"ERROR"` y SIN detalle: el que pide no se entera de qué mandó mal, y
+// "ERROR" en este servicio significa "reintentá", que acá no va a funcionar
+// nunca. Validarlo en el schema lo convierte en 400 con el campo señalado.
+const zodRespaldoXml = conCredencial(schemaRespaldoXml).refine(
+  d => d.fecha_desde <= d.fecha_hasta,
+  { path: ['fecha_desde'], error: 'fecha_desde no puede ser posterior a fecha_hasta' });
 const zodListBorradores = conCredencial(schemaListBorradores);
 const zodEmitirDte = z.object(schemaEmitirDte).extend({
   ...zodCredencialCert,
@@ -94,6 +103,48 @@ export function registrarRutasMipyme(
         nombre_archivo: `mipyme-dte-${codigo.replace(/[^A-Za-z0-9]/g, '')}.pdf`,
         tamano_bytes: contenido.length,
         pdf_base64: contenido.toString('base64'),
+      };
+    });
+  });
+
+  // Respaldo XML de un rango. Devuelve el `SetDTE` CRUDO, sin parsear: es el
+  // documento firmado por el emisor, y cualquier reescritura —normalizar
+  // nombres, reordenar campos— invalidaría la firma que lo hace oponible. El
+  // consumidor parsea lo que necesite.
+  //
+  // A diferencia de dte-pdf, el XML NO va en base64: es texto, y el base64 sólo
+  // agregaría un paso de decodificación a los dos lados.
+  rutas.set('POST /v1/mipyme/respaldo-xml', async body => {
+    const parseo = zodRespaldoXml.safeParse(body);
+    if (!parseo.success) return badRequest(parseo.error);
+    const { rut, empresa_rut, origen, fecha_desde, fecha_hasta, tipo_dte, max_tramos } = parseo.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
+    return ejecutar(async () => {
+      const r = await core.respaldoXml(ejecutor, rut, {
+        empresaRut: empresa_rut,
+        origen: origen === 'emitidos' ? 'ENV' : 'RCP',
+        fechaDesde: fecha_desde,
+        fechaHasta: fecha_hasta,
+        tipoDte: tipo_dte,
+        maxTramos: max_tramos,
+      });
+      return {
+        empresa_rut: r.empresaRut,
+        origen,
+        fecha_desde: r.fechaDesde,
+        fecha_hasta: r.fechaHasta,
+        documentos: r.documentos,
+        content_type: 'application/xml',
+        // Un tramo por descarga del SII, cada uno un SetDTE válido por sí solo.
+        // No se concatenan: dos SetDTE pegados no son XML bien formado.
+        tramos: r.tramos.map(t => ({
+          fecha_desde: t.fechaDesde,
+          fecha_hasta: t.fechaHasta,
+          documentos: t.documentos,
+          nombre_archivo:
+            `mipyme-respaldo-${origen}-${r.empresaRut.replace(/[^0-9kK]/g, '')}-${t.fechaDesde}-${t.fechaHasta}.xml`,
+          xml: t.xml,
+        })),
       };
     });
   });

@@ -19,7 +19,11 @@ const SALIDA = process.env.RELEVO_SALIDA ?? '/tmp/relevo-mipyme-resto';
 const NOMBRE = (process.env.RELEVO_PERFIL ?? 'certificado') as NombrePerfil;
 const EMPRESA = process.env.RELEVO_EMPRESA;
 
-const AUTH_DESCARGA = 'https://www1.sii.cl/Portal001/auth.html';
+// `auth.html` —que es lo que enlaza el menú— NO es la página de la descarga: su
+// único contenido útil es un `window.location.href` a este CGI. Relevar el
+// `.html` daba un falso negativo, "el portal no ofrece XML", sobre un camino que
+// sí existe y que hoy usa `MipymeHttpScraper.respaldoXml`.
+const AUTH_DESCARGA = 'https://www1.sii.cl/cgi-bin/Portal001/auth.cgi';
 const SPA_BORRADORES = 'https://www4.sii.cl/mipymeinternetui/';
 
 async function main() {

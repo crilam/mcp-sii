@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<SetDTE>
+<DTE version="1.0" >
+	<Documento ID="S20260831T34F1">
+		<Encabezado>
+			<IdDoc><TipoDTE>34</TipoDTE><Folio>1</Folio><FchEmis>2026-08-31</FchEmis></IdDoc>
+			<Emisor><RUTEmisor>77777777-7</RUTEmisor><RznSoc>Emisor De Prueba</RznSoc><GiroEmis>Servicios</GiroEmis><Acteco>671210</Acteco></Emisor>
+			<Receptor><RUTRecep>33333333-3</RUTRecep></Receptor>
+			<Totales><MntNeto>0</MntNeto><MntExe>1000</MntExe><MntTotal>1000</MntTotal></Totales>
+		</Encabezado>
+		<Detalle><NroLinDet>1</NroLinDet><NmbItem>ITEM DE PRUEBA</NmbItem><QtyItem>1</QtyItem><PrcItem>1000</PrcItem><MontoItem>1000</MontoItem></Detalle>
+	</Documento>
+</DTE>
+<DTE version="1.0" >
+	<Documento ID="S20260831T34F2">
+		<Encabezado>
+			<IdDoc><TipoDTE>34</TipoDTE><Folio>2</Folio><FchEmis>2026-08-31</FchEmis></IdDoc>
+			<Emisor><RUTEmisor>77777777-7</RUTEmisor><RznSoc>Emisor De Prueba</RznSoc></Emisor>
+		</Encabezado>
+		<Detalle><NroLinDet>1</NroLinDet><NmbItem>OTRO ITEM</NmbItem><MontoItem>2000</MontoItem></Detalle>
+	</Documento>
+</DTE>
+</SetDTE>

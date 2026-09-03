@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { MipymeHttpScraper, BorradorMipyme, FiltrosDteEmitidos, DteEmitidosResult, FiltrosDteRecibidos, DteRecibidosResult, EmitirDteParams, PrevisualizacionDte, DteEmitido, BorradorGuardado } from '../scrapers/mipymeHttp';
+import { MipymeHttpScraper, BorradorMipyme, FiltrosDteEmitidos, DteEmitidosResult, FiltrosDteRecibidos, DteRecibidosResult, EmitirDteParams, PrevisualizacionDte, DteEmitido, BorradorGuardado, FiltrosRespaldoXml, RespaldoXmlResult } from '../scrapers/mipymeHttp';
 import { SiiHttpClient } from '../http';
 import { SessionManager, Empresa } from '../session';
 import { EjecutorSesion } from '../registroSesiones';
@@ -56,6 +56,17 @@ export async function dtePdf(
   return ejecutor.ejecutar(rut, async sesion => {
     const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
     return http.dtePdf(codigo, empresaRut);
+  });
+}
+
+export async function respaldoXml(
+  ejecutor: EjecutorSesion<SessionManager>,
+  rut: string,
+  filtros: FiltrosRespaldoXml
+): Promise<RespaldoXmlResult> {
+  return ejecutor.ejecutar(rut, async sesion => {
+    const http = new MipymeHttpScraper(new SiiHttpClient(sesion), sesion);
+    return http.respaldoXml(filtros);
   });
 }
 

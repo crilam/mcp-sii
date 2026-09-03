@@ -12,9 +12,17 @@
 // bloqueado, porque el bloqueo no sólo corta el relevamiento — deja al SERVICIO
 // sin poder consultar ese portal para los tenants reales.
 //
-// Este módulo es para los scripts de relevamiento y diagnóstico. Las consultas
-// que atienden a un tenant NO pasan por acá: son una por request y las serializa
-// `ColaPorClave`.
+// Este módulo es, sobre todo, para los scripts de relevamiento y diagnóstico:
+// casi todas las consultas que atienden a un tenant son UNA por request y las
+// serializa `ColaPorClave`, así que no necesitan ritmo propio.
+//
+// La excepción es `MipymeHttpScraper.respaldoXml`, que sí lo usa desde una ruta
+// REST. No es una violación de la regla sino su caso límite: el SII no entrega
+// más de 20 documentos por descarga, o sea que cubrir un rango obliga a varias
+// llamadas seguidas al mismo CGI DENTRO de una request — que es exactamente el
+// patrón que este módulo existe para amortiguar. El techo de tramos de esa ruta
+// es la otra mitad de la protección: la pausa evita el barrido rápido, el techo
+// evita el barrido largo.
 
 // Pausa por defecto entre llamadas de un barrido. Es deliberadamente lenta: el
 // portal del SII sirve a personas que hacen clic, y una llamada por segundo ya

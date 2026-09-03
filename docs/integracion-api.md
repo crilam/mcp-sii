@@ -512,6 +512,18 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
   Cada documento trae un **`codigo`**, que es un identificador interno del SII: no es el folio ni se deriva de la fila, y es el único parámetro que acepta el CGI de detalle.
 
+- **`POST /v1/mipyme/respaldo-xml`** — el XML firmado de los DTE de un rango. `rut`, `fecha_desde` y `fecha_hasta` (`AAAA-MM-DD`) son obligatorios; opcionales `empresa_rut`, `origen` (`recibidos` por defecto, o `emitidos`), `tipo_dte` y `max_tramos` (default 10).
+
+  Devuelve `tramos`: una lista donde cada elemento es **una descarga del SII**, con su `xml` crudo —`SetDTE` completo, sin base64 y sin reescribir, para no invalidar la firma del emisor—, su rango y su conteo de documentos. Los tramos **no** se concatenan: dos `SetDTE` pegados no son XML bien formado.
+
+  Hay más de un tramo porque **el SII no entrega más de 20 documentos por descarga**, y el tope lo aplica el servidor: cuando el rango lo excede se parte al medio y cada mitad se pide aparte. Cada tramo extra es otra llamada al portal dentro de la misma request, y por eso `max_tramos` la acota; si el rango necesitara más, la ruta falla pidiendo un rango más corto o un `tipo_dte` en vez de barrer. Un solo día con más de 20 documentos tampoco se puede partir por fecha: ahí falla diciéndolo, en lugar de devolver un respaldo incompleto.
+
+  **Es la ruta más lenta del servicio y conviene tratarla como tal.** Cada tramo son dos llamadas al portal más una pausa de ritmo: contá ~2 s por tramo, o sea hasta ~20 s con el `max_tramos` por defecto y más de un minuto si lo subís al máximo. Mientras dura retiene el lock de esa empresa, así que el resto de las consultas sobre el mismo RUT responde `SERVICIO_OCUPADO`. Poné el timeout del cliente por encima de eso, y preferí varias llamadas por mes antes que una por año. El body tampoco tiene techo declarado: son hasta `max_tramos` XML crudos en un solo JSON (los tramos medidos rondan los 130 KB cada uno).
+
+  Los dos fallos del troceo —rango que necesita más tramos que `max_tramos`, y día suelto con más de 20 documentos— vuelven como `LIMITE_CONOCIDO` **con `detalle`**, no como `ERROR`: son permanentes, el mensaje dice qué hacer, y `ERROR` significa "reintentá". El `detalle` incluye qué sub-rango sí se había descargado antes de cortar, para reintentar acotado en vez de repetir todo.
+
+  Es la fuente a usar para **procesar** documentos (clasificar gastos, conciliar): el XML trae el detalle línea a línea y el giro del emisor en campos. `dte-pdf` sirve para mirar un documento, no para parsearlo.
+
 - **`POST /v1/mipyme/emitir-dte`** — previsualización solamente.
 
 > **La emisión real no está disponible por REST.** `confirmar:true` se rechaza con `400 CONFIRMAR_NO_SOPORTADO`. Firmar un DTE requiere la clave del certificado, que hoy sólo se configura por variables de entorno del proceso — incompatible con credenciales por request. Con `confirmar:false` (el default) devolvés una previsualización con `emitido: false`, el resumen del documento y los campos del formulario. **Nada se emite ante el SII.**
