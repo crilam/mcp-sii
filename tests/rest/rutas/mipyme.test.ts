@@ -20,14 +20,92 @@ const RECEPTOR_MINIMO = {
 describe('registrarRutasMipyme', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 7 rutas bajo /v1/mipyme', () => {
+  it('registra las 8 rutas bajo /v1/mipyme', () => {
     const rutas = armarRouter();
     expect([...rutas.keys()]).toEqual([
       'POST /v1/mipyme/list-empresas', 'POST /v1/mipyme/list-dte-emitidos',
       'POST /v1/mipyme/list-dte-recibidos', 'POST /v1/mipyme/dte-pdf',
+      'POST /v1/mipyme/respaldo-xml',
       'POST /v1/mipyme/list-borradores', 'POST /v1/mipyme/emitir-dte',
       'POST /v1/mipyme/borrador',
     ]);
+  });
+
+  describe('respaldo-xml', () => {
+    const BASE = { rut: '11.111.111-1', clave: 'secreta', fecha_desde: '2026-08-01', fecha_hasta: '2026-08-31' };
+    const RESULTADO = {
+      empresaRut: '44444444-4', origen: 'RCP' as const,
+      fechaDesde: '2026-08-01', fechaHasta: '2026-08-31', documentos: 2,
+      tramos: [{ fechaDesde: '2026-08-01', fechaHasta: '2026-08-31', documentos: 2, xml: '<SetDTE></SetDTE>' }],
+    };
+
+    it('devuelve el XML crudo, sin base64', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue(RESULTADO);
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+
+      const body = r.body as any;
+      expect(body.ok).toBe(true);
+      expect(body.tramos[0].xml).toBe('<SetDTE></SetDTE>');
+      expect(body.content_type).toBe('application/xml');
+      expect(body.documentos).toBe(2);
+      expect(JSON.stringify(body)).not.toContain('base64');
+    });
+
+    // El default es `recibidos` porque es el caso que motiva la ruta: clasificar
+    // gastos del libro de compras.
+    it('traduce origen a los valores del portal y usa recibidos por defecto', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue(RESULTADO);
+      const rutas = armarRouter();
+
+      await rutas.get('POST /v1/mipyme/respaldo-xml')!(BASE);
+      expect(core.respaldoXml).toHaveBeenCalledWith(
+        expect.anything(), '11.111.111-1', expect.objectContaining({ origen: 'RCP' }));
+
+      await rutas.get('POST /v1/mipyme/respaldo-xml')!({ ...BASE, origen: 'emitidos' });
+      expect(core.respaldoXml).toHaveBeenLastCalledWith(
+        expect.anything(), '11.111.111-1', expect.objectContaining({ origen: 'ENV' }));
+    });
+
+    it('exige el rango de fechas', async () => {
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!({ rut: '11.111.111-1', clave: 'x' });
+      expect(r.status).toBe(400);
+      expect(core.respaldoXml).not.toHaveBeenCalled();
+    });
+
+    it('rechaza una fecha con formato distinto de YYYY-MM-DD', async () => {
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!({ ...BASE, fecha_desde: '01-08-2026' });
+      expect(r.status).toBe(400);
+      expect(core.respaldoXml).not.toHaveBeenCalled();
+    });
+
+    // Un rango al revés es error de quien pide, no del servicio: si llegara al
+    // scraper saldría como Error genérico, y `ejecutar` lo devuelve como 200 con
+    // error:"ERROR" y sin detalle — o sea "reintentá", que acá nunca funciona.
+    it('rechaza con 400 un rango invertido, sin llamar al SII', async () => {
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(
+        { ...BASE, fecha_desde: '2026-08-31', fecha_hasta: '2026-08-01' });
+
+      expect(r.status).toBe(400);
+      expect(core.respaldoXml).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con 400 una fecha que no existe en el calendario', async () => {
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(
+        { ...BASE, fecha_desde: '2026-02-31' });
+
+      expect(r.status).toBe(400);
+      expect(core.respaldoXml).not.toHaveBeenCalled();
+    });
+
+    it('nombra cada tramo con la empresa y su rango', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue(RESULTADO);
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+
+      expect((r.body as any).tramos[0].nombre_archivo)
+        .toBe('mipyme-respaldo-recibidos-444444444-2026-08-01-2026-08-31.xml');
+    });
   });
 
   describe('borrador (R11)', () => {

@@ -1,8 +1,22 @@
 import { SiiHttpClient } from '../http';
 import { Empresa, SessionManager } from '../session';
 import { rutEsValido } from '../rut';
-import { EscrituraRechazadaPorSii } from '../erroresConsulta';
+import { EscrituraRechazadaPorSii, LimitacionConocida } from '../erroresConsulta';
 import { marcarSeguro } from '../idempotenciaEscritura';
+import { esperar, pausaConfigurada } from '../ritmoSii';
+
+const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+function aIsoUtc(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+// El round-trip a ISO es lo que descarta un 31 de febrero: el Date lo normaliza
+// al 3 de marzo y deja de coincidir con lo pedido.
+function esFechaDelCalendario(fecha: string): boolean {
+  const d = new Date(`${fecha}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === fecha;
+}
 
 // Portal mipyme (Sistema de Facturación Gratuito) por HTTP directo, sin
 // navegador. Contratos relevados en vivo el 2026-08-03:
@@ -28,6 +42,47 @@ const HISTORIAL_RECIBIDOS_URL = `${CGI_BASE}/mipeAdminDocsRcp.cgi`;
 // documento, y los dispara un reCAPTCHA (`llamaRecaptchaConCallback`), o sea que
 // no son un camino que un servicio pueda recorrer solo.
 const PDF_DOCUMENTO_URL = `${CGI_BASE}/mipeShowPdf.cgi`;
+
+// Respaldo XML de los DTE ("Respaldo de DTE y/o IECV" → "Descargar información
+// electrónica" en el menú del portal). Relevado en vivo el 2026-09-02.
+//
+// Son TRES CGI y el orden importa: `download.cgi` sólo entrega el XML si antes
+// se pasó por `auth.cgi` —que abre el contexto de descarga— y por
+// `lista_documentos.cgi`, que fija la búsqueda.
+//
+// El menú NO enlaza `auth.cgi` sino `/Portal001/auth.html`, una página cuyo
+// único contenido útil es un `window.location.href` a `auth.cgi`. Quedarse en el
+// `.html` es lo que hizo que un relevamiento anterior concluyera que el XML no
+// era alcanzable: la página que se leía no es la que tiene el formulario.
+//
+// El reCAPTCHA de la pantalla NO bloquea este camino. El propio JavaScript
+// agrega `recaptcha-response` sólo `if (token && token.value.length>0)`, y
+// `download.cgi` entrega el XML sin token — verificado contra el SII real. Es
+// distinto de `mipeDownLoad.cgi` (el del listado), que sí lo exige.
+const AUTH_DESCARGA_URL = `${CGI_BASE}/auth.cgi`;
+const LISTA_DOCUMENTOS_URL = `${CGI_BASE}/lista_documentos.cgi`;
+const DOWNLOAD_URL = `${CGI_BASE}/download.cgi`;
+
+// Tope de documentos por descarga que impone el SII. No es del JavaScript de la
+// pantalla —que también lo mira—: el servidor responde una página de error
+// cuando el rango trae más, así que hay que trocear sí o sí.
+const TOPE_DOCUMENTOS_SII = 20;
+
+// Tope de tramos de un respaldo. Existe porque el troceo hace una llamada al SII
+// por tramo DENTRO de una sola request del tenant: sin techo, un rango ancho
+// sobre una empresa con mucho volumen se convierte en un barrido, que es
+// justamente el patrón que hace que el SII bloquee el portal (ver ritmoSii.ts).
+const MAX_TRAMOS_POR_DEFECTO = 10;
+
+// Techo duro, aunque el caller pida más. Es el mismo número que expone el schema
+// REST, repetido acá porque el schema no cubre a quien llame al scraper directo.
+//
+// RIESGO ASUMIDO: el presupuesto es POR REQUEST, no por cliente ni por ventana.
+// Nada impide repetir requests de 48 tramos sobre el mismo RUT; el lock de
+// empresa los serializa —no corren en paralelo— pero no acota el volumen
+// agregado contra el portal. Si alguna vez el SII corta por esta ruta, el
+// arreglo es un presupuesto por ventana, no bajar este número.
+const MAX_TRAMOS_ABSOLUTO = 48;
 
 // Los BORRADORES no viven en el portal viejo. El menú los publica con una
 // función JavaScript (`printLinkAdmBorradores`, definida en `valores.js`) que
@@ -146,6 +201,40 @@ export interface DteRecibidoMipyme {
   monto: number;
   estado: string;
   codigo: string;
+}
+
+// El lado del respaldo: `RCP` son los documentos RECIBIDOS y `ENV` los emitidos.
+// Son los valores del `<select name="ORIGEN">` del portal, no una convención de
+// este repo.
+export type OrigenRespaldo = 'RCP' | 'ENV';
+
+export interface FiltrosRespaldoXml {
+  empresaRut?: string;
+  origen: OrigenRespaldo;
+  fechaDesde: string;
+  fechaHasta: string;
+  tipoDte?: number;
+  maxTramos?: number;
+}
+
+// Un tramo es UNA descarga del SII: un `SetDTE` completo y válido por sí solo.
+// Los tramos NO se concatenan en un XML único a propósito — dos `SetDTE` pegados
+// no son un documento XML bien formado, y unificarlos obligaría a reescribir el
+// contenido firmado por el emisor.
+export interface TramoRespaldoXml {
+  fechaDesde: string;
+  fechaHasta: string;
+  documentos: number;
+  xml: string;
+}
+
+export interface RespaldoXmlResult {
+  empresaRut: string;
+  origen: OrigenRespaldo;
+  fechaDesde: string;
+  fechaHasta: string;
+  documentos: number;
+  tramos: TramoRespaldoXml[];
 }
 
 export interface FiltrosDteRecibidos {
@@ -571,6 +660,250 @@ export class MipymeHttpScraper {
       }
       return contenido;
     });
+  }
+
+  /**
+   * Respaldo XML de los DTE de un rango de fechas, tal como lo entrega el
+   * portal: el `SetDTE` firmado, sin reescribir.
+   *
+   * Es la fuente buena para procesar documentos recibidos. El PDF de
+   * `dtePdf` sirve para MIRAR un documento; el XML trae el detalle línea a línea
+   * (`NmbItem`, `QtyItem`, `PrcItem`, `MontoItem`) y el giro del emisor
+   * (`Acteco`, `GiroEmis`) en campos, sin parsear una maqueta de impresión.
+   *
+   * El SII no entrega más de 20 documentos por descarga, así que un rango que
+   * los exceda se parte en dos por la mitad y cada mitad se pide aparte
+   * (recursivamente). Cada tramo devuelto es un `SetDTE` independiente.
+   */
+  async respaldoXml(filtros: FiltrosRespaldoXml): Promise<RespaldoXmlResult> {
+    const { fechaDesde, fechaHasta } = filtros;
+    if (!FECHA_ISO.test(fechaDesde) || !FECHA_ISO.test(fechaHasta)) {
+      throw new Error(
+        `Las fechas del respaldo van en formato YYYY-MM-DD; se recibió `
+        + `"${fechaDesde}" y "${fechaHasta}".`);
+    }
+    // El formato no basta: `2026-02-31` lo cumple y no existe. El schema REST ya
+    // lo rechaza, y el chequeo se repite acá porque es una invariante de ESTE
+    // método —hace aritmética con las fechas— y no de quien lo llame: sin él,
+    // una fecha imposible sale como RangeError desde `toISOString`, recién al
+    // trocear y sin decir cuál era el problema.
+    for (const fecha of [fechaDesde, fechaHasta]) {
+      if (!esFechaDelCalendario(fecha)) {
+        throw new Error(`${fecha} no es una fecha del calendario.`);
+      }
+    }
+    if (fechaDesde > fechaHasta) {
+      throw new Error(
+        `El rango del respaldo está invertido: ${fechaDesde} es posterior a ${fechaHasta}.`);
+    }
+    const maxTramos = filtros.maxTramos ?? MAX_TRAMOS_POR_DEFECTO;
+    // El techo se valida ACÁ y no sólo en el schema REST: el schema protege a la
+    // ruta, pero este método es público y `core.respaldoXml` lo llama directo.
+    // Un caller interno con maxTramos: 500 convertiría una request en el barrido
+    // que ritmoSii.ts documenta como causa de bloqueo del portal, sin pasar por
+    // ninguna validación. El límite es del scraper porque el riesgo es suyo.
+    if (!Number.isInteger(maxTramos) || maxTramos < 1 || maxTramos > MAX_TRAMOS_ABSOLUTO) {
+      throw new Error(
+        `maxTramos debe ser un entero entre 1 y ${MAX_TRAMOS_ABSOLUTO}; se recibió ${filtros.maxTramos}`);
+    }
+    this.session.assertPuedeEntregarCookieJar();
+
+    return this.session.conEmpresaExclusiva(async () => {
+      const empresas = this.parseEmpresas(await this.http.get(SEL_EMPRESA_URL));
+      const empresaRut = this.resolverEmpresa(empresas, filtros.empresaRut);
+      await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: empresaRut });
+
+      // `auth.cgi` abre el contexto de descarga. Va DESPUÉS de seleccionar la
+      // empresa: la empresa activa es estado del servidor, y este CGI se apoya
+      // en ella.
+      await this.http.get(AUTH_DESCARGA_URL);
+
+      const [rut, dv] = this.partirRut(empresaRut);
+      const tramos: TramoRespaldoXml[] = [];
+      await this.acumularTramos(
+        { rut, dv, filtros, empresaRut, descargas: 0 }, fechaDesde, fechaHasta, tramos, maxTramos);
+
+      return {
+        empresaRut,
+        origen: filtros.origen,
+        fechaDesde,
+        fechaHasta,
+        documentos: tramos.reduce((n, t) => n + t.documentos, 0),
+        tramos,
+      };
+    });
+  }
+
+  // El troceo: pide el rango y, si el SII contesta que son más de 20, lo parte
+  // en dos y baja cada mitad. Se hace por BISECCIÓN y no estimando desde el
+  // listado porque el conteo del listado y el de la descarga no tienen por qué
+  // coincidir —filtran distinto—, y porque así el corte lo decide el SII, que es
+  // el único que sabe cuántos documentos hay.
+  private async acumularTramos(
+    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    desde: string,
+    hasta: string,
+    tramos: TramoRespaldoXml[],
+    maxTramos: number
+  ): Promise<void> {
+    // El tope cuenta DESCARGAS, no tramos logrados. Contar sólo los tramos que
+    // salieron bien dejaba el caso peor sin techo: si cada intento excede el
+    // tope del SII, no se acumula ninguno y la bisección seguía bajando hasta el
+    // día, gastando una llamada por nivel sin que el contador se moviera nunca.
+    // `LimitacionConocida` y no `Error`: los DOS fallos del troceo —éste y el
+    // del día suelto— son
+    // PERMANENTES —el mismo pedido va a fallar igual— y su mensaje es la parte
+    // accionable. Un Error genérico sale de la ruta como `ERROR`, que en el
+    // contrato de este servicio significa "reintentá" y viaja SIN detalle: el
+    // consumidor perdería la instrucción y reintentaría en loop un rango que no
+    // puede funcionar, gastando hasta 24 descargas contra el SII por intento.
+    // Eso es justo lo que ritmoSii.ts documenta como causa de bloqueo.
+    if (ctx.descargas >= maxTramos) {
+      throw new LimitacionConocida(
+        `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para respetar el `
+        + `tope de ${TOPE_DOCUMENTOS_SII} documentos por descarga del SII. Pedí un rango más corto `
+        + `o filtrá por tipo de documento; subir el tope convierte la consulta en un barrido, que `
+        + `es lo que hace que el SII bloquee el portal. ${this.progreso(tramos, desde)}`);
+    }
+
+    // La pausa va antes de cada descarga menos la primera: son varias llamadas
+    // seguidas al mismo CGI, que es la firma que el SII penaliza.
+    if (ctx.descargas > 0) await esperar(pausaConfigurada());
+    ctx.descargas += 1;
+
+    const respuesta = await this.descargarTramo(ctx, desde, hasta);
+    if (respuesta.excedeTope) {
+      if (desde === hasta) {
+        throw new LimitacionConocida(
+          `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos y el SII no entrega más `
+          + `por descarga. El filtro por fecha ya no se puede afinar: pedí ese día con tipo_dte `
+          + `para partirlo por tipo de documento. ${this.progreso(tramos, desde)}`);
+      }
+      const [primerFin, segundoInicio] = this.partirRango(desde, hasta);
+      await this.acumularTramos(ctx, desde, primerFin, tramos, maxTramos);
+      await this.acumularTramos(ctx, segundoInicio, hasta, tramos, maxTramos);
+      return;
+    }
+
+    tramos.push({
+      fechaDesde: desde,
+      fechaHasta: hasta,
+      // Conteo por TEXTO, no por nodos: contar de verdad obligaría a parsear el
+      // XML entero, que es justamente lo que esta ruta no hace —entrega el
+      // documento firmado tal cual—. Un `<DTE` dentro de un comentario o un
+      // CDATA inflaría el número; en el `SetDTE` del SII no los hay. Es un dato
+      // para dimensionar, no un conteo tributario: quien necesite el número
+      // exacto lo saca del XML que ya tiene.
+      documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
+      xml: respuesta.xml,
+    });
+  }
+
+  // Qué alcanzó a bajarse antes de fallar. Va en el mensaje porque un respaldo
+  // que falla a mitad de camino tira TODO lo descargado —los tramos viven en
+  // memoria hasta que la operación termina bien—, y sin esto el consumidor
+  // reintenta el rango entero, repitiendo llamadas al SII que ya habían salido
+  // bien. Con el sub-rango que sí funcionó puede reintentar acotado.
+  private progreso(tramos: TramoRespaldoXml[], corteEn: string): string {
+    if (tramos.length === 0) return `No alcanzó a bajarse ningún tramo (falló en ${corteEn}).`;
+    const cubierto = `${tramos[0].fechaDesde}..${tramos[tramos.length - 1].fechaHasta}`;
+    const documentos = tramos.reduce((n, t) => n + t.documentos, 0);
+    return (
+      `Se descartan ${tramos.length} tramo(s) que sí habían salido bien `
+      + `(${cubierto}, ${documentos} documentos): reintentá ese sub-rango aparte, `
+      + `y aparte el resto desde ${corteEn}.`);
+  }
+
+  private async descargarTramo(
+    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml },
+    desde: string,
+    hasta: string
+  ): Promise<{ xml: string; excedeTope: boolean }> {
+    const comunes = {
+      RUT_EMP: ctx.rut,
+      DV_EMP: ctx.dv,
+      RUT_RECP: '',
+      FOLIO: '',
+      RZN_SOC: '',
+      FEC_DESDE: desde,
+      FEC_HASTA: hasta,
+      TPO_DOC: ctx.filtros.tipoDte != null ? String(ctx.filtros.tipoDte) : '',
+      ESTADO: '',
+      ORDEN: '',
+    };
+
+    // `lista_documentos.cgi` fija la búsqueda del lado del servidor. Sin este
+    // POST, `download.cgi` no tiene contexto y devuelve una página de error.
+    await this.http.postForm(LISTA_DOCUMENTOS_URL, {
+      ...comunes, TPO_ARCHIVO: 'dte', ORIGEN: ctx.filtros.origen, NUM_PAG: '1',
+    });
+
+    // FUERA DE ALCANCE: un tramo que supere el tope de respuesta del transporte
+    // (MAX_RESPUESTA_BYTES en http.ts) falla duro y NO se bisecta — la partición
+    // sólo reacciona al tope de 20 documentos del SII, que es un conteo, no un
+    // tamaño. Haría falta que 20 DTE sumaran varios MiB de detalle; los tramos
+    // reales medidos van por 130 KB. Si alguna vez aparece, el síntoma es un
+    // error de transporte y el arreglo es bisecar también ante ese error.
+    const { contenido, contentType } = await this.http.getBinario(DOWNLOAD_URL, {
+      ...comunes, ORIGEN: ctx.filtros.origen, FOLIOHASTA: '', DOWNLOAD: 'XML',
+    });
+
+    // El XML viene declarado ISO-8859-1 y así se decodifica. Pasarlo por UTF-8
+    // rompería las razones sociales con acentos, que son la mayoría, y el daño
+    // es silencioso: el string sigue siendo un string.
+    //
+    // Se mira igual lo que DECLARA el servidor, en el Content-Type o en el
+    // prólogo del propio XML: si el SII algún día sirve UTF-8, forzar latin1
+    // rompería los acentos con el mismo silencio, sólo que al revés. Latin1
+    // queda de default porque es lo que responde hoy, verificado.
+    const prologo = contenido.subarray(0, 200).toString('latin1');
+    const declarado = (
+      /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ??
+      /encoding=["']([\w-]+)["']/i.exec(prologo)?.[1] ?? ''
+    ).toLowerCase();
+    const texto = /^utf-?8$/.test(declarado)
+      ? contenido.toString('utf-8')
+      : contenido.toString('latin1');
+
+    // El corte por volumen llega como PÁGINA, no como error HTTP: el CGI
+    // responde 200 con HTML. Reconocerlo es lo que permite trocear en vez de
+    // fallar.
+    if (/demasiados Documentos electr/i.test(texto)) return { xml: '', excedeTope: true };
+
+    // Este SÍ queda como Error genérico —o sea `ERROR`, "reintentá"— y no como
+    // LimitacionConocida: verificado en vivo que es TRANSITORIO. El mismo rango
+    // ancho respondió esta página una vez y el XML completo al reintentarlo un
+    // minuto después, sin cambiar nada.
+    if (!/<SetDTE/i.test(texto)) {
+      const codigoSii = texto.slice(0, 4096).match(/CODIGO:\s*([\d.\-]+)/)?.[1];
+      throw new Error(
+        `El portal mipyme no devolvió un SetDTE para ${desde}..${hasta} `
+        + `(Content-Type: ${contentType || 'sin declarar'})`
+        + `${codigoSii ? `, código del SII ${codigoSii}` : ''}.`);
+    }
+    return { xml: texto, excedeTope: false };
+  }
+
+  // Parte [desde, hasta] en dos mitades contiguas: devuelve el fin de la primera
+  // y el inicio de la segunda. Se opera en UTC a propósito — con fechas locales,
+  // un cambio de horario de verano corre un día y el respaldo pierde o repite
+  // documentos sin que nadie lo note.
+  private partirRango(desde: string, hasta: string): [string, string] {
+    const inicio = Date.parse(`${desde}T00:00:00Z`);
+    const fin = Date.parse(`${hasta}T00:00:00Z`);
+    const DIA_MS = 24 * 60 * 60 * 1000;
+    // Se redondea HACIA ABAJO para que la primera mitad nunca quede vacía
+    // cuando el rango son dos días.
+    const medio = inicio + Math.floor((fin - inicio) / (2 * DIA_MS)) * DIA_MS;
+    return [aIsoUtc(medio), aIsoUtc(medio + DIA_MS)];
+  }
+
+  private partirRut(rut: string): [string, string] {
+    const [cuerpo, dv] = rut.split('-');
+    if (!cuerpo || !dv) {
+      throw new Error(`El RUT de la empresa tiene que venir con guión y dígito verificador; se recibió "${rut}".`);
+    }
+    return [cuerpo.replace(/\./g, ''), dv];
   }
 
   /**

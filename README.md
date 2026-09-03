@@ -269,10 +269,6 @@ borradores" en vez de "preguntaste por otra empresa".
 Tres cosas del catálogo de apigateway **no se homologaron, y no por falta de
 tiempo**:
 
-- **`dte-xml`.** El único camino del portal a un XML es la descarga masiva
-  (`mipeDownLoad.cgi`), que baja el lote entero según los filtros de la pantalla
-  y está detrás de un reCAPTCHA. No hay descarga individual, y un reCAPTCHA no es
-  un camino que un servicio pueda recorrer solo.
 - **`borrador-pdf`.** Depende de tener un borrador; sin ninguno no hay nada que
   relevar ni con qué verificar.
 - **`info-contribuyente`.** El formulario de emisión no expone ningún CGI de
@@ -284,6 +280,31 @@ no como tool MCP, igual que el de BHE: un PDF en base64 dentro de una respuesta
 MCP satura el contexto sin que el modelo pueda hacer nada con él. Se pide por el
 `codigo` que devuelve el listado y **no por el folio**, que se repite entre
 emisores y entre tipos de documento.
+
+El **respaldo XML** (`POST /v1/mipyme/respaldo-xml`) es la fuente buena para
+*procesar* documentos: devuelve el `SetDTE` firmado tal como lo entrega el
+portal, con el detalle línea a línea (`NmbItem`, `QtyItem`, `PrcItem`,
+`MontoItem`) y el giro del emisor (`Acteco`, `GiroEmis`) en campos. El PDF sirve
+para **mirar** un documento; el XML, para clasificarlo sin parsear una maqueta de
+impresión. Tampoco es tool MCP: un respaldo entero en el contexto del modelo no
+le sirve de nada.
+
+Dos cosas que definen su forma, las dos verificadas contra el SII:
+
+- El camino no es el que enlaza el menú. `/Portal001/auth.html` sólo redirige por
+  JavaScript a `auth.cgi`, que es el CGI que abre el contexto de descarga; después
+  van `lista_documentos.cgi` (fija la búsqueda) y `download.cgi` (entrega el XML).
+  Quedarse en el `.html` daba el falso negativo de que "el portal no ofrece XML".
+  El reCAPTCHA de esa pantalla **no** bloquea: el propio JavaScript manda el token
+  sólo si existe, y `download.cgi` responde sin él.
+- **El SII no entrega más de 20 documentos por descarga**, y el tope lo impone el
+  servidor, no el JavaScript. Un rango que lo exceda se parte al medio y cada
+  mitad se pide aparte, hasta que todas pasen; la respuesta trae un tramo por
+  descarga, cada uno un `SetDTE` válido por sí solo. No se concatenan: dos
+  `SetDTE` pegados no son XML bien formado, y unificarlos obligaría a reescribir
+  contenido firmado. Un día suelto con más de 20 documentos ya no se puede
+  partir por fecha y falla diciéndolo, en vez de devolver un respaldo incompleto
+  que se lee igual que uno completo.
 
 `sii_mipyme_list_dte_recibidos` es el espejo de `list_dte_emitidos` y comparte su
 forma, con el **emisor** como contraparte en vez del receptor. Trae algo que
