@@ -512,7 +512,20 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
   Cada documento trae un **`codigo`**, que es un identificador interno del SII: no es el folio ni se deriva de la fila, y es el único parámetro que acepta el CGI de detalle.
 
-- **`POST /v1/mipyme/respaldo-xml`** — el XML firmado de los DTE de un rango. `rut`, `fecha_desde` y `fecha_hasta` (`AAAA-MM-DD`) son obligatorios; opcionales `empresa_rut`, `origen` (`recibidos` por defecto, o `emitidos`), `tipo_dte` y `max_tramos` (default 10).
+- **`POST /v1/mipyme/respaldo-xml`** — el XML firmado de los DTE de un rango. `rut`, `fecha_desde` y `fecha_hasta` (`AAAA-MM-DD`) son obligatorios; opcionales `empresa_rut`, `origen` (`recibidos` por defecto, o `emitidos`), `tipo_dte`, `contraparte_rut`, `razon_social`, `folio_desde`, `folio_hasta` y `max_tramos` (default 10).
+
+  **Filtrar no es sólo comodidad: es lo que baja el costo de la llamada.** Cada filtro recorta el conjunto, y con el tope de 20 documentos por descarga eso significa menos tramos, menos llamadas al portal y menos latencia. Todos se verificaron contra el SII:
+
+  | Filtro | Qué hace | Verificado |
+  |---|---|---|
+  | `contraparte_rut` | El **emisor** si `origen=recibidos`; el **receptor** si `emitidos`. Con o sin DV. | 5 documentos → 2, todos de ese emisor (verificado con `origen=recibidos`; el lado `emitidos` usa el mismo campo del portal, pero no se probó end-to-end) |
+  | `razon_social` | Match **parcial** sobre la razón social de la contraparte. Viaja en ISO-8859-1, que es lo que leen estos CGI. | "Banchile" → los 2 de "Banchile Corredores De Bolsa S.A." (ASCII; el caso con ñ o tildes está cubierto por tests, no verificado contra el SII) |
+  | `folio_desde` / `folio_hasta` | Rango de folios. `folio_desde` solo = ese folio exacto. | folio 739 → 1 documento |
+  | `tipo_dte` | Tipo de documento | — |
+
+  `contraparte_rut` se llama así y no `emisor_rut` porque el portal usa **un solo campo** para los dos lados en esta pantalla (a diferencia del listado, que sí separa `RUT_EMI` de `RUT_RECP`): el nombre neutro es el que no miente en ninguno de los dos casos.
+
+  **No hay `iecv` acá.** Los libros de compras y ventas existen en el portal pero se bajan por otro CGI (`respaldoLibrosXml.cgi`), **por código de libro y no por rango de fechas**, y se filtran por `TPO_LIBRO` (VENTA/COMPRA) en vez de por contraparte o folio. No entra en el contrato de esta ruta; sería una ruta aparte.
 
   Devuelve `tramos`: una lista donde cada elemento es **una descarga del SII**, con su `xml` crudo —`SetDTE` completo, sin base64 y sin reescribir, para no invalidar la firma del emisor—, su rango y su conteo de documentos. Los tramos **no** se concatenan: dos `SetDTE` pegados no son XML bien formado.
 

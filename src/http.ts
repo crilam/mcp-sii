@@ -186,15 +186,18 @@ export class SiiHttpClient {
   // Quien llama decide qué hacer con el Content-Type; el transporte no sabe
   // qué tipo esperaba.
   //
-  // No expone el `charset` que sí tienen `get`/`postForm`, y no es un olvido:
-  // los únicos parámetros que viajan por acá son identificadores del SII
-  // (códigos de barras), que son ASCII. Si alguna vez hay que mandar texto con
-  // acentos en un GET binario, hay que agregarlo igual que en `postForm`.
+  // Acepta `charset` por la misma razón que `postForm`: el respaldo XML filtra
+  // por razón social, que es texto libre, y estos CGI leen ISO-8859-1. Con el
+  // default UTF-8 una `ñ` viaja como `%C3%B1`, el CGI la lee como `Ã±` y no
+  // matchea nada — cero documentos, indistinguible de "no hubo documentos".
+  // Antes esto no hacía falta: lo único que pasaba por acá eran identificadores
+  // ASCII (códigos de barras).
   async getBinario(
     url: string,
-    params?: Record<string, string>
+    params?: Record<string, string>,
+    opciones?: { charset?: 'utf-8' | 'latin1' }
   ): Promise<{ contenido: Buffer; contentType: string }> {
-    const query = params ? `?${this.encodeParams(params)}` : '';
+    const query = params ? `?${this.encodeParams(params, opciones?.charset ?? 'utf-8')}` : '';
     const resp = await this.curlCrudo([`${url}${query}`]);
 
     // El corte por volumen también hay que detectarlo acá, y no alcanza con

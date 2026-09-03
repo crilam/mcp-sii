@@ -19,8 +19,23 @@ import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacio
 //   VERIF_DESDE    inicio del rango, YYYY-MM-DD (default: primer día del mes pasado)
 //   VERIF_HASTA    fin del rango (default: último día del mes pasado)
 //   VERIF_SALIDA   directorio donde dejar los XML bajados
+//   VERIF_CONTRAPARTE  RUT de la contraparte (emisor si recibidos)
+//   VERIF_RZN_SOC      razón social de la contraparte
+//   VERIF_FOLIO        folio inicial (solo = ese folio exacto)
+//   VERIF_FOLIO_HASTA  folio final del rango
 const NOMBRE = (process.argv[2] ?? 'certificado') as NombrePerfil;
 const SALIDA = process.env.VERIF_SALIDA;
+
+// `Number("abc")` es NaN, y NaN pasa cualquier `if` de "está definido": llegaría
+// como `folio_desde: NaN` y saldría un 400 del schema en vez de un mensaje que
+// diga qué variable está mal escrita.
+function numeroDe(variable: string): number | undefined {
+  const crudo = process.env[variable];
+  if (!crudo) return undefined;
+  const n = Number(crudo);
+  if (!Number.isFinite(n)) throw new Error(`${variable} tiene que ser un número; se recibió "${crudo}".`);
+  return n;
+}
 
 function mesPasado(): { desde: string; hasta: string } {
   const hoy = new Date();
@@ -48,6 +63,10 @@ async function main() {
     origen: process.env.VERIF_ORIGEN ?? 'recibidos',
     fecha_desde: desde,
     fecha_hasta: hasta,
+    contraparte_rut: process.env.VERIF_CONTRAPARTE,
+    razon_social: process.env.VERIF_RZN_SOC,
+    folio_desde: numeroDe('VERIF_FOLIO'),
+    folio_hasta: numeroDe('VERIF_FOLIO_HASTA'),
   });
   const b = r.body as Record<string, unknown>;
 
@@ -71,6 +90,16 @@ async function main() {
     // sin <Detalle>, el respaldo serviría para archivar pero no para clasificar.
     const detalles = (t.xml.match(/<Detalle>/g) ?? []).length;
     console.log(`    bloques <Detalle>: ${detalles}`);
+
+    // Con qué contrapartes vino el respaldo. Es lo que prueba si un filtro
+    // FILTRÓ de verdad: el CGI no da error con un filtro que ignora, devuelve
+    // todo — y "todo" se lee igual que "el filtro no aplicaba a nadie".
+    const emisores = [...new Set([...t.xml.matchAll(/<RUTEmisor>(.*?)<\/RUTEmisor>/g)].map(m => m[1]))];
+    const receptores = [...new Set([...t.xml.matchAll(/<RUTRecep>(.*?)<\/RUTRecep>/g)].map(m => m[1]))];
+    const folios = [...new Set([...t.xml.matchAll(/<Folio>(.*?)<\/Folio>/g)].map(m => m[1]))];
+    console.log(`    emisores: ${emisores.join(', ') || '(ninguno)'}`);
+    console.log(`    receptores: ${receptores.join(', ') || '(ninguno)'}`);
+    console.log(`    folios: ${folios.slice(0, 8).join(', ')}${folios.length > 8 ? ` (+${folios.length - 8})` : ''}`);
 
     if (SALIDA && esXml) {
       fs.mkdirSync(SALIDA, { recursive: true });

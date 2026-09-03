@@ -71,7 +71,7 @@ describe('MipymeHttpScraper.respaldoXml', () => {
       expect.objectContaining({
         RUT_EMP: '33333333', DV_EMP: '3', ORIGEN: 'RCP', DOWNLOAD: 'XML',
         FEC_DESDE: '2026-08-01', FEC_HASTA: '2026-08-31',
-      }));
+      }), { charset: 'latin1' });
     expect(r.tramos).toHaveLength(1);
     expect(r.tramos[0].xml).toContain('<SetDTE>');
     expect(r.documentos).toBe(2);
@@ -91,7 +91,8 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(http.get).toHaveBeenLastCalledWith(expect.stringContaining('auth.cgi'));
     expect(http.postForm).toHaveBeenCalledWith(
       expect.stringContaining('lista_documentos.cgi'),
-      expect.objectContaining({ RUT_EMP: '33333333', DV_EMP: '3', TPO_ARCHIVO: 'dte' }));
+      expect.objectContaining({ RUT_EMP: '33333333', DV_EMP: '3', TPO_ARCHIVO: 'dte' }),
+      { charset: 'latin1' });
   });
 
   // El tope de 20 lo impone el SERVIDOR, no el JavaScript de la pantalla: un
@@ -179,6 +180,19 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     await scraper.respaldoXml(RANGO);
 
     expect(esperar).not.toHaveBeenCalled();
+  });
+
+  // Las mismas invariantes que valida la ruta REST, sostenidas por el scraper:
+  // lo llaman también el core y los scripts, sin pasar por el schema. Un filtro
+  // a medias no da error en el portal, da resultados equivocados.
+  it('rechaza un rango de folios a medias o invertido, sin tocar el SII', async () => {
+    const { scraper, http } = armar();
+
+    await expect(scraper.respaldoXml({ ...RANGO, folioHasta: 20 }))
+      .rejects.toThrow(/folioHasta requiere folioDesde/);
+    await expect(scraper.respaldoXml({ ...RANGO, folioDesde: 20, folioHasta: 10 }))
+      .rejects.toThrow(/invertido/);
+    expect(http.getBinario).not.toHaveBeenCalled();
   });
 
   it('rechaza un maxTramos por encima del techo del scraper', async () => {
@@ -337,7 +351,149 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     await scraper.respaldoXml({ ...RANGO, tipoDte: 33 });
 
     expect(http.getBinario).toHaveBeenCalledWith(
-      expect.any(String), expect.objectContaining({ TPO_DOC: '33' }));
+      expect.any(String), expect.objectContaining({ TPO_DOC: '33' }), { charset: 'latin1' });
+  });
+
+  describe('filtros', () => {
+    // El portal quiere el cuerpo del RUT sin DV. Mandarlo con guión no da error:
+    // da CERO resultados, y un respaldo vacío se lee igual que "no hubo
+    // documentos en el período" — el peor modo de fallo posible acá.
+    it('manda la contraparte sin dígito verificador, venga como venga', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, contraparteRut: '77.777.777-7' });
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String), expect.objectContaining({ RUT_RECP: '77777777' }), { charset: 'latin1' });
+
+      await scraper.respaldoXml({ ...RANGO, contraparteRut: '77777777' });
+      expect(http.getBinario).toHaveBeenLastCalledWith(
+        expect.any(String), expect.objectContaining({ RUT_RECP: '77777777' }), { charset: 'latin1' });
+    });
+
+    // La afirmación central del nombre `contraparteRut`: el MISMO campo del
+    // portal sirve para los dos lados. Verificado contra el SII para RCP (filtra
+    // por emisor); acá se fija que el scraper no cambie de campo según el
+    // origen, que es lo que haría inútil el nombre neutro.
+    it('usa el mismo campo de contraparte para el lado emitido', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, origen: 'ENV', contraparteRut: '77777777-7' });
+
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ ORIGEN: 'ENV', RUT_RECP: '77777777' }), { charset: 'latin1' });
+    });
+
+    // Los dos CGI tienen que pedir el MISMO rango: `lista_documentos.cgi` fija
+    // el contexto de búsqueda del lado del servidor, y si sólo la descarga
+    // llevara el extremo superior, la búsqueda quedaría "de ese folio en
+    // adelante" y dependeríamos de cuál de las dos manda.
+    it('manda el rango de folios completo también al fijar la búsqueda', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, folioDesde: 10, folioHasta: 20 });
+
+      expect(http.postForm).toHaveBeenCalledWith(
+        expect.stringContaining('lista_documentos.cgi'),
+        expect.objectContaining({ FOLIO: '10', FOLIOHASTA: '20' }),
+        { charset: 'latin1' });
+    });
+
+    // Las dos llamadas van en ISO-8859-1 porque estos CGI leen latin1 y
+    // `razonSocial` es el primer texto libre que pasa por acá. Con el default
+    // UTF-8, "Muñoz" viaja como `Mu%C3%B1oz`, el portal lo lee como `MuÃ±oz` y
+    // devuelve cero documentos — indistinguible de "no hubo documentos". Las
+    // razones sociales chilenas con ñ y tildes son la norma, no el borde, y una
+    // verificación con un nombre ASCII (como "Banchile") no lo detecta.
+    it('manda la razón social en latin1, no en UTF-8', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, razonSocial: 'Muñoz' });
+
+      expect(http.postForm).toHaveBeenCalledWith(
+        expect.stringContaining('lista_documentos.cgi'),
+        expect.objectContaining({ RZN_SOC: 'Muñoz' }),
+        { charset: 'latin1' });
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.stringContaining('download.cgi'),
+        expect.objectContaining({ RZN_SOC: 'Muñoz' }),
+        { charset: 'latin1' });
+    });
+
+    it('pasa razón social y el rango de folios', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, razonSocial: 'Proveedor', folioDesde: 10, folioHasta: 20 });
+
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ RZN_SOC: 'Proveedor', FOLIO: '10', FOLIOHASTA: '20' }), { charset: 'latin1' });
+    });
+
+    // Sin esto, pedir un folio suelto bajaría de ese folio EN ADELANTE: el CGI
+    // interpreta FOLIOHASTA vacío como sin límite superior.
+    it('un folio suelto filtra ese folio exacto, no de ahí en adelante', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, folioDesde: 13711545 });
+
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ FOLIO: '13711545', FOLIOHASTA: '13711545' }), { charset: 'latin1' });
+    });
+
+    it('sin filtros, los campos van vacíos y no rompen la búsqueda', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml(RANGO);
+
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ RUT_RECP: '', RZN_SOC: '', FOLIO: '', FOLIOHASTA: '' }), { charset: 'latin1' });
+    });
+
+    // TPO_ARCHIVO va FIJO en 'dte' y no es un olvido: mandarlo en 'iecv' no
+    // cambia nada por este camino —se verificó contra el SII, devuelve los
+    // mismos DTE—, porque los libros se bajan por otro CGI
+    // (`respaldoLibrosXml.cgi?COD_LBR=...`), uno por código de libro y no por
+    // rango de fechas. Exponerlo acá sería prometer libros y entregar
+    // documentos.
+    it('siempre pide los DTE, nunca los libros', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml(RANGO);
+
+      expect(http.postForm).toHaveBeenCalledWith(
+        expect.stringContaining('lista_documentos.cgi'),
+        expect.objectContaining({ TPO_ARCHIVO: 'dte' }),
+        { charset: 'latin1' });
+    });
+
+    // Los filtros tienen que sobrevivir al troceo: si se perdieran al bisecar,
+    // el primer tramo vendría filtrado y el resto no, y el respaldo mezclaría
+    // documentos de otras contrapartes sin que nada lo indique.
+    it('mantiene los filtros en todos los tramos del troceo', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock)
+        .mockResolvedValueOnce(binarioDemasiados())
+        .mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, contraparteRut: '77777777', tipoDte: 33 });
+
+      const llamadas = (http.getBinario as jest.Mock).mock.calls;
+      expect(llamadas).toHaveLength(3);
+      for (const [, params] of llamadas) {
+        expect(params).toMatchObject({ RUT_RECP: '77777777', TPO_DOC: '33' });
+      }
+    });
   });
 
   it('acepta ORIGEN=ENV para el lado emitido', async () => {
@@ -347,6 +503,6 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     await scraper.respaldoXml({ ...RANGO, origen: 'ENV' });
 
     expect(http.getBinario).toHaveBeenCalledWith(
-      expect.any(String), expect.objectContaining({ ORIGEN: 'ENV' }));
+      expect.any(String), expect.objectContaining({ ORIGEN: 'ENV' }), { charset: 'latin1' });
   });
 });

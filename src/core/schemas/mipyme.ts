@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EmitirDteParams } from '../../scrapers/mipymeHttp';
+import { rutEsValido } from '../../rut';
 
 export const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
@@ -78,6 +79,46 @@ export const schemaRespaldoXml = {
   fecha_hasta: FechaRequerida.describe('Fin del rango, YYYY-MM-DD'),
   tipo_dte: z.number().int().optional()
     .describe('Filtrar por tipo: 33=factura, 34=exenta, 61=N.crédito, 56=N.débito, 52=guía, 46=F.compra'),
+  // Los filtros valen más que la comodidad: cada uno recorta el conjunto, y con
+  // el tope de 20 documentos por descarga eso significa menos tramos, menos
+  // llamadas al portal y menos latencia. Filtrar por contraparte puede convertir
+  // tres tramos en uno.
+  //
+  // La CONTRAPARTE y no "el emisor": en esta pantalla el portal usa un solo
+  // campo para los dos lados, así que con origen=recibidos filtra por emisor y
+  // con emitidos por receptor. Un nombre que fije uno de los dos mentiría en el
+  // otro caso, que es peor que pedir una línea de documentación.
+  // El formato se valida acá y no sólo se normaliza en el scraper: un RUT
+  // basura no da error en el portal, da CERO resultados — y un respaldo vacío se
+  // lee exactamente igual que "este período no tuvo documentos". Mejor 400.
+  // Cuando viene CON dígito verificador se valida el DV de verdad, no sólo la
+  // forma: un `77777777-3` bien formado pero con DV incorrecto produce el mismo
+  // cero-resultados silencioso que este chequeo viene a evitar. Sin DV no hay
+  // nada que validar más allá de la forma — y se acepta, porque es lo que el
+  // portal quiere igual.
+  contraparte_rut: z.string()
+    .transform(v => v.replace(/\./g, '').trim())
+    .refine(v => /^\d{5,9}(-[\dkK])?$/.test(v),
+      'contraparte_rut tiene que ser un RUT (con o sin dígito verificador), por ejemplo 77777777-7')
+    .refine(v => !v.includes('-') || rutEsValido(v.split('-')[0], v.split('-')[1]),
+      'El dígito verificador de contraparte_rut no corresponde al RUT')
+    .optional()
+    .describe('RUT de la contraparte: el EMISOR si origen=recibidos, el RECEPTOR si origen=emitidos. Con o sin dígito verificador.'),
+  // `.trim()` y `.min(1)`: un string vacío o de puros espacios viajaría tal cual
+  // a `RZN_SOC` y el portal no matchearía nada — el mismo respaldo vacío
+  // indistinguible de "no hubo documentos" que motiva validar la contraparte.
+  // El `.max()` no es burocracia: este valor viaja en la QUERY del GET de
+  // descarga, y una cadena larga infla la URL sin que el portal la use — su
+  // propio campo tiene 100 de maxlength.
+  razon_social: z.string().trim()
+    .min(1, 'razon_social no puede ser vacía')
+    .max(100, 'razon_social no puede superar los 100 caracteres')
+    .optional()
+    .describe('Filtrar por razón social de la contraparte (el portal hace match parcial)'),
+  folio_desde: z.number().int().positive().optional()
+    .describe('Folio inicial del rango. Sin folio_hasta, filtra ese folio exacto.'),
+  folio_hasta: z.number().int().positive().optional()
+    .describe('Folio final del rango. Requiere folio_desde.'),
   // El tope existe para que un rango ancho no se convierta en un barrido: el
   // SII entrega 20 documentos por descarga, así que cada tramo extra es otra
   // llamada al portal dentro de la misma request.
