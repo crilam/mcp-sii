@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EmitirDteParams } from '../../scrapers/mipymeHttp';
+import { rutEsValido } from '../../rut';
 
 export const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 const FechaSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Formato YYYY-MM-DD');
@@ -90,13 +91,23 @@ export const schemaRespaldoXml = {
   // El formato se valida acá y no sólo se normaliza en el scraper: un RUT
   // basura no da error en el portal, da CERO resultados — y un respaldo vacío se
   // lee exactamente igual que "este período no tuvo documentos". Mejor 400.
+  // Cuando viene CON dígito verificador se valida el DV de verdad, no sólo la
+  // forma: un `77777777-3` bien formado pero con DV incorrecto produce el mismo
+  // cero-resultados silencioso que este chequeo viene a evitar. Sin DV no hay
+  // nada que validar más allá de la forma — y se acepta, porque es lo que el
+  // portal quiere igual.
   contraparte_rut: z.string()
     .transform(v => v.replace(/\./g, '').trim())
-    .refine(v => /^\d{1,8}(-[\dkK])?$/.test(v),
+    .refine(v => /^\d{5,9}(-[\dkK])?$/.test(v),
       'contraparte_rut tiene que ser un RUT (con o sin dígito verificador), por ejemplo 77777777-7')
+    .refine(v => !v.includes('-') || rutEsValido(v.split('-')[0], v.split('-')[1]),
+      'El dígito verificador de contraparte_rut no corresponde al RUT')
     .optional()
     .describe('RUT de la contraparte: el EMISOR si origen=recibidos, el RECEPTOR si origen=emitidos. Con o sin dígito verificador.'),
-  razon_social: z.string().optional()
+  // `.trim()` y `.min(1)`: un string vacío o de puros espacios viajaría tal cual
+  // a `RZN_SOC` y el portal no matchearía nada — el mismo respaldo vacío
+  // indistinguible de "no hubo documentos" que motiva validar la contraparte.
+  razon_social: z.string().trim().min(1, 'razon_social no puede ser vacía').optional()
     .describe('Filtrar por razón social de la contraparte (el portal hace match parcial)'),
   folio_desde: z.number().int().positive().optional()
     .describe('Folio inicial del rango. Sin folio_hasta, filtra ese folio exacto.'),

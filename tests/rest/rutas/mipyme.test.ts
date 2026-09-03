@@ -114,8 +114,6 @@ describe('registrarRutasMipyme', () => {
         }));
     });
 
-    // `folio_hasta` solo dejaría el rango a medias: el portal manda los dos
-    // extremos. Se rechaza en vez de inventarle un inicio.
     // Un RUT basura no falla en el portal: devuelve CERO documentos, y un
     // respaldo vacío se lee igual que "este período no tuvo documentos". Por eso
     // se rechaza acá en vez de dejarlo pasar.
@@ -140,6 +138,25 @@ describe('registrarRutasMipyme', () => {
         expect.anything(), expect.anything(), expect.objectContaining({ contraparteRut: '77777777' }));
     });
 
+    // Un DV que no corresponde está BIEN FORMADO pero no identifica a nadie: el
+    // portal devuelve cero documentos, que es el mismo silencio de siempre.
+    it('rechaza un RUT con dígito verificador incorrecto', async () => {
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(
+        { ...BASE, contraparte_rut: '77777777-3' });
+
+      expect(r.status).toBe(400);
+      expect(core.respaldoXml).not.toHaveBeenCalled();
+    });
+
+    it('rechaza una razón social vacía o de puros espacios', async () => {
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!({ ...BASE, razon_social: '   ' });
+
+      expect(r.status).toBe(400);
+      expect(core.respaldoXml).not.toHaveBeenCalled();
+    });
+
+    // `folio_hasta` solo dejaría el rango a medias: el portal manda los dos
+    // extremos. Se rechaza en vez de inventarle un inicio.
     it('rechaza folio_hasta sin folio_desde', async () => {
       const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!({ ...BASE, folio_hasta: 20 });
 
