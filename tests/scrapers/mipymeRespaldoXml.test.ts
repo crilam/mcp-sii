@@ -182,6 +182,19 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(esperar).not.toHaveBeenCalled();
   });
 
+  // Las mismas invariantes que valida la ruta REST, sostenidas por el scraper:
+  // lo llaman también el core y los scripts, sin pasar por el schema. Un filtro
+  // a medias no da error en el portal, da resultados equivocados.
+  it('rechaza un rango de folios a medias o invertido, sin tocar el SII', async () => {
+    const { scraper, http } = armar();
+
+    await expect(scraper.respaldoXml({ ...RANGO, folioHasta: 20 }))
+      .rejects.toThrow(/folioHasta requiere folioDesde/);
+    await expect(scraper.respaldoXml({ ...RANGO, folioDesde: 20, folioHasta: 10 }))
+      .rejects.toThrow(/invertido/);
+    expect(http.getBinario).not.toHaveBeenCalled();
+  });
+
   it('rechaza un maxTramos por encima del techo del scraper', async () => {
     const { scraper, http } = armar();
 

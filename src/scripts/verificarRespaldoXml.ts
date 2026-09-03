@@ -26,6 +26,17 @@ import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacio
 const NOMBRE = (process.argv[2] ?? 'certificado') as NombrePerfil;
 const SALIDA = process.env.VERIF_SALIDA;
 
+// `Number("abc")` es NaN, y NaN pasa cualquier `if` de "está definido": llegaría
+// como `folio_desde: NaN` y saldría un 400 del schema en vez de un mensaje que
+// diga qué variable está mal escrita.
+function numeroDe(variable: string): number | undefined {
+  const crudo = process.env[variable];
+  if (!crudo) return undefined;
+  const n = Number(crudo);
+  if (!Number.isFinite(n)) throw new Error(`${variable} tiene que ser un número; se recibió "${crudo}".`);
+  return n;
+}
+
 function mesPasado(): { desde: string; hasta: string } {
   const hoy = new Date();
   const inicio = new Date(Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth() - 1, 1));
@@ -54,8 +65,8 @@ async function main() {
     fecha_hasta: hasta,
     contraparte_rut: process.env.VERIF_CONTRAPARTE,
     razon_social: process.env.VERIF_RZN_SOC,
-    folio_desde: process.env.VERIF_FOLIO ? Number(process.env.VERIF_FOLIO) : undefined,
-    folio_hasta: process.env.VERIF_FOLIO_HASTA ? Number(process.env.VERIF_FOLIO_HASTA) : undefined,
+    folio_desde: numeroDe('VERIF_FOLIO'),
+    folio_hasta: numeroDe('VERIF_FOLIO_HASTA'),
   });
   const b = r.body as Record<string, unknown>;
 

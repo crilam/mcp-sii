@@ -518,8 +518,8 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
   | Filtro | Qué hace | Verificado |
   |---|---|---|
-  | `contraparte_rut` | El **emisor** si `origen=recibidos`; el **receptor** si `emitidos`. Con o sin DV. | 5 documentos → 2, todos de ese emisor |
-  | `razon_social` | Match **parcial** sobre la razón social de la contraparte | "Banchile" → los 2 de "Banchile Corredores De Bolsa S.A." |
+  | `contraparte_rut` | El **emisor** si `origen=recibidos`; el **receptor** si `emitidos`. Con o sin DV. | 5 documentos → 2, todos de ese emisor (verificado con `origen=recibidos`; el lado `emitidos` usa el mismo campo del portal, pero no se probó end-to-end) |
+  | `razon_social` | Match **parcial** sobre la razón social de la contraparte. Viaja en ISO-8859-1, que es lo que leen estos CGI. | "Banchile" → los 2 de "Banchile Corredores De Bolsa S.A." (ASCII; el caso con ñ o tildes está cubierto por tests, no verificado contra el SII) |
   | `folio_desde` / `folio_hasta` | Rango de folios. `folio_desde` solo = ese folio exacto. | folio 739 → 1 documento |
   | `tipo_dte` | Tipo de documento | — |
 

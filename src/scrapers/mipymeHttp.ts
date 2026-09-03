@@ -713,6 +713,19 @@ export class MipymeHttpScraper {
       throw new Error(
         `El rango del respaldo está invertido: ${fechaDesde} es posterior a ${fechaHasta}.`);
     }
+    // Las invariantes de folio también acá y no sólo en el schema REST: este
+    // método es público y lo llaman el core y los scripts. Un `folioHasta` sin
+    // `folioDesde` mandaría `FOLIO=''` con `FOLIOHASTA='20'` — un filtro a
+    // medias que el portal acepta y que devuelve cualquier cosa, en silencio.
+    if (filtros.folioHasta != null && filtros.folioDesde == null) {
+      throw new Error('folioHasta requiere folioDesde: el portal filtra por rango, no por extremo superior.');
+    }
+    if (filtros.folioDesde != null && filtros.folioHasta != null
+        && filtros.folioDesde > filtros.folioHasta) {
+      throw new Error(
+        `El rango de folios está invertido: ${filtros.folioDesde} es mayor que ${filtros.folioHasta}.`);
+    }
+
     const maxTramos = filtros.maxTramos ?? MAX_TRAMOS_POR_DEFECTO;
     // El techo se valida ACÁ y no sólo en el schema REST: el schema protege a la
     // ruta, pero este método es público y `core.respaldoXml` lo llama directo.

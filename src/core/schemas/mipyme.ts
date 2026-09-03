@@ -107,7 +107,13 @@ export const schemaRespaldoXml = {
   // `.trim()` y `.min(1)`: un string vacío o de puros espacios viajaría tal cual
   // a `RZN_SOC` y el portal no matchearía nada — el mismo respaldo vacío
   // indistinguible de "no hubo documentos" que motiva validar la contraparte.
-  razon_social: z.string().trim().min(1, 'razon_social no puede ser vacía').optional()
+  // El `.max()` no es burocracia: este valor viaja en la QUERY del GET de
+  // descarga, y una cadena larga infla la URL sin que el portal la use — su
+  // propio campo tiene 100 de maxlength.
+  razon_social: z.string().trim()
+    .min(1, 'razon_social no puede ser vacía')
+    .max(100, 'razon_social no puede superar los 100 caracteres')
+    .optional()
     .describe('Filtrar por razón social de la contraparte (el portal hace match parcial)'),
   folio_desde: z.number().int().positive().optional()
     .describe('Folio inicial del rango. Sin folio_hasta, filtra ese folio exacto.'),
