@@ -862,6 +862,12 @@ export class MipymeHttpScraper {
     // POST, `download.cgi` no tiene contexto y devuelve una página de error.
     await this.http.postForm(LISTA_DOCUMENTOS_URL, {
       ...comunes, TPO_ARCHIVO: 'dte', ORIGEN: f.origen, NUM_PAG: '1',
+      // `FOLIOHASTA` va también acá y no sólo en la descarga: este POST fija el
+      // contexto de búsqueda del lado del servidor, y sin el extremo superior la
+      // búsqueda queda "de ese folio en adelante" aunque la descarga después lo
+      // recorte. Que las dos llamadas pidan lo mismo es lo que evita depender de
+      // cuál de las dos manda.
+      FOLIOHASTA: folioHasta != null ? String(folioHasta) : '',
     });
 
     // FUERA DE ALCANCE: un tramo que supere el tope de respuesta del transporte

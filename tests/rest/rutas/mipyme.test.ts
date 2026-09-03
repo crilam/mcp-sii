@@ -116,6 +116,30 @@ describe('registrarRutasMipyme', () => {
 
     // `folio_hasta` solo dejaría el rango a medias: el portal manda los dos
     // extremos. Se rechaza en vez de inventarle un inicio.
+    // Un RUT basura no falla en el portal: devuelve CERO documentos, y un
+    // respaldo vacío se lee igual que "este período no tuvo documentos". Por eso
+    // se rechaza acá en vez de dejarlo pasar.
+    it('rechaza una contraparte que no es un RUT', async () => {
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(
+        { ...BASE, contraparte_rut: 'Banchile Corredores' });
+
+      expect(r.status).toBe(400);
+      expect(core.respaldoXml).not.toHaveBeenCalled();
+    });
+
+    it('acepta la contraparte con puntos y con o sin dígito verificador', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue(RESULTADO);
+      const rutas = armarRouter();
+
+      await rutas.get('POST /v1/mipyme/respaldo-xml')!({ ...BASE, contraparte_rut: '77.777.777-7' });
+      expect(core.respaldoXml).toHaveBeenLastCalledWith(
+        expect.anything(), expect.anything(), expect.objectContaining({ contraparteRut: '77777777-7' }));
+
+      await rutas.get('POST /v1/mipyme/respaldo-xml')!({ ...BASE, contraparte_rut: '77777777' });
+      expect(core.respaldoXml).toHaveBeenLastCalledWith(
+        expect.anything(), expect.anything(), expect.objectContaining({ contraparteRut: '77777777' }));
+    });
+
     it('rechaza folio_hasta sin folio_desde', async () => {
       const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!({ ...BASE, folio_hasta: 20 });
 

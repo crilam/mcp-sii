@@ -357,6 +357,36 @@ describe('MipymeHttpScraper.respaldoXml', () => {
         expect.any(String), expect.objectContaining({ RUT_RECP: '77777777' }));
     });
 
+    // La afirmación central del nombre `contraparteRut`: el MISMO campo del
+    // portal sirve para los dos lados. Verificado contra el SII para RCP (filtra
+    // por emisor); acá se fija que el scraper no cambie de campo según el
+    // origen, que es lo que haría inútil el nombre neutro.
+    it('usa el mismo campo de contraparte para el lado emitido', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, origen: 'ENV', contraparteRut: '77777777-7' });
+
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ ORIGEN: 'ENV', RUT_RECP: '77777777' }));
+    });
+
+    // Los dos CGI tienen que pedir el MISMO rango: `lista_documentos.cgi` fija
+    // el contexto de búsqueda del lado del servidor, y si sólo la descarga
+    // llevara el extremo superior, la búsqueda quedaría "de ese folio en
+    // adelante" y dependeríamos de cuál de las dos manda.
+    it('manda el rango de folios completo también al fijar la búsqueda', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, folioDesde: 10, folioHasta: 20 });
+
+      expect(http.postForm).toHaveBeenCalledWith(
+        expect.stringContaining('lista_documentos.cgi'),
+        expect.objectContaining({ FOLIO: '10', FOLIOHASTA: '20' }));
+    });
+
     it('pasa razón social y el rango de folios', async () => {
       const { scraper, http } = armar();
       (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());

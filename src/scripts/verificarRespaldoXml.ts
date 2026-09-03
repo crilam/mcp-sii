@@ -22,7 +22,6 @@ import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacio
 //   VERIF_CONTRAPARTE  RUT de la contraparte (emisor si recibidos)
 //   VERIF_RZN_SOC      razón social de la contraparte
 //   VERIF_FOLIO        folio exacto
-//   VERIF_TPO_ARCHIVO  `dte` (default) o `iecv`
 const NOMBRE = (process.argv[2] ?? 'certificado') as NombrePerfil;
 const SALIDA = process.env.VERIF_SALIDA;
 
@@ -55,7 +54,6 @@ async function main() {
     contraparte_rut: process.env.VERIF_CONTRAPARTE,
     razon_social: process.env.VERIF_RZN_SOC,
     folio_desde: process.env.VERIF_FOLIO ? Number(process.env.VERIF_FOLIO) : undefined,
-    tipo_archivo: process.env.VERIF_TPO_ARCHIVO ?? 'dte',
   });
   const b = r.body as Record<string, unknown>;
 
