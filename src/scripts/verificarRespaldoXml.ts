@@ -19,6 +19,10 @@ import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacio
 //   VERIF_DESDE    inicio del rango, YYYY-MM-DD (default: primer día del mes pasado)
 //   VERIF_HASTA    fin del rango (default: último día del mes pasado)
 //   VERIF_SALIDA   directorio donde dejar los XML bajados
+//   VERIF_CONTRAPARTE  RUT de la contraparte (emisor si recibidos)
+//   VERIF_RZN_SOC      razón social de la contraparte
+//   VERIF_FOLIO        folio exacto
+//   VERIF_TPO_ARCHIVO  `dte` (default) o `iecv`
 const NOMBRE = (process.argv[2] ?? 'certificado') as NombrePerfil;
 const SALIDA = process.env.VERIF_SALIDA;
 
@@ -48,6 +52,10 @@ async function main() {
     origen: process.env.VERIF_ORIGEN ?? 'recibidos',
     fecha_desde: desde,
     fecha_hasta: hasta,
+    contraparte_rut: process.env.VERIF_CONTRAPARTE,
+    razon_social: process.env.VERIF_RZN_SOC,
+    folio_desde: process.env.VERIF_FOLIO ? Number(process.env.VERIF_FOLIO) : undefined,
+    tipo_archivo: process.env.VERIF_TPO_ARCHIVO ?? 'dte',
   });
   const b = r.body as Record<string, unknown>;
 
@@ -71,6 +79,16 @@ async function main() {
     // sin <Detalle>, el respaldo serviría para archivar pero no para clasificar.
     const detalles = (t.xml.match(/<Detalle>/g) ?? []).length;
     console.log(`    bloques <Detalle>: ${detalles}`);
+
+    // Con qué contrapartes vino el respaldo. Es lo que prueba si un filtro
+    // FILTRÓ de verdad: el CGI no da error con un filtro que ignora, devuelve
+    // todo — y "todo" se lee igual que "el filtro no aplicaba a nadie".
+    const emisores = [...new Set([...t.xml.matchAll(/<RUTEmisor>(.*?)<\/RUTEmisor>/g)].map(m => m[1]))];
+    const receptores = [...new Set([...t.xml.matchAll(/<RUTRecep>(.*?)<\/RUTRecep>/g)].map(m => m[1]))];
+    const folios = [...new Set([...t.xml.matchAll(/<Folio>(.*?)<\/Folio>/g)].map(m => m[1]))];
+    console.log(`    emisores: ${emisores.join(', ') || '(ninguno)'}`);
+    console.log(`    receptores: ${receptores.join(', ') || '(ninguno)'}`);
+    console.log(`    folios: ${folios.slice(0, 8).join(', ')}${folios.length > 8 ? ` (+${folios.length - 8})` : ''}`);
 
     if (SALIDA && esXml) {
       fs.mkdirSync(SALIDA, { recursive: true });

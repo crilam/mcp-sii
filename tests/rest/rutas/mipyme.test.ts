@@ -98,6 +98,39 @@ describe('registrarRutasMipyme', () => {
       expect(core.respaldoXml).not.toHaveBeenCalled();
     });
 
+    it('pasa los filtros nuevos al core', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue(RESULTADO);
+
+      await armarRouter().get('POST /v1/mipyme/respaldo-xml')!({
+        ...BASE, contraparte_rut: '77777777-7', razon_social: 'Proveedor',
+        folio_desde: 10, folio_hasta: 20,
+      });
+
+      expect(core.respaldoXml).toHaveBeenCalledWith(
+        expect.anything(), '11.111.111-1',
+        expect.objectContaining({
+          contraparteRut: '77777777-7', razonSocial: 'Proveedor',
+          folioDesde: 10, folioHasta: 20,
+        }));
+    });
+
+    // `folio_hasta` solo dejaría el rango a medias: el portal manda los dos
+    // extremos. Se rechaza en vez de inventarle un inicio.
+    it('rechaza folio_hasta sin folio_desde', async () => {
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!({ ...BASE, folio_hasta: 20 });
+
+      expect(r.status).toBe(400);
+      expect(core.respaldoXml).not.toHaveBeenCalled();
+    });
+
+    it('rechaza un rango de folios invertido', async () => {
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(
+        { ...BASE, folio_desde: 20, folio_hasta: 10 });
+
+      expect(r.status).toBe(400);
+      expect(core.respaldoXml).not.toHaveBeenCalled();
+    });
+
     it('nombra cada tramo con la empresa y su rango', async () => {
       (core.respaldoXml as jest.Mock).mockResolvedValue(RESULTADO);
 

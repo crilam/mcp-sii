@@ -11,6 +11,14 @@ function aIsoUtc(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+// El cuerpo del RUT, sin puntos ni dígito verificador, que es como lo quiere el
+// formulario de descarga. Acepta las dos formas que manda la gente —"77777777-7"
+// y "77777777"— porque mandar el DV pegado no da error: da CERO resultados, y un
+// respaldo vacío se lee igual que "no hubo documentos en el período".
+function soloCuerpoRut(rut: string): string {
+  return rut.trim().replace(/\./g, '').split('-')[0];
+}
+
 // El round-trip a ISO es lo que descarta un 31 de febrero: el Date lo normaliza
 // al 3 de marzo y deja de coincidir con lo pedido.
 function esFechaDelCalendario(fecha: string): boolean {
@@ -214,6 +222,15 @@ export interface FiltrosRespaldoXml {
   fechaDesde: string;
   fechaHasta: string;
   tipoDte?: number;
+  // La CONTRAPARTE, no "el receptor": con `origen: 'RCP'` es el emisor del
+  // documento y con `ENV` es el receptor. El portal usa el mismo campo
+  // (`RUT_RECP`) para los dos lados en esta pantalla —a diferencia del listado,
+  // que sí los separa en `RUT_EMI`/`RUT_RECP`—, así que el nombre neutro es el
+  // que no miente en ninguno de los dos casos.
+  contraparteRut?: string;
+  razonSocial?: string;
+  folioDesde?: number;
+  folioHasta?: number;
   maxTramos?: number;
 }
 
@@ -819,23 +836,32 @@ export class MipymeHttpScraper {
     desde: string,
     hasta: string
   ): Promise<{ xml: string; excedeTope: boolean }> {
+    const f = ctx.filtros;
     const comunes = {
       RUT_EMP: ctx.rut,
       DV_EMP: ctx.dv,
-      RUT_RECP: '',
-      FOLIO: '',
-      RZN_SOC: '',
+      // El portal quiere la contraparte SIN dígito verificador, igual que
+      // `RUT_EMP`/`DV_EMP` van separados. Un RUT con guión acá no filtra: el CGI
+      // no encuentra coincidencias y devuelve un respaldo vacío, que se lee
+      // exactamente igual que "este período no tuvo documentos".
+      RUT_RECP: f.contraparteRut ? soloCuerpoRut(f.contraparteRut) : '',
+      FOLIO: f.folioDesde != null ? String(f.folioDesde) : '',
+      RZN_SOC: f.razonSocial ?? '',
       FEC_DESDE: desde,
       FEC_HASTA: hasta,
-      TPO_DOC: ctx.filtros.tipoDte != null ? String(ctx.filtros.tipoDte) : '',
+      TPO_DOC: f.tipoDte != null ? String(f.tipoDte) : '',
       ESTADO: '',
       ORDEN: '',
     };
+    // El folio de cierre viaja sólo en la descarga: el formulario de búsqueda no
+    // lo lleva. Si se pidió `folioDesde` sin `folioHasta`, se repite el mismo
+    // valor para que el rango sea ese folio exacto y no "de ahí en adelante".
+    const folioHasta = f.folioHasta ?? f.folioDesde;
 
     // `lista_documentos.cgi` fija la búsqueda del lado del servidor. Sin este
     // POST, `download.cgi` no tiene contexto y devuelve una página de error.
     await this.http.postForm(LISTA_DOCUMENTOS_URL, {
-      ...comunes, TPO_ARCHIVO: 'dte', ORIGEN: ctx.filtros.origen, NUM_PAG: '1',
+      ...comunes, TPO_ARCHIVO: 'dte', ORIGEN: f.origen, NUM_PAG: '1',
     });
 
     // FUERA DE ALCANCE: un tramo que supere el tope de respuesta del transporte
@@ -845,7 +871,8 @@ export class MipymeHttpScraper {
     // reales medidos van por 130 KB. Si alguna vez aparece, el síntoma es un
     // error de transporte y el arreglo es bisecar también ante ese error.
     const { contenido, contentType } = await this.http.getBinario(DOWNLOAD_URL, {
-      ...comunes, ORIGEN: ctx.filtros.origen, FOLIOHASTA: '', DOWNLOAD: 'XML',
+      ...comunes, ORIGEN: f.origen, DOWNLOAD: 'XML',
+      FOLIOHASTA: folioHasta != null ? String(folioHasta) : '',
     });
 
     // El XML viene declarado ISO-8859-1 y así se decodifica. Pasarlo por UTF-8

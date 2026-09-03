@@ -340,6 +340,94 @@ describe('MipymeHttpScraper.respaldoXml', () => {
       expect.any(String), expect.objectContaining({ TPO_DOC: '33' }));
   });
 
+  describe('filtros', () => {
+    // El portal quiere el cuerpo del RUT sin DV. Mandarlo con guión no da error:
+    // da CERO resultados, y un respaldo vacío se lee igual que "no hubo
+    // documentos en el período" — el peor modo de fallo posible acá.
+    it('manda la contraparte sin dígito verificador, venga como venga', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, contraparteRut: '77.777.777-7' });
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String), expect.objectContaining({ RUT_RECP: '77777777' }));
+
+      await scraper.respaldoXml({ ...RANGO, contraparteRut: '77777777' });
+      expect(http.getBinario).toHaveBeenLastCalledWith(
+        expect.any(String), expect.objectContaining({ RUT_RECP: '77777777' }));
+    });
+
+    it('pasa razón social y el rango de folios', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, razonSocial: 'Proveedor', folioDesde: 10, folioHasta: 20 });
+
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ RZN_SOC: 'Proveedor', FOLIO: '10', FOLIOHASTA: '20' }));
+    });
+
+    // Sin esto, pedir un folio suelto bajaría de ese folio EN ADELANTE: el CGI
+    // interpreta FOLIOHASTA vacío como sin límite superior.
+    it('un folio suelto filtra ese folio exacto, no de ahí en adelante', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, folioDesde: 13711545 });
+
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ FOLIO: '13711545', FOLIOHASTA: '13711545' }));
+    });
+
+    it('sin filtros, los campos van vacíos y no rompen la búsqueda', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml(RANGO);
+
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ RUT_RECP: '', RZN_SOC: '', FOLIO: '', FOLIOHASTA: '' }));
+    });
+
+    // TPO_ARCHIVO va FIJO en 'dte' y no es un olvido: mandarlo en 'iecv' no
+    // cambia nada por este camino —se verificó contra el SII, devuelve los
+    // mismos DTE—, porque los libros se bajan por otro CGI
+    // (`respaldoLibrosXml.cgi?COD_LBR=...`), uno por código de libro y no por
+    // rango de fechas. Exponerlo acá sería prometer libros y entregar
+    // documentos.
+    it('siempre pide los DTE, nunca los libros', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml(RANGO);
+
+      expect(http.postForm).toHaveBeenCalledWith(
+        expect.stringContaining('lista_documentos.cgi'),
+        expect.objectContaining({ TPO_ARCHIVO: 'dte' }));
+    });
+
+    // Los filtros tienen que sobrevivir al troceo: si se perdieran al bisecar,
+    // el primer tramo vendría filtrado y el resto no, y el respaldo mezclaría
+    // documentos de otras contrapartes sin que nada lo indique.
+    it('mantiene los filtros en todos los tramos del troceo', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock)
+        .mockResolvedValueOnce(binarioDemasiados())
+        .mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, contraparteRut: '77777777', tipoDte: 33 });
+
+      const llamadas = (http.getBinario as jest.Mock).mock.calls;
+      expect(llamadas).toHaveLength(3);
+      for (const [, params] of llamadas) {
+        expect(params).toMatchObject({ RUT_RECP: '77777777', TPO_DOC: '33' });
+      }
+    });
+  });
+
   it('acepta ORIGEN=ENV para el lado emitido', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());

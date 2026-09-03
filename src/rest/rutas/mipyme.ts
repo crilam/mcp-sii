@@ -23,9 +23,16 @@ const zodDtePdf = conCredencial(schemaDtePdf);
 // `error:"ERROR"` y SIN detalle: el que pide no se entera de qué mandó mal, y
 // "ERROR" en este servicio significa "reintentá", que acá no va a funcionar
 // nunca. Validarlo en el schema lo convierte en 400 con el campo señalado.
-const zodRespaldoXml = conCredencial(schemaRespaldoXml).refine(
-  d => d.fecha_desde <= d.fecha_hasta,
-  { path: ['fecha_desde'], error: 'fecha_desde no puede ser posterior a fecha_hasta' });
+const zodRespaldoXml = conCredencial(schemaRespaldoXml)
+  .refine(d => d.fecha_desde <= d.fecha_hasta,
+    { path: ['fecha_desde'], error: 'fecha_desde no puede ser posterior a fecha_hasta' })
+  // `folio_hasta` solo no filtra "hasta ese folio": el portal manda los dos
+  // extremos del rango, y sin el de inicio el filtro queda a medias. Se rechaza
+  // en vez de completarlo con un 1 implícito, que sería adivinar.
+  .refine(d => d.folio_hasta == null || d.folio_desde != null,
+    { path: ['folio_desde'], error: 'folio_hasta requiere folio_desde' })
+  .refine(d => d.folio_desde == null || d.folio_hasta == null || d.folio_desde <= d.folio_hasta,
+    { path: ['folio_desde'], error: 'folio_desde no puede ser mayor que folio_hasta' });
 const zodListBorradores = conCredencial(schemaListBorradores);
 const zodEmitirDte = z.object(schemaEmitirDte).extend({
   ...zodCredencialCert,
@@ -117,7 +124,10 @@ export function registrarRutasMipyme(
   rutas.set('POST /v1/mipyme/respaldo-xml', async body => {
     const parseo = zodRespaldoXml.safeParse(body);
     if (!parseo.success) return badRequest(parseo.error);
-    const { rut, empresa_rut, origen, fecha_desde, fecha_hasta, tipo_dte, max_tramos } = parseo.data;
+    const {
+      rut, empresa_rut, origen, fecha_desde, fecha_hasta, tipo_dte, max_tramos,
+      contraparte_rut, razon_social, folio_desde, folio_hasta,
+    } = parseo.data;
     const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(parseo.data));
     return ejecutar(async () => {
       const r = await core.respaldoXml(ejecutor, rut, {
@@ -126,6 +136,10 @@ export function registrarRutasMipyme(
         fechaDesde: fecha_desde,
         fechaHasta: fecha_hasta,
         tipoDte: tipo_dte,
+        contraparteRut: contraparte_rut,
+        razonSocial: razon_social,
+        folioDesde: folio_desde,
+        folioHasta: folio_hasta,
         maxTramos: max_tramos,
       });
       return {
