@@ -71,7 +71,7 @@ describe('MipymeHttpScraper.respaldoXml', () => {
       expect.objectContaining({
         RUT_EMP: '33333333', DV_EMP: '3', ORIGEN: 'RCP', DOWNLOAD: 'XML',
         FEC_DESDE: '2026-08-01', FEC_HASTA: '2026-08-31',
-      }));
+      }), { charset: 'latin1' });
     expect(r.tramos).toHaveLength(1);
     expect(r.tramos[0].xml).toContain('<SetDTE>');
     expect(r.documentos).toBe(2);
@@ -91,7 +91,8 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(http.get).toHaveBeenLastCalledWith(expect.stringContaining('auth.cgi'));
     expect(http.postForm).toHaveBeenCalledWith(
       expect.stringContaining('lista_documentos.cgi'),
-      expect.objectContaining({ RUT_EMP: '33333333', DV_EMP: '3', TPO_ARCHIVO: 'dte' }));
+      expect.objectContaining({ RUT_EMP: '33333333', DV_EMP: '3', TPO_ARCHIVO: 'dte' }),
+      { charset: 'latin1' });
   });
 
   // El tope de 20 lo impone el SERVIDOR, no el JavaScript de la pantalla: un
@@ -337,7 +338,7 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     await scraper.respaldoXml({ ...RANGO, tipoDte: 33 });
 
     expect(http.getBinario).toHaveBeenCalledWith(
-      expect.any(String), expect.objectContaining({ TPO_DOC: '33' }));
+      expect.any(String), expect.objectContaining({ TPO_DOC: '33' }), { charset: 'latin1' });
   });
 
   describe('filtros', () => {
@@ -350,11 +351,11 @@ describe('MipymeHttpScraper.respaldoXml', () => {
 
       await scraper.respaldoXml({ ...RANGO, contraparteRut: '77.777.777-7' });
       expect(http.getBinario).toHaveBeenCalledWith(
-        expect.any(String), expect.objectContaining({ RUT_RECP: '77777777' }));
+        expect.any(String), expect.objectContaining({ RUT_RECP: '77777777' }), { charset: 'latin1' });
 
       await scraper.respaldoXml({ ...RANGO, contraparteRut: '77777777' });
       expect(http.getBinario).toHaveBeenLastCalledWith(
-        expect.any(String), expect.objectContaining({ RUT_RECP: '77777777' }));
+        expect.any(String), expect.objectContaining({ RUT_RECP: '77777777' }), { charset: 'latin1' });
     });
 
     // La afirmación central del nombre `contraparteRut`: el MISMO campo del
@@ -369,7 +370,7 @@ describe('MipymeHttpScraper.respaldoXml', () => {
 
       expect(http.getBinario).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ ORIGEN: 'ENV', RUT_RECP: '77777777' }));
+        expect.objectContaining({ ORIGEN: 'ENV', RUT_RECP: '77777777' }), { charset: 'latin1' });
     });
 
     // Los dos CGI tienen que pedir el MISMO rango: `lista_documentos.cgi` fija
@@ -384,7 +385,30 @@ describe('MipymeHttpScraper.respaldoXml', () => {
 
       expect(http.postForm).toHaveBeenCalledWith(
         expect.stringContaining('lista_documentos.cgi'),
-        expect.objectContaining({ FOLIO: '10', FOLIOHASTA: '20' }));
+        expect.objectContaining({ FOLIO: '10', FOLIOHASTA: '20' }),
+        { charset: 'latin1' });
+    });
+
+    // Las dos llamadas van en ISO-8859-1 porque estos CGI leen latin1 y
+    // `razonSocial` es el primer texto libre que pasa por acá. Con el default
+    // UTF-8, "Muñoz" viaja como `Mu%C3%B1oz`, el portal lo lee como `MuÃ±oz` y
+    // devuelve cero documentos — indistinguible de "no hubo documentos". Las
+    // razones sociales chilenas con ñ y tildes son la norma, no el borde, y una
+    // verificación con un nombre ASCII (como "Banchile") no lo detecta.
+    it('manda la razón social en latin1, no en UTF-8', async () => {
+      const { scraper, http } = armar();
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      await scraper.respaldoXml({ ...RANGO, razonSocial: 'Muñoz' });
+
+      expect(http.postForm).toHaveBeenCalledWith(
+        expect.stringContaining('lista_documentos.cgi'),
+        expect.objectContaining({ RZN_SOC: 'Muñoz' }),
+        { charset: 'latin1' });
+      expect(http.getBinario).toHaveBeenCalledWith(
+        expect.stringContaining('download.cgi'),
+        expect.objectContaining({ RZN_SOC: 'Muñoz' }),
+        { charset: 'latin1' });
     });
 
     it('pasa razón social y el rango de folios', async () => {
@@ -395,7 +419,7 @@ describe('MipymeHttpScraper.respaldoXml', () => {
 
       expect(http.getBinario).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ RZN_SOC: 'Proveedor', FOLIO: '10', FOLIOHASTA: '20' }));
+        expect.objectContaining({ RZN_SOC: 'Proveedor', FOLIO: '10', FOLIOHASTA: '20' }), { charset: 'latin1' });
     });
 
     // Sin esto, pedir un folio suelto bajaría de ese folio EN ADELANTE: el CGI
@@ -408,7 +432,7 @@ describe('MipymeHttpScraper.respaldoXml', () => {
 
       expect(http.getBinario).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ FOLIO: '13711545', FOLIOHASTA: '13711545' }));
+        expect.objectContaining({ FOLIO: '13711545', FOLIOHASTA: '13711545' }), { charset: 'latin1' });
     });
 
     it('sin filtros, los campos van vacíos y no rompen la búsqueda', async () => {
@@ -419,7 +443,7 @@ describe('MipymeHttpScraper.respaldoXml', () => {
 
       expect(http.getBinario).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ RUT_RECP: '', RZN_SOC: '', FOLIO: '', FOLIOHASTA: '' }));
+        expect.objectContaining({ RUT_RECP: '', RZN_SOC: '', FOLIO: '', FOLIOHASTA: '' }), { charset: 'latin1' });
     });
 
     // TPO_ARCHIVO va FIJO en 'dte' y no es un olvido: mandarlo en 'iecv' no
@@ -436,7 +460,8 @@ describe('MipymeHttpScraper.respaldoXml', () => {
 
       expect(http.postForm).toHaveBeenCalledWith(
         expect.stringContaining('lista_documentos.cgi'),
-        expect.objectContaining({ TPO_ARCHIVO: 'dte' }));
+        expect.objectContaining({ TPO_ARCHIVO: 'dte' }),
+        { charset: 'latin1' });
     });
 
     // Los filtros tienen que sobrevivir al troceo: si se perdieran al bisecar,
@@ -465,6 +490,6 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     await scraper.respaldoXml({ ...RANGO, origen: 'ENV' });
 
     expect(http.getBinario).toHaveBeenCalledWith(
-      expect.any(String), expect.objectContaining({ ORIGEN: 'ENV' }));
+      expect.any(String), expect.objectContaining({ ORIGEN: 'ENV' }), { charset: 'latin1' });
   });
 });

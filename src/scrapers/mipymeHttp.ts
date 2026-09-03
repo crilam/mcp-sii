@@ -853,13 +853,18 @@ export class MipymeHttpScraper {
       ESTADO: '',
       ORDEN: '',
     };
-    // El folio de cierre viaja sólo en la descarga: el formulario de búsqueda no
-    // lo lleva. Si se pidió `folioDesde` sin `folioHasta`, se repite el mismo
-    // valor para que el rango sea ese folio exacto y no "de ahí en adelante".
+    // Si se pidió `folioDesde` sin `folioHasta`, se repite el mismo valor para
+    // que el rango sea ese folio exacto y no "de ahí en adelante": el CGI lee un
+    // `FOLIOHASTA` vacío como sin límite superior.
     const folioHasta = f.folioHasta ?? f.folioDesde;
 
     // `lista_documentos.cgi` fija la búsqueda del lado del servidor. Sin este
     // POST, `download.cgi` no tiene contexto y devuelve una página de error.
+    // `latin1` en las dos llamadas: `RZN_SOC` es texto libre y estos CGI leen
+    // ISO-8859-1. Con UTF-8, "Muñoz" viaja como `Mu%C3%B1oz`, el portal lo lee
+    // como `MuÃ±oz` y devuelve cero documentos — el respaldo vacío que se
+    // confunde con "este período no tuvo documentos". Las razones sociales
+    // chilenas con ñ y tildes son la norma, no el borde.
     await this.http.postForm(LISTA_DOCUMENTOS_URL, {
       ...comunes, TPO_ARCHIVO: 'dte', ORIGEN: f.origen, NUM_PAG: '1',
       // `FOLIOHASTA` va también acá y no sólo en la descarga: este POST fija el
@@ -868,7 +873,7 @@ export class MipymeHttpScraper {
       // recorte. Que las dos llamadas pidan lo mismo es lo que evita depender de
       // cuál de las dos manda.
       FOLIOHASTA: folioHasta != null ? String(folioHasta) : '',
-    });
+    }, { charset: 'latin1' });
 
     // FUERA DE ALCANCE: un tramo que supere el tope de respuesta del transporte
     // (MAX_RESPUESTA_BYTES en http.ts) falla duro y NO se bisecta — la partición
@@ -879,7 +884,7 @@ export class MipymeHttpScraper {
     const { contenido, contentType } = await this.http.getBinario(DOWNLOAD_URL, {
       ...comunes, ORIGEN: f.origen, DOWNLOAD: 'XML',
       FOLIOHASTA: folioHasta != null ? String(folioHasta) : '',
-    });
+    }, { charset: 'latin1' });
 
     // El XML viene declarado ISO-8859-1 y así se decodifica. Pasarlo por UTF-8
     // rompería las razones sociales con acentos, que son la mayoría, y el daño
