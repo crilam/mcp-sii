@@ -2,7 +2,10 @@
 
 Capturadas el 2026-09-06/07 contra el SII real. **Todo dato identificatorio está
 sustituido**: RUT ficticio `11111111-1`, razón social "EMPRESA DE PRUEBA SPA",
-dirección inventada, y el RUT dentro de la traza del cálculo reemplazado.
+dirección inventada, el RUT dentro de la traza del cálculo reemplazado, y los montos que
+identificaban actividad real sustituidos por cifras ficticias. Lo que estos archivos
+documentan es la FORMA de cada respuesta —nombres de campo, tipos, dónde hay `null`—, no
+las cifras.
 
 Los archivos son **JSON válido** —sin comentarios— para que se puedan `require`
 directo desde un test. Lo que cada uno muestra:

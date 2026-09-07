@@ -138,9 +138,14 @@ posiciones: **sólo existen los tipos 1, 2 y 3.**
 
 | Período | `scoaPpmoCod563` | `scoaPpmoCod115` | Monto declarado |
 |---|---|---|---|
-| 202512 | 30.801.047 | 0.125 | $6.130.840 |
-| 202605 | 0 | null | $0 |
-| 202607 | 0 | null | $0 |
+| un período con movimiento | base imponible poblada | 0.125 | mayor que cero |
+| 202605 | 0 | null | 0 |
+| 202607 | 0 | null | 0 |
+
+Las cifras del período con movimiento no se transcriben —son datos tributarios de un
+contribuyente real y este repositorio es público—; lo que sostiene la conclusión es que los
+campos `Ppmo` se pueblan justo cuando la declaración tiene monto, y quedan en cero cuando
+no.
 
 Los tipos 1 y 2 vinieron `null` en los tres períodos cerrados, y en el período abierto los
 tres vienen `null` (`[null,null,null]`): todavía no se usó ninguno.
@@ -330,12 +335,14 @@ declarados, el RCV de compras contra `listCodPropuestos` de la propuesta del SII
 
 | Período | RCV de compras (del período consultado) | Propuesta del SII |
 |---|---|---|
-| 202606 | tipo 33: **1** documento, IVA **978** | `519=1`, `520=978`, `511=978` |
-| 202607 | tipo 33: **2** documentos, IVA **96.995**; nota de crédito (61): **1**, IVA **1.900** | `519=2`, `520=96995`, `527=1`, `528=1900`, `511=95095` |
+| 202606 | tipo 33: **1** documento, IVA **A** | `519=1`, `520=A`, `511=A` |
+| 202607 | tipo 33: **2** documentos, IVA **B**; nota de crédito (61): **1**, IVA **C** | `519=2`, `520=B`, `527=1`, `528=C`, `511=B−C` |
 
-Cuadra exacto, incluida la aritmética interna: `511 = 520 − 528` (95.095 = 96.995 − 1.900),
-o sea el crédito neto después de las notas de crédito. Las cantidades de documentos también
-coinciden una a una (`519` y `527`).
+**A**, **B** y **C** son los montos reales, que no se transcriben por la misma razón que en
+§3.2. Lo verificable sin publicarlos: el IVA que suma el RCV del período aparece idéntico
+en el `520` de la propuesta, y el `511` es exactamente el `520` menos la nota de crédito
+—o sea el crédito neto—. Las cantidades de documentos también coinciden una a una (`519` y
+`527`). Se reproduce corriendo la comparación descrita en el anexo.
 
 **La prueba del criterio es el documento desfasado.** En 202606 hay una factura **emitida
 el 31/05/2026 y recibida el 11/06/2026**, y está dentro del período 202606 del RCV — el
@@ -415,7 +422,7 @@ SPA", dirección inventada, y la traza del cálculo con el RUT sustituido):
 
 **Detalles de tipos que importan para escribir el cliente**, y que se ven en los fixtures:
 
-- **Los montos vienen como `string`, no como number** (`{"codigo":"520","valor":"96995"}`).
+- **Los montos vienen como `string`, no como number** (`{"codigo":"520","valor":"…"}`).
   Incluye la tasa: `"115": "0.125"`.
 - `getTasaPPMO` **mezcla**: `cod563` y `cod115` son string, `mes` y `anno` son number.
 - Abundan los `null` en campos opcionales; no asumir presencia.

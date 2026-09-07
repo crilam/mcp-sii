@@ -5,11 +5,11 @@
   "listCodPropuestos": [
     {
       "codigo": "511",
-      "valor": "95095"
+      "valor": "98000"
     },
     {
       "codigo": "562",
-      "valor": "288148"
+      "valor": "300000"
     },
     {
       "codigo": "584",
@@ -17,7 +17,7 @@
     },
     {
       "codigo": "520",
-      "valor": "96995"
+      "valor": "100000"
     },
     {
       "codigo": "519",
@@ -25,7 +25,7 @@
     },
     {
       "codigo": "528",
-      "valor": "1900"
+      "valor": "2000"
     },
     {
       "codigo": "527",
@@ -61,11 +61,11 @@
   "listCodAdministrativos": [
     {
       "codigo": "9114",
-      "valor": "95095"
+      "valor": "98000"
     },
     {
       "codigo": "9126",
-      "valor": "288148"
+      "valor": "300000"
     },
     {
       "codigo": "9129",
@@ -73,7 +73,7 @@
     },
     {
       "codigo": "9132",
-      "valor": "96995"
+      "valor": "100000"
     },
     {
       "codigo": "9137",
@@ -81,7 +81,7 @@
     },
     {
       "codigo": "9172",
-      "valor": "1900"
+      "valor": "2000"
     },
     {
       "codigo": "9175",
