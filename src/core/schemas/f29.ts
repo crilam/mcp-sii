@@ -39,3 +39,7 @@ export const schemaPropuestaF29 = {
     }, 'periodo debe ser AAAAMM, con año 2007-2100 y mes 01-12')
     .describe('Período tributario en formato AAAAMM (ej. "202608")'),
 };
+
+// PPM pide lo mismo que la propuesta —RUT y período AAAAMM como string—, y por
+// las mismas razones: las dos rutas las consume AgenticERP con el mismo tipo.
+export const schemaPpmF29 = schemaPropuestaF29;

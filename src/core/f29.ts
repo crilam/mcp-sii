@@ -1,5 +1,6 @@
 import { F29Scraper, EstadoF29 } from '../scrapers/f29';
 import { F29PropuestaScraper, PropuestaF29 } from '../scrapers/f29Propuesta';
+import { F29PpmScraper, TasaPpmF29 } from '../scrapers/f29Ppm';
 import { MisiiScraper } from '../scrapers/misii';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
@@ -71,5 +72,17 @@ export async function propuesta(
 ): Promise<PropuestaF29> {
   return ejecutor.ejecutar(rut, async sesion => {
     return new F29PropuestaScraper(new SiiHttpClient(sesion), sesion).propuesta(periodo);
+  });
+}
+
+// Tasa y casilleros de PPM del período. Misma aplicación del SII que la
+// propuesta (`propuestaf29ui`) y una sola consulta.
+export async function tasaPpm(
+  ejecutor: EjecutorSesion<SessionManager>,
+  rut: string,
+  periodo: string
+): Promise<TasaPpmF29> {
+  return ejecutor.ejecutar(rut, async sesion => {
+    return new F29PpmScraper(new SiiHttpClient(sesion), sesion).tasaPpm(periodo);
   });
 }

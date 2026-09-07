@@ -531,6 +531,31 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
   Un período **ya declarado sigue respondiendo la propuesta**, aunque el portal del SII corte antes con "Existe una declaración vigente". Sirve para reproducir y testear sobre períodos cerrados.
 
+- **`POST /v1/f29/ppm`** — el **Pago Provisional Mensual** del período: la tasa que el SII aplica y los casilleros del cálculo. `rut` y `periodo` (`AAAAMM`, string o número, igual que `/v1/f29/propuesta`). Es la cuarta fuente de la cuadratura del F29 y la única que **no** sale del Registro de Compras y Ventas: el SII la calcula con la renta del año anterior.
+
+  ```json
+  { "ok": true,
+    "periodo": "202608",
+    "casilleros": [ { "codigo": "563", "valor": "84" }, { "codigo": "115", "valor": "0.125" } ],
+    "cod563_propuesto": "84",
+    "tasa_idpc": "27.0",
+    "categoria_tributaria": 1,
+    "realizado": false,
+    "fuera_de_plazo": false,
+    "es_propyme": true,
+    "generada_en": "2026-09-07T20:15:04.163Z" }
+  ```
+
+  **`realizado` es el campo que cambia la lectura de todo lo demás.** En `false` el contribuyente todavía no usó el asistente de PPM en ese período, así que el `563` es lo que el SII **propone**; en `true` ya está declarado. Sin ese campo los dos casos se leen igual. Verificado en vivo con los dos: un período cerrado responde `realizado: true` y uno abierto `false`.
+
+  Los códigos que el SII manda en `null` **no aparecen** en `casilleros` — un `null` es "este código no aplica al contribuyente", no un casillero en cero. Por eso la lista cambia de largo entre períodos. `cod563_propuesto` va aparte y **no** es un casillero: es el valor propuesto, que en un período ya declarado con otro monto es justo la diferencia accionable.
+
+  **Los `valor` son STRING**, misma decisión que en la propuesta: la tasa del código 115 viene `"0.125"`.
+
+  **Lo que NO devuelve**: `rutContribuyente` y `dv`, que el SII **sí** incluye en su respuesta. Quien pregunta ya sabe por qué RUT preguntó, y devolverlo de vuelta sólo agrega un lugar más donde el RUT queda registrado. Hay un test que lo fija sobre el JSON serializado.
+
+  Una sola consulta al SII (`getTasaPPMO`), a diferencia de la propuesta, que hace dos. **Probada sólo con clave tributaria**, igual que la propuesta, y **sin tool MCP** por la misma razón.
+
 - **`POST /v1/mipyme/list-empresas`** — sólo `rut`. Devuelve `{"ok":true,"datos":[{"rut","nombre"}]}`.
 - **`POST /v1/mipyme/list-dte-emitidos`** — `rut` obligatorio; opcionales `empresa_rut`, `tipo_dte`, `fecha_desde` y `fecha_hasta` (`AAAA-MM-DD`), `receptor_rut`, `folio`, y `pagina` (default `1`, 100 documentos por página).
 
