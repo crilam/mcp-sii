@@ -1,7 +1,9 @@
 # F29: propuesta, borrador y asistentes — relevamiento
 
 **Fecha:** 2026-09-06 · **Contribuyente de prueba:** Truful SpA (perfil `mipyme` del `.env`) ·
-**Períodos usados:** 202607, 202605 y 202512, los tres YA DECLARADOS y cerrados.
+**Períodos usados:** 202607, 202605 y 202512 (declarados y cerrados) y **202608, abierto**,
+este último con autorización expresa del dueño para abrir el formulario y leer, sin tocar
+ningún botón de guardar, declarar ni pagar.
 
 Encargo de la sesión que lleva el PRD de agenticerp ("Declarar el F29"), para validar
 los supuestos de su sección 4.3. **Relevamiento de solo lectura**: no se presentó, cargó,
@@ -22,12 +24,14 @@ invocaron**.
    `getComplementosAsistentes` devuelve un **array posicional por tipo**.
 3. **Pero ese endpoint NO devuelve la propuesta del SII**: devuelve lo que el
    contribuyente dejó grabado *al declarar con el asistente*. La evidencia es temporal y
-   es contundente (ver §4). Para el diagnóstico previo a declarar hay que ir a la fuente
-   de la propuesta, que es el RCV, o a `getCodigosPropuestos`, cuyo contrato quedó
-   pendiente.
-4. **Recomendación de alcance**: la sección 4.3 del PRD **no se puede construir tal como
-   está escrita** sin dos verificaciones que faltan, y hay un argumento fuerte para
-   rediseñarla hacia "cuadrar y avisar" en vez de "dejar cargado" (ver §7).
+   es contundente (ver §4).
+4. **La propuesta SÍ se lee, y con casilleros**: el endpoint es
+   `getDeclaracionConCondicionesYTipoPropuesta`, capturado en un período abierto (§3.1).
+   Devuelve los códigos propuestos con su valor, los administrativos, el tipo de
+   propuesta y una traza del cálculo.
+5. **Recomendación de alcance**: la comparación por origen del PRD **se puede construir**,
+   pero contra la propuesta consolidada y el RCV, no "por asistente" — los asistentes son
+   dos y no cubren compras (ver §7).
 
 ---
 
@@ -89,13 +93,21 @@ Si se equivoca el namespace, el SII responde **diciendo cuál es el correcto** e
 `generarDeclaracionCuponPago`, `crearPagoPec`, `anularPec`, `enviarDatosFlujo`,
 `enrolarContribuyente`.
 
-### Con contrato pendiente (rechazan los payloads probados con HTTP 400)
+### La propuesta y los asistentes (capturados en período abierto, §3.1)
 
-`getCodigosPropuestos`, `hasBorrador`, `getBoletasHonorario`, `getBoletasPrestacionT`,
-`obtenerCodigosPrimitiva`, `getFormularioMetaData`. Se probaron cuatro formas distintas
-para `getCodigosPropuestos`; ninguna pasó. **Adivinar no sirve** — es la misma lección que
-dejó el RCV. Hay que capturarlos del navegador en un período **sin declarar**, que es
-donde la app los llama de verdad (ver §6).
+| Método | Payload `data` | Devuelve |
+|---|---|---|
+| `getDeclaracionConCondicionesYTipoPropuesta` | `{rutContribuyente, dv, formCodigo:"2", mes, anno}` | **la propuesta**: ver §3.1 |
+| `getBoletasHonorario` (Riac) | `{rutContribuyente, dv, mes, anno, paginaActual:1}` | `{listBoletasHonorarios[], honorariosBrutoTotal, honorariosRetencionEmisorTotal, honorariosRetencionReceptorTotal, honorariosLiquidoTotal, totalPaginas, totalRegistros, bhep}` |
+| `getBoletasPrestacionT` (Riac) | igual que el anterior | misma forma, `bhep:null` |
+| `getMensajesContribuyente` | `{rut, periodo, formId:"2", tipo:"IP"}` | mensajes al contribuyente, `null` si no hay |
+
+### Con contrato aún pendiente
+
+`getCodigosPropuestos`, `hasBorrador`, `obtenerCodigosPrimitiva`, `getFormularioMetaData`.
+No se los vio en el flujo capturado —la app usa
+`getDeclaracionConCondicionesYTipoPropuesta` para la propuesta—, así que probablemente
+pertenezcan al camino de rectificatoria. **No hacen falta** para lo que pide el PRD.
 
 ---
 
@@ -128,11 +140,52 @@ posiciones: **sólo existen los tipos 1, 2 y 3.**
 | 202605 | 0 | null | $0 |
 | 202607 | 0 | null | $0 |
 
-Los tipos 1 y 2 vinieron `null` en los tres períodos: Truful no usa esos asistentes.
-**Cuál es cada uno no se pudo determinar** con este contribuyente — por descarte y por los
-campos disponibles, uno de ellos es el de boletas de honorarios (los campos de retención
-emisor/receptor calzan con BHE). Para confirmarlo hace falta un contribuyente que sí los
-use, o la captura en un período con propuesta viva.
+Los tipos 1 y 2 vinieron `null` en los tres períodos cerrados, y en el período abierto los
+tres vienen `null` (`[null,null,null]`): todavía no se usó ninguno.
+
+### 3.1 Qué asistentes ofrece de verdad la pantalla
+
+La captura del período abierto muestra que **el formulario ofrece DOS asistentes**, con su
+estado al lado:
+
+| Asistente en pantalla | Estado mostrado |
+|---|---|
+| **Asistente Pago Provisional Mensual (PPM)** | No Realizado |
+| **Boletas de Ventas y Servicios** | Realizado |
+
+**No hay un asistente de compras ni uno de honorarios en esta pantalla.** Eso responde la
+pregunta 5 y corrige el supuesto del encargo:
+
+- **Las compras no pasan por un asistente**: entran solas desde el RCV. La propuesta lo
+  declara con `complementoDetalleDTE: true` y `documentosDelGiro: true`.
+- **Las boletas de honorarios tampoco tienen asistente propio acá**, pero **sí tienen
+  endpoint**: `getBoletasHonorario` y `getBoletasPrestacionT` (§2), que la app llama al
+  entrar al período.
+
+### 3.2 La propuesta: `getDeclaracionConCondicionesYTipoPropuesta`
+
+Es el endpoint que arma la propuesta del período. Payload
+`{rutContribuyente, dv, formCodigo:"2", mes, anno}`. Devuelve:
+
+| Campo | Qué trae |
+|---|---|
+| `listCodPropuestos` | **los casilleros propuestos**: `[{codigo, valor}]`. En la corrida real vinieron los códigos 110, 111, 115, 504, 511, 519, 520, 562, 563 y 584 |
+| `listCodAdministrativos` | códigos 9114, 9126, 9129, 9132, 9137, 9192, 9193, con los mismos valores que sus pares del formulario |
+| `listCodBase` | identificación: razón social, RUT, dirección, comuna y período (código 15) |
+| `tipopropuesta` | entero (40 en la corrida); `tipopropuestadescrip` vino `null` |
+| `listCondiciones`, `listGlosasProp`, `listCodComplementar` | vacíos en el caso medido |
+| `complementoDetalleDTE`, `documentosDelGiro` | `true` — el detalle viene del RCV |
+| `estado`, `tieneAnotaciones`, `anotacion` | `0`, `false`, `false` |
+| `resultadoCalculoPP29.traza` | **traza textual del cálculo**, con RUT y período. Útil para diagnóstico; **no loguear tal cual**, lleva identificadores |
+
+Los valores concretos no se transcriben acá a propósito: este repositorio es público y son
+datos tributarios de un contribuyente real. Se reproducen corriendo la captura.
+
+**Pregunta 8, matizada por la evidencia nueva:** hay dos comportamientos distintos según
+dónde se pregunte. `getComplementosAsistentes` devuelve **`null`** en la posición del
+asistente no usado; en cambio `getBoletasHonorario` con una empresa sin honorarios
+devuelve **ceros y lista vacía** (`listBoletasHonorarios: []`, `totalRegistros: 0`), no
+`null` ni error. Son dos convenciones diferentes en la misma aplicación.
 
 ---
 
@@ -190,61 +243,61 @@ relevamiento.
 
 ---
 
-## 6. Qué falta y cómo probarlo (sin cruzar la línea)
+## 6. Qué quedó fuera
 
-Todo lo que falta depende de mirar un período **sin declarar** (hoy 202608), porque es el
-único estado donde la app pide la propuesta y activa los asistentes. En un período ya
-declarado la aplicación corta antes: *"Existe una declaración vigente para este periodo
-tributario"*.
+Con la captura del período abierto quedaron respondidas las preguntas 2, 5, 6, 7 y 8.
+Sigue **sin verificar**, y a propósito:
 
-**No se hizo, y es deliberado.** Abrir el formulario de un período abierto podría dejar
-estado en el SII —la app tiene `guardarBorradorIntentoPago` y una pantalla que dice
-"Tienes información guardada"—, y la regla del encargo es no cargar nada. **Lo decide el
-dueño.**
-
-Si se autoriza, el procedimiento exacto es:
-
-1. Abrir `https://www4.sii.cl/propuestaf29ui/` con la clave propia, instalar el
-   interceptor de XHR (el de `relevarF29Rpc.ts`, ya probado acá) y seleccionar el período
-   abierto.
-2. Capturar los payloads de `getCodigosPropuestos`, `hasBorrador`,
-   `getBoletasHonorario`, `getBoletasPrestacionT` y `getFormularioMetaData`.
-3. **No tocar** ningún botón de guardar, declarar ni pagar; leer y salir.
-
-Con eso quedan cerradas las preguntas 2, 5, 6 y 7.
+- **Que la escritura funcione.** `guardarDeclaracion` / `guardarPropuesta` /
+  `guardarBorradorIntentoPago` no se invocaron. No sabemos si dejan la declaración
+  visible para el administrador, si crean folio, si son reversibles ni si bloquean el
+  período. Es lo único que separa "dejar cargado" de una suposición.
+- **Qué atribución exige declarar.** Se sabe que la clave propia abre la aplicación y
+  lee todo; no se sabe si enviar exige algo más.
+- **El criterio de fecha del RCV frente al de la propuesta.** La propuesta dice tomar el
+  detalle del RCV (`complementoDetalleDTE: true`), pero no se comparó documento a
+  documento contra el RCV que ya importamos. **Es la verificación que más valor tiene
+  ahora**, y es de solo lectura: bajar el RCV del período y contrastar los totales contra
+  `listCodPropuestos`.
 
 ---
 
 ## 7. Recomendación sobre la sección 4.3 del PRD
 
-**Tal como está escrita, no se puede construir todavía**, por dos motivos concretos:
+**La comparación a tres fuentes se puede construir**, con una corrección importante sobre
+cómo estaba planteada.
 
-1. La comparación "contra la propuesta del SII" se apoya en un endpoint cuyo contrato aún
-   no tenemos (`getCodigosPropuestos`). Lo que sí funciona hoy
-   (`getComplementosAsistentes`) es el registro de lo declarado, no la propuesta.
-2. Dejar la declaración cargada exige invocar `guardarDeclaracion` /
-   `guardarPropuesta`, que **nadie ha ejecutado nunca** desde este servicio. Eso no es un
-   detalle de implementación: es escribir en el SII, y su comportamiento —si crea folio,
-   si es reversible, si bloquea el período— es desconocido.
+**Lo que cambia:** no hay "un asistente por origen". Hay **dos** asistentes (PPM y Boletas
+de Ventas y Servicios) y las compras **no** pasan por asistente: entran solas desde el
+RCV. Así que la comparación por origen no se hace "asistente contra libro", sino:
 
-**Y hay un argumento para reducir el alcance, que el dueño planteó y este relevamiento
-respalda.** Si declarar con los asistentes es fácil para el administrador, el valor del
-sistema está en **cuadrar y avisar**, no en automatizar el trámite:
+| Origen | Fuente del SII para comparar |
+|---|---|
+| Compras | `listCodPropuestos` (códigos de crédito) + el RCV que ya importamos, documento a documento |
+| Ventas | `listCodPropuestos` (códigos de débito) + RCV |
+| Honorarios | `getBoletasHonorario` / `getBoletasPrestacionT`, que dan totales y detalle paginado |
+| PPM | `getTasaPPMO` y el asistente tipo 3 |
 
-- El paso caro y riesgoso es el que menos aporta: escribir en el SII, con la credencial
-  más sensible, en un flujo que además es indistinguible de declarar mal si algo falla.
-- El paso barato es el que más aporta: cuadrar las tres fuentes y decir **por dónde no
-  cuadra**, con el detalle por documento que el RCV ya nos da.
-- Además, el diagnóstico por origen **no depende de los asistentes**: se puede hacer
-  contra el RCV, que mcp-sii ya importa con detalle línea a línea, y contra el libro
-  propio. Los asistentes agregarían la vista del SII, pero no son la única vía.
+Con eso el diagnóstico accionable que pedía el PRD **es alcanzable**: se puede decir "el
+SII propone X en el código 520 y el libro dice Y", y con el RCV bajar al documento que
+explica la diferencia.
 
-**Propuesta concreta**: que 4.3 entregue al administrador un **diagnóstico accionable por
-origen** ("compras: el asistente trae X y el libro Y, por el folio N de tal proveedor") más
-un **enlace directo al período correcto** de `propuestaf29ui`, y que la carga automática
-quede como fase 2, condicionada a que se autorice probar la escritura en un período real.
-Eso deja el 80% del valor sin tocar la parte peligrosa, y no cierra la puerta a
-automatizar después.
+**Sobre dejar la declaración cargada.** Sigue siendo el punto caro: exige una escritura
+que nadie ejecutó nunca, con la credencial más sensible, en un flujo donde equivocarse es
+indistinguible de declarar mal. Y el relevamiento muestra que **el administrador ya tiene
+la propuesta armada al entrar**: el SII le precarga los casilleros y le ofrece los
+asistentes. Si declarar con eso es fácil —como dice el dueño—, el sistema aporta más
+cuadrando y avisando que cargando.
+
+**Propuesta concreta para 4.3:**
+
+1. **Fase 1 (todo lectura, construible ya)**: cuadrar `listCodPropuestos` contra el libro
+   propio y el RCV, y entregar el diagnóstico por origen con el documento que descuadra,
+   más un enlace directo al período en `propuestaf29ui`.
+2. **Fase 2 (requiere autorización aparte)**: probar `guardarDeclaracion` en un período
+   real y recién ahí decidir si conviene dejar cargado.
+
+El corte entre fase 1 y fase 2 es exactamente el corte entre lo verificado y lo supuesto.
 
 ---
 
