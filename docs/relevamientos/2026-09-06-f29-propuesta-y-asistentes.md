@@ -101,7 +101,7 @@ Si se equivoca el namespace, el SII responde **diciendo cuál es el correcto** e
 |---|---|---|
 | `getDeclaracionConCondicionesYTipoPropuesta` | `{rutContribuyente, dv, formCodigo:"2", mes, anno}` | **la propuesta**: ver §3.1 |
 | `getBoletasHonorario` (Riac) | `{rutContribuyente, dv, mes, anno, paginaActual:1}` | `{listBoletasHonorarios[], honorariosBrutoTotal, honorariosRetencionEmisorTotal, honorariosRetencionReceptorTotal, honorariosLiquidoTotal, totalPaginas, totalRegistros, bhep}` |
-| `getBoletasPrestacionT` (Riac) | igual que el anterior | misma forma, `bhep:null` |
+| `getBoletasPrestacionT` (Riac) | igual que el anterior | misma forma. En la corrida trajo `bhep: null` donde `getBoletasHonorario` trajo `false`; el fixture guardado es el de honorarios, así que ese `null` no se puede verificar desde los fixtures |
 | `getMensajesContribuyente` | `{rut, periodo, formId:"2", tipo:"IP"}` | mensajes al contribuyente, `null` si no hay |
 
 ### Con contrato aún pendiente

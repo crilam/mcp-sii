@@ -31,7 +31,9 @@ getTasaPPMO — respuesta REDACTADA. Mezcla tipos: cod563 y cod115 son string, m
 - Conviven **dos convenciones distintas de "sin datos"**: `null` por posición en
   asistentes, ceros y lista vacía en boletas. Hay que tratarlas por endpoint.
 
-## Lo que falta capturar
+## Pendiente: dos capturas que faltan
+
+No son un detalle — son el hueco que va a doler al escribir un cliente:
 
 - `getBoletasHonorario` **con** datos: el contribuyente de prueba no tiene boletas de
   honorarios en ningún período consultado, así que la forma de los elementos de
