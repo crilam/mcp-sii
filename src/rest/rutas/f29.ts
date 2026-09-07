@@ -75,7 +75,13 @@ export function registrarRutasF29(
     // parecida nunca puede terminar leyéndose como "sin propuesta".
     const cuerpo = respuesta.body as Record<string, unknown>;
     if (respuesta.status === 200 && cuerpo?.[SIN_PROPUESTA]) {
-      return { status: 200, body: { ok: false, error: 'SIN_PROPUESTA' } };
+      // Lleva `generada_en` igual que el caso con propuesta: "preguntamos y el
+      // SII no propuso nada" es un hecho fechable, y sin la marca el consumidor
+      // no puede auditar cuándo lo preguntó.
+      return {
+        status: 200,
+        body: { ok: false, error: 'SIN_PROPUESTA', generada_en: new Date().toISOString() },
+      };
     }
     return respuesta;
   });

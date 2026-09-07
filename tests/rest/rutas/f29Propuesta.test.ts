@@ -53,6 +53,8 @@ describe('POST /v1/f29/propuesta', () => {
     expect(body.error).toBe('SIN_PROPUESTA');
     // El marcador interno no puede escaparse al JSON del consumidor.
     expect(JSON.stringify(body)).not.toContain('__sin_propuesta');
+    // "Preguntamos y no había propuesta" también es un hecho fechable.
+    expect(Date.parse(body.generada_en)).not.toBeNaN();
   });
 
   // La ruta arma la respuesta campo por campo en vez de spreadear el resultado

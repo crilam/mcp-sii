@@ -57,6 +57,28 @@ interface RespuestaPropuesta {
 
 interface FilaDeclaracion {
   declFechaCreacion?: string | null;
+  estado?: string | null;
+}
+
+/**
+ * Lanza si el sobre SDI trae errores. Va acá y no en cada llamada porque el modo
+ * de fallo de esta app es traicionero: responde HTTP 200 con `metaData.errors` y
+ * `data` vacía, así que un error no verificado se lee como "no hay dato".
+ *
+ * Mira el CONTENIDO de `errors` y no su presencia: `errors: []` es truthy, y
+ * verificar la existencia haría fallar toda consulta exitosa que traiga la lista
+ * vacía.
+ */
+function assertSinErrores(respuesta: { metaData?: { errors?: unknown } } | null, queSePedia: string): void {
+  const errores = respuesta?.metaData?.errors;
+  const hayError = Array.isArray(errores) ? errores.length > 0 : errores != null;
+  if (!hayError) return;
+
+  const descripcion = Array.isArray(errores)
+    ? errores.map((e: { descripcion?: string }) => e?.descripcion).filter(Boolean).join('; ')
+    : '';
+  throw new Error(
+    `El SII rechazó la consulta de ${queSePedia}${descripcion ? `: ${descripcion}` : ''}.`);
 }
 
 export class F29PropuestaScraper {
@@ -81,25 +103,7 @@ export class F29PropuestaScraper {
       { rutContribuyente: String(rut), dv: String(dv), formCodigo: FORM_CODIGO, mes, anno }
     );
 
-    // Un FALLO del SII no puede terminar leyéndose como "no hay propuesta". Con
-    // el namespace equivocado o la sesión caída, esta app responde HTTP 200 con
-    // `metaData.errors` y `data` vacía: si eso cayera en el mismo camino que un
-    // período sin propuesta, el consumidor recibiría "no reintentar" ante un
-    // error que SÍ se arregla reintentando (o corrigiendo el namespace). Se
-    // distingue acá, que es donde se tiene la respuesta cruda.
-    // `errors: []` es TRUTHY: mirar sólo la presencia haría lanzar toda consulta
-    // exitosa que traiga la lista vacía, que es un patrón común en estos sobres.
-    // Se mira el contenido, no la existencia.
-    const errores = respuesta?.metaData?.errors;
-    const hayError = Array.isArray(errores) ? errores.length > 0 : errores != null;
-    if (hayError) {
-      const descripcion = Array.isArray(errores)
-        ? errores.map((e: { descripcion?: string }) => e?.descripcion).filter(Boolean).join('; ')
-        : '';
-      throw new Error(
-        `El SII rechazó la consulta de la propuesta del período ${periodo}` +
-        `${descripcion ? `: ${descripcion}` : ''}.`);
-    }
+    assertSinErrores(respuesta, `la propuesta del período ${periodo}`);
     if (respuesta?.data == null) {
       throw new Error(
         `El SII no devolvió datos de la propuesta del período ${periodo}. ` +
@@ -138,11 +142,18 @@ export class F29PropuestaScraper {
       URL_ADAPTER, NS_ADAPTER, 'getDeclaracionConEstados',
       { rut, dv, formId: FORM_ID, mes, anno }
     );
+    // Esta consulta se valida igual que la primera. Sin esto, un fallo del SII
+    // acá —sesión caída a mitad de camino, por ejemplo— dejaba `filas` en `[]` y
+    // la fecha en `null`, que el consumidor lee como "el período no está
+    // declarado". Un error disfrazado de dato, otra vez.
+    assertSinErrores(r, `el estado de la declaración de ${anno}${mes}`);
+
     const filas: FilaDeclaracion[] = Array.isArray(r?.data) ? r.data : [];
-    // Se toma la primera con el mismo criterio que `f29.ts`: el SII ordena la
-    // declaración vigente primero. OJO: con rectificatorias en el período puede
-    // haber más de una fila, y esta fecha sería la de la que el SII puso
-    // adelante, no necesariamente la vigente.
-    return filas[0]?.declFechaCreacion ?? null;
+    // Se busca la VIGENTE explícitamente en vez de confiar en que el SII la
+    // ordene primero: con rectificatorias hay más de una fila, y "la primera"
+    // es una convención del portal que nadie nos garantiza. Si ninguna se
+    // declara vigente, se cae a la primera antes que devolver null.
+    const vigente = filas.find(f => /vigente/i.test(f.estado ?? ''));
+    return (vigente ?? filas[0])?.declFechaCreacion ?? null;
   }
 }

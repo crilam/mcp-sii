@@ -525,6 +525,8 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
   **Lo que esta ruta NO devuelve, deliberadamente**: la traza del cálculo (`resultadoCalculoPP29.traza`, que lleva el RUT y el período en texto libre) y `listCodBase` (razón social, dirección y comuna del contribuyente). Quien pregunta ya sabe por qué RUT preguntó; devolverle su domicilio de paso sería filtrar datos que nadie pidió.
 
+  **Probada sólo con clave tributaria.** El certificado digital no se verificó contra esta aplicación del SII, así que no se anuncia: ver la nota sobre atribuciones distintas en el relevamiento del F29.
+
   Un período **ya declarado sigue respondiendo la propuesta**, aunque el portal del SII corte antes con "Existe una declaración vigente". Sirve para reproducir y testear sobre períodos cerrados.
 
 - **`POST /v1/mipyme/list-empresas`** — sólo `rut`. Devuelve `{"ok":true,"datos":[{"rut","nombre"}]}`.
