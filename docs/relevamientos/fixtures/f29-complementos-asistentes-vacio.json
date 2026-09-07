@@ -1,0 +1,6 @@
+// getComplementosAsistentes con scoaTipo="123" y ningun asistente usado. Convencion distinta a la de boletas: NULL por posicion, no ceros. El array es POSICIONAL: indice 0 = tipo 1, indice 1 = tipo 2, indice 2 = tipo 3 (PPM).
+[
+  null,
+  null,
+  null
+]

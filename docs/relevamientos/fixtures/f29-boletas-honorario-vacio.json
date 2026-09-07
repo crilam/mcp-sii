@@ -1,0 +1,13 @@
+// getBoletasHonorario sobre una empresa SIN honorarios en el periodo. Convencion de "no hay dato": ceros y lista vacia, NO null ni error.
+{
+  "listBoletasHonorarios": [],
+  "honorariosBrutoTotal": 0,
+  "honorariosRetencionEmisorTotal": 0,
+  "honorariosRetencionReceptorTotal": 0,
+  "honorariosLiquidoTotal": 0,
+  "totalPaginas": 0,
+  "totalRegistros": 0,
+  "paginaActual": 0,
+  "tamPagina": 0,
+  "bhep": false
+}

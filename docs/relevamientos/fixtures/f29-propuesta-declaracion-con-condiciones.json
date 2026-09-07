@@ -1,0 +1,108 @@
+// getDeclaracionConCondicionesYTipoPropuesta — respuesta REDACTADA. Estructura exacta del SII; RUT, razon social, direccion y comuna sustituidos. Ojo: los montos vienen como STRING, no como number.
+{
+  "tipopropuesta": 40,
+  "tipopropuestadescrip": null,
+  "listCondiciones": [],
+  "listCodPropuestos": [
+    {
+      "codigo": "511",
+      "valor": "95095"
+    },
+    {
+      "codigo": "562",
+      "valor": "288148"
+    },
+    {
+      "codigo": "584",
+      "valor": "2"
+    },
+    {
+      "codigo": "520",
+      "valor": "96995"
+    },
+    {
+      "codigo": "519",
+      "valor": "2"
+    },
+    {
+      "codigo": "528",
+      "valor": "1900"
+    },
+    {
+      "codigo": "527",
+      "valor": "1"
+    }
+  ],
+  "listGlosasProp": [],
+  "complementoDetalleDTE": false,
+  "anotacion": false,
+  "listCodBase": [
+    {
+      "codigo": "01",
+      "valor": "EMPRESA DE PRUEBA SPA"
+    },
+    {
+      "codigo": "03",
+      "valor": "111111111"
+    },
+    {
+      "codigo": "06",
+      "valor": "CALLE FALSA 123 OF 45, SANTIAGO"
+    },
+    {
+      "codigo": "08",
+      "valor": "SANTIAGO"
+    },
+    {
+      "codigo": "15",
+      "valor": "202607"
+    }
+  ],
+  "documentosDelGiro": true,
+  "listCodAdministrativos": [
+    {
+      "codigo": "9114",
+      "valor": "95095"
+    },
+    {
+      "codigo": "9126",
+      "valor": "288148"
+    },
+    {
+      "codigo": "9129",
+      "valor": "2"
+    },
+    {
+      "codigo": "9132",
+      "valor": "96995"
+    },
+    {
+      "codigo": "9137",
+      "valor": "2"
+    },
+    {
+      "codigo": "9172",
+      "valor": "1900"
+    },
+    {
+      "codigo": "9175",
+      "valor": "1"
+    }
+  ],
+  "estado": 0,
+  "descripcionEstado": null,
+  "listCodComplementar": [],
+  "crrp": false,
+  "codigosPrimitiva": null,
+  "resultadoCalculoPP29": {
+    "estado": 0,
+    "glosaError": null,
+    "traza": "|El calculo del PP29 ya fue realizado RUT[11111111-1] Periodo[202607] TOKEN[S]"
+  },
+  "ppmo": null,
+  "vectores": null,
+  "actividadesEco": null,
+  "inicioActividades": null,
+  "trabIndependiente": false,
+  "tieneAnotaciones": false
+}
