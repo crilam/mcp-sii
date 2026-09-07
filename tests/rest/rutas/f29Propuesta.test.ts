@@ -116,4 +116,17 @@ describe('POST /v1/f29/propuesta', () => {
       'POST /v1/f29/formulario-compacto',
     ]);
   });
+
+  // La distinción central del contrato: un fallo del SII sale como error
+  // genérico —reintentable— y NUNCA como SIN_PROPUESTA, que significa lo
+  // contrario.
+  it('un fallo del core sale como error genérico, no como SIN_PROPUESTA', async () => {
+    (core.propuesta as jest.Mock).mockRejectedValue(new Error('El SII rechazó la consulta'));
+
+    const r = await armarRouter().get('POST /v1/f29/propuesta')!(BASE);
+    const body = r.body as any;
+
+    expect(body.ok).toBe(false);
+    expect(body.error).not.toBe('SIN_PROPUESTA');
+  });
 });

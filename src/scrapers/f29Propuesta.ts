@@ -74,9 +74,16 @@ function assertSinErrores(respuesta: { metaData?: { errors?: unknown } } | null,
   const hayError = Array.isArray(errores) ? errores.length > 0 : errores != null;
   if (!hayError) return;
 
-  const descripcion = Array.isArray(errores)
+  // El texto del SII se ACOTA antes de entrar al mensaje. Este error termina en
+  // `console.error` (ver `rest/rutas/comun.ts`), y `errors[].descripcion` es texto
+  // libre de una aplicación que en otros campos manda RUT y razón social: un día
+  // trae uno y queda en los logs. Se corta a lo que alcanza para diagnosticar.
+  const crudo = Array.isArray(errores)
     ? errores.map((e: { descripcion?: string }) => e?.descripcion).filter(Boolean).join('; ')
-    : '';
+    // Si no es un array, se serializa igual: perder toda pista del fallo deja al
+    // operador sin nada que mirar.
+    : JSON.stringify(errores);
+  const descripcion = (crudo ?? '').slice(0, 200);
   throw new Error(
     `El SII rechazó la consulta de ${queSePedia}${descripcion ? `: ${descripcion}` : ''}.`);
 }
@@ -153,7 +160,17 @@ export class F29PropuestaScraper {
     // ordene primero: con rectificatorias hay más de una fila, y "la primera"
     // es una convención del portal que nadie nos garantiza. Si ninguna se
     // declara vigente, se cae a la primera antes que devolver null.
-    const vigente = filas.find(f => /vigente/i.test(f.estado ?? ''));
-    return (vigente ?? filas[0])?.declFechaCreacion ?? null;
+    // La expresión va ANCLADA: `/vigente/i` también matchea "No Vigente", que es
+    // como el SII marca las declaraciones reemplazadas por una rectificatoria. Con
+    // esa fila delante, la fecha devuelta sería la de la declaración vieja — un
+    // dato equivocado y silencioso, justo lo que este archivo se esfuerza en
+    // evitar en todos lados.
+    const vigente = filas.find(f => /^\s*vigente\s*$/i.test(f.estado ?? ''));
+    if (vigente) return vigente.declFechaCreacion ?? null;
+
+    // Ninguna se declara vigente. Con UNA sola fila no hay ambigüedad y se usa;
+    // con varias no se adivina: devolver la fecha de una declaración anulada como
+    // si fuera la del período es peor que no devolver nada.
+    return filas.length === 1 ? filas[0].declFechaCreacion ?? null : null;
   }
 }

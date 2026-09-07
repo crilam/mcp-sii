@@ -205,14 +205,53 @@ describe('F29PropuestaScraper.propuesta', () => {
     expect(r.fechaCreacion).toBe('10/08/2026 10:28:02');
   });
 
-  it('si ninguna se declara vigente cae a la primera, en vez de devolver null', async () => {
+  // El caso que rompe un `/vigente/i` sin anclar: "No Vigente" CONTIENE la
+  // palabra, así que un find ingenuo se queda con la declaración reemplazada y
+  // devuelve su fecha como si fuera la del período.
+  it('"No Vigente" no cuenta como vigente, aunque contenga la palabra', async () => {
     const { scraper } = conRespuestas(PROPUESTA, [
-      { estado: 'Anulada', declFechaCreacion: '01/08/2026 09:00:00' },
+      { estado: 'No Vigente', declFechaCreacion: '01/01/2026 09:00:00' },
+      { estado: 'Vigente', declFechaCreacion: '01/01/2026 12:00:00' },
     ]);
 
     const r = await scraper.propuesta('202607');
 
-    expect(r.fechaCreacion).toBe('01/08/2026 09:00:00');
+    expect(r.fechaCreacion).toBe('01/01/2026 12:00:00');
+  });
+
+  it('con una sola declaración no vigente la usa: no hay ambigüedad', async () => {
+    const { scraper } = conRespuestas(PROPUESTA, [
+      { estado: 'Anulada', declFechaCreacion: '01/01/2026 09:00:00' },
+    ]);
+
+    const r = await scraper.propuesta('202607');
+
+    expect(r.fechaCreacion).toBe('01/01/2026 09:00:00');
+  });
+
+  // Con varias y ninguna vigente no se adivina: devolver la fecha de una anulada
+  // como si fuera la del período es peor que no devolver nada.
+  it('con varias declaraciones y ninguna vigente devuelve null', async () => {
+    const { scraper } = conRespuestas(PROPUESTA, [
+      { estado: 'Anulada', declFechaCreacion: '01/01/2026 09:00:00' },
+      { estado: 'No Vigente', declFechaCreacion: '01/01/2026 10:00:00' },
+    ]);
+
+    const r = await scraper.propuesta('202607');
+
+    expect(r.fechaCreacion).toBeNull();
+  });
+
+  // El mensaje del error va a `console.error`: el texto del SII es libre y puede
+  // traer datos del contribuyente.
+  it('acota el texto de error del SII antes de ponerlo en el mensaje', async () => {
+    const { scraper, http } = armar();
+    (http.postSdi as jest.Mock).mockResolvedValue({
+      data: null,
+      metaData: { errors: [{ descripcion: 'x'.repeat(500) }] },
+    });
+
+    await expect(scraper.propuesta('202607')).rejects.toThrow(/x{200}(?!x)/);
   });
 
   // Mismo modo de fallo que el de la propuesta, pero en la SEGUNDA consulta: sin

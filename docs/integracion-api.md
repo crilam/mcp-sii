@@ -509,7 +509,7 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
   ```json
   { "ok": true,
-    "casilleros": [ { "codigo": "520", "valor": "96995" }, { "codigo": "115", "valor": "0.125" } ],
+    "casilleros": [ { "codigo": "520", "valor": "100000" }, { "codigo": "115", "valor": "0.125" } ],
     "tipo_propuesta": 40,
     "fecha_creacion": "10/08/2026 10:28:02",
     "complemento_detalle_dte": false,
