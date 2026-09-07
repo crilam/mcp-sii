@@ -7,6 +7,11 @@ identificaban actividad real sustituidos por cifras ficticias. Lo que estos arch
 documentan es la FORMA de cada respuesta —nombres de campo, tipos, dónde hay `null`—, no
 las cifras.
 
+Lo mismo vale para las **marcas de tiempo**: `scoaFechaIngreso` y cualquier fecha con hora
+llevan un valor ficticio. El instante exacto en que un contribuyente usó un asistente o
+declaró identifica su actividad igual que un monto; el fixture conserva el tipo (epoch en
+milisegundos) porque eso es lo que hay que saber para escribir el cliente.
+
 Los archivos son **JSON válido** —sin comentarios— para que se puedan `require`
 directo desde un test. Lo que cada uno muestra:
 
