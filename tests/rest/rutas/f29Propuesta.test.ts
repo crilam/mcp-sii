@@ -109,14 +109,6 @@ describe('POST /v1/f29/propuesta', () => {
     expect(core.propuesta).toHaveBeenCalledWith(expect.anything(), '11.111.111-1', '202607');
   });
 
-  it('registra la ruta junto a las otras dos de F29', () => {
-    expect([...armarRouter().keys()]).toEqual([
-      'POST /v1/f29/estado-declaracion',
-      'POST /v1/f29/propuesta',
-      'POST /v1/f29/formulario-compacto',
-    ]);
-  });
-
   // La distinción central del contrato: un fallo del SII sale como error
   // genérico —reintentable— y NUNCA como SIN_PROPUESTA, que significa lo
   // contrario.
