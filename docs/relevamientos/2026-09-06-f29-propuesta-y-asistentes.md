@@ -100,7 +100,7 @@ Si se equivoca el namespace, el SII responde **diciendo cuál es el correcto** e
 | Método | Payload `data` | Devuelve |
 |---|---|---|
 | `getDeclaracionConCondicionesYTipoPropuesta` | `{rutContribuyente, dv, formCodigo:"2", mes, anno}` | **la propuesta**: ver §3.1 |
-| `getBoletasHonorario` (Riac) | `{rutContribuyente, dv, mes, anno, paginaActual:1}` | `{listBoletasHonorarios[], honorariosBrutoTotal, honorariosRetencionEmisorTotal, honorariosRetencionReceptorTotal, honorariosLiquidoTotal, totalPaginas, totalRegistros, bhep}` |
+| `getBoletasHonorario` (Riac) | `{rutContribuyente, dv, mes, anno, paginaActual:1}` | `{listBoletasHonorarios[], honorariosBrutoTotal, honorariosRetencionEmisorTotal, honorariosRetencionReceptorTotal, honorariosLiquidoTotal, totalPaginas, totalRegistros, paginaActual, tamPagina, bhep}` |
 | `getBoletasPrestacionT` (Riac) | igual que el anterior | misma forma. En la corrida trajo `bhep: null` donde `getBoletasHonorario` trajo `false`; el fixture guardado es el de honorarios, así que ese `null` no se puede verificar desde los fixtures |
 | `getMensajesContribuyente` | `{rut, periodo, formId:"2", tipo:"IP"}` | mensajes al contribuyente, `null` si no hay |
 
@@ -154,6 +154,13 @@ estado al lado:
 |---|---|
 | **Asistente Pago Provisional Mensual (PPM)** | No Realizado |
 | **Boletas de Ventas y Servicios** | Realizado |
+
+**Una contradicción que quedó sin explicar**: la pantalla dice "Realizado" para Boletas de
+Ventas y Servicios, pero en ese mismo período `getComplementosAsistentes` devuelve
+`[null, null, null]`. O ese asistente no es ninguno de los tipos 1/2/3 de ese endpoint, o
+"Realizado" en la pantalla significa otra cosa que "hay complemento guardado". **No se
+relevó cuál de las dos**, y conviene saberlo antes de usar `scoaRealizado` como señal de
+que un asistente se completó.
 
 **No hay un asistente de compras ni uno de honorarios en esta pantalla.** Eso responde la
 pregunta 5 y corrige el supuesto del encargo:
@@ -402,6 +409,7 @@ SPA", dirección inventada, y la traza del cálculo con el RUT sustituido):
 | `f29-propuesta-declaracion-con-condiciones.json` | respuesta completa de la propuesta |
 | `f29-boletas-honorario-vacio.json` | convención "sin datos" de boletas: **ceros y lista vacía** |
 | `f29-complementos-asistentes-vacio.json` | convención "sin datos" de asistentes: **null por posición** |
+| `f29-complementos-asistentes-tipo3.json` | el mismo endpoint con el asistente de PPM usado: la evidencia de §3 y §4 |
 | `f29-tasa-ppmo.json` | casilleros de PPM. Es de un período **abierto**: trae `realizado: false`, y su `cod563` es el valor PROPUESTO, no uno ya declarado |
 | `README.md` | qué muestra cada uno, los detalles de tipos y lo que falta capturar |
 
@@ -417,10 +425,9 @@ SPA", dirección inventada, y la traza del cálculo con el RUT sustituido):
 Los cuatro son **JSON válido**, sin comentarios adentro: se pueden `require` directo desde
 un test. Las notas viven en el `README.md` de esa carpeta.
 
-**Lo que NO hay**: un fixture de `getComplementosAsistentes` con el **tipo 3 poblado** —el
-que sostiene §3 y §4—, porque el período capturado no tenía asistentes usados; sus campos
-están descritos en §3 pero no hay un JSON de ejemplo. Tampoco hay un `getBoletasHonorario`
-**con** datos. El contribuyente de
+**Lo que NO hay**: un fixture de `getBoletasHonorario` **con** datos. El contribuyente de
+prueba no tiene boletas de honorarios en ningún período consultado, así que la forma de los
+elementos de `listBoletasHonorarios` no está relevada. El contribuyente de
 prueba no tiene boletas de honorarios en ningún período consultado, así que
 `listBoletasHonorarios` siempre vino vacío y **la forma de sus elementos no se relevó**. No
 se inventa: hay que capturarlo con un contribuyente que sí las tenga.

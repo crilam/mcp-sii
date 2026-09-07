@@ -23,6 +23,16 @@ getDeclaracionConCondicionesYTipoPropuesta — respuesta REDACTADA. Estructura e
 
 getTasaPPMO — respuesta REDACTADA. Mezcla tipos: cod563 y cod115 son string, mes y anno number, y varios campos vienen null.
 
+## `f29-complementos-asistentes-tipo3.json`
+
+`getComplementosAsistentes` de un período donde el asistente de PPM SÍ se usó
+(`scoaRealizado: "S"`). Es el contraste del fixture vacío, y la evidencia de que el tipo 3
+es PPM: trae `scoaPpmoCod563` y `scoaPpmoCod115` poblados mientras los campos de
+honorarios siguen en `null`.
+
+Ojo con los tipos acá: `scoaPpmoCod115` es **number** (`0.125`), al revés que el `"0.125"`
+string de la propuesta. El mismo dato con dos tipos según el endpoint.
+
 ## Detalles de tipos que importan
 
 - **Los montos vienen como `string`**, no como number, incluida la tasa (`"0.125"`).
@@ -30,6 +40,8 @@ getTasaPPMO — respuesta REDACTADA. Mezcla tipos: cod563 y cod115 son string, m
   `cod563` es el valor **propuesto**, no uno ya declarado.
 - Conviven **dos convenciones distintas de "sin datos"**: `null` por posición en
   asistentes, ceros y lista vacía en boletas. Hay que tratarlas por endpoint.
+- La traza redactada conserva `TOKEN[S]` y la forma real del texto: sólo se sustituyó el
+  RUT. El informe advierte no loguearla tal cual, y el fixture muestra por qué.
 
 ## Pendiente: dos capturas que faltan
 
@@ -38,6 +50,3 @@ No son un detalle — son el hueco que va a doler al escribir un cliente:
 - `getBoletasHonorario` **con** datos: el contribuyente de prueba no tiene boletas de
   honorarios en ningún período consultado, así que la forma de los elementos de
   `listBoletasHonorarios` no está relevada.
-- `getComplementosAsistentes` **con el tipo 3 poblado**: el fixture guardado es de un
-  período sin asistentes usados. Los campos del objeto poblado están descritos en el
-  informe (§3), pero no hay un JSON de ejemplo.

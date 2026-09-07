@@ -18,9 +18,9 @@ function leer(nombre: string): any {
 describe('fixtures del F29', () => {
   // Que sean JSON válido es el punto: la primera versión llevaba comentarios `//`
   // adentro y no los podía cargar nadie.
-  it('los cuatro son JSON parseable', () => {
+  it('todos son JSON parseable', () => {
     const archivos = fs.readdirSync(DIR).filter(f => f.endsWith('.json'));
-    expect(archivos).toHaveLength(4);
+    expect(archivos.length).toBeGreaterThanOrEqual(5);
     for (const a of archivos) expect(() => leer(a)).not.toThrow();
   });
 
@@ -54,6 +54,21 @@ describe('fixtures del F29', () => {
     // Tres posiciones: tipo 1, tipo 2 y tipo 3 (PPM).
     expect(a).toHaveLength(3);
     for (const x of a) expect(x).toBeNull();
+  });
+
+  // El contraste del fixture vacío, y la evidencia de que el tipo 3 es PPM.
+  it('el asistente usado trae los campos de PPM y deja los de honorarios en null', () => {
+    const [t1, t2, t3] = leer('f29-complementos-asistentes-tipo3.json');
+
+    expect(t1).toBeNull();
+    expect(t2).toBeNull();
+    expect(t3.scoaTipo).toBe(3);
+    expect(t3.scoaRealizado).toBe('S');
+    expect(t3.scoaPpmoCod563).toBeGreaterThan(0);
+    // El MISMO dato es number acá y string en la propuesta: la mezcla es del SII.
+    expect(typeof t3.scoaPpmoCod115).toBe('number');
+    expect(t3.scoaBrutos).toBeNull();
+    expect(t3.scoaRetencionEmisor).toBeNull();
   });
 
   it('la tasa de PPM mezcla string y number en el mismo objeto', () => {

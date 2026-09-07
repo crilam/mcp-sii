@@ -1,0 +1,26 @@
+[
+  null,
+  null,
+  {
+    "scoaRut": 11111111,
+    "scoaDv": "1",
+    "scoaPeriodo": 202512,
+    "scoaTipo": 3,
+    "scoaRealizado": "S",
+    "scoaCantidad": null,
+    "scoaBrutos": null,
+    "scoaRetencionEmisor": null,
+    "scoaRetencionReceptor": null,
+    "scoaLiquidos": null,
+    "scoaTotal": null,
+    "scoaPpmoCod750": "N",
+    "scoaPpmoCod30": null,
+    "scoaPpmoCod115": 0.125,
+    "scoaPpmoCod563": 30801047,
+    "scoaPpmoCod68": null,
+    "scoaPpmoOtros": null,
+    "scoaFechaIngreso": 1768395277000,
+    "scoaPpmoRentaLiquida": null,
+    "scoaPpmoRentaProvisoria": null
+  }
+]
