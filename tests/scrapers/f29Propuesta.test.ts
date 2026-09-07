@@ -165,4 +165,42 @@ describe('F29PropuestaScraper.propuesta', () => {
     expect(r.casilleros).toBeNull();
     expect(http.postSdi).toHaveBeenCalledTimes(1);
   });
+
+  // `errors: []` es truthy: sin mirar el contenido, toda consulta exitosa que
+  // trajera la lista vacía habría lanzado.
+  it('una lista de errors VACÍA no es un error', async () => {
+    const { scraper, http } = armar();
+    (http.postSdi as jest.Mock)
+      .mockResolvedValueOnce({ data: PROPUESTA, metaData: { errors: [] } })
+      .mockResolvedValueOnce({ data: [] });
+
+    const r = await scraper.propuesta('202607');
+
+    expect(r.casilleros).not.toBeNull();
+  });
+
+  // El SII puede mandar la lista como null en vez de como []. Las dos formas
+  // significan lo mismo y ninguna es un error.
+  it('listCodPropuestos null también es un período sin propuesta', async () => {
+    const { scraper } = conRespuestas({ ...PROPUESTA, listCodPropuestos: null });
+
+    const r = await scraper.propuesta('202608');
+
+    expect(r.casilleros).toBeNull();
+  });
+
+  // Con rectificatorias el período tiene más de una declaración. Hoy se toma la
+  // primera —el SII ordena la vigente adelante—; este test fija esa convención
+  // para que el día que cambie rompa algo en vez de devolver otra fecha en
+  // silencio.
+  it('con varias declaraciones toma la primera que ordena el SII', async () => {
+    const { scraper } = conRespuestas(PROPUESTA, [
+      { estado: 'Vigente', declFechaCreacion: '10/08/2026 10:28:02' },
+      { estado: 'Rectificada', declFechaCreacion: '01/08/2026 09:00:00' },
+    ]);
+
+    const r = await scraper.propuesta('202607');
+
+    expect(r.fechaCreacion).toBe('10/08/2026 10:28:02');
+  });
 });

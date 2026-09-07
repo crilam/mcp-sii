@@ -49,10 +49,12 @@ async function main() {
   const noString = casilleros.filter(c => typeof c.valor !== 'string');
   console.log(`  todos los valores son string: ${noString.length === 0 ? 'SÍ' : `NO — ${JSON.stringify(noString)}`}`);
 
-  // Lo que NO debe estar. Se mira sobre el JSON serializado, que es exactamente
-  // lo que viaja al consumidor.
+  // Lo que NO debe estar. Con la ruta armando la respuesta campo por campo esto
+  // no puede fallar hoy; queda como red para el día que alguien la cambie por un
+  // spread del resultado. La verificación que SÍ prueba algo es la del test del
+  // scraper, que corre contra el fixture crudo del SII.
   const json = JSON.stringify(b);
-  for (const prohibido of ['traza', 'resultadoCalculoPP29', 'listCodBase', 'ppmo']) {
+  for (const prohibido of ['traza', 'resultadoCalculoPP29', 'listCodBase']) {
     console.log(`  sin "${prohibido}": ${json.includes(prohibido) ? 'NO — ¡FILTRACIÓN!' : 'SÍ'}`);
   }
 }

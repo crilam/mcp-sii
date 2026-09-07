@@ -71,8 +71,10 @@ export function registrarRutasF29(
     // un fallo: el marcador interno se convierte acá en un código propio, para
     // que el consumidor lo distinga de un error de credenciales o de red — que
     // sí se reintentan, y reintentar esto no cambiaría nada.
+    // Se exige status 200 además del marcador: un cuerpo de error con una clave
+    // parecida nunca puede terminar leyéndose como "sin propuesta".
     const cuerpo = respuesta.body as Record<string, unknown>;
-    if (cuerpo?.[SIN_PROPUESTA]) {
+    if (respuesta.status === 200 && cuerpo?.[SIN_PROPUESTA]) {
       return { status: 200, body: { ok: false, error: 'SIN_PROPUESTA' } };
     }
     return respuesta;

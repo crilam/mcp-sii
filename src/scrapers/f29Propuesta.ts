@@ -87,8 +87,12 @@ export class F29PropuestaScraper {
     // período sin propuesta, el consumidor recibiría "no reintentar" ante un
     // error que SÍ se arregla reintentando (o corrigiendo el namespace). Se
     // distingue acá, que es donde se tiene la respuesta cruda.
+    // `errors: []` es TRUTHY: mirar sólo la presencia haría lanzar toda consulta
+    // exitosa que traiga la lista vacía, que es un patrón común en estos sobres.
+    // Se mira el contenido, no la existencia.
     const errores = respuesta?.metaData?.errors;
-    if (errores) {
+    const hayError = Array.isArray(errores) ? errores.length > 0 : errores != null;
+    if (hayError) {
       const descripcion = Array.isArray(errores)
         ? errores.map((e: { descripcion?: string }) => e?.descripcion).filter(Boolean).join('; ')
         : '';

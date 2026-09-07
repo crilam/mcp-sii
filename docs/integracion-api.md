@@ -521,7 +521,7 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
   **`SIN_PROPUESTA`** (con `ok:false`) cuando el SII no arma propuesta para ese período — el caso normal de un mes que todavía no cerró. **No es un error y no se reintenta**: reintentar no lo cambia. Verificado en vivo contra un período abierto.
 
-  `fecha_creacion` es de la **declaración**, no de la propuesta, y por eso esta ruta hace **dos** consultas al SII: la propuesta no trae esa fecha. Viene `null` si el período no está declarado. `generada_en` es cuándo consultamos nosotros: la propuesta se recalcula sola cuando llega un documento tarde, así que una comparación sin marca de tiempo no se puede auditar después.
+  `fecha_creacion` es de la **declaración**, no de la propuesta, y por eso esta ruta hace **dos** consultas al SII cuando hay propuesta: la propuesta no trae esa fecha. Si el período no tiene propuesta, la segunda consulta se salta y no se gasta una llamada al portal. Viene `null` si el período no está declarado. `generada_en` es cuándo consultamos nosotros: la propuesta se recalcula sola cuando llega un documento tarde, así que una comparación sin marca de tiempo no se puede auditar después.
 
   **Lo que esta ruta NO devuelve, deliberadamente**: la traza del cálculo (`resultadoCalculoPP29.traza`, que lleva el RUT y el período en texto libre) y `listCodBase` (razón social, dirección y comuna del contribuyente). Quien pregunta ya sabe por qué RUT preguntó; devolverle su domicilio de paso sería filtrar datos que nadie pidió.
 
