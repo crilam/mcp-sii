@@ -1,4 +1,5 @@
 import { F29Scraper, EstadoF29 } from '../scrapers/f29';
+import { F29PropuestaScraper, PropuestaF29 } from '../scrapers/f29Propuesta';
 import { MisiiScraper } from '../scrapers/misii';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
@@ -57,5 +58,18 @@ export async function compacto(
     const estado = await scraper.estadoDeclaracion(periodo, unidad);
     const pdf = await scraper.pdfCompacto(estado.folio, estado.codInt);
     return { ...estado, pdf };
+  });
+}
+
+// Propuesta de casilleros del período. Vive en otra aplicación del SII que el
+// estado —`propuestaf29ui`, SDI, contra `sifmConsultaInternet`/GWT— y por eso
+// tiene su propio scraper.
+export async function propuesta(
+  ejecutor: EjecutorSesion<SessionManager>,
+  rut: string,
+  periodo: string
+): Promise<PropuestaF29> {
+  return ejecutor.ejecutar(rut, async sesion => {
+    return new F29PropuestaScraper(new SiiHttpClient(sesion), sesion).propuesta(periodo);
   });
 }

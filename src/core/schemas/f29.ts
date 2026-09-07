@@ -18,3 +18,18 @@ export const schemaEstadoF29 = {
 };
 
 export const schemaCompactoF29 = schemaEstadoF29;
+
+// La propuesta pide el período como STRING AAAAMM y no como number, a diferencia
+// de `schemaEstadoF29`. Es deliberado: este contrato lo consume AgenticERP, que
+// ya maneja el período así en sus otras fuentes, y un number obligaría a los dos
+// lados a convertir de ida y de vuelta. La validación es la misma.
+export const schemaPropuestaF29 = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  periodo: z.string()
+    .regex(/^\d{6}$/, 'periodo debe ser AAAAMM, por ejemplo "202608"')
+    .refine(p => {
+      const anio = Number(p.slice(0, 4)), mes = Number(p.slice(4));
+      return anio >= 2007 && anio <= 2100 && mes >= 1 && mes <= 12;
+    }, 'periodo debe ser AAAAMM, con año 2007-2100 y mes 01-12')
+    .describe('Período tributario en formato AAAAMM (ej. "202608")'),
+};
