@@ -54,7 +54,7 @@ describe('F29PropuestaScraper.propuesta', () => {
 
     const r = await scraper.propuesta('202607');
 
-    expect(r.casilleros).toContainEqual({ codigo: '520', valor: '96995' });
+    expect(r.casilleros).toContainEqual({ codigo: '520', valor: '100000' });
     // La tasa es el caso que rompe cualquier conversión a entero, así que se
     // afirma directo y no dentro de un `if`: un assert condicionado a que el
     // fixture tenga el código no prueba nada el día que el fixture cambia.

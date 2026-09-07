@@ -14,7 +14,7 @@ function armarRouter() {
 const BASE = { rut: '11.111.111-1', clave: 'secreta', periodo: '202607' };
 
 const RESULTADO = {
-  casilleros: [{ codigo: '520', valor: '96995' }, { codigo: '115', valor: '0.125' }],
+  casilleros: [{ codigo: '520', valor: '100000' }, { codigo: '115', valor: '0.125' }],
   tipoPropuesta: 40,
   fechaCreacion: '10/08/2026 10:28:02',
   complementoDetalleDTE: true,
