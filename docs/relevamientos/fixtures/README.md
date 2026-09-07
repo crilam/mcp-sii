@@ -46,9 +46,9 @@ string de la propuesta. El mismo dato con dos tipos según el endpoint.
 - La traza redactada conserva `TOKEN[S]` y la forma real del texto: sólo se sustituyó el
   RUT. El informe advierte no loguearla tal cual, y el fixture muestra por qué.
 
-## Pendiente: dos capturas que faltan
+## Pendiente: la captura que falta
 
-No son un detalle — son el hueco que va a doler al escribir un cliente:
+No es un detalle — es el hueco que va a doler al escribir un cliente:
 
 - `getBoletasHonorario` **con** datos: el contribuyente de prueba no tiene boletas de
   honorarios en ningún período consultado, así que la forma de los elementos de

@@ -221,11 +221,15 @@ devuelve **ceros y lista vacía** (`listBoletasHonorarios: []`, `totalRegistros:
 contribuyente dejó grabado **en el momento de declarar**. La evidencia es el cruce de
 marcas de tiempo:
 
-| Período | `scoaFechaIngreso` del asistente | `declFechaCreacion` de la declaración | Diferencia |
-|---|---|---|---|
-| 202607 | 2026-08-10 10:27:31 | 10/08/2026 10:28:02 | **31 segundos** |
-| 202605 | 2026-06-15 10:04:24 | 15/06/2026 10:04:54 | **30 segundos** |
-| 202512 | 2026-01-14 08:54:37 | 20/01/2026 18:27:17 | 6 días |
+| Período | El asistente se grabó… | …respecto de la declaración |
+|---|---|---|
+| 202607 | el mismo día, mismo minuto | **31 segundos antes** |
+| 202605 | el mismo día, mismo minuto | **30 segundos antes** |
+| 202512 | seis días antes | 6 días |
+
+(Las horas exactas no se transcriben, por el mismo criterio que los montos: identifican la
+actividad de un contribuyente real y este repositorio es público. Lo que importa acá es la
+diferencia, no el instante.)
 
 En dos de tres casos el complemento se graba medio minuto antes que la declaración: es el
 rastro de alguien usando el asistente y declarando a continuación. El caso de 202512
@@ -234,9 +238,9 @@ todavía** — lo que refuerza que el borrador existe, pero también que ese dat
 contribuyente, no del Servicio.
 
 **Consecuencia para el PRD**: este endpoint sirve como **evidencia de auditoría** ("con
-qué valores se declaró y cuándo"), no como la propuesta a comparar antes de declarar. La
-comparación previa tiene que hacerse contra el RCV —que mcp-sii ya importa— o contra
-`getCodigosPropuestos`, cuyo contrato falta.
+qué valores se declaró y cuándo"), no como la propuesta a comparar antes de declarar. Para
+eso está `getDeclaracionConCondicionesYTipoPropuesta` (§3.2), que sí devuelve la propuesta
+del período, y el RCV que mcp-sii ya importa.
 
 **Sobre el criterio de fecha del RCV**: no se pudo comparar el asistente de compras contra
 el RCV importado, porque el asistente de compras (tipo 1 o 2) vino `null` en todos los
@@ -429,7 +433,7 @@ SPA", dirección inventada, y la traza del cálculo con el RUT sustituido):
 - Las dos convenciones de "sin datos" conviven en la misma aplicación: hay que tratarlas
   por endpoint, no con una regla global.
 
-Los cuatro son **JSON válido**, sin comentarios adentro: se pueden `require` directo desde
+Todos son **JSON válido**, sin comentarios adentro: se pueden `require` directo desde
 un test. Las notas viven en el `README.md` de esa carpeta.
 
 **Lo que NO hay**: un fixture de `getBoletasHonorario` **con** datos. El contribuyente de
