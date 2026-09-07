@@ -219,14 +219,17 @@ describe('F29PropuestaScraper.propuesta', () => {
     expect(r.fechaCreacion).toBe('01/01/2026 12:00:00');
   });
 
-  it('con una sola declaración no vigente la usa: no hay ambigüedad', async () => {
+  // Sólo la vigente cuenta, haya una o varias: el consumidor no recibe el estado,
+  // así que la fecha de una anulada sería indistinguible de la de una declaración
+  // buena.
+  it('una sola declaración anulada tampoco da fecha', async () => {
     const { scraper } = conRespuestas(PROPUESTA, [
       { estado: 'Anulada', declFechaCreacion: '01/01/2026 09:00:00' },
     ]);
 
     const r = await scraper.propuesta('202607');
 
-    expect(r.fechaCreacion).toBe('01/01/2026 09:00:00');
+    expect(r.fechaCreacion).toBeNull();
   });
 
   // Con varias y ninguna vigente no se adivina: devolver la fecha de una anulada

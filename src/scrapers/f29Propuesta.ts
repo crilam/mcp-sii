@@ -165,12 +165,13 @@ export class F29PropuestaScraper {
     // esa fila delante, la fecha devuelta sería la de la declaración vieja — un
     // dato equivocado y silencioso, justo lo que este archivo se esfuerza en
     // evitar en todos lados.
+    // SÓLO la vigente cuenta, haya una fila o varias. El contrato promete "la
+    // fecha de creación de la declaración" del período, y la de una anulada o
+    // reemplazada no lo es: como el consumidor no recibe el estado, no podría
+    // distinguirlas. Sin vigente se devuelve `null`, que es lo mismo que dice un
+    // período sin declarar — y es cierto en los dos casos: no hay declaración
+    // vigente.
     const vigente = filas.find(f => /^\s*vigente\s*$/i.test(f.estado ?? ''));
-    if (vigente) return vigente.declFechaCreacion ?? null;
-
-    // Ninguna se declara vigente. Con UNA sola fila no hay ambigüedad y se usa;
-    // con varias no se adivina: devolver la fecha de una declaración anulada como
-    // si fuera la del período es peor que no devolver nada.
-    return filas.length === 1 ? filas[0].declFechaCreacion ?? null : null;
+    return vigente?.declFechaCreacion ?? null;
   }
 }

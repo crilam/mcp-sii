@@ -71,10 +71,12 @@ export function registrarRutasF29(
     // un fallo: el marcador interno se convierte acá en un código propio, para
     // que el consumidor lo distinga de un error de credenciales o de red — que
     // sí se reintentan, y reintentar esto no cambiaría nada.
-    // Se exige status 200 además del marcador: un cuerpo de error con una clave
-    // parecida nunca puede terminar leyéndose como "sin propuesta".
+    // Se exige `ok === true` además del marcador. Mirar el status NO servía:
+    // `ejecutar` devuelve 200 en todas sus ramas, incluidas las de error. Con
+    // `ok` la condición discrimina de verdad — un cuerpo de error nunca lo trae
+    // en true.
     const cuerpo = respuesta.body as Record<string, unknown>;
-    if (respuesta.status === 200 && cuerpo?.[SIN_PROPUESTA]) {
+    if (cuerpo?.ok === true && cuerpo[SIN_PROPUESTA]) {
       // Lleva `generada_en` igual que el caso con propuesta: "preguntamos y el
       // SII no propuso nada" es un hecho fechable, y sin la marca el consumidor
       // no puede auditar cuándo lo preguntó.

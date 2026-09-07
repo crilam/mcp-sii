@@ -505,7 +505,7 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 
 **Clave o certificado.**
 
-- **`POST /v1/f29/propuesta`** — los casilleros que el SII **propone** para el período, a partir del Registro de Compras y Ventas. `rut` y `periodo` (`AAAAMM`, **string**, no número como en el resto de F29).
+- **`POST /v1/f29/propuesta`** — los casilleros que el SII **propone** para el período, a partir del Registro de Compras y Ventas. `rut` y `periodo` (`AAAAMM`). Acepta **string o número** y normaliza a string: el resto de `/v1/f29` pide el período como número, y esta ruta como string, así que se toleran los dos para que la diferencia no sea una trampa.
 
   ```json
   { "ok": true,
@@ -524,6 +524,8 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
   `fecha_creacion` es de la **declaración**, no de la propuesta, y por eso esta ruta hace **dos** consultas al SII cuando hay propuesta: la propuesta no trae esa fecha. Si el período no tiene propuesta, la segunda consulta se salta y no se gasta una llamada al portal. Viene `null` si el período no está declarado. `generada_en` es cuándo consultamos nosotros: la propuesta se recalcula sola cuando llega un documento tarde, así que una comparación sin marca de tiempo no se puede auditar después.
 
   **Lo que esta ruta NO devuelve, deliberadamente**: la traza del cálculo (`resultadoCalculoPP29.traza`, que lleva el RUT y el período en texto libre) y `listCodBase` (razón social, dirección y comuna del contribuyente). Quien pregunta ya sabe por qué RUT preguntó; devolverle su domicilio de paso sería filtrar datos que nadie pidió.
+
+  **No tiene tool MCP, y es deliberado**: la propuesta existe para que un sistema contable cuadre el período contra el RCV y el libro propio, no para que un modelo la lea — son diez casilleros sin significado fuera de esa comparación. Si algún día se expone por MCP, ojo con `schemaPropuestaF29`: usa `z.union(...).transform()`, que no se puede pasar como *raw shape* a `server.tool` (rompe la generación del JSON Schema) a diferencia de `schemaEstadoF29`.
 
   **Probada sólo con clave tributaria.** El certificado digital no se verificó contra esta aplicación del SII, así que no se anuncia: ver la nota sobre atribuciones distintas en el relevamiento del F29.
 
