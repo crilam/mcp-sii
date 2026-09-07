@@ -80,24 +80,48 @@ export class F29PropuestaScraper {
       URL_ADAPTER, NS_ADAPTER, 'getDeclaracionConCondicionesYTipoPropuesta',
       { rutContribuyente: String(rut), dv: String(dv), formCodigo: FORM_CODIGO, mes, anno }
     );
-    const datos: RespuestaPropuesta | null = respuesta?.data ?? null;
 
-    // Sin propuesta es un resultado LEGÍTIMO, no un fallo: el SII simplemente no
-    // arma una para ese período. Se distingue de un error devolviendo
-    // `casilleros: null`, y quien llama decide qué significa.
-    const lista = datos?.listCodPropuestos;
+    // Un FALLO del SII no puede terminar leyéndose como "no hay propuesta". Con
+    // el namespace equivocado o la sesión caída, esta app responde HTTP 200 con
+    // `metaData.errors` y `data` vacía: si eso cayera en el mismo camino que un
+    // período sin propuesta, el consumidor recibiría "no reintentar" ante un
+    // error que SÍ se arregla reintentando (o corrigiendo el namespace). Se
+    // distingue acá, que es donde se tiene la respuesta cruda.
+    const errores = respuesta?.metaData?.errors;
+    if (errores) {
+      const descripcion = Array.isArray(errores)
+        ? errores.map((e: { descripcion?: string }) => e?.descripcion).filter(Boolean).join('; ')
+        : '';
+      throw new Error(
+        `El SII rechazó la consulta de la propuesta del período ${periodo}` +
+        `${descripcion ? `: ${descripcion}` : ''}.`);
+    }
+    if (respuesta?.data == null) {
+      throw new Error(
+        `El SII no devolvió datos de la propuesta del período ${periodo}. ` +
+        'No es lo mismo que un período sin propuesta: acá no vino ni el envoltorio.');
+    }
+    const datos: RespuestaPropuesta = respuesta.data;
+
+    // ACÁ SÍ: `data` llegó bien y no trae códigos. Es un período sin propuesta,
+    // un resultado LEGÍTIMO que quien llama distingue por `casilleros: null`.
+    const lista = datos.listCodPropuestos;
     const casilleros = Array.isArray(lista) && lista.length > 0
       ? lista.map(c => ({ codigo: String(c.codigo), valor: String(c.valor) }))
       : null;
 
     return {
       casilleros,
-      tipoPropuesta: datos?.tipopropuesta ?? null,
-      fechaCreacion: await this.fechaCreacion(String(rut), String(dv), mes, anno),
+      tipoPropuesta: datos.tipopropuesta ?? null,
+      // Sin propuesta no se pregunta la fecha: sería una segunda llamada al SII
+      // para un dato que el consumidor no va a usar, y el SII penaliza volumen.
+      fechaCreacion: casilleros === null
+        ? null
+        : await this.fechaCreacion(String(rut), String(dv), mes, anno),
       // El default es `false` y no `true`: si el SII no lo declara, no se puede
       // afirmar que el detalle venga del RCV.
-      complementoDetalleDTE: datos?.complementoDetalleDTE === true,
-      documentosDelGiro: datos?.documentosDelGiro === true,
+      complementoDetalleDTE: datos.complementoDetalleDTE === true,
+      documentosDelGiro: datos.documentosDelGiro === true,
     };
   }
 
@@ -111,6 +135,10 @@ export class F29PropuestaScraper {
       { rut, dv, formId: FORM_ID, mes, anno }
     );
     const filas: FilaDeclaracion[] = Array.isArray(r?.data) ? r.data : [];
+    // Se toma la primera con el mismo criterio que `f29.ts`: el SII ordena la
+    // declaración vigente primero. OJO: con rectificatorias en el período puede
+    // haber más de una fila, y esta fecha sería la de la que el SII puso
+    // adelante, no necesariamente la vigente.
     return filas[0]?.declFechaCreacion ?? null;
   }
 }

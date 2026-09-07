@@ -55,9 +55,10 @@ describe('F29PropuestaScraper.propuesta', () => {
     const r = await scraper.propuesta('202607');
 
     expect(r.casilleros).toContainEqual({ codigo: '520', valor: '96995' });
-    // La tasa es el caso que rompe cualquier conversión a entero.
-    const tasa = r.casilleros!.find(c => c.codigo === '115');
-    if (tasa) expect(typeof tasa.valor).toBe('string');
+    // La tasa es el caso que rompe cualquier conversión a entero, así que se
+    // afirma directo y no dentro de un `if`: un assert condicionado a que el
+    // fixture tenga el código no prueba nada el día que el fixture cambia.
+    expect(r.casilleros).toContainEqual({ codigo: '115', valor: '0.125' });
     for (const c of r.casilleros!) {
       expect(typeof c.valor).toBe('string');
       expect(typeof c.codigo).toBe('string');
@@ -80,16 +81,6 @@ describe('F29PropuestaScraper.propuesta', () => {
     const r = await scraper.propuesta('202608');
 
     expect(r.casilleros).toBeNull();
-  });
-
-  it('tolera que el SII devuelva data null', async () => {
-    const { scraper } = conRespuestas(null);
-
-    const r = await scraper.propuesta('202608');
-
-    expect(r.casilleros).toBeNull();
-    expect(r.tipoPropuesta).toBeNull();
-    expect(r.complementoDetalleDTE).toBe(false);
   });
 
   // `fechaCreacion` NO viene en la propuesta: es de la declaración. Por eso hay
@@ -121,5 +112,57 @@ describe('F29PropuestaScraper.propuesta', () => {
 
     expect(r.complementoDetalleDTE).toBe(PROPUESTA.complementoDetalleDTE);
     expect(r.documentosDelGiro).toBe(PROPUESTA.documentosDelGiro);
+  });
+
+  // Este test vale acá y NO en la ruta: el fixture es la respuesta REAL del SII,
+  // con `resultadoCalculoPP29.traza` (que lleva el RUT) y `listCodBase` (razón
+  // social y domicilio) adentro. En la ruta, con el core mockeado, un test así
+  // pasa por construcción aunque el código filtre.
+  it('no arrastra la traza ni la identificación del contribuyente al resultado', async () => {
+    const { scraper } = conRespuestas(PROPUESTA);
+
+    const r = await scraper.propuesta('202607');
+
+    // El fixture SÍ los trae: si no, el test no probaría nada.
+    const crudo = JSON.stringify(PROPUESTA);
+    expect(crudo).toContain('resultadoCalculoPP29');
+    expect(crudo).toContain('listCodBase');
+
+    const salida = JSON.stringify(r);
+    expect(salida).not.toContain('traza');
+    expect(salida).not.toContain('resultadoCalculoPP29');
+    expect(salida).not.toContain('listCodBase');
+    expect(salida).not.toContain('EMPRESA DE PRUEBA');
+  });
+
+  // Un fallo del SII NO puede leerse como "no hay propuesta": el consumidor
+  // recibiría "no reintentar" ante algo que sí se arregla reintentando.
+  it('un 200 con errors del SII lanza, no se disfraza de período sin propuesta', async () => {
+    const { scraper, http } = armar();
+    (http.postSdi as jest.Mock).mockResolvedValue({
+      data: null,
+      metaData: { errors: [{ id: '0', descripcion: 'Request.MetaData.Namespace deberia ser ...' }] },
+    });
+
+    await expect(scraper.propuesta('202607')).rejects.toThrow(/rechazó la consulta/i);
+  });
+
+  it('data ausente lanza, y tampoco se confunde con sin propuesta', async () => {
+    const { scraper, http } = armar();
+    (http.postSdi as jest.Mock).mockResolvedValue({ metaData: {} });
+
+    await expect(scraper.propuesta('202607')).rejects.toThrow(/no devolvió datos/i);
+  });
+
+  // Sin propuesta no hay nada que fechar: preguntarlo sería una segunda llamada
+  // al SII por un dato que el consumidor no va a usar.
+  it('sin propuesta no hace la segunda consulta', async () => {
+    const { scraper, http } = armar();
+    (http.postSdi as jest.Mock).mockResolvedValueOnce({ data: { ...PROPUESTA, listCodPropuestos: [] } });
+
+    const r = await scraper.propuesta('202608');
+
+    expect(r.casilleros).toBeNull();
+    expect(http.postSdi).toHaveBeenCalledTimes(1);
   });
 });

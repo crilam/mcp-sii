@@ -55,19 +55,38 @@ describe('POST /v1/f29/propuesta', () => {
     expect(JSON.stringify(body)).not.toContain('__sin_propuesta');
   });
 
-  // Lo más importante de esta ruta: la respuesta del SII trae la identificación
-  // del contribuyente y una traza con su RUT. Nada de eso sale de acá.
-  it('no filtra la traza del cálculo ni la identificación del contribuyente', async () => {
-    (core.propuesta as jest.Mock).mockResolvedValue(RESULTADO);
+  // La ruta arma la respuesta campo por campo en vez de spreadear el resultado
+  // del core. Este test lo fija: si alguien cambiara a `...r`, cualquier campo
+  // nuevo del SII —incluida la traza— saldría solo.
+  //
+  // La no-filtración de la traza y de listCodBase se prueba en el test del
+  // SCRAPER, contra el fixture real: acá el core está mockeado y un assert así
+  // pasaría por construcción.
+  it('devuelve sólo los campos del contrato, y nunca la credencial', async () => {
+    (core.propuesta as jest.Mock).mockResolvedValue({ ...RESULTADO, traza: 'RUT[11111111-1]' });
 
     const r = await armarRouter().get('POST /v1/f29/propuesta')!(BASE);
-    const json = JSON.stringify(r.body);
+    const body = r.body as any;
 
+    expect(Object.keys(body).sort()).toEqual([
+      'casilleros', 'complemento_detalle_dte', 'documentos_del_giro',
+      'fecha_creacion', 'generada_en', 'ok', 'tipo_propuesta',
+    ]);
+    const json = JSON.stringify(body);
     expect(json).not.toContain('traza');
-    expect(json).not.toContain('resultadoCalculoPP29');
-    expect(json).not.toContain('listCodBase');
-    // Y tampoco la credencial con la que se consultó.
     expect(json).not.toContain('secreta');
+  });
+
+  // Los dos contratos de período conviven bajo /v1/f29: estado-declaracion pide
+  // number y ésta string. Se aceptan ambos para que la diferencia no sea una
+  // trampa.
+  it('acepta el período como number y lo normaliza a string', async () => {
+    (core.propuesta as jest.Mock).mockResolvedValue(RESULTADO);
+
+    const r = await armarRouter().get('POST /v1/f29/propuesta')!({ ...BASE, periodo: 202607 });
+
+    expect(r.status).toBe(200);
+    expect(core.propuesta).toHaveBeenCalledWith(expect.anything(), expect.anything(), '202607');
   });
 
   it('exige el período y lo valida como AAAAMM', async () => {

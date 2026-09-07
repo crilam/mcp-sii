@@ -30,6 +30,10 @@
     {
       "codigo": "527",
       "valor": "1"
+    },
+    {
+      "codigo": "115",
+      "valor": "0.125"
     }
   ],
   "listGlosasProp": [],
