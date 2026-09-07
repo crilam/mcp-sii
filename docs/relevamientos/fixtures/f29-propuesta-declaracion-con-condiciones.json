@@ -1,4 +1,3 @@
-// getDeclaracionConCondicionesYTipoPropuesta — respuesta REDACTADA. Estructura exacta del SII; RUT, razon social, direccion y comuna sustituidos. Ojo: los montos vienen como STRING, no como number.
 {
   "tipopropuesta": 40,
   "tipopropuestadescrip": null,

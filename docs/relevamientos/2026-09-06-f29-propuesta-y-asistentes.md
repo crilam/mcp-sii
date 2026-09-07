@@ -65,7 +65,7 @@ declaración.
 
 ---
 
-## 2. Endpoints (59 en total, extraídos del bundle)
+## 2. Endpoints (el bundle declara 59; abajo los relevantes)
 
 Base: `https://www4.sii.cl/propuestaf29ui/services/data/{facadeService|facadeAdapterService|riacFacadeService}/{metodo}`
 
@@ -158,8 +158,10 @@ estado al lado:
 **No hay un asistente de compras ni uno de honorarios en esta pantalla.** Eso responde la
 pregunta 5 y corrige el supuesto del encargo:
 
-- **Las compras no pasan por un asistente**: entran solas desde el RCV. La propuesta lo
-  declara con `complementoDetalleDTE: true` y `documentosDelGiro: true`.
+- **Las compras no pasan por un asistente**: entran solas desde el RCV. Lo prueba §8, donde
+  los montos del RCV coinciden exactamente con los casilleros propuestos. (`documentosDelGiro`
+  viene `true` en los tres períodos medidos; `complementoDetalleDTE` varía y no sirve para
+  sostener esto — ver §3.2.)
 - **Las boletas de honorarios tampoco tienen asistente propio acá**, pero **sí tienen
   endpoint**: `getBoletasHonorario` y `getBoletasPrestacionT` (§2), que la app llama al
   entrar al período.
@@ -171,17 +173,27 @@ Es el endpoint que arma la propuesta del período. Payload
 
 | Campo | Qué trae |
 |---|---|
-| `listCodPropuestos` | **los casilleros propuestos**: `[{codigo, valor}]`. En la corrida real vinieron los códigos 110, 111, 115, 504, 511, 519, 520, 562, 563 y 584 |
-| `listCodAdministrativos` | códigos 9114, 9126, 9129, 9132, 9137, 9192, 9193, con los mismos valores que sus pares del formulario |
+| `listCodPropuestos` | **los casilleros propuestos**: `[{codigo, valor}]`. El set CAMBIA por período según qué hubo: 202608 trajo 110, 111, 115, 504, 511, 519, 520, 562, 563 y 584; 202607 trajo 511, 519, 520, 527, 528, 562 y 584 (el 527/528 son la nota de crédito de ese mes) |
+| `listCodAdministrativos` | pares administrativos de los anteriores, y cambian con ellos: 202608 trajo 9114, 9126, 9129, 9132, 9137, 9192 y 9193; 202607 trajo 9172 y 9175 en lugar de los dos últimos (9172↔528, 9175↔527) |
 | `listCodBase` | identificación: razón social, RUT, dirección, comuna y período (código 15) |
 | `tipopropuesta` | entero (40 en la corrida); `tipopropuestadescrip` vino `null` |
 | `listCondiciones`, `listGlosasProp`, `listCodComplementar` | vacíos en el caso medido |
-| `complementoDetalleDTE`, `documentosDelGiro` | `true` — el detalle viene del RCV |
+| `documentosDelGiro` | `true` en los tres períodos medidos |
+| `complementoDetalleDTE` | **VARÍA**: `true` en 202608, `false` en 202607 y 202606. No es una constante y no conviene apoyar conclusiones en él (ver la nota bajo esta tabla) |
 | `estado`, `tieneAnotaciones`, `anotacion` | `0`, `false`, `false` |
 | `resultadoCalculoPP29.traza` | **traza textual del cálculo**, con RUT y período. Útil para diagnóstico; **no loguear tal cual**, lleva identificadores |
 
 Los valores concretos no se transcriben acá a propósito: este repositorio es público y son
-datos tributarios de un contribuyente real. Se reproducen corriendo la captura.
+datos tributarios de un contribuyente real. Se reproducen corriendo la captura, y hay un
+ejemplo redactado en `fixtures/f29-propuesta-declaracion-con-condiciones.json`.
+
+**Sobre `complementoDetalleDTE`**: una versión anterior de este informe lo daba por `true`
+y colgaba de ahí la afirmación "el detalle viene del RCV". Al comparar contra más períodos
+resultó que **varía** (`true` en 202608, `false` en 202607 y 202606) y no se relevó qué lo
+determina. La afirmación de que las compras entran desde el RCV **no depende de este flag**:
+se apoya en que la pantalla no ofrece un asistente de compras (§3.1) y, sobre todo, en que
+los montos del RCV coinciden exactamente con los casilleros propuestos (§8), que es
+evidencia mucho más fuerte.
 
 **Pregunta 8, matizada por la evidencia nueva:** hay dos comportamientos distintos según
 dónde se pregunte. `getComplementosAsistentes` devuelve **`null`** en la posición del
@@ -256,11 +268,12 @@ Sigue **sin verificar**, y a propósito:
   período. Es lo único que separa "dejar cargado" de una suposición.
 - **Qué atribución exige declarar.** Se sabe que la clave propia abre la aplicación y
   lee todo; no se sabe si enviar exige algo más.
-- **El criterio de fecha del RCV frente al de la propuesta.** La propuesta dice tomar el
-  detalle del RCV (`complementoDetalleDTE: true`), pero no se comparó documento a
-  documento contra el RCV que ya importamos. **Es la verificación que más valor tiene
-  ahora**, y es de solo lectura: bajar el RCV del período y contrastar los totales contra
-  `listCodPropuestos`.
+- **Un caso desfasado con IVA distinto de cero.** El criterio de fecha ya se verificó y es
+  RECEPCIÓN (§8), pero los dos documentos desfasados que aparecieron son exentos con IVA 0:
+  prueban la pertenencia al período, no el efecto sobre el crédito. Un desfasado con IVA
+  sería la confirmación redonda.
+- **Qué determina `complementoDetalleDTE`.** Varía entre períodos y no se relevó por qué.
+  Ninguna conclusión de este informe se apoya en él.
 
 ---
 
@@ -389,7 +402,8 @@ SPA", dirección inventada, y la traza del cálculo con el RUT sustituido):
 | `f29-propuesta-declaracion-con-condiciones.json` | respuesta completa de la propuesta |
 | `f29-boletas-honorario-vacio.json` | convención "sin datos" de boletas: **ceros y lista vacía** |
 | `f29-complementos-asistentes-vacio.json` | convención "sin datos" de asistentes: **null por posición** |
-| `f29-tasa-ppmo.json` | casilleros de PPM |
+| `f29-tasa-ppmo.json` | casilleros de PPM. Es de un período **abierto**: trae `realizado: false`, y su `cod563` es el valor PROPUESTO, no uno ya declarado |
+| `README.md` | qué muestra cada uno, los detalles de tipos y lo que falta capturar |
 
 **Detalles de tipos que importan para escribir el cliente**, y que se ven en los fixtures:
 
@@ -400,7 +414,13 @@ SPA", dirección inventada, y la traza del cálculo con el RUT sustituido):
 - Las dos convenciones de "sin datos" conviven en la misma aplicación: hay que tratarlas
   por endpoint, no con una regla global.
 
-**Lo que NO hay**: un fixture de `getBoletasHonorario` **con** datos. El contribuyente de
+Los cuatro son **JSON válido**, sin comentarios adentro: se pueden `require` directo desde
+un test. Las notas viven en el `README.md` de esa carpeta.
+
+**Lo que NO hay**: un fixture de `getComplementosAsistentes` con el **tipo 3 poblado** —el
+que sostiene §3 y §4—, porque el período capturado no tenía asistentes usados; sus campos
+están descritos en §3 pero no hay un JSON de ejemplo. Tampoco hay un `getBoletasHonorario`
+**con** datos. El contribuyente de
 prueba no tiene boletas de honorarios en ningún período consultado, así que
 `listBoletasHonorarios` siempre vino vacío y **la forma de sus elementos no se relevó**. No
 se inventa: hay que capturarlo con un contribuyente que sí las tenga.

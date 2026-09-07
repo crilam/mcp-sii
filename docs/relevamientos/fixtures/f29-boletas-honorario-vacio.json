@@ -1,4 +1,3 @@
-// getBoletasHonorario sobre una empresa SIN honorarios en el periodo. Convencion de "no hay dato": ceros y lista vacia, NO null ni error.
 {
   "listBoletasHonorarios": [],
   "honorariosBrutoTotal": 0,

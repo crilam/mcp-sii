@@ -1,7 +1,6 @@
-// getTasaPPMO — respuesta REDACTADA. Mezcla tipos: cod563 y cod115 son string, mes y anno number, y varios campos vienen null.
 {
   "rutContribuyente": "11111111",
-  "dv": "4",
+  "dv": "1",
   "mes": 8,
   "anno": 2026,
   "cod750": null,
