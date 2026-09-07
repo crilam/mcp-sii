@@ -29,7 +29,9 @@ invocaron**.
    `getDeclaracionConCondicionesYTipoPropuesta`, capturado en un período abierto (§3.1).
    Devuelve los códigos propuestos con su valor, los administrativos, el tipo de
    propuesta y una traza del cálculo.
-5. **Recomendación de alcance**: la comparación por origen del PRD **se puede construir**,
+5. **El criterio de fecha es RECEPCIÓN, confirmado contra dos períodos** (§8): el mismo que
+   AgenticERP ya aplica. La comparación no va a dar diferencias sistemáticas por ahí.
+6. **Recomendación de alcance**: la comparación por origen del PRD **se puede construir**,
    pero contra la propuesta consolidada y el RCV, no "por asistente" — los asistentes son
    dos y no cubren compras (ver §7).
 
@@ -298,6 +300,110 @@ cuadrando y avisando que cargando.
    real y recién ahí decidir si conviene dejar cargado.
 
 El corte entre fase 1 y fase 2 es exactamente el corte entre lo verificado y lo supuesto.
+
+---
+
+## 8. El criterio de fecha: RECEPCIÓN, confirmado
+
+Era la verificación que más valor tenía y salió limpia. Se comparó, en dos períodos
+declarados, el RCV de compras contra `listCodPropuestos` de la propuesta del SII.
+
+| Período | RCV de compras (del período consultado) | Propuesta del SII |
+|---|---|---|
+| 202606 | tipo 33: **1** documento, IVA **978** | `519=1`, `520=978`, `511=978` |
+| 202607 | tipo 33: **2** documentos, IVA **96.995**; nota de crédito (61): **1**, IVA **1.900** | `519=2`, `520=96995`, `527=1`, `528=1900`, `511=95095` |
+
+Cuadra exacto, incluida la aritmética interna: `511 = 520 − 528` (95.095 = 96.995 − 1.900),
+o sea el crédito neto después de las notas de crédito. Las cantidades de documentos también
+coinciden una a una (`519` y `527`).
+
+**La prueba del criterio es el documento desfasado.** En 202606 hay una factura **emitida
+el 31/05/2026 y recibida el 11/06/2026**, y está dentro del período 202606 del RCV — el
+caso que el PRD identificó. En 202607 se repite el patrón con otra emitida el 30/06 y
+recibida el 03/07. Si el SII agrupara por emisión, esos documentos estarían en el mes
+anterior. **Todas las fechas de recepción de cada período caen dentro del propio período.**
+
+**Conclusión: el SII agrupa por fecha de RECEPCIÓN (Art. 24), que es el mismo criterio que
+AgenticERP aplica con `recorded_period`.** La comparación no va a dar diferencias
+sistemáticas por este motivo.
+
+Matiz honesto: los dos documentos desfasados que se encontraron son de tipo 34 (exenta) con
+IVA 0, así que no mueven el `520`. Lo que prueban es la **pertenencia al período**, que es
+justamente lo que estaba en duda. Un caso desfasado con IVA distinto de cero sería la
+confirmación redonda; no apareció en los períodos disponibles.
+
+---
+
+## 9. Contrato de sesión para un cliente propio
+
+Para llamar estos endpoints desde `packages/sii-client`, que hoy ya hace el RCV contra
+`consdcvinternetui`: **es el mismo mecanismo, no hace falta nada nuevo.**
+
+**Autenticación**: login estándar del SII con **clave propia del contribuyente** (no sirve
+el certificado del representante, §5). No hay login específico de la aplicación: se
+autentica una vez contra el SII y la cookie sirve para todo el dominio.
+
+**Transporte**: `POST` con `Content-Type: application/json` y el cookie jar de la sesión.
+Sin headers extra. **No hay CSRF, ni token en el body, ni Referer obligatorio** — se
+verificó llamando por HTTP directo, fuera del navegador, y respondieron igual.
+
+**El sobre** (idéntico al del RCV):
+
+```json
+{
+  "metaData": {
+    "namespace": "<namespace>/<metodo>",
+    "conversationId": "<valor de la cookie TOKEN>",
+    "transactionId": "<único por petición>",
+    "page": null
+  },
+  "data": { }
+}
+```
+
+- **`conversationId` es el valor de la cookie `TOKEN`** que deja el login. No se inventa.
+- `transactionId` sólo necesita ser único por petición; cualquier cadena única sirve.
+- **El namespace es `cl.sii.sdi.lob.iva.propuestaf29…`** — `lob.iva`, no `lob.diii` como el
+  resto del repo. Si se equivoca, el SII responde en `metaData.errors` **diciendo cuál es
+  el correcto**, lo que hace muy barato descubrirlo.
+
+**Errores**: HTTP 200 con `metaData.errors` cuando el sobre está mal; **HTTP 400 con una
+página HTML de JBoss** cuando el `data` no tiene la forma esperada. El 400 no dice qué
+falta: por eso los payloads hay que capturarlos del navegador y no adivinarlos — se
+probaron cuatro formas de `getCodigosPropuestos` y todas dieron 400.
+
+**Un período ya declarado sigue respondiendo la propuesta por HTTP**, aunque la interfaz
+corte antes con "Existe una declaración vigente". Útil para reproducir y testear sobre
+períodos cerrados.
+
+---
+
+## 10. Fixtures
+
+En `docs/relevamientos/fixtures/`, con la estructura exacta del SII y todo dato
+identificatorio sustituido (RUT ficticio 11.111.111-1, razón social "EMPRESA DE PRUEBA
+SPA", dirección inventada, y la traza del cálculo con el RUT sustituido):
+
+| Archivo | Qué muestra |
+|---|---|
+| `f29-propuesta-declaracion-con-condiciones.json` | respuesta completa de la propuesta |
+| `f29-boletas-honorario-vacio.json` | convención "sin datos" de boletas: **ceros y lista vacía** |
+| `f29-complementos-asistentes-vacio.json` | convención "sin datos" de asistentes: **null por posición** |
+| `f29-tasa-ppmo.json` | casilleros de PPM |
+
+**Detalles de tipos que importan para escribir el cliente**, y que se ven en los fixtures:
+
+- **Los montos vienen como `string`, no como number** (`{"codigo":"520","valor":"96995"}`).
+  Incluye la tasa: `"115": "0.125"`.
+- `getTasaPPMO` **mezcla**: `cod563` y `cod115` son string, `mes` y `anno` son number.
+- Abundan los `null` en campos opcionales; no asumir presencia.
+- Las dos convenciones de "sin datos" conviven en la misma aplicación: hay que tratarlas
+  por endpoint, no con una regla global.
+
+**Lo que NO hay**: un fixture de `getBoletasHonorario` **con** datos. El contribuyente de
+prueba no tiene boletas de honorarios en ningún período consultado, así que
+`listBoletasHonorarios` siempre vino vacío y **la forma de sus elementos no se relevó**. No
+se inventa: hay que capturarlo con un contribuyente que sí las tenga.
 
 ---
 
