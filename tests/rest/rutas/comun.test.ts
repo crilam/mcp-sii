@@ -1,7 +1,7 @@
 import { ejecutar } from '../../../src/rest/rutas/comun';
 import {
   SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado, EscrituraRechazadaPorSii,
-  EmpresaNoAutorizada, SelectorEmpresasVacio,
+  EmpresaNoAutorizada, SelectorEmpresasVacio, LimitacionConocida, RecursoNoEncontrado,
 } from '../../../src/erroresConsulta';
 
 describe('ejecutar', () => {
@@ -151,6 +151,30 @@ describe('ejecutar', () => {
         expect((respuesta.body as { error: string }).error).not.toBe('LIMITE_CONOCIDO');
         expect((respuesta.body as { error: string }).error).not.toBe('ERROR');
       }
+    });
+
+    /*
+     * Toda la familia de LimitacionConocida en un solo caso, porque acá el
+     * orden de los `instanceof` en `ejecutar` es lo único que separa un código
+     * de otro: las cuatro clases son la misma cadena de herencia, y la clase
+     * madre —que va última— matchea a todas. Mover ese bloque unas líneas hacia
+     * arriba colapsaría las tres específicas en LIMITE_CONOCIDO sin que ningún
+     * test que mire una sola clase se entere.
+     *
+     * `LimitacionConocida` pelada tiene que seguir dando LIMITE_CONOCIDO: es la
+     * que representa "el SII no puede darnos esto por un límite que ya
+     * conocemos", y perderla dejaría a los tres casos permanentes que no son
+     * ninguna de las subclases saliendo como ERROR, o sea reintentables.
+     */
+    it.each([
+      [() => new RecursoNoEncontrado('no existe'), 'NO_ENCONTRADO'],
+      [() => new SelectorEmpresasVacio('selector vacío'), 'EMPRESA_NO_AUTORIZADA'],
+      [() => new EmpresaNoAutorizada('empresa ausente'), 'EMPRESA_NO_AUTORIZADA'],
+      [() => new LimitacionConocida('mes con más de 100 boletas'), 'LIMITE_CONOCIDO'],
+    ] as [() => Error, string][])('la familia de LimitacionConocida no colapsa: %# -> %s', async (crear, codigo) => {
+      const respuesta = await ejecutar(async () => { throw crear(); });
+
+      expect((respuesta.body as { error: string }).error).toBe(codigo);
     });
   });
 
