@@ -120,6 +120,7 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 | `LIMITE_SII` | 200 | **sí** | El SII cortó las consultas por volumen (su propio error 429). | **Sí, pero esperando de verdad.** |
 | `SERVICIO_OCUPADO` | 200 | **sí** | **Nosotros** estamos ocupados: hay demasiadas consultas de indicadores esperando turno. | **Sí**, en segundos. |
 | `NO_ENCONTRADO` | 200 | **sí** | El SII confirmó que el dato no existe. | No, es permanente. |
+| `SIN_PROPUESTA` | 200 | no, pero trae `generada_en` | El SII no arma propuesta de F29 para ese período (ver §6.11). No es un error: es el estado normal de un mes que todavía no cerró. | No ya mismo, pero **sí más adelante**: es el único código que cambia solo con el paso del tiempo. |
 | `LIMITE_CONOCIDO` | 200 | **sí** | Límite conocido de lo que se puede leer del portal (ver §7). | No, es permanente. |
 | `BAD_REQUEST` | 400 | **sí** | El body no valida. El `detalle` nombra el campo. | No, arreglá el request. |
 | `CONFIRMAR_NO_SOPORTADO` | 400 | no | Mandaste `confirmar:true` a `emitir-dte`. | No, ver §6.5. |
@@ -133,7 +134,7 @@ Dos precisiones que evitan bugs:
 
 - **`LIMITE_SII` significa parar, no reintentar rápido.** El SII cortó por volumen de consultas. Reintentar de inmediato es lo que mantiene el corte: hay que esperar de verdad —minutos, no segundos— y bajar el ritmo. Aparece cuando se le hacen muchas consultas al mismo portal en poco tiempo, y afecta a ese portal entero mientras dura.
 - **`SERVICIO_OCUPADO` es nuestro, no del SII, y se espera en segundos.** Las rutas de indicadores serializan sus bajadas contra el portal público a propósito: un barrido en paralelo es lo que hace que el SII corte por volumen. Cuando hay demasiadas esperando turno, preferimos rechazar rápido antes que dejarte la conexión abierta varios minutos sin decirte nada. Reintentá en unos segundos; si aparece seguido, el que está pidiendo de más probablemente seas vos.
-- **`ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII` y `SERVICIO_OCUPADO` son los cuatro que conviene reintentar**, con esperas muy distintas. `NO_ENCONTRADO`, `LIMITE_CONOCIDO` y `EMPRESA_NO_AUTORIZADA` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII.
+- **`ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII` y `SERVICIO_OCUPADO` son los cuatro que conviene reintentar**, con esperas muy distintas. `NO_ENCONTRADO`, `LIMITE_CONOCIDO` y `EMPRESA_NO_AUTORIZADA` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII. `SIN_PROPUESTA` es el caso aparte: no se reintenta *ahora* —el mes no cerró y volver a pedirlo no lo cambia—, pero el mismo request va a funcionar cuando cierre, así que tampoco se descarta para siempre como los otros tres.
 - **`ERROR` ahora siempre trae `detalle`**, con el mensaje de la excepción (redactado de secretos conocidos y truncado). Sigue siendo el único código genuinamente ambiguo del contrato —no se sabe si el fallo es transitorio o un bug permanente—, así que el criterio de reintento no cambia; lo que cambia es que ya no llega mudo.
 - **`SESIONES_SIMULTANEAS` merece su propio mensaje al usuario.** Reintentar es correcto igual que con `ERROR`, así que el comportamiento no cambia — lo que cambia es lo que le podés decir a la persona. Con `ERROR` sólo cabe "probá de nuevo en unos minutos"; con éste podés decirle que hay **otra consulta en curso sobre el mismo contribuyente**, y eso es accionable: sabe que dejó otra pestaña abierta, o que un colega está mirando el mismo caso. Aparece cuando el RUT supera el límite de sesiones simultáneas del SII.
 
@@ -514,32 +515,6 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 > - El selector vino **vacío**: el RUT autenticado no opera ninguna empresa en el portal. (Nota: un combo vacío también podría ser el CGI devolviendo otra página por una sesión perdida; el `detalle` deja constancia de esa ambigüedad residual — no hay forma de distinguir los dos casos sólo con el HTML del combo.)
 > - El selector trajo empresas, pero **la pedida no está entre ellas**: el RUT autenticado opera otras. El `detalle` dice **cuántas** trae, sin listar sus RUT — son datos de terceros desde el punto de vista de quien preguntó por una empresa puntual.
 
-- **`POST /v1/f29/propuesta`** — los casilleros que el SII **propone** para el período, a partir del Registro de Compras y Ventas. `rut` y `periodo` (`AAAAMM`). Acepta **string o número** y normaliza a string: el resto de `/v1/f29` pide el período como número, y esta ruta como string, así que se toleran los dos para que la diferencia no sea una trampa.
-
-  ```json
-  { "ok": true,
-    "casilleros": [ { "codigo": "520", "valor": "100000" }, { "codigo": "115", "valor": "0.125" } ],
-    "tipo_propuesta": 40,
-    "fecha_creacion": "10/08/2026 10:28:02",
-    "complemento_detalle_dte": false,
-    "documentos_del_giro": true,
-    "generada_en": "2026-09-07T12:36:53.960Z" }
-  ```
-
-  **Los `valor` son STRING y los `codigo` van sin normalizar**, tal como los entrega el SII. No se convierten a número a propósito: el código 115 es una tasa (`"0.125"`) y cualquier conversión a entero la rompe. Quien consume decide.
-
-  **`SIN_PROPUESTA`** (con `ok:false`) cuando el SII no arma propuesta para ese período — el caso normal de un mes que todavía no cerró. **No es un error y no se reintenta**: reintentar no lo cambia. Verificado en vivo contra un período abierto.
-
-  `fecha_creacion` es de la **declaración**, no de la propuesta, y por eso esta ruta hace **dos** consultas al SII cuando hay propuesta: la propuesta no trae esa fecha. Si el período no tiene propuesta, la segunda consulta se salta y no se gasta una llamada al portal. Viene `null` si el período no está declarado. `generada_en` es cuándo consultamos nosotros: la propuesta se recalcula sola cuando llega un documento tarde, así que una comparación sin marca de tiempo no se puede auditar después.
-
-  **Lo que esta ruta NO devuelve, deliberadamente**: la traza del cálculo (`resultadoCalculoPP29.traza`, que lleva el RUT y el período en texto libre) y `listCodBase` (razón social, dirección y comuna del contribuyente). Quien pregunta ya sabe por qué RUT preguntó; devolverle su domicilio de paso sería filtrar datos que nadie pidió.
-
-  **No tiene tool MCP, y es deliberado**: la propuesta existe para que un sistema contable cuadre el período contra el RCV y el libro propio, no para que un modelo la lea — son diez casilleros sin significado fuera de esa comparación. Si algún día se expone por MCP, ojo con `schemaPropuestaF29`: usa `z.union(...).transform()`, que no se puede pasar como *raw shape* a `server.tool` (rompe la generación del JSON Schema) a diferencia de `schemaEstadoF29`.
-
-  **Probada sólo con clave tributaria.** El certificado digital no se verificó contra esta aplicación del SII, así que no se anuncia: ver la nota sobre atribuciones distintas en el relevamiento del F29.
-
-  Un período **ya declarado sigue respondiendo la propuesta**, aunque el portal del SII corte antes con "Existe una declaración vigente". Sirve para reproducir y testear sobre períodos cerrados.
-
 - **`POST /v1/mipyme/list-empresas`** — sólo `rut`. Devuelve `{"ok":true,"datos":[{"rut","nombre"}]}`.
 - **`POST /v1/mipyme/list-dte-emitidos`** — `rut` obligatorio; opcionales `empresa_rut`, `tipo_dte`, `fecha_desde` y `fecha_hasta` (`AAAA-MM-DD`), `receptor_rut`, `folio`, y `pagina` (default `1`, 100 documentos por página).
 
@@ -707,8 +682,37 @@ Credencial estándar. `periodo` es AAAAMM (año 2007-2100). La Consulta Integral
 |---|---|---|
 | **`POST /v1/f29/estado-declaracion`** | `periodo` | `{periodo, formulario, folio, codInt, estado, observaciones, fechaPresentacion, moneda}`; período sin declaración → `NO_ENCONTRADO` |
 | **`POST /v1/f29/formulario-compacto`** | `periodo` | el estado (sin `codInt`) más `pdf_base64`, `content_type`, `nombre_archivo`, `tamano_bytes` |
+| **`POST /v1/f29/propuesta`** | `periodo` (string o número) | `casilleros` (`{codigo, valor}`, ambos string), `tipo_propuesta`, `fecha_creacion`, `complemento_detalle_dte`, `documentos_del_giro`, `generada_en`; período sin propuesta → `SIN_PROPUESTA` |
 
 Dos cosas: **el monto pagado NO se expone en el estado** —la respuesta GWT trae varios enteros grandes sin una posición fiable, y publicar el equivocado es peor que no publicarlo; los montos están en el PDF—; y **`formulario-compacto` resuelve el folio por período**, así que el consumidor pide por período y no necesita conocer el folio.
+
+#### `POST /v1/f29/propuesta` — la propuesta del SII para el período
+
+Los casilleros que el SII **propone** para el período, a partir del Registro de Compras y Ventas. `rut` y `periodo` (`AAAAMM`). Acepta **string o número** y normaliza a string: el resto de `/v1/f29` pide el período como número, y esta ruta como string, así que se toleran los dos para que la diferencia no sea una trampa.
+
+```json
+{ "ok": true,
+  "casilleros": [ { "codigo": "520", "valor": "100000" }, { "codigo": "115", "valor": "0.125" } ],
+  "tipo_propuesta": 40,
+  "fecha_creacion": "10/08/2026 10:28:02",
+  "complemento_detalle_dte": false,
+  "documentos_del_giro": true,
+  "generada_en": "2026-09-07T12:36:53.960Z" }
+```
+
+**Los `valor` son STRING y los `codigo` van sin normalizar**, tal como los entrega el SII. No se convierten a número a propósito: el código 115 es una tasa (`"0.125"`) y cualquier conversión a entero la rompe. Quien consume decide.
+
+**`SIN_PROPUESTA`** (con `ok:false`) cuando el SII no arma propuesta para ese período — el caso normal de un mes que todavía no cerró. **No es un error y no se reintenta**: reintentar no lo cambia. Verificado en vivo contra un período abierto. La respuesta no lleva `detalle` pero **sí `generada_en`**, igual que el caso con propuesta: "preguntamos y el SII no propuso nada" es un hecho fechable, y sin la marca no se puede auditar cuándo se preguntó.
+
+`fecha_creacion` es de la **declaración**, no de la propuesta, y por eso esta ruta hace **dos** consultas al SII cuando hay propuesta: la propuesta no trae esa fecha. Si el período no tiene propuesta, la segunda consulta se salta y no se gasta una llamada al portal. Viene `null` si el período no está declarado. `generada_en` es cuándo consultamos nosotros: la propuesta se recalcula sola cuando llega un documento tarde, así que una comparación sin marca de tiempo no se puede auditar después.
+
+**Lo que esta ruta NO devuelve, deliberadamente**: la traza del cálculo (`resultadoCalculoPP29.traza`, que lleva el RUT y el período en texto libre) y `listCodBase` (razón social, dirección y comuna del contribuyente). Quien pregunta ya sabe por qué RUT preguntó; devolverle su domicilio de paso sería filtrar datos que nadie pidió.
+
+**No tiene tool MCP, y es deliberado**: la propuesta existe para que un sistema contable cuadre el período contra el RCV y el libro propio, no para que un modelo la lea — son diez casilleros sin significado fuera de esa comparación. Si algún día se expone por MCP, ojo con `schemaPropuestaF29`: usa `z.union(...).transform()`, que no se puede pasar como *raw shape* a `server.tool` (rompe la generación del JSON Schema) a diferencia de `schemaEstadoF29`.
+
+**Probada sólo con clave tributaria.** El certificado digital no se verificó contra esta aplicación del SII, así que no se anuncia: ver la nota sobre atribuciones distintas en el relevamiento del F29.
+
+Un período **ya declarado sigue respondiendo la propuesta**, aunque el portal del SII corte antes con "Existe una declaración vigente". Sirve para reproducir y testear sobre períodos cerrados.
 
 ### 6.12 RCV asíncrono (cierre R1)
 
