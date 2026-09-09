@@ -1,7 +1,7 @@
 import { SiiHttpClient } from '../http';
 import { Empresa, SessionManager } from '../session';
 import { rutEsValido } from '../rut';
-import { EscrituraRechazadaPorSii, LimitacionConocida } from '../erroresConsulta';
+import { EscrituraRechazadaPorSii, LimitacionConocida, EmpresaNoAutorizada, SelectorEmpresasVacio } from '../erroresConsulta';
 import { marcarSeguro } from '../idempotenciaEscritura';
 import { esperar, pausaConfigurada } from '../ritmoSii';
 
@@ -1574,9 +1574,31 @@ export class MipymeHttpScraper {
   private resolverEmpresa(empresas: Empresa[], pedida?: string): string {
     if (pedida) {
       if (!empresas.some(e => e.rut === pedida)) {
-        throw new Error(
-          `La empresa ${pedida} no está entre las que este RUT puede operar en el portal ` +
-          `mipyme. Disponibles: ${empresas.map(e => e.rut).join(', ')}`
+        // El problema es QUIÉN autentica, no `pedida` ni la clave — ver el
+        // comentario de EmpresaNoAutorizada en erroresConsulta.ts. La acción de
+        // fondo es la misma en los dos subcasos (autenticar con la credencial
+        // de alguien que sí tenga `pedida` en su selector, o pedir el permiso
+        // en el portal); lo único que cambia es el diagnóstico.
+        const accion =
+          `No lo arregla reintentar: hace falta autenticar con la credencial de alguien que sí ` +
+          `tenga ${pedida} habilitada en su selector del portal mipyme, o pedir ese permiso ahí.`;
+        if (empresas.length === 0) {
+          // Este `if` es defensivo: hoy `parseEmpresas` ya rechaza el combo
+          // vacío antes de llegar acá (ver `SelectorEmpresasVacio` en
+          // parseEmpresas), así que este camino no debería ejecutarse en
+          // producción. Se cubre igual para que `resolverEmpresa` sea correcto
+          // por sí sola si algún día la llama alguien con una lista vacía sin
+          // pasar por `parseEmpresas`.
+          throw new SelectorEmpresasVacio(
+            `El RUT autenticado no tiene ninguna empresa en su selector del portal mipyme, así ` +
+            `que no puede leer los documentos de ${pedida}. El selector de empresas es un permiso ` +
+            `a nivel de PERSONA, no de la empresa pedida. ${accion}`
+          );
+        }
+        throw new EmpresaNoAutorizada(
+          `El RUT autenticado no tiene a ${pedida} entre las empresas de su selector del portal ` +
+          `mipyme (trae ${empresas.length} ${empresas.length === 1 ? 'empresa distinta' : 'empresas distintas'}). ` +
+          `${accion}`
         );
       }
       return pedida;
@@ -1653,13 +1675,26 @@ export class MipymeHttpScraper {
       empresas.push({ rut, nombre: nombre || rut });
     }
 
-    // Un combo sin opciones no es "esta persona no opera ninguna empresa": es el
-    // CGI devolviendo otra página (sesión caída, WAF, rediseño). Devolver [] haría
-    // los dos casos indistinguibles.
+    // Un combo sin opciones NO es sólo "esta persona no opera ninguna empresa":
+    // también puede ser el CGI devolviendo otra página (sesión caída, WAF,
+    // rediseño), y el HTML del combo no alcanza para distinguir los dos casos.
+    // Sigue viajando como fallo — no como `[]`, que los volvería indistinguibles
+    // de "esta empresa no tiene documentos" más adelante en el flujo — pero ya
+    // no como `Error` pelado: en la práctica medida contra el portal real, este
+    // caso coincide con el permiso a nivel de persona que describe
+    // `EmpresaNoAutorizada` en erroresConsulta.ts (RUT de la empresa, no de
+    // quien la administra), así que se clasifica con su código propio y un
+    // `detalle` accionable en vez de viajar como `ERROR` mudo. El mensaje deja
+    // constancia de que, si el motivo real fuera una sesión caída, un reintento
+    // sí podría andar — eso no se puede confirmar sólo con este HTML.
     if (empresas.length === 0) {
-      throw new Error(
-        'El portal mipyme no devolvió ninguna empresa en la página de selección. ' +
-        'Puede ser la sesión caída o un cambio del portal; no significa que este RUT no opere empresas.'
+      throw new SelectorEmpresasVacio(
+        'El portal mipyme no devolvió ninguna empresa en la página de selección. Lo más probable ' +
+        'es que el RUT autenticado no opere ninguna empresa en ese portal: el selector es un ' +
+        'permiso a nivel de PERSONA, no de empresa, y no lo arregla reintentar — hace falta ' +
+        'autenticar con la credencial de alguien que sí tenga la empresa buscada en su selector ' +
+        'del portal mipyme, o pedir ese permiso ahí. (Con menor probabilidad, puede ser una sesión ' +
+        'perdida justo antes de leer el combo; si esto no se repite en corridas posteriores, fue eso.)'
       );
     }
     return empresas;
