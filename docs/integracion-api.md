@@ -113,8 +113,9 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 
 | Código | Status | `detalle` | Qué pasó | ¿Reintentar? |
 |---|---|---|---|---|
-| `ERROR` | 200 | no | Fallo no clasificado: timeout, red, portal caído. | **Sí.** El único reintentable. |
+| `ERROR` | 200 | **sí** | Fallo no clasificado: timeout, red, portal caído. | **Sí.** El único reintentable. |
 | `CREDENCIALES_INVALIDAS` | 200 | no | El SII rechazó la clave o el certificado. | No. Pedí credenciales nuevas. |
+| `EMPRESA_NO_AUTORIZADA` | 200 | **sí** | El selector de empresas del portal mipyme es un permiso a nivel de PERSONA, no de empresa: el RUT autenticado no tiene la empresa pedida en su selector (ver §6.5). | No, es permanente para esa credencial. |
 | `SESIONES_SIMULTANEAS` | 200 | **sí** | El RUT ya tiene demasiadas sesiones abiertas en el SII. | **Sí**, después de esperar. |
 | `LIMITE_SII` | 200 | **sí** | El SII cortó las consultas por volumen (su propio error 429). | **Sí, pero esperando de verdad.** |
 | `SERVICIO_OCUPADO` | 200 | **sí** | **Nosotros** estamos ocupados: hay demasiadas consultas de indicadores esperando turno. | **Sí**, en segundos. |
@@ -132,7 +133,8 @@ Dos precisiones que evitan bugs:
 
 - **`LIMITE_SII` significa parar, no reintentar rápido.** El SII cortó por volumen de consultas. Reintentar de inmediato es lo que mantiene el corte: hay que esperar de verdad —minutos, no segundos— y bajar el ritmo. Aparece cuando se le hacen muchas consultas al mismo portal en poco tiempo, y afecta a ese portal entero mientras dura.
 - **`SERVICIO_OCUPADO` es nuestro, no del SII, y se espera en segundos.** Las rutas de indicadores serializan sus bajadas contra el portal público a propósito: un barrido en paralelo es lo que hace que el SII corte por volumen. Cuando hay demasiadas esperando turno, preferimos rechazar rápido antes que dejarte la conexión abierta varios minutos sin decirte nada. Reintentá en unos segundos; si aparece seguido, el que está pidiendo de más probablemente seas vos.
-- **`ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII` y `SERVICIO_OCUPADO` son los cuatro que conviene reintentar**, con esperas muy distintas. `NO_ENCONTRADO` y `LIMITE_CONOCIDO` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII.
+- **`ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII` y `SERVICIO_OCUPADO` son los cuatro que conviene reintentar**, con esperas muy distintas. `NO_ENCONTRADO`, `LIMITE_CONOCIDO` y `EMPRESA_NO_AUTORIZADA` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII.
+- **`ERROR` ahora siempre trae `detalle`**, con el mensaje de la excepción (redactado de secretos conocidos y truncado). Sigue siendo el único código genuinamente ambiguo del contrato —no se sabe si el fallo es transitorio o un bug permanente—, así que el criterio de reintento no cambia; lo que cambia es que ya no llega mudo.
 - **`SESIONES_SIMULTANEAS` merece su propio mensaje al usuario.** Reintentar es correcto igual que con `ERROR`, así que el comportamiento no cambia — lo que cambia es lo que le podés decir a la persona. Con `ERROR` sólo cabe "probá de nuevo en unos minutos"; con éste podés decirle que hay **otra consulta en curso sobre el mismo contribuyente**, y eso es accionable: sabe que dejó otra pestaña abierta, o que un colega está mirando el mismo caso. Aparece cuando el RUT supera el límite de sesiones simultáneas del SII.
 
   Con una salvedad: hoy se detecta al **abrir** la sesión, que es donde el portal lo informa. Si el bloqueo apareciera a mitad de una consulta ya en curso, todavía llega como `ERROR`. O sea que `SESIONES_SIMULTANEAS` confirma el caso, pero su ausencia no lo descarta.
@@ -504,6 +506,39 @@ Un año puede tener **varias declaraciones**, y sólo una con `vigente: true`.
 ### 6.5 Mipyme
 
 **Clave o certificado.**
+
+> **El selector de empresas de este portal es un permiso a nivel de PERSONA, no de empresa.** Verificado contra el portal real: con la clave de la EMPRESA, `list-empresas` devuelve 0 resultados y cualquier otra ruta de este grupo falla; con la clave de la PERSONA que la administra, devuelve todas las que opera y todo funciona — la clave de la empresa es válida (otros servicios de este MCP responden bien con ella), el problema es sólo QUIÉN autentica acá.
+>
+> Cuando `empresa_rut` (o el único candidato, si no lo mandás) no está en el selector del RUT autenticado, la ruta responde `EMPRESA_NO_AUTORIZADA` en vez de `ERROR`: es determinístico —el mismo par (RUT, empresa) va a fallar igual siempre— y no lo arregla reintentar. El `detalle` distingue dos casos, con la misma acción de fondo: autenticar con la credencial de alguien que sí tenga esa empresa en su selector del portal mipyme, o pedir el permiso ahí.
+>
+> - El selector vino **vacío**: el RUT autenticado no opera ninguna empresa en el portal. (Nota: un combo vacío también podría ser el CGI devolviendo otra página por una sesión perdida; el `detalle` deja constancia de esa ambigüedad residual — no hay forma de distinguir los dos casos sólo con el HTML del combo.)
+> - El selector trajo empresas, pero **la pedida no está entre ellas**: el RUT autenticado opera otras. El `detalle` dice **cuántas** trae, sin listar sus RUT — son datos de terceros desde el punto de vista de quien preguntó por una empresa puntual.
+
+- **`POST /v1/f29/propuesta`** — los casilleros que el SII **propone** para el período, a partir del Registro de Compras y Ventas. `rut` y `periodo` (`AAAAMM`). Acepta **string o número** y normaliza a string: el resto de `/v1/f29` pide el período como número, y esta ruta como string, así que se toleran los dos para que la diferencia no sea una trampa.
+
+  ```json
+  { "ok": true,
+    "casilleros": [ { "codigo": "520", "valor": "100000" }, { "codigo": "115", "valor": "0.125" } ],
+    "tipo_propuesta": 40,
+    "fecha_creacion": "10/08/2026 10:28:02",
+    "complemento_detalle_dte": false,
+    "documentos_del_giro": true,
+    "generada_en": "2026-09-07T12:36:53.960Z" }
+  ```
+
+  **Los `valor` son STRING y los `codigo` van sin normalizar**, tal como los entrega el SII. No se convierten a número a propósito: el código 115 es una tasa (`"0.125"`) y cualquier conversión a entero la rompe. Quien consume decide.
+
+  **`SIN_PROPUESTA`** (con `ok:false`) cuando el SII no arma propuesta para ese período — el caso normal de un mes que todavía no cerró. **No es un error y no se reintenta**: reintentar no lo cambia. Verificado en vivo contra un período abierto.
+
+  `fecha_creacion` es de la **declaración**, no de la propuesta, y por eso esta ruta hace **dos** consultas al SII cuando hay propuesta: la propuesta no trae esa fecha. Si el período no tiene propuesta, la segunda consulta se salta y no se gasta una llamada al portal. Viene `null` si el período no está declarado. `generada_en` es cuándo consultamos nosotros: la propuesta se recalcula sola cuando llega un documento tarde, así que una comparación sin marca de tiempo no se puede auditar después.
+
+  **Lo que esta ruta NO devuelve, deliberadamente**: la traza del cálculo (`resultadoCalculoPP29.traza`, que lleva el RUT y el período en texto libre) y `listCodBase` (razón social, dirección y comuna del contribuyente). Quien pregunta ya sabe por qué RUT preguntó; devolverle su domicilio de paso sería filtrar datos que nadie pidió.
+
+  **No tiene tool MCP, y es deliberado**: la propuesta existe para que un sistema contable cuadre el período contra el RCV y el libro propio, no para que un modelo la lea — son diez casilleros sin significado fuera de esa comparación. Si algún día se expone por MCP, ojo con `schemaPropuestaF29`: usa `z.union(...).transform()`, que no se puede pasar como *raw shape* a `server.tool` (rompe la generación del JSON Schema) a diferencia de `schemaEstadoF29`.
+
+  **Probada sólo con clave tributaria.** El certificado digital no se verificó contra esta aplicación del SII, así que no se anuncia: ver la nota sobre atribuciones distintas en el relevamiento del F29.
+
+  Un período **ya declarado sigue respondiendo la propuesta**, aunque el portal del SII corte antes con "Existe una declaración vigente". Sirve para reproducir y testear sobre períodos cerrados.
 
 - **`POST /v1/mipyme/list-empresas`** — sólo `rut`. Devuelve `{"ok":true,"datos":[{"rut","nombre"}]}`.
 - **`POST /v1/mipyme/list-dte-emitidos`** — `rut` obligatorio; opcionales `empresa_rut`, `tipo_dte`, `fecha_desde` y `fecha_hasta` (`AAAA-MM-DD`), `receptor_rut`, `folio`, y `pagina` (default `1`, 100 documentos por página).

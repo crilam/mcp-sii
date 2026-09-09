@@ -30,6 +30,58 @@ export class LimitacionConocida extends Error {
 // funcionar.
 export class RecursoNoEncontrado extends LimitacionConocida {}
 
+// El selector de empresas del portal mipyme (`mipeSelEmpresa.cgi`) es un
+// permiso a nivel de PERSONA, no de empresa: verificado contra el portal real
+// con dos credenciales de la misma empresa. Con la clave de la EMPRESA el
+// selector devuelve 0 empresas y cualquier lectura de esa empresa falla; con la
+// clave de la PERSONA que la administra el selector devuelve las cinco que esa
+// persona opera y el respaldo baja completo — la clave de la empresa es válida
+// (otros servicios de este MCP responden bien con ella), así que el problema
+// nunca fue la credencial ni la empresa pedida, sino QUIÉN autentica.
+//
+// Los identificadores de esa medición no van acá: este repositorio es público y
+// `tests/anonimizacion.test.ts` los rechaza con razón. La medición se sostiene
+// sin ellos.
+//
+// Antes de este tipo, `resolverEmpresa`/`parseEmpresas` (mipymeHttp.ts)
+// lanzaban un `Error` pelado que el adaptador REST traducía a
+// `{ok:false, error:'ERROR'}` SIN `detalle`: el tenant no podía diagnosticar el
+// fallo, y como `ERROR` es el único código que este contrato trata como
+// transitorio, la corrida diaria del ERP reintentaba para siempre un pedido
+// que ninguna corrida futura iba a resolver. Sólo lo arregla una acción
+// humana: autenticar con la credencial de alguien que sí tenga esa empresa en
+// su selector del portal mipyme, o pedir ese permiso ahí.
+//
+// Hereda de LimitacionConocida por el mismo motivo que RecursoNoEncontrado: es
+// determinística —el mismo request contra el mismo par (RUT autenticado,
+// empresa pedida) falla siempre igual— y no una falla de sesión que valga la
+// pena reautenticar.
+//
+// Cubre DOS subcasos con la misma acción de fondo pero distinto diagnóstico:
+//  - el selector vino VACÍO (`SelectorEmpresasVacio`, ver más abajo): el RUT
+//    autenticado no opera NINGUNA empresa en el portal.
+//  - el selector trajo empresas, pero la pedida no está entre ellas
+//    (este tipo): el RUT autenticado opera OTRAS empresas, no la pedida. El
+//    mensaje va con la CANTIDAD de esas otras empresas, no con sus RUT: son
+//    datos de terceros desde el punto de vista de quien preguntó por una
+//    empresa puntual, y no hace falta exponerlos para que el mensaje sea
+//    accionable.
+export class EmpresaNoAutorizada extends LimitacionConocida {}
+
+// El combo de `mipeSelEmpresa.cgi` no trajo ninguna opción. `parseEmpresas` ya
+// rechazaba este caso con un `Error` genérico (ver su comentario: un combo
+// vacío también puede ser el CGI devolviendo otra página —sesión caída, WAF,
+// rediseño— y no necesariamente "este RUT no opera empresas"; esa ambigüedad
+// de PARSEO no se resuelve acá y sigue vigente). Lo que cambia es la
+// clasificación: en la práctica medida contra el portal real, este caso es
+// justamente el permiso a nivel de persona descrito en `EmpresaNoAutorizada`
+// —RUT de una empresa, no de quien la administra—, así que merece el mismo
+// código propio y el mismo `detalle` accionable en vez de viajar como `ERROR`
+// mudo. El mensaje deja constancia de la ambigüedad residual: si esto pasa por
+// una caída de sesión y no por el permiso, reintentar SÍ podría andar, pero no
+// hay forma de distinguir los dos casos sólo con el HTML del combo.
+export class SelectorEmpresasVacio extends LimitacionConocida {}
+
 // El SII rechazó el login porque el RUT ya tiene demasiadas sesiones abiertas
 // (código 01.01.<n>.500.720.27). NO es una limitación conocida ni un fallo de
 // credenciales: la clave es correcta y el dato existe, sólo que hay que esperar.

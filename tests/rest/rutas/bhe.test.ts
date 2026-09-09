@@ -359,7 +359,12 @@ describe('registrarRutasBhe', () => {
       codigo_barras: '111111110000048F99ED',
     });
 
-    expect(respuesta).toEqual({ status: 200, body: { ok: false, error: 'ERROR' } });
+    // Desde que la rama sin clasificar de `ejecutar` siempre adjunta `detalle`
+    // (ver comun.ts), el mensaje del error no controlado viaja también acá.
+    expect(respuesta).toEqual({
+      status: 200,
+      body: { ok: false, error: 'ERROR', detalle: 'el portal respondió algo inesperado' },
+    });
   });
 
   it('pdf: un codigo_barras absurdamente largo devuelve 400', async () => {

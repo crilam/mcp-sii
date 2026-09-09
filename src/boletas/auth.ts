@@ -13,6 +13,13 @@
 // un doble. No usa el SiiHttpClient del CGI —eso va con cookie jar y curl, acá
 // es JSON plano a hosts de AWS con TLS estándar.
 
+// `resumenSeguro` (resumen de una respuesta parcial del SII/Cognito SIN
+// filtrar el token OpenID, la SecretKey ni el SessionToken) vive en
+// `../redaccion`: un segundo consumidor genérico —el catch-all de errores no
+// clasificados de `rest/rutas/comun.ts`— necesita la misma redacción por
+// nombre de campo, y duplicarla ahí divergiría de ésta con el tiempo.
+import { resumenSeguro } from '../redaccion';
+
 const AUTHORIZE_URL = 'https://clave.w.sii.cl/oauthsii-v1-ms/authorization/v1/authorize';
 // apiAuthSII. El endpoint es público (Amplify lo firma con credenciales
 // indefinidas): valida el code contra el SII y devuelve un token OpenID de
@@ -56,20 +63,6 @@ export interface CredencialesAws {
 // gateway headless no puede resolverlo solo: se distingue con tipo propio para
 // que el llamador lo trate distinto de una clave incorrecta.
 export class RequiereChallenge extends Error {}
-
-// Resumen de una respuesta para meter en un mensaje de error SIN filtrar
-// secretos. Los mensajes van a logs, y una respuesta parcial del SII o de
-// Cognito puede traer el token OpenID, la SecretKey o el SessionToken: se
-// redactan por nombre antes de serializar. Se conserva el resto (códigos,
-// mensajes) que es lo que sirve para diagnosticar.
-const CLAVES_SENSIBLES = /^(token|secretkey|sessiontoken|accesskeyid|password|clave)$/i;
-
-function resumenSeguro(valor: unknown): string {
-  const redactado = JSON.stringify(valor, (clave, v) =>
-    CLAVES_SENSIBLES.test(clave) ? '[REDACTADO]' : v
-  );
-  return (redactado ?? String(valor)).slice(0, 150);
-}
 
 export class BoletaAuth {
   constructor(private http: HttpBoletas) {}

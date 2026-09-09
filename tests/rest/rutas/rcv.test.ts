@@ -151,7 +151,16 @@ describe('registrarRutasRcv', () => {
       { rut: '1', certificado_base64: 'xxx', certificado_password: 'yyy', periodo: '202607', operacion: 'VENTA' }
     );
 
-    expect(respuesta).toEqual({ status: 200, body: { ok: false, error: 'ERROR' } });
+    // Desde que la rama sin clasificar de `ejecutar` siempre adjunta `detalle`
+    // (ver comun.ts), el mensaje del error no controlado viaja también acá.
+    expect(respuesta).toEqual({
+      status: 200,
+      body: {
+        ok: false,
+        error: 'ERROR',
+        detalle: 'No hay sesión iniciada para el RUT 1. Llamá sii_iniciar_sesion primero.',
+      },
+    });
   });
   // Lo que cambió: estas rutas exigían certificado y ahora aceptan clave, igual
   // que las de BHE. Se verificó contra el portal que RCV se puede consultar con
