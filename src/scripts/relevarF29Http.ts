@@ -56,7 +56,10 @@ async function main() {
    * de literales en el código: el token del RUT versionado equivale a versionar
    * el RUT, porque el decodificador vive en este mismo repositorio público.
    */
-  const tokenDelRut = longGwt(Number(p.rut.split('-')[0]));
+  // `split('-')[0]` sobre un RUT sin guión devuelve el string entero, que sigue
+  // siendo el cuerpo; el `?? p.rut` cubre sólo el caso imposible de un string
+  // vacío, para que el log no diga `NaN` sin explicar por qué.
+  const tokenDelRut = longGwt(Number(p.rut.split('-')[0] ?? p.rut));
   console.log(`decodificación: ${tokenDelRut}=${deLongGwt(tokenDelRut)} xdp=${deLongGwt('xdp')} tcaQa=${deLongGwt('tcaQa')} WFX5y=${deLongGwt('WFX5y')} C5Z20=${deLongGwt('C5Z20')} IOFT3a=${deLongGwt('IOFT3a')}`);
   console.log(`codificación: 202601=${longGwt(202601)} ${PERIODO_ALTERNATIVO}=${longGwt(Number(PERIODO_ALTERNATIVO))}`);
 

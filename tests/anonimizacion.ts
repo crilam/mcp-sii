@@ -44,10 +44,17 @@ const RUT_DE_PRUEBA = /^(?:(\d)\1{6,7}|1234567|12345678)$/;
 // justo el ruido que termina con el chequeo apagado. El nombre incluye `user`,
 // `usuario` y `login` porque el identificador con que se entra al portal ES el
 // RUT.
+//
+// El anclaje de la forma 3 no es sólo "el nombre cerca del número": entre los
+// dos tiene que haber un `=`, un `:` o un `(`, o sea el separador de una
+// asignación, una propiedad o un argumento. Sin eso, la mera cercanía alcanzaba
+// y una frase en prosa con un número entrecomillado al lado de la palabra
+// `usuario` quedaba marcada. El chequeo tiene que gritar por datos, no por
+// texto.
 const CAMPO_RUT = /\w+\['([^']*rut[^']*)'\]\s*=\s*"(\d+)"/gi;
 const RUT_CON_DV = /\b(\d{7,8})-([\dkK])\b/g;
 const CUERPO_RUT_CON_NOMBRE =
-  /\b[\w$]*(?:rut|usuario|user|login)[\w$]*\b['\]]?[^'"\n]{0,20}["'](\d{7,8})["']/gi;
+  /\b[\w$]*(?:rut|usuario|user|login)[\w$]*\b['\]]?[^'"\n=:(]{0,8}[=:(][^'"\n]{0,12}["'](\d{7,8})["']/gi;
 const CUERPO_RUT_EN_INPUT =
   /(?:name\s*=\s*"[^"]*rut[^"]*"[^>]{0,160}?value\s*=\s*"(\d{7,8})"|value\s*=\s*"(\d{7,8})"[^>]{0,160}?name\s*=\s*"[^"]*rut[^"]*")/gi;
 

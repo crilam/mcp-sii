@@ -94,6 +94,30 @@ describe('extraerRutsSospechosos', () => {
     expect(extraerRutsSospechosos(contenido)).toEqual([]);
   });
 
+  // Las formas que motivaron mirar el cuerpo sin dígito verificador: el
+  // argumento de un login en un test, la propiedad de un objeto y la aserción
+  // sobre un campo. Las tres tienen el nombre del dato al lado y un separador
+  // de asignación, propiedad o argumento en el medio.
+  it.each([
+    `await auth.login({ rut: '17654329', clave });`,
+    `const rutEmisor = "17654329";`,
+    `expect(campos.rut_arrastre).toBe('17654329');`,
+    `<input name="rutEmisor" value="17654329">`,
+  ])('detecta el cuerpo de un RUT sin dígito verificador en %s', (contenido) => {
+    expect(extraerRutsSospechosos(contenido)).toContain('17654329');
+  });
+
+  // El anclaje de la forma 3 exige un separador (`=`, `:` o `(`) entre el nombre
+  // y el número: sin eso bastaba la cercanía, y una frase en prosa con un número
+  // entrecomillado cerca de la palabra `usuario` quedaba marcada. Un chequeo que
+  // grita por prosa es un chequeo que alguien apaga.
+  it.each([
+    'el usuario activo hace "17654329" días según el log',
+    '// login previo con "17654329" reintentos',
+  ])('no marca la mera cercanía sin separador: %s', (contenido) => {
+    expect(extraerRutsSospechosos(contenido)).toEqual([]);
+  });
+
   // Montos, folios y códigos de barra son números largos que NO son RUT: un
   // chequeo que los marcara sería ruido y terminaría desactivado.
   it('no marca montos ni folios como RUT', () => {
