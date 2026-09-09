@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado, EscrituraRechazadaPorSii } from '../../erroresConsulta';
+import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado, EscrituraRechazadaPorSii, EmpresaNoAutorizada, SelectorEmpresasVacio } from '../../erroresConsulta';
+import { mensajeSeguro } from '../../redaccion';
 
 // Fragmento zod para la única ruta que recibe SÓLO certificado digital:
 // `/v1/mipyme/emitir-dte`, porque firmar un DTE necesita el certificado de
@@ -170,6 +171,20 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
       // de subproceso con el comando adentro.
       return { status: 200, body: { ok: false, error: 'NO_ENCONTRADO', detalle: e.message } };
     }
+    // El selector de empresas del portal mipyme es un permiso a nivel de
+    // PERSONA, no de empresa (ver el comentario de EmpresaNoAutorizada en
+    // erroresConsulta.ts): el RUT autenticado no tiene la empresa pedida en su
+    // selector, ya sea porque no opera ninguna (`SelectorEmpresasVacio`) o
+    // porque opera otras (`EmpresaNoAutorizada`). Va ANTES del `LimitacionConocida`
+    // genérico de más abajo por la misma razón que RecursoNoEncontrado: las dos
+    // son subclases suyas, y el caso más específico tiene que ganar. Comparten
+    // código REST porque la acción de fondo es la misma en los dos —autenticar
+    // con la credencial de alguien que sí tenga la empresa en su selector, o
+    // pedir el permiso en el portal—; lo que distingue un subcaso del otro es
+    // el `detalle`, no el código.
+    if (e instanceof SelectorEmpresasVacio || e instanceof EmpresaNoAutorizada) {
+      return { status: 200, body: { ok: false, error: 'EMPRESA_NO_AUTORIZADA', detalle: e.message } };
+    }
     // Lo que el SII no puede darnos por un límite que ya conocemos: un mes de
     // recibidas con más de 100 boletas (ese CGI pagina con otro esquema, sin
     // relevar), un descuadre entre lo que el SII informa y lo que se recupera, o
@@ -223,10 +238,32 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
       return { status: 200, body: { ok: false, error: 'SERVICIO_OCUPADO', detalle: e.message } };
     }
     const error = clasificarErrorCredenciales(e);
-    // Un error que no es rechazo de credenciales es un bug (del scraper, de
-    // infraestructura) — sin este log, queda invisible detrás del status 200.
     if (error === 'ERROR') {
-      console.error('Error no clasificado en ruta REST:', e instanceof Error ? e.message : e);
+      // Última rama: cualquier excepción que no matcheó ninguno de los tipos
+      // de arriba (un bug del scraper, una caída de infraestructura, un fallo
+      // de red). Antes de esto salía SIN `detalle` — un cliente recibía
+      // `{ok:false,error:'ERROR'}` pelado y no tenía sobre qué actuar, ni
+      // siquiera para reportarlo a quien opera este servicio. Ocho intentos de
+      // descarga del respaldo XML quedaron así en el ERP que integra: `ERROR`
+      // sin motivo, indistinguible entre sí y sin nada que decirle a un
+      // humano.
+      //
+      // `mensajeSeguro` (src/redaccion.ts) redacta patrones `campo=valor` cuyo
+      // nombre pueda ser un secreto y trunca el resto: es best-effort, NO una
+      // garantía de que un Error mal construido en otra parte del código no
+      // filtre un secreto por otra vía (ver su comentario). La defensa de
+      // fondo sigue siendo la de siempre en este repo: cada error se
+      // construye para que su mensaje nunca lleve el secreto.
+      //
+      // El código sigue siendo `ERROR` a propósito: acá SÍ significa
+      // "reintentá", porque no se sabe si el fallo es transitorio (red,
+      // timeout, portal caído) o un bug permanente — a diferencia de los
+      // códigos de arriba, que sólo se usan cuando el motivo ya está
+      // identificado. Lo único que cambia es que ahora SIEMPRE viaja con algo
+      // diagnosticable, aunque siga siendo genérico.
+      const detalle = mensajeSeguro(e);
+      console.error('Error no clasificado en ruta REST:', detalle);
+      return { status: 200, body: { ok: false, error, detalle } };
     }
     return { status: 200, body: { ok: false, error } };
   }

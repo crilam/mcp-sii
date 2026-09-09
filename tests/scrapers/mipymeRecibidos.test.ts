@@ -296,8 +296,11 @@ describe('MipymeHttpScraper.listBorradores', () => {
   it('exige que la empresa pedida esté entre las que el RUT opera', async () => {
     const { scraper } = conRespuesta('[]');
 
+    // Desde que resolverEmpresa clasifica este fallo (EmpresaNoAutorizada, ver
+    // erroresConsulta.ts): el problema es quién autentica, no la clave ni la
+    // empresa pedida.
     await expect(scraper.listBorradores('99999999-9'))
-      .rejects.toThrow(/no está entre las que este RUT puede operar/);
+      .rejects.toThrow(/no tiene a 99999999-9 entre las empresas de su selector/);
   });
 
   // El bundle lo declara con `createGetOperation`, y el servidor lo confirma: un

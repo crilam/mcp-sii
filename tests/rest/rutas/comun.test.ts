@@ -1,5 +1,8 @@
 import { ejecutar } from '../../../src/rest/rutas/comun';
-import { SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado, EscrituraRechazadaPorSii } from '../../../src/erroresConsulta';
+import {
+  SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado, EscrituraRechazadaPorSii,
+  EmpresaNoAutorizada, SelectorEmpresasVacio, LimitacionConocida, RecursoNoEncontrado,
+} from '../../../src/erroresConsulta';
 
 describe('ejecutar', () => {
   it('objeto: spreadea flat junto a ok:true', async () => {
@@ -100,5 +103,117 @@ describe('ejecutar', () => {
     });
 
     expect((respuesta.body as { error: string }).error).not.toBe('LIMITE_CONOCIDO');
+  });
+
+  // El caso que motivó EmpresaNoAutorizada / SelectorEmpresasVacio: el selector
+  // de empresas del portal mipyme es un permiso a nivel de PERSONA, no de
+  // empresa. Antes de estos dos tipos, `resolverEmpresa`/`parseEmpresas`
+  // lanzaban un Error pelado que llegaba acá como `ERROR` sin `detalle` — el
+  // tenant no podía diagnosticar el fallo y, como `ERROR` se trata como
+  // transitorio, reintentaba para siempre un pedido que nunca iba a funcionar.
+  describe('EmpresaNoAutorizada / SelectorEmpresasVacio', () => {
+    it('SelectorEmpresasVacio (selector vacío) sale como EMPRESA_NO_AUTORIZADA con detalle', async () => {
+      const respuesta = await ejecutar(async () => {
+        throw new SelectorEmpresasVacio(
+          'El RUT autenticado no tiene ninguna empresa en su selector del portal mipyme.'
+        );
+      });
+
+      expect(respuesta.status).toBe(200);
+      expect(respuesta.body).toEqual({
+        ok: false,
+        error: 'EMPRESA_NO_AUTORIZADA',
+        detalle: 'El RUT autenticado no tiene ninguna empresa en su selector del portal mipyme.',
+      });
+    });
+
+    it('EmpresaNoAutorizada (empresa ausente de un selector no vacío) sale como EMPRESA_NO_AUTORIZADA con detalle', async () => {
+      const respuesta = await ejecutar(async () => {
+        throw new EmpresaNoAutorizada(
+          'El RUT autenticado no tiene a 44444444-4 entre las empresas de su selector del ' +
+          'portal mipyme (trae 3 empresas distintas).'
+        );
+      });
+
+      expect(respuesta.status).toBe(200);
+      expect((respuesta.body as { error: string }).error).toBe('EMPRESA_NO_AUTORIZADA');
+      expect((respuesta.body as { detalle: string }).detalle).toMatch(/trae 3 empresas distintas/);
+    });
+
+    // Las dos son subclases de LimitacionConocida: no pueden colapsar en
+    // LIMITE_CONOCIDO (el orden de los `instanceof` en `ejecutar` decide) ni en
+    // ERROR (que el contrato trata como transitorio y reintentable).
+    it('no se confunden con LIMITE_CONOCIDO ni con ERROR', async () => {
+      const vacio = await ejecutar(async () => { throw new SelectorEmpresasVacio('vacío'); });
+      const ausente = await ejecutar(async () => { throw new EmpresaNoAutorizada('ausente'); });
+
+      for (const respuesta of [vacio, ausente]) {
+        expect((respuesta.body as { error: string }).error).not.toBe('LIMITE_CONOCIDO');
+        expect((respuesta.body as { error: string }).error).not.toBe('ERROR');
+      }
+    });
+
+    /*
+     * Toda la familia de LimitacionConocida en un solo caso, porque acá el
+     * orden de los `instanceof` en `ejecutar` es lo único que separa un código
+     * de otro: las cuatro clases son la misma cadena de herencia, y la clase
+     * madre —que va última— matchea a todas. Mover ese bloque unas líneas hacia
+     * arriba colapsaría las tres específicas en LIMITE_CONOCIDO sin que ningún
+     * test que mire una sola clase se entere.
+     *
+     * `LimitacionConocida` pelada tiene que seguir dando LIMITE_CONOCIDO: es la
+     * que representa "el SII no puede darnos esto por un límite que ya
+     * conocemos", y perderla dejaría a los tres casos permanentes que no son
+     * ninguna de las subclases saliendo como ERROR, o sea reintentables.
+     */
+    it.each([
+      [() => new RecursoNoEncontrado('no existe'), 'NO_ENCONTRADO'],
+      [() => new SelectorEmpresasVacio('selector vacío'), 'EMPRESA_NO_AUTORIZADA'],
+      [() => new EmpresaNoAutorizada('empresa ausente'), 'EMPRESA_NO_AUTORIZADA'],
+      [() => new LimitacionConocida('mes con más de 100 boletas'), 'LIMITE_CONOCIDO'],
+    ] as [() => Error, string][])('la familia de LimitacionConocida no colapsa: %# -> %s', async (crear, codigo) => {
+      const respuesta = await ejecutar(async () => { throw crear(); });
+
+      expect((respuesta.body as { error: string }).error).toBe(codigo);
+    });
+  });
+
+  // Antes de esto, cualquier excepción sin clasificar salía como
+  // `{ok:false,error:'ERROR'}` PELADO: sin `detalle`, un cliente no tenía sobre
+  // qué actuar ni qué reportar. Ver el comentario de la rama en comun.ts.
+  describe('rama sin clasificar (ERROR)', () => {
+    it('siempre adjunta detalle, aunque el código siga siendo ERROR', async () => {
+      const respuesta = await ejecutar(async () => {
+        throw new Error('el portal devolvió algo que no se pudo interpretar');
+      });
+
+      expect(respuesta).toEqual({
+        status: 200,
+        body: {
+          ok: false,
+          error: 'ERROR',
+          detalle: 'el portal devolvió algo que no se pudo interpretar',
+        },
+      });
+    });
+
+    it('redacta patrones campo=valor / campo: valor cuyo nombre es un secreto conocido', async () => {
+      const respuesta = await ejecutar(async () => {
+        throw new Error('Command failed: cli --rut 11111111-1 --clave=miClaveSecreta123 --modo x');
+      });
+
+      const detalle = (respuesta.body as { detalle: string }).detalle;
+      expect(detalle).not.toContain('miClaveSecreta123');
+      expect(detalle).toContain('clave=[REDACTADO]');
+    });
+
+    it('trunca un mensaje larguísimo en vez de volcarlo entero', async () => {
+      const respuesta = await ejecutar(async () => {
+        throw new Error('x'.repeat(1000));
+      });
+
+      const detalle = (respuesta.body as { detalle: string }).detalle;
+      expect(detalle.length).toBeLessThan(400);
+    });
   });
 });

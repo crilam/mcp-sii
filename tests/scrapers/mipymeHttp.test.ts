@@ -3,6 +3,7 @@ import * as path from 'path';
 import { MipymeHttpScraper } from '../../src/scrapers/mipymeHttp';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
+import { SelectorEmpresasVacio, EmpresaNoAutorizada } from '../../src/erroresConsulta';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -56,13 +57,19 @@ describe('MipymeHttpScraper.listEmpresas', () => {
   });
 
   // Un combo vacío significa que el CGI no devolvió la página esperada (sesión
-  // caída, rediseño, WAF). Devolver [] lo haría indistinguible de "esta persona
-  // no opera ninguna empresa", que es justo el vacío ambiguo que este proyecto
-  // no admite.
+  // caída, rediseño, WAF) O que el RUT autenticado no opera ninguna empresa en
+  // el portal —un permiso a nivel de PERSONA, no de empresa, verificado contra
+  // el portal real (ver el comentario de SelectorEmpresasVacio en
+  // erroresConsulta.ts)—. La ambigüedad de PARSEO no se resuelve (por eso NO
+  // se devuelve `[]`, que la volvería indistinguible de "esta empresa no tiene
+  // documentos" más adelante), pero el fallo ya no viaja como Error pelado: el
+  // adaptador REST lo traduce a `EMPRESA_NO_AUTORIZADA` con `detalle`, en vez
+  // de `ERROR` mudo.
   it('falla si no hay ninguna opción en el combo, en vez de devolver lista vacía', async () => {
     const { scraper, http } = armar();
     (http.get as jest.Mock).mockResolvedValue('<html><body>sesión expirada</body></html>');
 
+    await expect(scraper.listEmpresas()).rejects.toThrow(SelectorEmpresasVacio);
     await expect(scraper.listEmpresas()).rejects.toThrow(/no devolvió ninguna empresa/i);
   });
 });
@@ -140,13 +147,41 @@ describe('MipymeHttpScraper.listDteEmitidos', () => {
       .rejects.toThrow(/no ha seleccionado una empresa/i);
   });
 
+  // El caso "selector no vacío, pero la empresa pedida no está entre las
+  // suyas": el RUT autenticado opera OTRAS empresas, no la pedida — mismo
+  // permiso a nivel de persona que SelectorEmpresasVacio, pero acá SÍ se sabe
+  // que el CGI respondió bien (no hay ambigüedad de sesión caída/WAF), así que
+  // se distingue con su propio tipo, EmpresaNoAutorizada.
   it('exige que la empresa pedida esté en el combo, en vez de consultar otra', async () => {
     const { scraper, http } = armar();
     (http.get as jest.Mock).mockResolvedValue(SEL_EMPRESA);
 
     await expect(scraper.listDteEmitidos({ empresaRut: '99999999-9' }))
+      .rejects.toThrow(EmpresaNoAutorizada);
+    await expect(scraper.listDteEmitidos({ empresaRut: '99999999-9' }))
       .rejects.toThrow(/99999999-9/);
     expect(http.postForm).not.toHaveBeenCalled();
+  });
+
+  // El detalle NO debe listar los RUT de las otras empresas: son datos de
+  // terceros desde el punto de vista de quien preguntó por una empresa
+  // puntual. Sí es útil el CONTEO — la fixture SEL_EMPRESA trae 4 empresas.
+  it('el mensaje de empresa no autorizada cuenta las otras empresas sin listar sus RUT', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock).mockResolvedValue(SEL_EMPRESA);
+
+    await expect(scraper.listDteEmitidos({ empresaRut: '99999999-9' }))
+      .rejects.toThrow(/4 empresas distintas/);
+    // Ninguno de los RUT de la fixture (que no sea el pedido) puede aparecer.
+    try {
+      await scraper.listDteEmitidos({ empresaRut: '99999999-9' });
+      throw new Error('debía lanzar');
+    } catch (e) {
+      const mensaje = (e as Error).message;
+      for (const rut of ['22222222-2', '33333333-3', '44444444-4', '55555555-5']) {
+        expect(mensaje).not.toContain(rut);
+      }
+    }
   });
 
   it('manda los filtros al CGI con el formato que espera, y fechas dd/mm/aaaa', async () => {
