@@ -30,7 +30,7 @@ export const schemaPdf = {
   // rechaza la cadena vacía es el `+` de la regex de abajo, no un `.min(1)`.
   //
   // Y sólo alfanuméricos: todos los códigos observados lo son
-  // ("17270613000007FEB33E", "033333333034364C969E7"). Restringirlo evita
+  // ("11111111000007FEB33E", "033333333034364C969E7"). Restringirlo evita
   // mandarle basura al SII, y sobre todo evita que un valor con separadores
   // ("../../x") se propague al `nombre_archivo` que devuelve la ruta y termine
   // siendo un path traversal en el consumidor que guarde el PDF con ese nombre.

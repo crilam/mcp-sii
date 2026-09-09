@@ -26,7 +26,7 @@ describe('BoletaAuth.login', () => {
     });
     const auth = new BoletaAuth(http);
 
-    const { code, state } = await auth.login('17270613', 'clave-secreta', 'st-1');
+    const { code, state } = await auth.login('11111111', 'clave-secreta', 'st-1');
 
     // El code sale del redirect_uri que arma el servidor, no de un campo suelto.
     expect(code).toBe('abc-123');
@@ -38,7 +38,7 @@ describe('BoletaAuth.login', () => {
       response_type: 'code',
       scope: 'user_info',
       action_captcha: 'login',
-      user: '17270613',
+      user: '11111111',
       password: 'clave-secreta',
       state: 'st-1',
     });
@@ -54,7 +54,7 @@ describe('BoletaAuth.login', () => {
     });
     const auth = new BoletaAuth(http);
 
-    await expect(auth.login('17270613', 'mala', 'st-1')).rejects.toThrow(/612|password|clave/i);
+    await expect(auth.login('11111111', 'mala', 'st-1')).rejects.toThrow(/612|password|clave/i);
   });
 
   it('propaga otros códigos de error del login (611: debe obtener clave)', async () => {
@@ -67,7 +67,7 @@ describe('BoletaAuth.login', () => {
     });
     const auth = new BoletaAuth(http);
 
-    await expect(auth.login('17270613', 'x', 'st-1')).rejects.toThrow(/611/);
+    await expect(auth.login('11111111', 'x', 'st-1')).rejects.toThrow(/611/);
   });
 
   it('avisa cuando el SII exige un challenge por email (dispositivo nuevo)', async () => {
@@ -81,7 +81,7 @@ describe('BoletaAuth.login', () => {
     });
     const auth = new BoletaAuth(http);
 
-    await expect(auth.login('17270613', 'clave', 'st-1')).rejects.toThrow(/challenge|verificar|correo|email/i);
+    await expect(auth.login('11111111', 'clave', 'st-1')).rejects.toThrow(/challenge|verificar|correo|email/i);
   });
 });
 
@@ -175,7 +175,7 @@ describe('BoletaAuth.autenticar (orquesta los 3 pasos)', () => {
     });
     const auth = new BoletaAuth(http);
 
-    const cred = await auth.autenticar('17270613', 'clave', () => 'st');
+    const cred = await auth.autenticar('11111111', 'clave', () => 'st');
 
     expect(cred.accessKeyId).toBe('ASIA1');
     expect(cred.sessionToken).toBe('st-tok');

@@ -25,7 +25,7 @@ const PASO1_SIN_CATEGORIA = '<html><body>Sr. Contribuyente: Ud no registra activ
 const LOGIN = '<html><title>Aut</title>Ingresar Clave Tributaria IngresoRutClave</html>';
 
 const PASO2_FORM = '<html><form name="frmBoleta" action="TMBECN_ConfirmaTimbrajeContrib.cgi">'
-  + '<input type="hidden" name="rut_arrastre" value="17270613">'
+  + '<input type="hidden" name="rut_arrastre" value="11111111">'
   + '<input type="hidden" name="dv_arrastre" value="4">'
   + '<input type="hidden" name="tiempo" value="1787000000">'
   + '<input type="hidden" name="hdn_glosa_actividad" value="ASESOR">'
@@ -169,7 +169,7 @@ describe('BheEmisionScraper.emitir — dry-run (confirmar:false)', () => {
     const paso3 = (http.postForm as jest.Mock).mock.calls.find(c => (c[0] as string).includes('ConfirmaTimbraje'));
     const campos = paso3![1] as Record<string, string>;
     expect(campos.tiempo).toBe('1787000000');           // propagado, no regenerado
-    expect(campos.rut_arrastre).toBe('17270613');       // del server
+    expect(campos.rut_arrastre).toBe('11111111');       // del server
     expect(campos.txt_rut_destinatario).toBe('66666666');
     expect(campos.txt_dv_destinatario).toBe('6');
     expect(campos.desc_prestacion_1).toBe('Servicio uno');

@@ -55,10 +55,16 @@ describe('anonimización de los archivos versionados', () => {
 // la MISMA función que el chequeo: cuando el regex estaba duplicado, una
 // divergencia dejaba estos tests en verde probando algo que ya no corría.
 describe('extraerRutsSospechosos', () => {
+  /*
+   * El cuerpo de este caso NO puede ser 12345678: esa secuencia es uno de los
+   * ficticios del convenio y el chequeo la exime, así que usarla acá probaba lo
+   * contrario de lo que dice el nombre del test. El valor es inventado y con
+   * forma de RUT real: ni dígito repetido ni secuencia.
+   */
   it('detecta un RUT real en un campo de xml_values', () => {
-    const contenido = `xml_values['rut_arrastre'] = "12345678";`;
+    const contenido = `xml_values['rut_arrastre'] = "17654329";`;
 
-    expect(extraerRutsSospechosos(contenido)).toContain('12345678');
+    expect(extraerRutsSospechosos(contenido)).toContain('17654329');
   });
 
   // El informe mensual guarda el RUT de la contraparte en arr_informe_mensual,

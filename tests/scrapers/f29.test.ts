@@ -9,7 +9,7 @@ jest.mock('../../src/session');
 
 // Respuesta REAL de getFoliosConsulta para un período declarado (ids
 // anonimizados salvo folio/codInt, que no son datos personales).
-const OK = `//OK[-7,-7,4,24,23,22,-7,'xdp',5,21,20,'tcaQa',5,'xdp',5,'C5Z20',5,19,0,18,'Hc1lAB',5,17,'A',5,0,-6,16,15,14,1,3,13,12,11,10,9,8,0,7,'WFX5y',5,6,'Eh_hw',5,4,2026,3,2,1,1,["java.util.Vector/3057315478","cl.sii.sdi.sifm.commons.to.consulta.FolioPeriodoFormularioTO/3253336399","java.lang.Integer/3438268394","2","java.lang.Long/4227064769","SINOBS","DRCP","Vigente","AMBOS","29","F29 - Declaración Mensual","Declaración Mensual","MES","DPS","G1515000gym","MPD_PLANT","20/02/2026","800000001","CLP","2026-02-20 22:45:21.0","N","OPVPHHA","M01","CRCIVA"],0,7]`;
+const OK = `//OK[-7,-7,4,24,23,22,-7,'xdp',5,21,20,'tcaQa',5,'xdp',5,'C5Z20',5,19,0,18,'Hc1lAB',5,17,'A',5,0,-6,16,15,14,1,3,13,12,11,10,9,8,0,7,'WFX5y',5,6,'BUxWO',5,4,2026,3,2,1,1,["java.util.Vector/3057315478","cl.sii.sdi.sifm.commons.to.consulta.FolioPeriodoFormularioTO/3253336399","java.lang.Integer/3438268394","2","java.lang.Long/4227064769","SINOBS","DRCP","Vigente","AMBOS","29","F29 - Declaración Mensual","Declaración Mensual","MES","DPS","G1515000gym","MPD_PLANT","20/02/2026","800000001","CLP","2026-02-20 22:45:21.0","N","OPVPHHA","M01","CRCIVA"],0,7]`;
 // Un período SIN declaración: el Vector viene vacío, sin folio ni codInt.
 const OK_VACIO = '//OK[1,1,["java.util.Vector/3057315478"],0,7]';
 
@@ -17,11 +17,11 @@ describe('sobreGetFolios', () => {
   // El RUT y el período viajan como longs GWT inline; el sobre se rompe si se
   // codifican mal. Se comprueba contra los valores medidos en vivo.
   it('codifica el RUT y el período como los espera GWT', () => {
-    const sobre = sobreGetFolios(76019824, 202601, 'SANTIAGO ORIENTE');
+    const sobre = sobreGetFolios(22222222, 202601, 'SANTIAGO ORIENTE');
 
-    expect(sobre).toContain(`|${codificarLong(202601)}|${codificarLong(76019824)}|`);
-    expect(sobre).toContain('Eh_hw');   // 76019824
-    expect(sobre).toContain('|76019824|18|76019824|'); // el RUT literal, dos veces
+    expect(sobre).toContain(`|${codificarLong(202601)}|${codificarLong(22222222)}|`);
+    expect(sobre).toContain('BUxWO');   // 22222222
+    expect(sobre).toContain('|22222222|18|22222222|'); // el RUT literal, dos veces
     expect(sobre).toContain('SANTIAGO ORIENTE');
   });
 
@@ -37,7 +37,7 @@ describe('F29Scraper', () => {
     const session = new (SessionManager as jest.MockedClass<typeof SessionManager>)({} as any, {} as any);
     const http = new (SiiHttpClient as jest.MockedClass<typeof SiiHttpClient>)(session);
     (session.assertPuedeEntregarCookieJar as jest.Mock) = jest.fn();
-    (session.identidad as jest.Mock) = jest.fn(() => ({ rut: '76019824', dv: '2' }));
+    (session.identidad as jest.Mock) = jest.fn(() => ({ rut: '22222222', dv: '2' }));
     (http.postCrudo as jest.Mock) = jest.fn().mockResolvedValue(gwt);
     return { scraper: new F29Scraper(http, session), http, session };
   }
@@ -102,14 +102,14 @@ describe('F29Scraper', () => {
 
     await expect(s2.pdfCompacto(8000000001, '800000001')).resolves.toEqual(Buffer.from('%PDF-1.4 x'));
     expect(http.getBinario).toHaveBeenCalledWith(expect.stringContaining('formCompacto'),
-      expect.objectContaining({ folio: '8000000001', codInt: '800000001', form: '029', rut: '76019824' }));
+      expect.objectContaining({ folio: '8000000001', codInt: '800000001', form: '029', rut: '22222222' }));
   });
 
   it('si el PDF no viene con Content-Type de PDF, falla explícito', async () => {
     const { session } = armar(OK);
     const http = new (SiiHttpClient as jest.MockedClass<typeof SiiHttpClient>)(session);
     (session.assertPuedeEntregarCookieJar as jest.Mock) = jest.fn();
-    (session.identidad as jest.Mock) = jest.fn(() => ({ rut: '76019824', dv: '2' }));
+    (session.identidad as jest.Mock) = jest.fn(() => ({ rut: '22222222', dv: '2' }));
     (http.getBinario as jest.Mock) = jest.fn().mockResolvedValue({ contenido: Buffer.from('<html>error</html>'), contentType: 'text/html' });
 
     await expect(new F29Scraper(http, session).pdfCompacto(1, 'x')).rejects.toThrow(/no devolvió un PDF/);
