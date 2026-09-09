@@ -15,7 +15,9 @@ import { codificarLong, decodificarLong } from '../scrapers/gwtRpc';
 // lista de declaraciones de un período sale de una llamada GWT-RPC
 // (`svcConsulta` / `getFoliosConsulta`) cuyo cuerpo es texto serializado con el
 // RUT y el período codificados como longs en el base64 de GWT (alfabeto
-// A-Za-z0-9$_): `Eh_hw` = 76019824, `xdp` = 202601. Acá se prueba (1) el GET del
+// A-Za-z0-9$_): por ejemplo `xdp` = 202601. (El token del RUT no se documenta
+// acá: este repositorio es público y del token se recupera el RUT con el
+// decodificador que vive al lado.) Acá se prueba (1) el GET del
 // PDF con el cookie jar de la sesión, con y sin `codInt`; (2) la replay del
 // cuerpo capturado tal cual; (3) la misma replay con OTRO período.
 const SALIDA = process.env.RELEVO_SALIDA ?? '/tmp/relevo-f29-http';
@@ -49,8 +51,17 @@ async function main() {
   }
   const registro = crearRegistroSesionesSii(credenciales);
 
-  console.log(`decodificación: Eh_hw=${deLongGwt('Eh_hw')} xdp=${deLongGwt('xdp')} tcaQa=${deLongGwt('tcaQa')} WFX5y=${deLongGwt('WFX5y')} C5Z20=${deLongGwt('C5Z20')} IOFT3a=${deLongGwt('IOFT3a')}`);
-  console.log(`codificación: 76019824=${longGwt(76019824)} 202601=${longGwt(202601)} ${PERIODO_ALTERNATIVO}=${longGwt(Number(PERIODO_ALTERNATIVO))}`);
+  /*
+   * Los tokens que se decodifican salen del `rut` del perfil y de la captura, no
+   * de literales en el código: el token del RUT versionado equivale a versionar
+   * el RUT, porque el decodificador vive en este mismo repositorio público.
+   */
+  // `split('-')[0]` sobre un RUT sin guión devuelve el string entero, que sigue
+  // siendo el cuerpo; el `?? p.rut` cubre sólo el caso imposible de un string
+  // vacío, para que el log no diga `NaN` sin explicar por qué.
+  const tokenDelRut = longGwt(Number(p.rut.split('-')[0] ?? p.rut));
+  console.log(`decodificación: ${tokenDelRut}=${deLongGwt(tokenDelRut)} xdp=${deLongGwt('xdp')} tcaQa=${deLongGwt('tcaQa')} WFX5y=${deLongGwt('WFX5y')} C5Z20=${deLongGwt('C5Z20')} IOFT3a=${deLongGwt('IOFT3a')}`);
+  console.log(`codificación: 202601=${longGwt(202601)} ${PERIODO_ALTERNATIVO}=${longGwt(Number(PERIODO_ALTERNATIVO))}`);
 
   if (!CAPTURA) { console.log('Pasá RELEVO_CAPTURA con la ruta al JSON de relevarF29Rpc.ts'); return; }
   const capturas = JSON.parse(fs.readFileSync(CAPTURA, 'utf8')) as { url: string; body: string; headers: Record<string, string> }[];

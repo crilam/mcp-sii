@@ -11,15 +11,52 @@
 // Un RUT de dígito repetido (11111111, 22222222, 33333333) es el convenio de
 // datos ficticios del proyecto: el emisor y el receptor de una BHE nunca pueden
 // ser el mismo RUT, así que las fixtures necesitan varios ficticios distintos.
-const RUT_DE_PRUEBA = /^(\d)\1{6,7}$/;
+// La secuencia 1234567/12345678 es el otro ficticio del convenio, y se usa en
+// todo el repo —incluido el ejemplo de CAMPO_RUT unas líneas más abajo— como
+// valor de relleno cuando alcanza con uno. Estaba fuera de este filtro sin que
+// se notara: mientras el chequeo sólo miraba el RUT con dígito verificador y el
+// campo `arreglo['...rut']`, un cuerpo suelto no llegaba acá. Al mirar también
+// el cuerpo, no incluirla marcaría decenas de valores de relleno legítimos, y un
+// chequeo que grita por relleno es un chequeo que alguien apaga.
+const RUT_DE_PRUEBA = /^(?:(\d)\1{6,7}|1234567|12345678)$/;
 
 // Se buscan RUT en dos formas, no "cualquier número largo": un chequeo así se
 // llenaría de falsos positivos con montos, folios y códigos de barra.
 //   1. Campos de los arreglos del SII cuyo nombre contiene "rut":
 //      xml_values['rut_arrastre'] = "12345678" / arr_informe_mensual['rutemisor_1'] = "..."
 //   2. RUT escrito con guión y dígito verificador: 12345678-9, 1234567-K.
+//   3. Cuerpo de RUT SIN dígito verificador, anclado al nombre del dato.
+//      Cubre `rut: '12345678'`, `rutEmisor = "12345678"` y
+//      `expect(campos.rut_arrastre).toBe('12345678')`.
+//   4. El par de atributos de un input HTML: `name="...rut..."` con su
+//      `value="12345678"`, en cualquiera de los dos órdenes.
+//
+// Las formas 3 y 4 se agregaron porque el chequeo dejó pasar, durante meses y en
+// un repositorio público, el cuerpo del RUT de una persona escrito así —como
+// argumento de un login en un test y como valor de un input en una fixture— en
+// tres archivos versionados. La forma 1 sólo miraba `arreglo['campo_rut']` y la
+// 2 exige el guión con dígito verificador, así que un cuerpo suelto de ocho
+// dígitos no lo veía nadie.
+//
+// Van ANCLADAS al nombre del dato y no a "cualquier número de 7 u 8 dígitos
+// entrecomillado": se midió esa versión laxa sobre el repo y marcaba montos
+// (`xml_values['ago5'] = "15992909"`) y folios (`FOLIO: '13711545'`), que es
+// justo el ruido que termina con el chequeo apagado. El nombre incluye `user`,
+// `usuario` y `login` porque el identificador con que se entra al portal ES el
+// RUT.
+//
+// El anclaje de la forma 3 no es sólo "el nombre cerca del número": entre los
+// dos tiene que haber un `=`, un `:` o un `(`, o sea el separador de una
+// asignación, una propiedad o un argumento. Sin eso, la mera cercanía alcanzaba
+// y una frase en prosa con un número entrecomillado al lado de la palabra
+// `usuario` quedaba marcada. El chequeo tiene que gritar por datos, no por
+// texto.
 const CAMPO_RUT = /\w+\['([^']*rut[^']*)'\]\s*=\s*"(\d+)"/gi;
 const RUT_CON_DV = /\b(\d{7,8})-([\dkK])\b/g;
+const CUERPO_RUT_CON_NOMBRE =
+  /\b[\w$]*(?:rut|usuario|user|login)[\w$]*\b['\]]?[^'"\n=:(]{0,8}[=:(][^'"\n]{0,12}["'](\d{7,8})["']/gi;
+const CUERPO_RUT_EN_INPUT =
+  /(?:name\s*=\s*"[^"]*rut[^"]*"[^>]{0,160}?value\s*=\s*"(\d{7,8})"|value\s*=\s*"(\d{7,8})"[^>]{0,160}?name\s*=\s*"[^"]*rut[^"]*")/gi;
 
 // Un RUT no es el único dato personal que puede filtrarse: una fixture con una
 // declaración de renta completa trajo correo del contribuyente e IP pública de
@@ -64,6 +101,12 @@ function esIpNoPersonal(o: number[]): boolean {
 //      resto del código (por ejemplo "011111111134364C969E7").
 //   2. Un RUT escrito con puntos ("11.111.111-1") no matchea RUT_CON_DV: el
 //      patrón espera el cuerpo sin separadores de miles.
+//   2b. Un cuerpo de RUT pasado POSICIONALMENTE, sin ningún nombre al lado que
+//      lo delate: `auth.login('12345678', 'clave')`. Es el caso que dejó pasar
+//      un RUT real durante meses, y sigue afuera a propósito: cerrarlo pide
+//      marcar cualquier número de 7 u 8 dígitos entrecomillado, que sobre este
+//      repo marca montos y folios. Un valor así se atrapa leyendo el diff, no
+//      acá.
 //   3. Nombres, razones sociales, direcciones y comunas reales no se chequean:
 //      no tienen forma reconocible, y cualquier heurística sobre texto libre
 //      daría falsos positivos constantes hasta que alguien apague el chequeo.
@@ -99,6 +142,14 @@ export function extraerRutsSospechosos(contenido: string): string[] {
     // El filtro de ficticio corre sobre el cuerpo (el DV de un RUT ficticio no
     // es fijo), pero se reporta con DV para que el hallazgo sea accionable.
     if (!RUT_DE_PRUEBA.test(m[1])) encontrados.push(`${m[1]}-${m[2]}`);
+  }
+  for (const m of contenido.matchAll(CUERPO_RUT_CON_NOMBRE)) {
+    if (!RUT_DE_PRUEBA.test(m[1])) encontrados.push(m[1]);
+  }
+  for (const m of contenido.matchAll(CUERPO_RUT_EN_INPUT)) {
+    // Uno de los dos grupos según el orden en que vinieron los atributos.
+    const cuerpo = m[1] ?? m[2];
+    if (cuerpo !== undefined && !RUT_DE_PRUEBA.test(cuerpo)) encontrados.push(cuerpo);
   }
 
   return encontrados;
