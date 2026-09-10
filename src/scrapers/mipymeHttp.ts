@@ -893,11 +893,16 @@ export class MipymeHttpScraper {
       // mitad de camino.
       const tercerNivelOn = tercerNivelHabilitado();
       await this.acumularTramos(
-        // `diasPortalCaidoSeguidos` arranca en 0 y viaja por REFERENCIA a
-        // través de toda la recursión (bisección + tercer nivel): es la
-        // misma técnica que `descargas`, mutado in-place para que todas las
-        // ramas compartan un único contador. Ver `DIAS_PORTAL_CAIDO_PARA_CORTAR`.
-        { rut, dv, filtros, empresaRut, descargas: 0, tercerNivelOn, diasPortalCaidoSeguidos: 0 },
+        // Dos contadores, no uno: listado (`mipeAdminDocs*.cgi`) y descarga
+        // (`lista_documentos.cgi`/`download.cgi`) son CGI distintos que
+        // pueden fallar de forma independiente contra el portal real. Cada
+        // uno arranca en 0 y viaja por REFERENCIA a través de toda la
+        // recursión (bisección + tercer nivel), igual que `descargas`. Ver
+        // `DIAS_PORTAL_CAIDO_PARA_CORTAR`.
+        {
+          rut, dv, filtros, empresaRut, descargas: 0, tercerNivelOn,
+          diasPortalCaidoListado: 0, diasPortalCaidoDescarga: 0,
+        },
         fechaDesde, fechaHasta, tramos, limitaciones, maxTramos);
 
       return {
@@ -973,7 +978,7 @@ export class MipymeHttpScraper {
   private async acumularTramos(
     ctx: {
       rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
-      tercerNivelOn: boolean; diasPortalCaidoSeguidos: number;
+      tercerNivelOn: boolean; diasPortalCaidoListado: number; diasPortalCaidoDescarga: number;
     },
     desde: string,
     hasta: string,
@@ -1005,34 +1010,30 @@ export class MipymeHttpScraper {
     }
 
     // Corte temprano: el mismo colapso que el de arriba (por presupuesto),
-    // pero por causa DISTINTA. `diasPortalCaidoSeguidos` lo incrementan las
-    // TRES superficies que pueden chocar con la página de error genérica del
-    // portal: la descarga principal de acá abajo (`descargarTramo`, la que
-    // corre SIEMPRE, con o sin el tercer nivel) y, del lado del tercer nivel
-    // —sólo si `RESPALDO_XML_TERCER_NIVEL` está prendido—,
-    // `listarEmitidosDelDia`/`listarRecibidosDelDia`. Unificado en un solo
-    // contador a propósito: si sólo contaran los listados, el corte quedaría
-    // CIEGO en producción, donde ese flag está apagado y el listado nunca se
-    // llega a pedir. Se resetea con CUALQUIER operación de las tres que
-    // conteste (más abajo, y en esas dos funciones) — así que llegar acá con
-    // el contador en el tope significa que los últimos
-    // `DIAS_PORTAL_CAIDO_PARA_CORTAR` intentos, EN SECUENCIA, chocaron con
-    // esa página. Insistir contra un portal caído no sólo pierde tiempo: es
-    // la misma clase de barrido que `ritmoSii.ts` existe para evitar.
-    // [desde, hasta] en este punto de la recursión es justo el rango que
-    // todavía no se intentó —la bisección visita el calendario en orden, así
-    // que el próximo `acumularTramos` siempre representa lo que sigue
-    // cronológicamente— y se colapsa entero en UNA limitación, igual que el
-    // colapso por presupuesto.
-    if (ctx.diasPortalCaidoSeguidos >= DIAS_PORTAL_CAIDO_PARA_CORTAR) {
+    // pero por causa DISTINTA. Dos contadores, no uno, porque listado
+    // (`mipeAdminDocs*.cgi`) y descarga (`lista_documentos.cgi`/
+    // `download.cgi`) son CGI distintos que se observó fallar por separado
+    // contra el SII real: un reset compartido borraba los fallos de un lado
+    // con el éxito del otro y el corte nunca se alcanzaba. `diasPortalCaido-
+    // Descarga` lo incrementan la descarga principal de acá abajo y la
+    // descarga por folio del tercer nivel (`descargarGrupoConBiseccion`);
+    // `diasPortalCaidoListado` lo incrementan `listarEmitidosDelDia`/
+    // `listarRecibidosDelDia`. El corte se dispara si CUALQUIERA de los dos
+    // llega al tope. [desde, hasta] en este punto de la recursión es justo
+    // el rango que todavía no se intentó —la bisección visita el calendario
+    // en orden— y se colapsa entero en UNA limitación, igual que el colapso
+    // por presupuesto.
+    if (ctx.diasPortalCaidoListado >= DIAS_PORTAL_CAIDO_PARA_CORTAR
+        || ctx.diasPortalCaidoDescarga >= DIAS_PORTAL_CAIDO_PARA_CORTAR) {
+      const dias = Math.max(ctx.diasPortalCaidoListado, ctx.diasPortalCaidoDescarga);
       limitaciones.push({
         fechaDesde: desde,
         fechaHasta: hasta,
         motivo:
-          `El portal del SII respondió su página de error genérica en ${ctx.diasPortalCaidoSeguidos} `
-          + `días consecutivos: parece estar caído, no ser un problema puntual de este rango. Se `
-          + `abandona el resto (${desde}..${hasta}) para no seguir insistiendo contra un portal caído; `
-          + `reintentá este tramo más tarde.`,
+          `El portal del SII respondió su página de error genérica en ${dias} días consecutivos: `
+          + `parece estar caído, no ser un problema puntual de este rango. Se abandona el resto `
+          + `(${desde}..${hasta}) para no seguir insistiendo contra un portal caído; reintentá este `
+          + `tramo más tarde.`,
       });
       return;
     }
@@ -1064,11 +1065,9 @@ export class MipymeHttpScraper {
       // reintentable que vale la pena cargar como limitación en vez de
       // hacer explotar la corrida entera.
       if (!(e instanceof PortalSiiNoDisponible)) throw e;
-      // Mismo contador que usan los listados del tercer nivel (ver
-      // `DIAS_PORTAL_CAIDO_PARA_CORTAR`): si no sumara acá, el corte
-      // temprano quedaría CIEGO justo cuando el tercer nivel está apagado
-      // —el caso de producción—, porque nunca se alcanzaría a incrementar.
-      ctx.diasPortalCaidoSeguidos += 1;
+      // Contador de DESCARGA (ver `DIAS_PORTAL_CAIDO_PARA_CORTAR`): esta es
+      // una de las superficies que corre siempre, con o sin el tercer nivel.
+      ctx.diasPortalCaidoDescarga += 1;
       limitaciones.push({
         fechaDesde: desde,
         fechaHasta: hasta,
@@ -1079,10 +1078,9 @@ export class MipymeHttpScraper {
       return;
     }
     // La descarga contestó —con o sin exceder el tope, las dos son
-    // respuestas del portal, no un fallo suyo—: rompe cualquier racha de
-    // días caídos que venía acumulándose. Mismo criterio que el reset en
-    // `listarEmitidosDelDia`/`listarRecibidosDelDia`.
-    ctx.diasPortalCaidoSeguidos = 0;
+    // respuestas del portal, no un fallo suyo—: rompe la racha de fallos de
+    // DESCARGA, pero no toca `diasPortalCaidoListado` (son CGI distintos).
+    ctx.diasPortalCaidoDescarga = 0;
 
     if (respuesta.excedeTope) {
       if (desde === hasta) {
@@ -1191,7 +1189,7 @@ export class MipymeHttpScraper {
   private async trocearPorEjeFino(
     ctx: {
       rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
-      diasPortalCaidoSeguidos: number;
+      diasPortalCaidoListado: number; diasPortalCaidoDescarga: number;
     },
     dia: string,
     tramos: TramoRespaldoXml[],
@@ -1464,7 +1462,7 @@ export class MipymeHttpScraper {
   private async listarEmitidosDelDia(
     ctx: {
       filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
-      diasPortalCaidoSeguidos: number;
+      diasPortalCaidoListado: number;
     },
     dia: string,
     limitaciones: LimitacionRespaldoXml[],
@@ -1523,19 +1521,12 @@ export class MipymeHttpScraper {
       // comentario de `assertNoPaginaDeErrorDelPortal`), y ninguno esconde al
       // otro detrás de un nombre que sólo anuncia el primero.
       this.assertEmpresaSeleccionada(html);
-      // BLOQUEANTE detectado en producción (post-PR #98): esta función NO
-      // tiene try/catch propio, y `acumularTramos`/`respaldoXml` tampoco lo
-      // tienen alrededor de la llamada al tercer nivel — así que dejar
-      // escapar `PortalSiiNoDisponible` acá se llevaba puesto el arreglo
-      // `tramos` YA acumulado de los días anteriores que sí bajaron bien.
-      // #98 eliminó justamente ese desperdicio (repetir al SII lo que ya se
-      // había bajado); un throw sin capturar en este punto lo hubiera
-      // reintroducido para el caso puntual de esta página de error. Se
-      // captura ACÁ —y no más arriba, en `acumularTramos`— porque acá es
-      // donde se sabe que el fallo es "este DÍA, este LISTADO" y se puede
-      // armar la limitación con esa precisión, siguiendo el mismo patrón que
-      // los otros dos `return null` de esta función (tope de tramos, listado
-      // demasiado grande).
+      // Se captura ACÁ, no en `acumularTramos`: es donde se sabe que el
+      // fallo es "este DÍA, este LISTADO" y se puede armar la limitación con
+      // esa precisión, siguiendo el mismo patrón que los otros dos
+      // `return null` de esta función (tope de tramos, listado demasiado
+      // grande). Dejar escapar el error se llevaría puesto el arreglo
+      // `tramos` ya acumulado por días anteriores.
       try {
         this.assertNoPaginaDeErrorDelPortal(html);
       } catch (e) {
@@ -1544,7 +1535,7 @@ export class MipymeHttpScraper {
         // (ver esa constante y el chequeo en `acumularTramos`): días
         // CONSECUTIVOS con esta misma página son la señal de que el portal
         // está caído, no de que este día puntual tiene un problema.
-        ctx.diasPortalCaidoSeguidos += 1;
+        ctx.diasPortalCaidoListado += 1;
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           razonSocial: ctx.filtros.razonSocial,
@@ -1559,10 +1550,9 @@ export class MipymeHttpScraper {
         });
         return null;
       }
-      // Este listado SÍ contestó bien: rompe cualquier racha de días caídos
-      // que venía acumulándose (mismo razonamiento que el reset en
-      // `acumularTramos`).
-      ctx.diasPortalCaidoSeguidos = 0;
+      // Este listado SÍ contestó bien: rompe la racha de fallos de LISTADO,
+      // pero no toca `diasPortalCaidoDescarga` (son CGI distintos).
+      ctx.diasPortalCaidoListado = 0;
       documentos.push(...this.parseHistorial(html));
       const totalPaginas = this.parseTotalPaginas(html);
       if (totalPaginas == null || pagina >= totalPaginas) break;
@@ -1576,7 +1566,7 @@ export class MipymeHttpScraper {
   private async listarRecibidosDelDia(
     ctx: {
       filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
-      diasPortalCaidoSeguidos: number;
+      diasPortalCaidoListado: number;
     },
     dia: string,
     limitaciones: LimitacionRespaldoXml[],
@@ -1629,17 +1619,13 @@ export class MipymeHttpScraper {
       // comentario de `assertNoPaginaDeErrorDelPortal`), y ninguno esconde al
       // otro detrás de un nombre que sólo anuncia el primero.
       this.assertEmpresaSeleccionada(html);
-      // Mismo motivo que en `listarEmitidosDelDia`: sin este try/catch acá,
-      // `PortalSiiNoDisponible` escapa sin que nadie lo atrape (ni esta
-      // función ni `acumularTramos`/`respaldoXml` tienen un catch propio) y
-      // se lleva puesto el arreglo `tramos` de los días anteriores que ya se
-      // habían bajado bien — el desperdicio que #98 eliminó, reintroducido
-      // para este caso puntual.
+      // Mismo motivo que en `listarEmitidosDelDia`: se captura ACÁ para no
+      // perder el arreglo `tramos` de los días anteriores que ya bajaron bien.
       try {
         this.assertNoPaginaDeErrorDelPortal(html);
       } catch (e) {
         if (!(e instanceof PortalSiiNoDisponible)) throw e;
-        ctx.diasPortalCaidoSeguidos += 1;
+        ctx.diasPortalCaidoListado += 1;
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           razonSocial: ctx.filtros.razonSocial,
@@ -1652,7 +1638,8 @@ export class MipymeHttpScraper {
         });
         return null;
       }
-      ctx.diasPortalCaidoSeguidos = 0;
+      // Rompe la racha de fallos de LISTADO; no toca `diasPortalCaidoDescarga`.
+      ctx.diasPortalCaidoListado = 0;
       documentos.push(...this.parseHistorialRecibidos(html));
       const totalPaginas = this.parseTotalPaginas(html);
       if (totalPaginas == null || pagina >= totalPaginas) break;
@@ -1773,7 +1760,10 @@ export class MipymeHttpScraper {
   // sólo en este comentario: `consumirPresupuesto` revienta si algún path
   // nuevo la llama con el presupuesto ya agotado, en vez de dejarlo pasar.
   private async descargarListaDeGrupos(
-    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    ctx: {
+      rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
+      diasPortalCaidoDescarga: number;
+    },
     dia: string,
     grupos: number[][],
     overrideBase: { contraparteRut?: string },
@@ -1815,7 +1805,10 @@ export class MipymeHttpScraper {
   }
 
   private async descargarGrupoConBiseccion(
-    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    ctx: {
+      rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
+      diasPortalCaidoDescarga: number;
+    },
     dia: string,
     folios: number[],
     overrideBase: { contraparteRut?: string },
@@ -1863,7 +1856,34 @@ export class MipymeHttpScraper {
       const folioHasta = grupo[grupo.length - 1];
 
       await this.consumirPresupuesto(ctx, maxTramos);
-      const respuesta = await this.descargarTramo(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
+      let respuesta: { xml: string; excedeTope: boolean };
+      try {
+        respuesta = await this.descargarTramo(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
+      } catch (e) {
+        // Misma superficie de DESCARGA que la de `acumularTramos` (mismo CGI,
+        // `lista_documentos.cgi`/`download.cgi`, sólo que acá con filtro de
+        // folio): sin este catch, el error escapa por toda la cadena
+        // (`descargarListaDeGrupos` ← `trocearPorEjeFino` ← `acumularTramos`)
+        // sin que nadie más lo atrape, y se lleva puesto el arreglo `tramos`
+        // de los grupos y días hermanos ya bajados.
+        if (!(e instanceof PortalSiiNoDisponible)) throw e;
+        ctx.diasPortalCaidoDescarga += 1;
+        // Mismo campo (folioDesde/folioHasta) que `limitacionPresupuestoFolios`
+        // pero motivo propio: acá no se agotó el presupuesto, el portal no
+        // contestó para este rango de folios puntual.
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          contraparteRut: overrideBase.contraparteRut ?? ctx.filtros.contraparteRut,
+          razonSocial: ctx.filtros.razonSocial,
+          folioDesde, folioHasta,
+          motivo:
+            `El portal del SII no contestó para los folios ${folioDesde}..${folioHasta} del ${dia}: `
+            + `${e.message}`,
+        });
+        continue;
+      }
+      // Rompe la racha de fallos de DESCARGA; no toca `diasPortalCaidoListado`.
+      ctx.diasPortalCaidoDescarga = 0;
       if (respuesta.excedeTope) {
         if (grupo.length === 1) {
           limitaciones.push(this.limitacionFolioUnico(
@@ -2808,8 +2828,7 @@ export class MipymeHttpScraper {
         `El portal mipyme respondió con su página de error («Por el momento no se puede ` +
         `responder a sus requerimientos»)${codigo ? ` (código ${codigo})` : ''}. Es un fallo ` +
         `transitorio del portal del SII, no una empresa sin documentos: reintentá la ` +
-        `operación más tarde.`,
-        { codigo }
+        `operación más tarde.`
       );
     }
   }

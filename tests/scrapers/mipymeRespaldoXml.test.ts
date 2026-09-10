@@ -582,15 +582,11 @@ describe('MipymeHttpScraper.respaldoXml', () => {
   });
 
   // Unifica el mismo síntoma con el del historial: la descarga del respaldo
-  // puede recibir la misma página de error genérica del portal. Antes de la
-  // primera ronda de este arreglo salía como el `Error` genérico de "no
-  // devolvió un SetDTE"; la segunda ronda lo hizo propagar como
-  // `PortalSiiNoDisponible` tal cual, pero eso resultó ser OTRO bloqueante:
-  // un throw sin capturar en `acumularTramos` se lleva puesto cualquier
-  // tramo hermano ya bajado (ver el test multi-día más abajo). La versión
-  // correcta es la de acá: `acumularTramos` lo captura y lo carga como
-  // `LimitacionRespaldoXml` del rango que estaba pidiendo, y `respaldoXml`
-  // sigue resolviendo.
+  // puede recibir la misma página de error genérica del portal.
+  // `acumularTramos` la captura y la carga como `LimitacionRespaldoXml` del
+  // rango que estaba pidiendo (no como el Error genérico de "no SetDTE" ni
+  // propagada), y `respaldoXml` sigue resolviendo sin perder tramos hermanos
+  // (ver el test multi-día más abajo).
   it('la página de error genérica del portal queda como limitación del rango, no como el Error genérico de "no SetDTE" ni propagada', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue({
@@ -606,13 +602,13 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
   });
 
-  // EL BLOQUEANTE MÁS GRAVE de los dos: este camino (`descargarTramo` dentro
-  // de `acumularTramos`) corre SIEMPRE, con o sin `RESPALDO_XML_TERCER_NIVEL`
-  // —que en producción está APAGADO—. Dos días: el primero baja su SetDTE
-  // completo: el segundo excede el tope UNA vez (fuerza la bisección a día
-  // por día) y, al pedirse solo, el portal devuelve su página de error en vez
-  // del SetDTE. El día 1 tiene que SOBREVIVIR en `tramos` — verificado más
-  // abajo revirtiendo el fix a mano.
+  // Este camino (`descargarTramo` dentro de `acumularTramos`) corre SIEMPRE,
+  // con o sin `RESPALDO_XML_TERCER_NIVEL` —que en producción está APAGADO—.
+  // Dos días: el primero baja su SetDTE completo; el segundo excede el tope
+  // UNA vez (fuerza la bisección a día por día) y, al pedirse solo, el portal
+  // devuelve su página de error en vez del SetDTE. El día 1 tiene que
+  // SOBREVIVIR en `tramos`, que es justo lo que un test de un solo día no
+  // puede verificar (sin tramo previo no hay nada que perder).
   it('un día que baja bien + un día que falla en la DESCARGA (no en el listado), sin el tercer nivel: el primero sobrevive, el segundo queda como limitación', async () => {
     const { scraper, http } = armar();
     const DIA_1 = '2026-08-05';
@@ -990,22 +986,16 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
   });
 
   // El bug real: el listado del tercer nivel (`listarEmitidosDelDia`) puede
-  // recibir la misma página de error transitorio que el historial normal.
-  // Antes de la primera ronda de este arreglo, `parseHistorial` la leía como
-  // "cero filas" y `trocearPorEjeFino` la reportaba como "el listado no
-  // devolvió ningún folio" — la limitación de un dato genuinamente vacío, no
-  // la de un portal que no contestó.
-  //
-  // BLOQUEANTE detectado después: hacer que el error se PROPAGARA (versión
-  // anterior de este test) resolvía la confusión de motivo pero rompía algo
-  // peor — un `throw` sin capturar en `listarEmitidosDelDia` escapa por
-  // `acumularTramos`/`respaldoXml` sin que nadie lo atrape, y en un rango de
-  // VARIOS días se lleva puesto el arreglo `tramos` de los días anteriores
-  // que ya se habían bajado bien (el desperdicio que #98 eliminó). Por eso
-  // el fallo se CARGA COMO LIMITACIÓN de este día puntual —igual que las
-  // otras dos salidas de esta función (tope de tramos, listado demasiado
-  // grande)— y no se propaga: `respaldoXml` sigue resolviendo, con lo que sí
-  // se pudo bajar más la limitación de este día con su motivo real.
+  // recibir la misma página de error transitorio que el historial normal. Sin
+  // capturarlo, `parseHistorial` lo leía como "cero filas" y
+  // `trocearPorEjeFino` lo reportaba como "el listado no devolvió ningún
+  // folio" — la limitación de un dato genuinamente vacío, no la de un portal
+  // que no contestó. El fallo se CARGA COMO LIMITACIÓN de este día puntual
+  // —igual que las otras dos salidas de esta función (tope de tramos, listado
+  // demasiado grande)— y no se propaga: un `throw` sin capturar acá escapa
+  // por `acumularTramos`/`respaldoXml` sin que nadie lo atrape y, en un rango
+  // de varios días, se lleva puesto el arreglo `tramos` de los días
+  // anteriores que ya se habían bajado bien.
   it('emitidos: si el listado del tercer nivel devuelve la página de error del portal, queda como limitación de ESE día (no como "no devolvió ningún folio", y sin propagar)', async () => {
     const { scraper, http } = armar();
     mockearListado(http, PORTAL_NO_DISPONIBLE);
@@ -1071,19 +1061,54 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió ningún folio/);
   });
 
-  // El contador de días caídos es COMPARTIDO entre la descarga
-  // (`descargarTramo`) y el listado del tercer nivel, y el reset es "CUALQUIER
-  // operación que salga bien" — incluida una descarga que sólo dice "excede
-  // el tope", que es una respuesta del portal, no un fallo suyo. Consecuencia
-  // a propósito: si cada día la DESCARGA contesta bien (aunque exceda el
-  // tope, que es lo que manda a este día al tercer nivel) y sólo el LISTADO
-  // de ese mismo día falla, el corte NUNCA se alcanza — la descarga exitosa
-  // de cada día resetea el contador antes de que el listado lo suba—, y los
-  // seis días salen como seis limitaciones individuales, no colapsadas. El
-  // corte temprano con fallos consecutivos DE VERDAD (sin un éxito en el
-  // medio) está cubierto por el test de descarga pura, más abajo en el
-  // describe principal.
-  it('emitidos: si la descarga de cada día sigue contestando bien, el listado fallando solo no alcanza el corte (6 limitaciones individuales, no colapsadas)', async () => {
+  // La cuarta superficie: el listado del tercer nivel contesta BIEN (trae los
+  // folios), pero la descarga POR FOLIO que arma `descargarGrupoConBiseccion`
+  // —fuera del try/catch de `acumularTramos`, en su propia cadena
+  // (`descargarListaDeGrupos` ← `trocearPorEjeFino`)— es la que recibe la
+  // página de error del portal. Mismo bug que las otras tres superficies: sin
+  // captura acá, el error escapa por toda la cadena y se lleva puesto el
+  // tramo del día 1 ya bajado.
+  it('emitidos: listado OK pero la descarga por folio del tercer nivel devuelve la página de error — el día 1 sobrevive, el día 2 queda como limitación con su rango de folio', async () => {
+    const { scraper, http } = armar();
+    const DIA_1 = '2026-08-05';
+    const DIA_2 = '2026-08-06';
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValueOnce(historialEmitidosHtml([1, 2, 3])); // listado del día 2: OK
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // rango completo: excede, bisecta
+      .mockResolvedValueOnce(binarioXml())        // día 1 solo: baja completo
+      .mockResolvedValueOnce(binarioDemasiados()) // día 2 solo: excede, dispara el tercer nivel
+      .mockResolvedValueOnce({                    // descarga del grupo de folios [1,2,3]: página de error
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: DIA_1, fechaHasta: DIA_2, tipoDte: 33,
+    });
+
+    // El día 1 SOBREVIVE: esto es lo que un `throw` sin capturar destruía.
+    expect(r.tramos).toHaveLength(1);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: DIA_1, fechaHasta: DIA_1 });
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({
+      fechaDesde: DIA_2, fechaHasta: DIA_2, folioDesde: 1, folioHasta: 3,
+    });
+    expect(r.limitaciones[0].motivo).toMatch(/no contestó/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // Listado (`mipeAdminDocs*.cgi`) y descarga (`lista_documentos.cgi`/
+  // `download.cgi`) son CGI distintos que se observó fallar por separado
+  // contra el SII real: la descarga de cada día sigue contestando (aunque
+  // exceda el tope, que es una respuesta del portal, no un fallo suyo)
+  // mientras el listado de ese mismo día no contesta nada. Con contadores
+  // por superficie, ese éxito de descarga NO limpia la racha de listados
+  // caídos, así que el corte se alcanza igual: los primeros tres días quedan
+  // como limitaciones individuales y el resto del rango colapsa.
+  it('emitidos: si la descarga de cada día sigue contestando bien, el listado fallando 3 veces seguidas SÍ alcanza el corte (CGI distintos, contadores independientes)', async () => {
     const { scraper, http } = armar();
     (http.get as jest.Mock)
       .mockResolvedValueOnce(SEL_EMPRESA)
@@ -1093,17 +1118,17 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
 
     const r = await scraper.respaldoXml({
       // maxTramos alto a propósito: cada día que llega al tercer nivel gasta
-      // DOS descargas (la propia + el listado), y este test quiere que los
-      // seis días completen sin chocar con el tope de tramos —que es OTRA
-      // limitación, no la que este test verifica—.
+      // DOS descargas (la propia + el listado).
       ...RANGO, origen: 'ENV', fechaDesde: '2026-08-05', fechaHasta: '2026-08-10', tipoDte: 33,
       maxTramos: 30,
     });
 
     expect(r.tramos).toEqual([]);
-    expect(r.limitaciones).toHaveLength(6);
-    expect(r.limitaciones.every(l => l.fechaDesde === l.fechaHasta)).toBe(true);
-    expect(r.limitaciones.some(l => l.motivo.includes('parece estar caído'))).toBe(false);
+    expect(r.limitaciones).toHaveLength(4);
+    const individuales = r.limitaciones.filter(l => l.fechaDesde === l.fechaHasta);
+    expect(individuales.map(l => l.fechaDesde).sort()).toEqual(['2026-08-05', '2026-08-06', '2026-08-07']);
+    const deCorte = r.limitaciones.find(l => l.motivo.includes('parece estar caído'));
+    expect(deCorte).toMatchObject({ fechaDesde: '2026-08-08', fechaHasta: '2026-08-10' });
   });
 
   it('recibidos: el listado de 3 emisores agrupa en 3 descargas por contraparte', async () => {
