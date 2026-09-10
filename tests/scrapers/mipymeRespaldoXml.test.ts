@@ -935,6 +935,101 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.limitaciones[0].motivo).toMatch(/tramos/i);
     expect(r.limitaciones[0].motivo).toMatch(/emisores/i);
   });
+
+  // Si el caller YA pidió un folio único (folio_desde === folio_hasta, o sólo
+  // folio_desde), el intento que acaba de excedeer el tope en `acumularTramos`
+  // usó ese MISMO filtro (fecha+tipo+folio). Listar el día y volver a pedir
+  // exactamente ese folio son dos llamadas cuyo resultado ya se conoce.
+  it('emitidos: folio único ya pedido por el caller corta directo a la limitación, sin listar', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero, con el folio único
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, folioDesde: 5, folioHasta: 5 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ folioDesde: 5, folioHasta: 5, tipoDte: 33 });
+    expect(r.limitaciones[0].motivo).toMatch(/folio 5/);
+    // Nunca se llega a listar: sólo parseEmpresas + auth.cgi.
+    expect(http.get).toHaveBeenCalledTimes(2);
+    expect(http.getBinario).toHaveBeenCalledTimes(1);
+  });
+
+  it('emitidos: un solo folio_desde (sin folio_hasta) también corta directo, sin listar', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados());
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, folioDesde: 7 });
+
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ folioDesde: 7, folioHasta: 7 });
+    expect(http.get).toHaveBeenCalledTimes(2);
+  });
+
+  // Cuando `maxTramos` se agota A MITAD de la bisección, los grupos hermanos
+  // que quedan pendientes (varios niveles de la partición, no sólo uno) tienen
+  // que colapsarse en UNA sola limitación con el rango combinado — no una por
+  // hoja pendiente, que sería ruidoso y redundante para el mismo motivo.
+  it('emitidos: maxTramos agotado a mitad de la bisección colapsa los hermanos restantes en UNA limitación', async () => {
+    const { scraper, http } = armar();
+    const folios = [1, 2, 3, 4, 5, 6, 7, 8];
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero (descargas: 1)
+      .mockResolvedValueOnce(binarioDemasiados()) // grupo [1..8] (descargas: 3, tras el listado)
+      .mockResolvedValueOnce(binarioDemasiados()); // grupo [1,2,3,4] (descargas: 4 — se agota acá)
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 4 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ folioDesde: 1, folioHasta: 8, tipoDte: 33 });
+    expect(r.limitaciones[0].motivo).toMatch(/tramos/i);
+    expect(http.getBinario).toHaveBeenCalledTimes(3);
+  });
+
+  // `contraparte_rut` (el receptor, del lado emitidos) del caller original
+  // tiene que seguir viajando en CADA grupo de folios del tercer nivel, no
+  // sólo en el intento inicial: si se perdiera al agrupar, el primer grupo
+  // vendría filtrado por contraparte y el resto no.
+  it('emitidos: conserva contraparte_rut (receptor) del caller en cada grupo de folios', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 25 }, (_, i) => i + 1);
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValue(binarioXml());           // cada grupo
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', ...DIA, contraparteRut: '77777777-7',
+    });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(2);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    expect(llamadas.length).toBeGreaterThan(1);
+    for (const [, params] of llamadas) {
+      expect(params).toMatchObject({ RUT_RECP: '77777777' });
+    }
+  });
+
+  // Espejo del caso ENV equivalente: si el listado de recibidos no trae NINGÚN
+  // emisor, la limitación tiene que llevar el `folio_desde`/`folio_hasta` del
+  // caller igual que del lado emitido — es el mismo filtro exacto que no se
+  // pudo trocear más fino.
+  it('recibidos: sin emisores en el listado, la limitación lleva folio_desde/folio_hasta del caller', async () => {
+    const { scraper, http } = armar();
+    mockearListado(http, historialRecibidosHtml([]));
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', ...DIA, folioDesde: 10, folioHasta: 20,
+    });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ folioDesde: 10, folioHasta: 20, tipoDte: 33 });
+  });
 });
 
 // El tercer nivel está APAGADO por defecto porque la combinación

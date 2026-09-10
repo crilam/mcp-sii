@@ -125,10 +125,14 @@ async function main() {
       const folioHasta = numeroDe('VERIF_FOLIO_HASTA') ?? folioDesde;
       const folioOk = folioDesde == null
         || folios.every(f => Number(f) >= folioDesde && Number(f) <= (folioHasta as number));
-      const contraparteOk = !process.env.VERIF_CONTRAPARTE || (
+      // Igualdad de CUERPO de RUT a los dos lados, no `startsWith`: un prefijo
+      // ("7600000" contra "76000001") daba falso positivo, y este chequeo es
+      // justo la evidencia que decide si se prende el flag — no puede mentir.
+      const cuerpoContraparte = process.env.VERIF_CONTRAPARTE?.split('-')[0];
+      const contraparteOk = !cuerpoContraparte || (
         process.env.VERIF_ORIGEN === 'emitidos'
-          ? receptores.every(r => r.startsWith(process.env.VERIF_CONTRAPARTE!.split('-')[0]))
-          : emisores.every(e => e.startsWith(process.env.VERIF_CONTRAPARTE!.split('-')[0]))
+          ? receptores.every(r => r.split('-')[0] === cuerpoContraparte)
+          : emisores.every(e => e.split('-')[0] === cuerpoContraparte)
       );
       console.log(
         `    tipo_dte+folio/contraparte: ${tipoOk && folioOk && contraparteOk ? 'RESPETADO' : 'NO RESPETADO — revisar antes de prender RESPALDO_XML_TERCER_NIVEL'}`

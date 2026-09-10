@@ -987,6 +987,19 @@ export class MipymeHttpScraper {
     maxTramos: number
   ): Promise<void> {
     if (ctx.filtros.origen === 'ENV') {
+      // El caller ya pidió UN folio exacto (`folioDesde === folioHasta`, o
+      // sólo `folioDesde`). El intento que acaba de excedeer el tope en
+      // `acumularTramos` usó ese MISMO filtro (fecha+tipo+folio único), así
+      // que listar el día y volver a pedir exactamente ese folio es repetir
+      // dos llamadas cuyo resultado ya se conoce: es un dato roto, no un
+      // sub-rango por afinar.
+      if (ctx.filtros.folioDesde != null
+          && (ctx.filtros.folioHasta ?? ctx.filtros.folioDesde) === ctx.filtros.folioDesde) {
+        limitaciones.push(this.limitacionFolioUnico(
+          dia, ctx.filtros.folioDesde, ctx.filtros.tipoDte, ctx.filtros.contraparteRut));
+        return;
+      }
+
       const documentos = await this.listarEmitidosDelDia(ctx, dia, limitaciones, maxTramos);
       if (documentos === null) return; // maxTramos se agotó listando; limitación ya cargada.
 
@@ -1040,6 +1053,10 @@ export class MipymeHttpScraper {
     if (foliosPorEmisor.size === 0) {
       limitaciones.push({
         fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+        // Igual que el espejo del lado ENV: si el llamador pidió un rango de
+        // folio, va acá también — es parte del filtro exacto que no se pudo
+        // trocear más fino.
+        folioDesde: ctx.filtros.folioDesde, folioHasta: ctx.filtros.folioHasta,
         motivo:
           `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
           + `(tipo ${ctx.filtros.tipoDte}), pero el listado de recibidos no devolvió ningún emisor `
@@ -1186,6 +1203,24 @@ export class MipymeHttpScraper {
   // hasta llegar a un solo folio. Un folio único que por sí solo excede el
   // tope es un dato roto: no hay forma de afinar más, y queda como limitación
   // con el folio exacto.
+  // Un folio único que por sí solo excede el tope, o que ya se sabe condenado
+  // de antemano (ver el atajo de `trocearPorEjeFino` para un `folio_desde`
+  // sin rango): es un dato roto, no hay forma de afinar más. Se factoriza acá
+  // porque los dos call-sites arman el mismo mensaje.
+  private limitacionFolioUnico(
+    dia: string, folio: number, tipoDte: number | undefined, contraparteRut: string | undefined
+  ): LimitacionRespaldoXml {
+    const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
+    return {
+      fechaDesde: dia, fechaHasta: dia, tipoDte,
+      contraparteRut, folioDesde: folio, folioHasta: folio,
+      motivo:
+        `El folio ${folio} del ${dia}${contraparte} excede por sí solo el tope de `
+        + `${TOPE_DOCUMENTOS_SII} documentos del SII: es un único folio y el filtro ya no se `
+        + `puede afinar más. El listado y la descarga no cuentan igual para este caso puntual.`,
+    };
+  }
+
   private async descargarGrupoDeFolios(
     ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
     dia: string,
@@ -1195,50 +1230,58 @@ export class MipymeHttpScraper {
     limitaciones: LimitacionRespaldoXml[],
     maxTramos: number
   ): Promise<void> {
-    const folioDesde = folios[0];
-    const folioHasta = folios[folios.length - 1];
+    // Iterativo con una PILA (no recursión) para poder COLAPSAR los grupos
+    // hermanos que quedan sin intentar cuando se agota `maxTramos` a mitad de
+    // la bisección: sin esto, cada hoja pendiente empujaba su propia
+    // limitación (hasta ~10 del mismo motivo, con folios distintos) en vez de
+    // una sola que cubra el rango combinado. Se apila DERECHA y después
+    // IZQUIERDA para que la izquierda salga primero al hacer `pop()` — el
+    // mismo orden que tenía la recursión original (`await izquierda();
+    // await derecha();`), así que el orden de las descargas no cambia.
+    const pendientes: number[][] = [folios];
     const contraparte = overrideBase.contraparteRut ? ` (contraparte ${overrideBase.contraparteRut})` : '';
 
-    if (ctx.descargas >= maxTramos) {
-      limitaciones.push({
-        fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
-        contraparteRut: overrideBase.contraparteRut, folioDesde, folioHasta,
-        motivo:
-          `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para bajar los `
-          + `folios ${folioDesde}..${folioHasta} del ${dia}${contraparte}. Pedí un maxTramos más `
-          + `alto o acotá el rango de folios.`,
-      });
-      return;
-    }
-
-    await this.consumirPresupuesto(ctx);
-    const respuesta = await this.descargarTramo(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
-    if (respuesta.excedeTope) {
-      if (folios.length === 1) {
+    while (pendientes.length > 0) {
+      if (ctx.descargas >= maxTramos) {
+        const restantes = pendientes.flat();
+        const folioDesde = Math.min(...restantes);
+        const folioHasta = Math.max(...restantes);
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           contraparteRut: overrideBase.contraparteRut, folioDesde, folioHasta,
           motivo:
-            `El folio ${folioDesde} del ${dia}${contraparte} excede por sí solo el tope de `
-            + `${TOPE_DOCUMENTOS_SII} documentos del SII: es un único folio y el filtro ya no se `
-            + `puede afinar más. El listado y la descarga no cuentan igual para este caso puntual.`,
+            `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para bajar los `
+            + `folios ${folioDesde}..${folioHasta} del ${dia}${contraparte}. Pedí un maxTramos más `
+            + `alto o acotá el rango de folios.`,
         });
         return;
       }
-      const mitad = Math.floor(folios.length / 2);
-      await this.descargarGrupoDeFolios(
-        ctx, dia, folios.slice(0, mitad), overrideBase, tramos, limitaciones, maxTramos);
-      await this.descargarGrupoDeFolios(
-        ctx, dia, folios.slice(mitad), overrideBase, tramos, limitaciones, maxTramos);
-      return;
-    }
 
-    tramos.push({
-      fechaDesde: dia,
-      fechaHasta: dia,
-      documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
-      xml: respuesta.xml,
-    });
+      const grupo = pendientes.pop()!;
+      const folioDesde = grupo[0];
+      const folioHasta = grupo[grupo.length - 1];
+
+      await this.consumirPresupuesto(ctx);
+      const respuesta = await this.descargarTramo(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
+      if (respuesta.excedeTope) {
+        if (grupo.length === 1) {
+          limitaciones.push(
+            this.limitacionFolioUnico(dia, folioDesde, ctx.filtros.tipoDte, overrideBase.contraparteRut));
+          continue;
+        }
+        const mitad = Math.floor(grupo.length / 2);
+        pendientes.push(grupo.slice(mitad));      // derecha: se procesa DESPUÉS
+        pendientes.push(grupo.slice(0, mitad));   // izquierda: queda en el tope de la pila
+        continue;
+      }
+
+      tramos.push({
+        fechaDesde: dia,
+        fechaHasta: dia,
+        documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
+        xml: respuesta.xml,
+      });
+    }
   }
 
   private async descargarTramo(

@@ -256,6 +256,28 @@ describe('registrarRutasMipyme', () => {
       expect(body.detalle).toMatch(/2026-08-01.*tipo_dte|tipo_dte.*2026-08-01/s);
     });
 
+    // Ajuste del review de #98: el `detalle` de varias limitaciones se junta
+    // con ' | ' y no con '\n' — los demás `detalle` de este servicio son de
+    // una sola línea, y un salto acá rompía esa uniformidad.
+    it('junta varias limitaciones en el detalle con " | ", no con salto de línea', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        documentos: 0,
+        tramos: [],
+        limitaciones: [
+          { fechaDesde: '2026-08-01', fechaHasta: '2026-08-01', motivo: 'Motivo uno.' },
+          { fechaDesde: '2026-08-02', fechaHasta: '2026-08-02', motivo: 'Motivo dos.' },
+        ],
+      });
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+
+      const body = r.body as any;
+      expect(body.detalle).toBe(
+        '2026-08-01..2026-08-01: Motivo uno. | 2026-08-02..2026-08-02: Motivo dos.');
+      expect(body.detalle).not.toContain('\n');
+    });
+
     // La condición de "nada bajado" depende de esta distinción: `tramos:[]`
     // SIN limitaciones es un período sin documentos, y tiene que seguir siendo
     // ok:true. Si la ruta disparara LIMITE_CONOCIDO acá, un mes real sin DTE
