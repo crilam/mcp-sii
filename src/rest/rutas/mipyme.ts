@@ -7,6 +7,7 @@ import * as core from '../../core/mipyme';
 import { schemaListEmpresas, schemaListDteEmitidos, schemaListDteRecibidos, schemaDtePdf, schemaRespaldoXml, schemaListBorradores, schemaEmitirDte, schemaGuardarBorrador, paramsDocumento } from '../../core/schemas/mipyme';
 import { ejecutorPara, ejecutorPassThroughCertDe } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest, zodCredencialCert } from './comun';
+import { LimitacionConocida } from '../../erroresConsulta';
 
 // Las dos LECTURAS aceptan clave tributaria O certificado, igual que BHE:
 // verificado contra el SII con clave real (list-empresas devolvió las cinco
@@ -142,6 +143,28 @@ export function registrarRutasMipyme(
         folioHasta: folio_hasta,
         maxTramos: max_tramos,
       });
+
+      // Si NO se bajó NADA —todos los sub-rangos toparon, o el único tramo
+      // pedido topó y no había hermanos— la ruta sigue respondiendo
+      // ok:false/LIMITE_CONOCIDO, igual que antes de que el scraper dejara de
+      // lanzar. La regla va ACÁ y no en el scraper porque es del CONTRATO de
+      // esta ruta, no del troceo: un `ok:true` con `tramos:[]` sería
+      // indistinguible de "el período no tuvo documentos", y esa ambigüedad es
+      // un problema del wire, no de cómo se armó el resultado. Se reusa
+      // `LimitacionConocida` (en vez de armar el body a mano) para que el
+      // mapeo a `{ok:false,...}` salga del mismo lugar que todos los demás
+      // casos de `ejecutar`.
+      if (r.tramos.length === 0 && r.limitaciones.length > 0) {
+        // Cada limitación con su rango, no sólo el motivo pegado: cuando
+        // conviven un día lleno y un corte por tope de tramos, el `detalle`
+        // tiene que decir CUÁL rango es cuál — un `join(' ')` de puros motivos
+        // mezcla los dos párrafos sin que se note dónde empieza cada uno.
+        throw new LimitacionConocida(
+          r.limitaciones
+            .map(l => `${l.fechaDesde}..${l.fechaHasta}: ${l.motivo}`)
+            .join('\n'));
+      }
+
       return {
         empresa_rut: r.empresaRut,
         origen,
@@ -158,6 +181,15 @@ export function registrarRutasMipyme(
           nombre_archivo:
             `mipyme-respaldo-${origen}-${r.empresaRut.replace(/[^0-9kK]/g, '')}-${t.fechaDesde}-${t.fechaHasta}.xml`,
           xml: t.xml,
+        })),
+        // Siempre presente, aunque esté vacía: un consumidor que sólo mire
+        // `tramos` no se entera de que le faltó un sub-rango. `ok:true` con
+        // `limitaciones` no vacías es un respaldo PARCIAL — ver
+        // docs/integracion-api.md.
+        limitaciones: r.limitaciones.map(l => ({
+          fecha_desde: l.fechaDesde,
+          fecha_hasta: l.fechaHasta,
+          motivo: l.motivo,
         })),
       };
     });

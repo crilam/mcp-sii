@@ -1,7 +1,7 @@
 import { SiiHttpClient } from '../http';
 import { Empresa, SessionManager } from '../session';
 import { rutEsValido } from '../rut';
-import { EscrituraRechazadaPorSii, LimitacionConocida, EmpresaNoAutorizada, SelectorEmpresasVacio } from '../erroresConsulta';
+import { EscrituraRechazadaPorSii, EmpresaNoAutorizada, SelectorEmpresasVacio } from '../erroresConsulta';
 import { marcarSeguro } from '../idempotenciaEscritura';
 import { esperar, pausaConfigurada } from '../ritmoSii';
 
@@ -245,6 +245,16 @@ export interface TramoRespaldoXml {
   xml: string;
 }
 
+// Un sub-rango que NO se pudo bajar y por qué. Reemplaza el `throw` que antes
+// se llevaba puesto, junto con él, los tramos que sí habían salido bien: acá el
+// sub-rango que falló queda registrado con precisión (para que el consumidor
+// pueda pedirlo de nuevo, acotado) y el resto de la bisección sigue su curso.
+export interface LimitacionRespaldoXml {
+  fechaDesde: string;
+  fechaHasta: string;
+  motivo: string;
+}
+
 export interface RespaldoXmlResult {
   empresaRut: string;
   origen: OrigenRespaldo;
@@ -252,6 +262,7 @@ export interface RespaldoXmlResult {
   fechaHasta: string;
   documentos: number;
   tramos: TramoRespaldoXml[];
+  limitaciones: LimitacionRespaldoXml[];
 }
 
 export interface FiltrosDteRecibidos {
@@ -750,8 +761,9 @@ export class MipymeHttpScraper {
 
       const [rut, dv] = this.partirRut(empresaRut);
       const tramos: TramoRespaldoXml[] = [];
+      const limitaciones: LimitacionRespaldoXml[] = [];
       await this.acumularTramos(
-        { rut, dv, filtros, empresaRut, descargas: 0 }, fechaDesde, fechaHasta, tramos, maxTramos);
+        { rut, dv, filtros, empresaRut, descargas: 0 }, fechaDesde, fechaHasta, tramos, limitaciones, maxTramos);
 
       return {
         empresaRut,
@@ -760,8 +772,41 @@ export class MipymeHttpScraper {
         fechaHasta,
         documentos: tramos.reduce((n, t) => n + t.documentos, 0),
         tramos,
+        // Un `maxTramos` bajo hace que CADA hoja pendiente de la bisección
+        // empuje su propia limitación, aunque sean vecinas y el motivo sea
+        // idéntico (todas dicen "necesita más de N tramos"): sin fusionar, el
+        // consumidor pediría de nuevo un sub-rango por hoja cuando un solo
+        // pedido —el rango unido— alcanza.
+        limitaciones: this.fusionarLimitacionesContiguas(limitaciones),
       };
     });
+  }
+
+  // Junta limitaciones ADYACENTES (el día siguiente al fin de una es el inicio
+  // de la próxima) que comparten el mismo `motivo` textual en una sola, con el
+  // rango unido. Dos limitaciones con motivos distintos —un día lleno al lado
+  // de un corte por tope de tramos— NO se fusionan aunque sean contiguas: el
+  // texto ya no describiría bien a las dos juntas, y el consumidor perdería la
+  // distinción entre "pedí este día con tipo_dte" y "acortá el rango".
+  //
+  // Se ordena por `fechaDesde` primero porque la bisección no las produce en
+  // orden: la rama izquierda de un nivel se resuelve entera (incluida su propia
+  // sub-bisección) antes de arrancar la derecha, así que dos limitaciones
+  // vecinas en el calendario pueden llegar lejos una de la otra en el arreglo.
+  private fusionarLimitacionesContiguas(limitaciones: LimitacionRespaldoXml[]): LimitacionRespaldoXml[] {
+    const ordenadas = [...limitaciones].sort((a, b) => a.fechaDesde.localeCompare(b.fechaDesde));
+    const fusionadas: LimitacionRespaldoXml[] = [];
+    for (const actual of ordenadas) {
+      const anterior = fusionadas[fusionadas.length - 1];
+      const contigua = anterior != null
+        && aIsoUtc(Date.parse(`${anterior.fechaHasta}T00:00:00Z`) + 24 * 60 * 60 * 1000) === actual.fechaDesde;
+      if (anterior != null && contigua && anterior.motivo === actual.motivo) {
+        anterior.fechaHasta = actual.fechaHasta;
+      } else {
+        fusionadas.push({ ...actual });
+      }
+    }
+    return fusionadas;
   }
 
   // El troceo: pide el rango y, si el SII contesta que son más de 20, lo parte
@@ -774,26 +819,30 @@ export class MipymeHttpScraper {
     desde: string,
     hasta: string,
     tramos: TramoRespaldoXml[],
+    limitaciones: LimitacionRespaldoXml[],
     maxTramos: number
   ): Promise<void> {
     // El tope cuenta DESCARGAS, no tramos logrados. Contar sólo los tramos que
     // salieron bien dejaba el caso peor sin techo: si cada intento excede el
     // tope del SII, no se acumula ninguno y la bisección seguía bajando hasta el
     // día, gastando una llamada por nivel sin que el contador se moviera nunca.
-    // `LimitacionConocida` y no `Error`: los DOS fallos del troceo —éste y el
-    // del día suelto— son
-    // PERMANENTES —el mismo pedido va a fallar igual— y su mensaje es la parte
-    // accionable. Un Error genérico sale de la ruta como `ERROR`, que en el
-    // contrato de este servicio significa "reintentá" y viaja SIN detalle: el
-    // consumidor perdería la instrucción y reintentaría en loop un rango que no
-    // puede funcionar, gastando hasta 24 descargas contra el SII por intento.
-    // Eso es justo lo que ritmoSii.ts documenta como causa de bloqueo.
+    //
+    // Ya NO se lanza: [desde, hasta] es justo el rango que no se alcanzó a
+    // pedir, así que se registra como limitación de ESE rango —con precisión,
+    // para que el consumidor pueda pedirlo después— y se corta la recursión acá
+    // sin tocar los tramos hermanos, que ya se bajaron o se van a bajar por su
+    // cuenta.
     if (ctx.descargas >= maxTramos) {
-      throw new LimitacionConocida(
-        `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para respetar el `
-        + `tope de ${TOPE_DOCUMENTOS_SII} documentos por descarga del SII. Pedí un rango más corto `
-        + `o filtrá por tipo de documento; subir el tope convierte la consulta en un barrido, que `
-        + `es lo que hace que el SII bloquee el portal. ${this.progreso(tramos, desde)}`);
+      limitaciones.push({
+        fechaDesde: desde,
+        fechaHasta: hasta,
+        motivo:
+          `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para respetar el `
+          + `tope de ${TOPE_DOCUMENTOS_SII} documentos por descarga del SII. Pedí un rango más corto `
+          + `o filtrá por tipo de documento; subir el tope convierte la consulta en un barrido, que `
+          + `es lo que hace que el SII bloquee el portal.`,
+      });
+      return;
     }
 
     // La pausa va antes de cada descarga menos la primera: son varias llamadas
@@ -804,14 +853,21 @@ export class MipymeHttpScraper {
     const respuesta = await this.descargarTramo(ctx, desde, hasta);
     if (respuesta.excedeTope) {
       if (desde === hasta) {
-        throw new LimitacionConocida(
-          `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos y el SII no entrega más `
-          + `por descarga. El filtro por fecha ya no se puede afinar: pedí ese día con tipo_dte `
-          + `para partirlo por tipo de documento. ${this.progreso(tramos, desde)}`);
+        // Un solo día no se puede partir más: el filtro por fecha se agotó. Se
+        // registra como limitación de ESE día en vez de tirar todo lo demás.
+        limitaciones.push({
+          fechaDesde: desde,
+          fechaHasta: hasta,
+          motivo:
+            `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos y el SII no entrega más `
+            + `por descarga. El filtro por fecha ya no se puede afinar: pedí ese día con tipo_dte `
+            + `para partirlo por tipo de documento.`,
+        });
+        return;
       }
       const [primerFin, segundoInicio] = this.partirRango(desde, hasta);
-      await this.acumularTramos(ctx, desde, primerFin, tramos, maxTramos);
-      await this.acumularTramos(ctx, segundoInicio, hasta, tramos, maxTramos);
+      await this.acumularTramos(ctx, desde, primerFin, tramos, limitaciones, maxTramos);
+      await this.acumularTramos(ctx, segundoInicio, hasta, tramos, limitaciones, maxTramos);
       return;
     }
 
@@ -827,21 +883,6 @@ export class MipymeHttpScraper {
       documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
       xml: respuesta.xml,
     });
-  }
-
-  // Qué alcanzó a bajarse antes de fallar. Va en el mensaje porque un respaldo
-  // que falla a mitad de camino tira TODO lo descargado —los tramos viven en
-  // memoria hasta que la operación termina bien—, y sin esto el consumidor
-  // reintenta el rango entero, repitiendo llamadas al SII que ya habían salido
-  // bien. Con el sub-rango que sí funcionó puede reintentar acotado.
-  private progreso(tramos: TramoRespaldoXml[], corteEn: string): string {
-    if (tramos.length === 0) return `No alcanzó a bajarse ningún tramo (falló en ${corteEn}).`;
-    const cubierto = `${tramos[0].fechaDesde}..${tramos[tramos.length - 1].fechaHasta}`;
-    const documentos = tramos.reduce((n, t) => n + t.documentos, 0);
-    return (
-      `Se descartan ${tramos.length} tramo(s) que sí habían salido bien `
-      + `(${cubierto}, ${documentos} documentos): reintentá ese sub-rango aparte, `
-      + `y aparte el resto desde ${corteEn}.`);
   }
 
   private async descargarTramo(
