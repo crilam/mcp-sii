@@ -155,7 +155,14 @@ export function registrarRutasMipyme(
       // mapeo a `{ok:false,...}` salga del mismo lugar que todos los demás
       // casos de `ejecutar`.
       if (r.tramos.length === 0 && r.limitaciones.length > 0) {
-        throw new LimitacionConocida(r.limitaciones.map(l => l.motivo).join(' '));
+        // Cada limitación con su rango, no sólo el motivo pegado: cuando
+        // conviven un día lleno y un corte por tope de tramos, el `detalle`
+        // tiene que decir CUÁL rango es cuál — un `join(' ')` de puros motivos
+        // mezcla los dos párrafos sin que se note dónde empieza cada uno.
+        throw new LimitacionConocida(
+          r.limitaciones
+            .map(l => `${l.fechaDesde}..${l.fechaHasta}: ${l.motivo}`)
+            .join('\n'));
       }
 
       return {

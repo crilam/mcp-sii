@@ -772,9 +772,41 @@ export class MipymeHttpScraper {
         fechaHasta,
         documentos: tramos.reduce((n, t) => n + t.documentos, 0),
         tramos,
-        limitaciones,
+        // Un `maxTramos` bajo hace que CADA hoja pendiente de la bisección
+        // empuje su propia limitación, aunque sean vecinas y el motivo sea
+        // idéntico (todas dicen "necesita más de N tramos"): sin fusionar, el
+        // consumidor pediría de nuevo un sub-rango por hoja cuando un solo
+        // pedido —el rango unido— alcanza.
+        limitaciones: this.fusionarLimitacionesContiguas(limitaciones),
       };
     });
+  }
+
+  // Junta limitaciones ADYACENTES (el día siguiente al fin de una es el inicio
+  // de la próxima) que comparten el mismo `motivo` textual en una sola, con el
+  // rango unido. Dos limitaciones con motivos distintos —un día lleno al lado
+  // de un corte por tope de tramos— NO se fusionan aunque sean contiguas: el
+  // texto ya no describiría bien a las dos juntas, y el consumidor perdería la
+  // distinción entre "pedí este día con tipo_dte" y "acortá el rango".
+  //
+  // Se ordena por `fechaDesde` primero porque la bisección no las produce en
+  // orden: la rama izquierda de un nivel se resuelve entera (incluida su propia
+  // sub-bisección) antes de arrancar la derecha, así que dos limitaciones
+  // vecinas en el calendario pueden llegar lejos una de la otra en el arreglo.
+  private fusionarLimitacionesContiguas(limitaciones: LimitacionRespaldoXml[]): LimitacionRespaldoXml[] {
+    const ordenadas = [...limitaciones].sort((a, b) => a.fechaDesde.localeCompare(b.fechaDesde));
+    const fusionadas: LimitacionRespaldoXml[] = [];
+    for (const actual of ordenadas) {
+      const anterior = fusionadas[fusionadas.length - 1];
+      const contigua = anterior != null
+        && aIsoUtc(Date.parse(`${anterior.fechaHasta}T00:00:00Z`) + 24 * 60 * 60 * 1000) === actual.fechaDesde;
+      if (anterior != null && contigua && anterior.motivo === actual.motivo) {
+        anterior.fechaHasta = actual.fechaHasta;
+      } else {
+        fusionadas.push({ ...actual });
+      }
+    }
+    return fusionadas;
   }
 
   // El troceo: pide el rango y, si el SII contesta que son más de 20, lo parte

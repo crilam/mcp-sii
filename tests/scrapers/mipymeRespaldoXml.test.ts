@@ -299,17 +299,69 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(r.limitaciones[0].motivo).toMatch(/2026-08-05.*más de 20|más de 20.*2026-08-05/s);
   });
 
-  it('registra la limitación del rango pendiente si el troceo supera el tope de tramos', async () => {
+  // Con maxTramos:3 la bisección corta en CUATRO hojas contiguas (08-01..04,
+  // 08-05..08, 08-09..16, 08-17..31), todas con el mismo motivo ("necesita más
+  // de 3 tramos"). Sin fusionar, el consumidor pediría 4 sub-rangos donde el
+  // rango entero de vuelta —el que ya tenía— alcanza con uno solo.
+  it('fusiona en una sola limitación las hojas contiguas con el mismo motivo por tope de tramos', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
 
     const r = await scraper.respaldoXml({ ...RANGO, maxTramos: 3 });
 
     expect(r.tramos).toHaveLength(0);
-    expect(r.limitaciones.length).toBeGreaterThan(0);
-    for (const l of r.limitaciones) {
-      expect(l.motivo).toMatch(/tramos/i);
-    }
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ fechaDesde: '2026-08-01', fechaHasta: '2026-08-31' });
+    expect(r.limitaciones[0].motivo).toMatch(/tramos/i);
+  });
+
+  // Dos limitaciones del mismo TIPO (día suelto que excede el tope) pero
+  // separadas por un tramo que sí se bajó (08-02, entre medio) NO se fusionan:
+  // fusionarlas inventaría un rango (08-01..08-03) que incluye un día que sí se
+  // descargó. El motivo de cada una ya trae la fecha propia, así que ni
+  // siquiera coinciden como texto — la fusión exige match exacto e igual no
+  // alcanzaría a confundirlas.
+  it('no fusiona limitaciones no contiguas aunque compartan motivo', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados())  // 08-01..08-03, se parte
+      .mockResolvedValueOnce(binarioDemasiados())  // 08-01..08-02, se parte
+      .mockResolvedValueOnce(binarioDemasiados())  // 08-01 (día suelto), sin fondo
+      .mockResolvedValueOnce(binarioXml())         // 08-02 (día suelto), OK
+      .mockResolvedValueOnce(binarioDemasiados()); // 08-03 (día suelto), sin fondo
+
+    const r = await scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-01', fechaHasta: '2026-08-03' });
+
+    expect(r.tramos).toHaveLength(1);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: '2026-08-02', fechaHasta: '2026-08-02' });
+    expect(r.limitaciones).toHaveLength(2);
+    expect(r.limitaciones[0]).toMatchObject({ fechaDesde: '2026-08-01', fechaHasta: '2026-08-01' });
+    expect(r.limitaciones[1]).toMatchObject({ fechaDesde: '2026-08-03', fechaHasta: '2026-08-03' });
+    expect(r.limitaciones[0].motivo).toMatch(/día/);
+    expect(r.limitaciones[1].motivo).toMatch(/día/);
+  });
+
+  // Motivos DISTINTOS no se fusionan aunque las fechas sean contiguas: un día
+  // lleno al lado de un corte por tope de tramos son instrucciones distintas
+  // ("pedí ese día con tipo_dte" vs. "acortá el rango"), y fusionarlos perdería
+  // esa distinción.
+  it('no fusiona limitaciones contiguas con motivos distintos', async () => {
+    const { scraper, http } = armar();
+    // 08-05: un día suelto que excede el tope (motivo "día"). 08-06..08-11 (el
+    // resto del rango original de dos tramos) agota maxTramos con otro motivo.
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados())  // 08-05..08-06, se parte
+      .mockResolvedValueOnce(binarioDemasiados());  // 08-05..08-05, día suelto sin fondo
+
+    const r = await scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-05', fechaHasta: '2026-08-06', maxTramos: 2 });
+
+    // El día 08-05 topa por sí solo (motivo "día") y 08-06 queda sin pedir
+    // porque se agotó maxTramos (motivo "tramos"): son contiguas pero con
+    // motivos distintos, así que no se fusionan.
+    expect(r.limitaciones).toHaveLength(2);
+    expect(r.limitaciones[0]).toMatchObject({ fechaDesde: '2026-08-05', fechaHasta: '2026-08-05' });
+    expect(r.limitaciones[1]).toMatchObject({ fechaDesde: '2026-08-06', fechaHasta: '2026-08-06' });
+    expect(r.limitaciones[0].motivo).not.toBe(r.limitaciones[1].motivo);
   });
 
   // Cuando NINGÚN tope se toca, `limitaciones` es `[]` y todo lo demás sigue

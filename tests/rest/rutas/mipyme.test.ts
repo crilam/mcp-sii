@@ -227,6 +227,28 @@ describe('registrarRutasMipyme', () => {
       expect(body.error).toBe('LIMITE_CONOCIDO');
       expect(body.detalle).toMatch(/2026-08-01.*tipo_dte|tipo_dte.*2026-08-01/s);
     });
+
+    // La condición de "nada bajado" depende de esta distinción: `tramos:[]`
+    // SIN limitaciones es un período sin documentos, y tiene que seguir siendo
+    // ok:true. Si la ruta disparara LIMITE_CONOCIDO acá, un mes real sin DTE
+    // sería indistinguible de un corte del SII.
+    it('un período sin documentos (tramos:[] y limitaciones:[]) sigue siendo ok:true', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        documentos: 0,
+        tramos: [],
+        limitaciones: [],
+      });
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+
+      expect(r.status).toBe(200);
+      const body = r.body as any;
+      expect(body.ok).toBe(true);
+      expect(body.tramos).toEqual([]);
+      expect(body.limitaciones).toEqual([]);
+      expect(body.documentos).toBe(0);
+    });
   });
 
   describe('borrador (R11)', () => {
