@@ -1040,6 +1040,18 @@ export class MipymeHttpScraper {
     // RCP: la contraparte es el eje. Se agrupan los folios por EMISOR y se
     // pide una descarga por emisor; sólo si un emisor por sí solo sigue
     // excediendo el tope se baja también por folio, igual que del lado ENV.
+
+    // Espejo exacto del atajo de ENV: el caller ya pidió UN folio exacto y el
+    // intento que acaba de exceder el tope en `acumularTramos` usó ese MISMO
+    // filtro (fecha+tipo+folio, con o sin contraparte). Listar el día y volver
+    // a pedir ese folio es repetir llamadas cuyo resultado ya se conoce.
+    if (ctx.filtros.folioDesde != null
+        && (ctx.filtros.folioHasta ?? ctx.filtros.folioDesde) === ctx.filtros.folioDesde) {
+      limitaciones.push(this.limitacionFolioUnico(
+        dia, ctx.filtros.folioDesde, ctx.filtros.tipoDte, ctx.filtros.contraparteRut));
+      return;
+    }
+
     const documentos = await this.listarRecibidosDelDia(ctx, dia, limitaciones, maxTramos);
     if (documentos === null) return;
 
@@ -1065,7 +1077,12 @@ export class MipymeHttpScraper {
       return;
     }
 
-    for (const [emisorRut, foliosCrudos] of foliosPorEmisor) {
+    // Array indexable (no el `Map` directo) para poder listar los emisores
+    // PENDIENTES por RUT cuando el presupuesto se agota entre uno y el
+    // siguiente — un `for...of` sobre el `Map` no da esa posición.
+    const entradas = [...foliosPorEmisor.entries()];
+    for (let i = 0; i < entradas.length; i++) {
+      const [emisorRut, foliosCrudos] = entradas[i];
       // Dedupe con `Set`, igual que ENV: el listado puede repetir un folio (una
       // fila por página, u otra razón del portal), y sin dedupe la bisección
       // llegaría a `[10],[10]` — dos descargas idénticas y dos limitaciones
@@ -1085,16 +1102,43 @@ export class MipymeHttpScraper {
         // Se agota el presupuesto entre un emisor y el siguiente: los que
         // quedan sin pedir se registran juntos, no uno por uno — no se
         // intentó ninguna descarga por ellos, así que no hay un folio
-        // puntual que reportar.
+        // puntual que reportar. Se nombran los RUT pendientes (los primeros
+        // 10, con un resumen si sobran) para que "acotá con contraparte_rut"
+        // sea accionable y no una sugerencia a ciegas.
+        const pendientes = entradas.slice(i).map(([rut]) => rut);
+        const listados = pendientes.slice(0, 10).join(', ');
+        const resto = pendientes.length > 10 ? ` y ${pendientes.length - 10} más` : '';
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           motivo:
             `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para trocear por `
-            + `contraparte el ${dia} (tipo ${ctx.filtros.tipoDte}): quedaron emisores sin procesar. `
-            + `Pedí este día con un maxTramos más alto o acotá con contraparte_rut.`,
+            + `contraparte el ${dia} (tipo ${ctx.filtros.tipoDte}): quedaron ${pendientes.length} `
+            + `emisores sin procesar (${listados}${resto}). Pedí este día con un maxTramos más alto `
+            + `o acotá con contraparte_rut.`,
         });
         break;
       }
+
+      // Dos atajos que se saltan la descarga "plana" del emisor entero
+      // porque ya se sabe (o se sospecha con fundamento) que va a exceder:
+      //   - El caller YA fijó `contraparteRut`: el listado sólo trae ESE
+      //     emisor, así que la plana repetiría fecha+tipo+contraparte
+      //     exactos — la misma llamada que acaba de exceder en
+      //     `acumularTramos`. Es una llamada condenada, no una sospecha.
+      //   - El listado YA muestra más de `TOPE_DOCUMENTOS_SII` folios para
+      //     este emisor: listado y descarga no cuentan igual (documentado en
+      //     `acumularTramos`), así que esto es una HEURÍSTICA, no una certeza.
+      //     Si acierta, ahorra una llamada; si el listado sobreestima y la
+      //     plana en realidad no hubiera excedido, cuesta una llamada de más
+      //     — el mismo costo que ya paga hoy cualquier grupo que se biseccione
+      //     de más.
+      if (ctx.filtros.contraparteRut != null || folios.length > TOPE_DOCUMENTOS_SII) {
+        await this.descargarGruposDeFolios(
+          ctx, dia, this.enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
+          tramos, limitaciones, maxTramos);
+        continue;
+      }
+
       await this.consumirPresupuesto(ctx);
       const respuesta = await this.descargarTramo(ctx, dia, dia, { contraparteRut: emisorRut });
       if (respuesta.excedeTope) {

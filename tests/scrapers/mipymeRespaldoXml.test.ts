@@ -753,14 +753,15 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
   // Un emisor con MÁS de 20 folios en el día tiene que agruparse de a lo sumo
   // `TOPE_DOCUMENTOS_SII` (igual que ENV) antes de intentar la descarga: pasar
   // los 45 folios de una sola vez excede seguro y quema una llamada condenada
-  // a fallar.
-  it('recibidos: un emisor con 45 folios se agrupa de a 20 antes de bisectar', async () => {
+  // a fallar. Con la heurística de la ronda 4, el listado por sí solo (45 >
+  // TOPE) ya alcanza para saltarse la descarga "plana" del emisor entero: va
+  // directo a grupos sin gastar esa llamada condenada.
+  it('recibidos: un emisor con 45 folios se agrupa de a 20 directo, sin la descarga plana', async () => {
     const { scraper, http } = armar();
     const docs = Array.from({ length: 45 }, (_, i) => ({ folio: i + 1, emisorRut: '11111111-1' }));
     mockearListado(http, historialRecibidosHtml(docs));
     (http.getBinario as jest.Mock)
       .mockResolvedValueOnce(binarioDemasiados()) // el día entero
-      .mockResolvedValueOnce(binarioDemasiados()) // el emisor, plano
       .mockResolvedValue(binarioXml());           // cada grupo de a lo sumo 20 folios
 
     const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
@@ -768,10 +769,10 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.limitaciones).toEqual([]);
     expect(r.tramos).toHaveLength(3);
     const llamadas = (http.getBinario as jest.Mock).mock.calls;
-    expect(llamadas).toHaveLength(5); // día entero + emisor plano + 3 grupos
-    expect(llamadas[2][1]).toMatchObject({ FOLIO: '1', FOLIOHASTA: '20' });
-    expect(llamadas[3][1]).toMatchObject({ FOLIO: '21', FOLIOHASTA: '40' });
-    expect(llamadas[4][1]).toMatchObject({ FOLIO: '41', FOLIOHASTA: '45' });
+    expect(llamadas).toHaveLength(4); // día entero + 3 grupos (sin la plana)
+    expect(llamadas[1][1]).toMatchObject({ FOLIO: '1', FOLIOHASTA: '20' });
+    expect(llamadas[2][1]).toMatchObject({ FOLIO: '21', FOLIOHASTA: '40' });
+    expect(llamadas[3][1]).toMatchObject({ FOLIO: '41', FOLIOHASTA: '45' });
   });
 
   // Un folio repetido en el listado (una fila por página, u otra razón del
@@ -934,6 +935,29 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.limitaciones).toHaveLength(1);
     expect(r.limitaciones[0].motivo).toMatch(/tramos/i);
     expect(r.limitaciones[0].motivo).toMatch(/emisores/i);
+    // El motivo tiene que nombrar CUÁLES emisores quedaron pendientes: sin
+    // esto, "acotá con contraparte_rut" es una sugerencia a ciegas.
+    expect(r.limitaciones[0].motivo).toMatch(/22222222-2/);
+  });
+
+  // Con más de 10 emisores pendientes, el motivo trunca la lista (los
+  // primeros 10) y resume el resto — nombrar los 40 RUT pendientes sería tan
+  // ilegible como no nombrar ninguno.
+  it('recibidos: más de 10 emisores pendientes trunca la lista y resume el resto', async () => {
+    const { scraper, http } = armar();
+    const docs = Array.from({ length: 12 }, (_, i) => ({
+      folio: i + 1, emisorRut: `1000000${String(i).padStart(2, '0')}-${i % 10}`,
+    }));
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero (1er tramo)
+      .mockResolvedValueOnce(binarioXml());       // el primer emisor (2º tramo)
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA, maxTramos: 3 });
+
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/quedaron 11 emisores sin procesar/);
+    expect(r.limitaciones[0].motivo).toMatch(/y 1 más/);
   });
 
   // Si el caller YA pidió un folio único (folio_desde === folio_hasta, o sólo
@@ -964,6 +988,52 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.limitaciones).toHaveLength(1);
     expect(r.limitaciones[0]).toMatchObject({ folioDesde: 7, folioHasta: 7 });
     expect(http.get).toHaveBeenCalledTimes(2);
+  });
+
+  // Espejo RCP del atajo de folio único: hoy hacía listado + descarga plana +
+  // grupo de un folio (3 llamadas) antes de llegar a la misma limitación que
+  // ENV corta en cero. El filtro (fecha+tipo+folio, con o sin contraparte) ya
+  // se sabe condenado, así que no hay nada que listar ni bisectar.
+  it('recibidos: folio único ya pedido por el caller corta directo a la limitación, sin listar', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero, con el folio único
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA, folioDesde: 5, folioHasta: 5 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ folioDesde: 5, folioHasta: 5, tipoDte: 33 });
+    expect(r.limitaciones[0].motivo).toMatch(/folio 5/);
+    // Nunca se llega a listar: sólo parseEmpresas + auth.cgi.
+    expect(http.get).toHaveBeenCalledTimes(2);
+    expect(http.getBinario).toHaveBeenCalledTimes(1);
+  });
+
+  // Si el caller ya fijó `contraparteRut`, el listado sólo trae ESE emisor y
+  // la descarga "plana" repetiría fecha+tipo+contraparte exactos — la misma
+  // llamada que acaba de exceder en `acumularTramos`. Se salta directo a
+  // grupos de folios, sin gastar esa llamada condenada.
+  it('recibidos: contraparte_rut ya fijado por el caller salta la descarga plana, va directo a grupos', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 1, emisorRut: '77777777-7' },
+      { folio: 2, emisorRut: '77777777-7' },
+      { folio: 3, emisorRut: '77777777-7' },
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioXml());       // grupo [1,2,3] directo, sin la plana
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', ...DIA, contraparteRut: '77777777-7',
+    });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+    // Sólo 2 llamadas: el día entero + el grupo. Sin la plana, que hubiera
+    // repetido fecha+tipo+contraparte y fallado igual que el intento original.
+    expect(http.getBinario).toHaveBeenCalledTimes(2);
   });
 
   // Cuando `maxTramos` se agota A MITAD de la bisección, los grupos hermanos
@@ -1059,6 +1129,36 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
 
     const r = await scraper.respaldoXml({
       ...RANGO, origen: 'ENV', ...DIA, contraparteRut: '77777777-7',
+    });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos.length).toBeGreaterThan(0);
+  });
+
+  // Espejo RCP del test anterior: el listado de recibidos filtra por EMISOR
+  // (`RUT_EMI`), no por receptor, pero el mismo bug era posible ahí (el RUT
+  // crudo con DV no matchea nada). Con `contraparte_rut` ya fijado, el atajo
+  // de la ronda 4 salta la descarga plana, así que sólo hay día entero + 1
+  // grupo de folios en `getBinario`.
+  it('recibidos: contraparte_rut llega al listado sin DV, igual que a la descarga', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 1, emisorRut: '77777777-7' },
+      { folio: 2, emisorRut: '77777777-7' },
+    ];
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockImplementationOnce((_url: string, params?: Record<string, string>) => {
+        expect(params?.RUT_EMI).toBe('77777777');
+        return Promise.resolve(historialRecibidosHtml(docs));
+      });
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValue(binarioXml());           // el grupo, directo por el atajo de contraparte fijada
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', ...DIA, contraparteRut: '77777777-7',
     });
 
     expect(r.limitaciones).toEqual([]);

@@ -256,9 +256,9 @@ describe('registrarRutasMipyme', () => {
       expect(body.detalle).toMatch(/2026-08-01.*tipo_dte|tipo_dte.*2026-08-01/s);
     });
 
-    // Ajuste del review de #98: el `detalle` de varias limitaciones se junta
-    // con ' | ' y no con '\n' — los demás `detalle` de este servicio son de
-    // una sola línea, y un salto acá rompía esa uniformidad.
+    // El `detalle` de varias limitaciones se junta con ' | ' y no con '\n':
+    // los demás `detalle` de este servicio son de una sola línea, y un salto
+    // acá rompería esa uniformidad.
     it('junta varias limitaciones en el detalle con " | ", no con salto de línea', async () => {
       (core.respaldoXml as jest.Mock).mockResolvedValue({
         ...RESULTADO,
