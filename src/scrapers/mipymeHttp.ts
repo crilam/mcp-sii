@@ -1018,13 +1018,26 @@ export class MipymeHttpScraper {
       const documentos = await this.listarEmitidosDelDia(ctx, dia, limitaciones, maxTramos);
       if (documentos === null) return; // maxTramos se agotó listando; limitación ya cargada.
 
+      // Defensivo: `parseHistorial` resuelve `tipoDte` igual que
+      // `parseHistorialRecibidos`, y `DteEmitidoMipyme.tipoDte` existe igual
+      // que del lado recibido. Si el CGI de emitidos ignorara `TPO_DOC` (el
+      // mismo riesgo no verificado que justifica `RESPALDO_XML_TERCER_NIVEL`),
+      // un día con folios de otro tipo se colaría en el agrupado por folio:
+      // un tipo 33 (folios 10, 11) más un tipo 61 (folio 5000) agruparía
+      // `[10, 11, 5000]` y pediría `FOLIO=10..5000` — un rango 500× más ancho
+      // que bisecciona folios de dos tipos que nunca convergen. Filtrar acá
+      // convierte ese barrido silencioso en cero folios de este tipo +
+      // limitación explícita, igual que "el listado no devolvió ningún folio"
+      // de más abajo.
+      const documentosDelTipo = documentos.filter(d => d.tipoDte === ctx.filtros.tipoDte);
+
       // El listado NO filtra por rango de folio (no lo soporta como filtro de
       // fecha/tipo), así que trae TODOS los folios del día+tipo. Se acota ACÁ
       // al `folioDesde`/`folioHasta` que pidió el llamador original antes de
       // agrupar: sin este paso, un grupo terminaría con extremos fuera del
       // rango pedido y `descargarGrupoConBiseccion` bajaría documentos de más.
       const folios = acotarPorFolio(
-        [...new Set(documentos.map(d => d.folio))].sort((a, b) => a - b),
+        [...new Set(documentosDelTipo.map(d => d.folio))].sort((a, b) => a - b),
         ctx.filtros
       );
       if (folios.length === 0) {
@@ -1039,6 +1052,9 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           folioDesde: ctx.filtros.folioDesde, folioHasta: ctx.filtros.folioHasta,
+          // El filtro exacto que hay que repetir incluye la contraparte si el
+          // llamador la fijó, aunque este camino no la haya usado para nada.
+          contraparteRut: ctx.filtros.contraparteRut,
           motivo:
             `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
             + `(tipo ${ctx.filtros.tipoDte}), pero el listado de emitidos no devolvió ningún folio`
@@ -1095,6 +1111,9 @@ export class MipymeHttpScraper {
         // folio, va acá también — es parte del filtro exacto que no se pudo
         // trocear más fino.
         folioDesde: ctx.filtros.folioDesde, folioHasta: ctx.filtros.folioHasta,
+        // Ídem: el filtro exacto a repetir incluye la contraparte si el
+        // llamador la fijó, aunque este camino no la haya usado para nada.
+        contraparteRut: ctx.filtros.contraparteRut,
         motivo:
           `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
           + `(tipo ${ctx.filtros.tipoDte}), pero el listado de recibidos no devolvió ningún emisor `
@@ -1330,6 +1349,14 @@ export class MipymeHttpScraper {
   // el presupuesto agotado y empujaba SU PROPIA limitación — por ejemplo
   // `21..40` y después `41..45` en vez de una sola `21..45`. Se colapsan acá,
   // ANTES de entrar a cada grupo.
+  //
+  // Invariante que hay que mantener si se agrega algún path nuevo acá o en
+  // `descargarGrupoConBiseccion`: NINGÚN llamado a `descargarTramo` puede
+  // saltarse `consumirPresupuesto` antes. Hoy se cumple porque tanto la
+  // plana por emisor (en `trocearPorEjeFino`) como cada listado (paginado)
+  // pasan por `consumirPresupuesto` o por el chequeo de `ctx.descargas` de
+  // acá arriba — es la pausa que protege al portal contra el bloqueo por
+  // patrón de uso, y no puede haber una llamada que se la salte.
   private async descargarListaDeGrupos(
     ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
     dia: string,

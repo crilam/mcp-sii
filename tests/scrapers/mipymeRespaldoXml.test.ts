@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { MipymeHttpScraper, LimitacionRespaldoXml, soloCuerpoRut } from '../../src/scrapers/mipymeHttp';
+import {
+  MipymeHttpScraper, LimitacionRespaldoXml, soloCuerpoRut, acotarPorFolio, enGrupos,
+} from '../../src/scrapers/mipymeHttp';
 import { LimitacionConocida } from '../../src/erroresConsulta';
 import { esperar } from '../../src/ritmoSii';
 import { SiiHttpClient } from '../../src/http';
@@ -18,6 +20,14 @@ jest.mock('../../src/ritmoSii', () => ({
 
 const MockHttp = SiiHttpClient as jest.MockedClass<typeof SiiHttpClient>;
 const MockSession = SessionManager as jest.MockedClass<typeof SessionManager>;
+
+// Global, a nivel de archivo: sólo el describe del tercer nivel prende
+// `RESPALDO_XML_TERCER_NIVEL` y lo limpia en SU `afterEach`, pero eso lo hace
+// inmune al orden sólo porque hoy Jest corre un archivo en un único worker
+// con orden determinista. Este `afterEach` de archivo entero es la red que
+// no depende de ese orden: si algún test futuro seteara la variable sin
+// limpiarla, no se filtraría al resto de los tests del archivo.
+afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
 
 function fixture(nombre: string): string {
   return fs.readFileSync(path.join(__dirname, '..', 'fixtures', nombre), 'utf-8');
@@ -701,12 +711,14 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
   });
   afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
 
-  function filaEmitido(folio: number, codigo: number, receptorRut = '77777777-7'): string {
+  function filaEmitido(
+    folio: number, codigo: number, receptorRut = '77777777-7', tipoNombre = 'Factura Electronica'
+  ): string {
     return `<tr>
       <td><a href="/cgi-bin/Portal001/mipeGesDocEmi.cgi?CODIGO=${codigo}"><img></a></td>
       <td>${receptorRut}</td>
       <td>Receptor ${receptorRut}</td>
-      <td>Factura Electronica</td>
+      <td>${tipoNombre}</td>
       <td>${folio}</td>
       <td>2026-08-05</td>
       <td>1000</td>
@@ -716,6 +728,10 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
 
   function historialEmitidosHtml(folios: number[]): string {
     return `<table>${folios.map((f, i) => filaEmitido(f, 1000 + i)).join('\n')}</table>`;
+  }
+
+  function historialEmitidosMixtoHtml(docs: { folio: number; tipoNombre?: string }[]): string {
+    return `<table>${docs.map((d, i) => filaEmitido(d.folio, 1000 + i, '77777777-7', d.tipoNombre)).join('\n')}</table>`;
   }
 
   function filaRecibido(
@@ -988,12 +1004,15 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 2 });
 
     expect(r.tramos).toEqual([]);
-    expect(r.limitaciones.length).toBeGreaterThan(0);
-    for (const l of r.limitaciones) {
-      expect(l.motivo).toMatch(/tramos/i);
-      expect(l.fechaDesde).toBe('2026-08-05');
-      expect(l.tipoDte).toBe(33);
-    }
+    // Los dos grupos (1..20 y 21..25) tienen que colapsar en UNA sola
+    // limitación con el rango completo, igual que el caso de recibidos "a
+    // mitad de la bisección" — si el colapso de hermanos regresionara,
+    // volverían 2 limitaciones (una por grupo) en vez de 1.
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({
+      fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33, folioDesde: 1, folioHasta: 25,
+    });
+    expect(r.limitaciones[0].motivo).toMatch(/tramos/i);
     // El listado sí alcanzó a pedirse (consumió el 2º y último tramo del
     // presupuesto); lo que se agotó es lo que vino DESPUÉS.
     expect(http.getBinario).toHaveBeenCalledTimes(1);
@@ -1415,6 +1434,36 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(llamadas[2][1]).toMatchObject({ FOLIO: '10', FOLIOHASTA: '10' });
   });
 
+  // Espejo del test anterior, del lado ENV: `parseHistorial` resuelve
+  // `tipoDte` igual que `parseHistorialRecibidos`, y nada filtraba por
+  // `ctx.filtros.tipoDte` antes de agrupar por folio. Un documento de OTRO
+  // tipo mezclado en el listado (folio 5000, tipo 61) se colaba en el grupo
+  // de folios del día y ensuchaba el rango pedido con un folio ajeno —tipo
+  // 33 (folios 10, 11) más tipo 61 (folio 5000) agruparía `[10, 11, 5000]` y
+  // pediría `FOLIO=10..5000`, un rango 500× más ancho que nunca converge.
+  it('emitidos: documentos de otro tipo en el listado no contaminan el agrupado por folio', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 10, tipoNombre: 'Factura Electronica' },        // tipo 33, el de DIA
+      { folio: 11, tipoNombre: 'Factura Electronica' },        // tipo 33, el de DIA
+      { folio: 5000, tipoNombre: 'Nota de Credito Electronica' }, // tipo 61, ajeno
+    ];
+    mockearListado(http, historialEmitidosMixtoHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero, sin folio
+      .mockResolvedValueOnce(binarioXmlConFolios(33, [10, 11])); // el grupo, ya sin el folio ajeno
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+    expect(r.documentos).toBe(2);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    // Sin el filtro por tipo, el grupo sería [10,11,5000] y este llamado
+    // pediría FOLIO=10..FOLIOHASTA=5000 en vez de 10..11.
+    expect(llamadas[1][1]).toMatchObject({ FOLIO: '10', FOLIOHASTA: '11' });
+  });
+
   // Espejo del caso ENV equivalente: si el listado de recibidos no trae NINGÚN
   // emisor, la limitación tiene que llevar el `folio_desde`/`folio_hasta` del
   // caller igual que del lado emitido — es el mismo filtro exacto que no se
@@ -1431,6 +1480,42 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.tramos).toEqual([]);
     expect(r.limitaciones).toHaveLength(1);
     expect(r.limitaciones[0]).toMatchObject({ folioDesde: 10, folioHasta: 20, tipoDte: 33 });
+  });
+
+  // `contraparte_rut` es parte del filtro exacto que hay que repetir para
+  // volver a pedir este sub-rango, aunque el camino de "sin emisores en el
+  // listado" no lo haya usado para nada (el listado ya viene filtrado por
+  // `receptorRut`/`emisorRut` antes de llegar acá): sin este campo, el
+  // consumidor perdería la contraparte al reintentar.
+  it('recibidos: sin emisores en el listado y con contraparte_rut fijado, la limitación lo incluye', async () => {
+    const { scraper, http } = armar();
+    mockearListado(http, historialRecibidosHtml([]));
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', ...DIA, contraparteRut: '11111111-1',
+    });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ tipoDte: 33, contraparteRut: '11111111-1' });
+  });
+
+  // Espejo del lado ENV: si el listado no devuelve ningún folio y el caller
+  // fijó `contraparte_rut` (el receptor), tiene que quedar en la limitación
+  // igual que del lado recibido.
+  it('emitidos: sin folios en el listado y con contraparte_rut fijado, la limitación lo incluye', async () => {
+    const { scraper, http } = armar();
+    mockearListado(http, historialEmitidosHtml([]));
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', ...DIA, contraparteRut: '77777777-7',
+    });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ tipoDte: 33, contraparteRut: '77777777-7' });
   });
 });
 
@@ -1531,5 +1616,49 @@ describe('soloCuerpoRut', () => {
 
   it('con puntos y DV, limpia los puntos y saca el DV', () => {
     expect(soloCuerpoRut('77.777.777-7')).toBe('77777777');
+  });
+});
+
+// `acotarPorFolio` quedó exportada por testeabilidad (se usa dentro de
+// `trocearPorEjeFino` para acotar el listado del día+tipo al rango de folio
+// del llamador) sin tener un test propio.
+describe('acotarPorFolio', () => {
+  it('sin folioDesde ni folioHasta, deja pasar todo', () => {
+    expect(acotarPorFolio([1, 5, 10], {} as any)).toEqual([1, 5, 10]);
+  });
+
+  it('con folioDesde y folioHasta, recorta a ambos lados', () => {
+    expect(acotarPorFolio([1, 5, 10, 15, 20], { folioDesde: 5, folioHasta: 15 } as any)).toEqual([5, 10, 15]);
+  });
+
+  // Borde explícito del brief: `folioDesde` puesto SIN `folioHasta` — el
+  // fallback (`filtros.folioHasta ?? filtros.folioDesde`) colapsa el techo al
+  // mismo `folioDesde`, igual que un folio único (mismo criterio que
+  // `limitacionFolioUnico` usa para reconocer "folio exacto, sin rango").
+  it('con folioDesde y sin folioHasta, el techo colapsa al mismo folioDesde (folio exacto)', () => {
+    expect(acotarPorFolio([1, 5, 10, 15], { folioDesde: 10 } as any)).toEqual([10]);
+  });
+
+  // Sin `folioDesde`, la función corta camino y devuelve todo sin filtrar —
+  // `folioHasta` solo no alcanza para acotar nada (mismo `if` de guarda).
+  it('con folioHasta y sin folioDesde, no filtra nada (folioDesde es el que gatilla el recorte)', () => {
+    expect(acotarPorFolio([1, 5, 10, 15], { folioHasta: 10 } as any)).toEqual([1, 5, 10, 15]);
+  });
+});
+
+// `enGrupos` quedó exportada por testeabilidad (parte una lista ORDENADA en
+// rangos disjuntos de a lo sumo `tamano`, la base de por qué ningún documento
+// puede caer en dos grupos) sin tener un test propio.
+describe('enGrupos', () => {
+  it('parte en grupos de a lo sumo `tamano`, el último con el resto', () => {
+    expect(enGrupos([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+
+  it('con menos elementos que `tamano`, un solo grupo', () => {
+    expect(enGrupos([1, 2, 3], 20)).toEqual([[1, 2, 3]]);
+  });
+
+  it('lista vacía, ningún grupo', () => {
+    expect(enGrupos([], 20)).toEqual([]);
   });
 });
