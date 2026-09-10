@@ -3,6 +3,7 @@ import * as path from 'path';
 import { MipymeHttpScraper } from '../../src/scrapers/mipymeHttp';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
+import { PortalSiiNoDisponible } from '../../src/erroresConsulta';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -17,6 +18,7 @@ function fixture(nombre: string): string {
 const SEL_EMPRESA = fixture('mipyme-sel-empresa.html');
 const RECIBIDOS = fixture('mipyme-historial-recibidos.html');
 const SIN_EMPRESA = fixture('mipyme-sin-empresa.html');
+const PORTAL_NO_DISPONIBLE = fixture('mipyme-portal-no-disponible.html');
 
 function armar() {
   const session = new MockSession({} as any, {} as any);
@@ -159,6 +161,27 @@ describe('MipymeHttpScraper.listDteRecibidos', () => {
 
     await expect(scraper.listDteRecibidos({ empresaRut: '33333333-3' }))
       .rejects.toThrow(/no ha seleccionado una empresa/i);
+  });
+
+  // El bug real, medido contra el SII: `mipeAdminDocsRcp.cgi` devolvió su
+  // propia página de error interno («Error al contribuyente» / «no se puede
+  // responder a sus requerimientos») para una empresa de alto volumen, y
+  // `parseHistorialRecibidos` —que sólo sabe leer filas `<tr>`— no encontró
+  // ninguna fila de datos ahí adentro y lo interpretó como "cero documentos".
+  // Tiene que fallar con `PortalSiiNoDisponible` y el código del SII en el
+  // mensaje, nunca devolver `{documentos: []}`.
+  it('falla con PortalSiiNoDisponible si el portal devuelve su página de error interno, en vez de "cero documentos"', async () => {
+    const { scraper } = conHistorial(PORTAL_NO_DISPONIBLE);
+
+    let error: unknown;
+    try {
+      await scraper.listDteRecibidos({ empresaRut: '33333333-3' });
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
   });
 
   // Una fila que ES de datos y que el parser no supo leer no se saltea en

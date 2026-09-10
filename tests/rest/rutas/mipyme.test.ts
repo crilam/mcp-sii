@@ -2,6 +2,7 @@ import { registrarRutasMipyme } from '../../../src/rest/rutas/mipyme';
 import { RegistroSesiones } from '../../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../../src/credencialesRuntime';
 import * as core from '../../../src/core/mipyme';
+import { PortalSiiNoDisponible } from '../../../src/erroresConsulta';
 
 jest.mock('../../../src/core/mipyme');
 
@@ -279,6 +280,26 @@ describe('registrarRutasMipyme', () => {
       expect(body.ok).toBe(false);
       expect(body.error).toBe('LIMITE_CONOCIDO');
       expect(body.detalle).toMatch(/2026-08-01.*tipo_dte|tipo_dte.*2026-08-01/s);
+    });
+
+    // El bug real: el portal devolvió su página de error transitoria y el
+    // scraper la propaga como PortalSiiNoDisponible en vez de absorberla en
+    // una limitación. La ruta tiene que traducirla a SII_NO_DISPONIBLE, no a
+    // LIMITE_CONOCIDO (que el contrato declara permanente) ni a ERROR mudo.
+    it('responde ok:false SII_NO_DISPONIBLE cuando el portal devolvió su página de error', async () => {
+      (core.respaldoXml as jest.Mock).mockRejectedValue(
+        new PortalSiiNoDisponible(
+          'El portal mipyme respondió con su página de error (código 04.77.113.29.408.51).'
+        )
+      );
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+
+      expect(r.status).toBe(200);
+      const body = r.body as any;
+      expect(body.ok).toBe(false);
+      expect(body.error).toBe('SII_NO_DISPONIBLE');
+      expect(body.detalle).toMatch(/04\.77\.113\.29\.408\.51/);
     });
 
     // El `detalle` de varias limitaciones se junta con ' | ' y no con '\n':

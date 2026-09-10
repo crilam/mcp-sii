@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { clasificarErrorCredenciales } from '../../erroresSesion';
-import { LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado, EscrituraRechazadaPorSii, EmpresaNoAutorizada, SelectorEmpresasVacio } from '../../erroresConsulta';
+import {
+  LimitacionConocida, RecursoNoEncontrado, SesionesSimultaneas, LimiteDeConsultasSii,
+  ServicioOcupado, EscrituraRechazadaPorSii, EmpresaNoAutorizada, SelectorEmpresasVacio,
+  PortalSiiNoDisponible,
+} from '../../erroresConsulta';
 import { mensajeSeguro } from '../../redaccion';
 
 // Fragmento zod para la única ruta que recibe SÓLO certificado digital:
@@ -236,6 +240,18 @@ export async function ejecutar<R>(fn: () => Promise<R>): Promise<RespuestaRuta> 
     // se mide en segundos, no en los minutos que pide `LIMITE_SII`.
     if (e instanceof ServicioOcupado) {
       return { status: 200, body: { ok: false, error: 'SERVICIO_OCUPADO', detalle: e.message } };
+    }
+    // El portal mipyme devolvió su propia página de error interno («Error al
+    // contribuyente» / «no se puede responder a sus requerimientos») en vez del
+    // historial o del listado pedido (ver el comentario de `PortalSiiNoDisponible`
+    // en erroresConsulta.ts). Código propio y NO `LIMITE_CONOCIDO`: esa familia le
+    // diría al consumidor "esto no se arregla reintentando", que es lo contrario de
+    // lo que dice el propio aviso del SII. Tampoco `ERROR` a secas, porque ese
+    // código no distingue "portal caído, reintentá" de "bug de este servicio" — acá
+    // sí se sabe la causa, y vale la pena que el consumidor sepa que reintentar más
+    // tarde alcanza.
+    if (e instanceof PortalSiiNoDisponible) {
+      return { status: 200, body: { ok: false, error: 'SII_NO_DISPONIBLE', detalle: e.message } };
     }
     const error = clasificarErrorCredenciales(e);
     if (error === 'ERROR') {

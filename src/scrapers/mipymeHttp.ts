@@ -1,7 +1,9 @@
 import { SiiHttpClient } from '../http';
 import { Empresa, SessionManager } from '../session';
 import { rutEsValido } from '../rut';
-import { EscrituraRechazadaPorSii, EmpresaNoAutorizada, SelectorEmpresasVacio } from '../erroresConsulta';
+import {
+  EscrituraRechazadaPorSii, EmpresaNoAutorizada, SelectorEmpresasVacio, PortalSiiNoDisponible,
+} from '../erroresConsulta';
 import { marcarSeguro } from '../idempotenciaEscritura';
 import { esperar, pausaConfigurada, tercerNivelHabilitado } from '../ritmoSii';
 
@@ -2534,6 +2536,43 @@ export class MipymeHttpScraper {
       throw new Error(
         `El portal mipyme respondió que no ha seleccionado una Empresa (código ${codigo}). ` +
         `La selección se perdió entre el POST y la consulta: reintentá la operación.`
+      );
+    }
+    this.assertNoPaginaDeErrorDelPortal(html);
+  }
+
+  // El portal responde 200 con esta página —título «Error al contribuyente» y
+  // «Por el momento no se puede responder a sus requerimientos»— en vez del
+  // HTML que se esperaba, medido en vivo contra `mipeAdminDocsRcp.cgi` para
+  // una empresa de alto volumen. Sin este chequeo, un parser que sólo sabe
+  // leer las filas o los campos que espera no encuentra ninguno en esta
+  // página y devuelve "vacío" — cero documentos, cero folios, según quien
+  // llame— en vez de fallar: un error transitorio del portal, disfrazado de
+  // dato legítimo.
+  //
+  // Comparte el mismo choke point que "no ha seleccionado una Empresa" arriba
+  // —las dos páginas de error se detectan ANTES de que el HTML llegue a
+  // `parseHistorial`/`parseHistorialRecibidos`, y todo call-site de esos dos
+  // parsers llama primero a `assertEmpresaSeleccionada`—, pero es un tipo de
+  // error DISTINTO (ver el comentario de `PortalSiiNoDisponible` en
+  // erroresConsulta.ts): no se sabe que falta la selección de empresa, se sabe
+  // que el portal no pudo responder. Por eso vive en su propio método, con su
+  // propia clase, y no se funde con el chequeo de arriba.
+  //
+  // Detección por TÍTULO + FRASE, no por el `CODIGO:` (que sí se extrae, sólo
+  // para citarlo en el mensaje): esos octetos parecen llevar datos de sesión o
+  // de servidor y variar entre corridas, así que atar la detección a un
+  // código puntual la rompería en la próxima corrida real.
+  private assertNoPaginaDeErrorDelPortal(html: string): void {
+    if (/Error al contribuyente/i.test(html)
+        && /no se puede responder a sus requerimientos/i.test(html)) {
+      const codigo = html.match(/CODIGO:\s*([\d.\-]+)/)?.[1];
+      throw new PortalSiiNoDisponible(
+        `El portal mipyme respondió con su página de error («Por el momento no se puede ` +
+        `responder a sus requerimientos»)${codigo ? ` (código ${codigo})` : ''}. Es un fallo ` +
+        `transitorio del portal del SII, no una empresa sin documentos: reintentá la ` +
+        `operación más tarde.`,
+        { codigo }
       );
     }
   }

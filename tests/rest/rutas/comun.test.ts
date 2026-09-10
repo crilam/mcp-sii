@@ -2,6 +2,7 @@ import { ejecutar } from '../../../src/rest/rutas/comun';
 import {
   SesionesSimultaneas, LimiteDeConsultasSii, ServicioOcupado, EscrituraRechazadaPorSii,
   EmpresaNoAutorizada, SelectorEmpresasVacio, LimitacionConocida, RecursoNoEncontrado,
+  PortalSiiNoDisponible,
 } from '../../../src/erroresConsulta';
 
 describe('ejecutar', () => {
@@ -103,6 +104,26 @@ describe('ejecutar', () => {
     });
 
     expect((respuesta.body as { error: string }).error).not.toBe('LIMITE_CONOCIDO');
+  });
+
+  // El bug real: el portal mipyme devuelve su propia página de error interno
+  // («Error al contribuyente» / «no se puede responder a sus requerimientos»)
+  // en vez del historial pedido, y antes de este código un parser que sólo
+  // sabía leer filas la interpretaba como "cero documentos". Código propio y
+  // NO LIMITE_CONOCIDO: esa familia significa "esto no se arregla
+  // reintentando", justo lo contrario del propio aviso del SII.
+  it('PortalSiiNoDisponible sale como SII_NO_DISPONIBLE con detalle, no como LIMITE_CONOCIDO ni ERROR', async () => {
+    const respuesta = await ejecutar(async () => {
+      throw new PortalSiiNoDisponible(
+        'El portal mipyme respondió con su página de error (código 04.77.113.29.408.51).'
+      );
+    });
+
+    expect(respuesta.status).toBe(200);
+    expect((respuesta.body as { error: string }).error).toBe('SII_NO_DISPONIBLE');
+    expect((respuesta.body as { detalle: string }).detalle).toMatch(/04\.77\.113\.29\.408\.51/);
+    expect((respuesta.body as { error: string }).error).not.toBe('LIMITE_CONOCIDO');
+    expect((respuesta.body as { error: string }).error).not.toBe('ERROR');
   });
 
   // El caso que motivó EmpresaNoAutorizada / SelectorEmpresasVacio: el selector

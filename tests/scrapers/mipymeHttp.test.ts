@@ -3,7 +3,7 @@ import * as path from 'path';
 import { MipymeHttpScraper } from '../../src/scrapers/mipymeHttp';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
-import { SelectorEmpresasVacio, EmpresaNoAutorizada } from '../../src/erroresConsulta';
+import { SelectorEmpresasVacio, EmpresaNoAutorizada, PortalSiiNoDisponible } from '../../src/erroresConsulta';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -18,6 +18,7 @@ function fixture(nombre: string): string {
 const SEL_EMPRESA = fixture('mipyme-sel-empresa.html');
 const HISTORIAL = fixture('mipyme-historial-emitidos.html');
 const SIN_EMPRESA = fixture('mipyme-sin-empresa.html');
+const PORTAL_NO_DISPONIBLE = fixture('mipyme-portal-no-disponible.html');
 
 function armar() {
   const session = new MockSession({} as any, {} as any);
@@ -145,6 +146,33 @@ describe('MipymeHttpScraper.listDteEmitidos', () => {
 
     await expect(scraper.listDteEmitidos({ empresaRut: '33333333-3' }))
       .rejects.toThrow(/no ha seleccionado una empresa/i);
+  });
+
+  // El bug medido contra el SII real: `mipeAdminDocsRcp.cgi` devolvió su propia
+  // página de error interno («Error al contribuyente» / «no se puede responder
+  // a sus requerimientos») para una empresa de alto volumen, y el parser —que
+  // sólo sabe leer filas `<tr>`— no encontró ninguna fila de datos ahí adentro
+  // y lo leyó como "cero documentos". Un fallo transitorio del portal
+  // reportado como un historial vacío es peor que un error: el consumidor
+  // concluye que esta empresa no emitió nada, cuando en realidad el SII no
+  // llegó a contestar. Tiene que fallar con `PortalSiiNoDisponible`, con el
+  // código del SII en el mensaje, y NO devolver `{documentos: []}`.
+  it('falla con PortalSiiNoDisponible si el portal devuelve su página de error interno, en vez de "cero documentos"', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce(PORTAL_NO_DISPONIBLE);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+    let error: unknown;
+    try {
+      await scraper.listDteEmitidos({ empresaRut: '33333333-3' });
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
   });
 
   // El caso "selector no vacío, pero la empresa pedida no está entre las

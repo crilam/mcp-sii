@@ -3,7 +3,7 @@ import * as path from 'path';
 import {
   MipymeHttpScraper, LimitacionRespaldoXml, soloCuerpoRut, acotarPorFolio, enGrupos,
 } from '../../src/scrapers/mipymeHttp';
-import { LimitacionConocida } from '../../src/erroresConsulta';
+import { LimitacionConocida, PortalSiiNoDisponible } from '../../src/erroresConsulta';
 import { esperar } from '../../src/ritmoSii';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
@@ -36,6 +36,7 @@ function fixture(nombre: string): string {
 const SEL_EMPRESA = fixture('mipyme-sel-empresa.html');
 const SET_DTE = fixture('mipyme-respaldo-setdte.xml');
 const DEMASIADOS = fixture('mipyme-respaldo-demasiados.html');
+const PORTAL_NO_DISPONIBLE = fixture('mipyme-portal-no-disponible.html');
 
 function binarioXml(xml: string = SET_DTE) {
   return {
@@ -892,6 +893,49 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     });
     expect(r.limitaciones[0].motivo).toMatch(/folio 1/);
     expect(r.limitaciones[0].motivo).toMatch(/excede/);
+  });
+
+  // El bug real: el listado del tercer nivel (`listarEmitidosDelDia`) puede
+  // recibir la misma página de error transitorio que el historial normal.
+  // Antes de este arreglo, `parseHistorial` la leía como "cero filas" y
+  // `trocearPorEjeFino` la reportaba como "el listado no devolvió ningún
+  // folio" — la limitación de un dato genuinamente vacío, no la de un portal
+  // que no contestó. El fallo tiene que PROPAGARSE tal cual (no convertirse en
+  // limitación) para que el consumidor sepa que hay que reintentar, no que
+  // ese día está vacío.
+  it('emitidos: si el listado del tercer nivel devuelve la página de error del portal, el fallo se propaga sin convertirse en "no devolvió ningún folio"', async () => {
+    const { scraper, http } = armar();
+    mockearListado(http, PORTAL_NO_DISPONIBLE);
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    let error: unknown;
+    try {
+      await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).not.toMatch(/no devolvió ningún folio/);
+  });
+
+  // Espejo RCP del test anterior: `listarRecibidosDelDia` puede recibir la
+  // misma página, y antes de este arreglo terminaba en "el listado no
+  // devolvió ningún emisor" en vez de propagar el fallo transitorio.
+  it('recibidos: si el listado del tercer nivel devuelve la página de error del portal, el fallo se propaga sin convertirse en "no devolvió ningún emisor"', async () => {
+    const { scraper, http } = armar();
+    mockearListado(http, PORTAL_NO_DISPONIBLE);
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    let error: unknown;
+    try {
+      await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).not.toMatch(/no devolvió ningún emisor/);
   });
 
   it('recibidos: el listado de 3 emisores agrupa en 3 descargas por contraparte', async () => {

@@ -161,3 +161,36 @@ export class ServicioOcupado extends Error {
     this.name = new.target.name;
   }
 }
+
+// El portal mipyme devolvió su PROPIA página de error interno («Error al
+// contribuyente» + «Por el momento no se puede responder a sus
+// requerimientos. Por favor, inténtelo más tarde») en vez de la tabla del
+// historial que se pidió. Medido contra el SII real: `mipeAdminDocsRcp.cgi`
+// respondió esta página para una empresa de alto volumen en una consulta sin
+// filtros, y el parser de historial —que sólo sabía leer filas de `<tr>`— la
+// interpretó como una tabla SIN filas, o sea "cero documentos". Un fallo
+// transitorio del portal, reportado como un dato vacío legítimo: peor que un
+// error, porque quien lo consume concluye que no hay nada que descargar.
+//
+// NO es `LimitacionConocida`: esa familia significa "el SII confirmó un
+// límite/dato y no lo arregla reintentar" (de ahí que el tercer nivel de
+// troceo reaccione trocheando más fino). Acá el propio mensaje del portal
+// pide reintentar más tarde — es exactamente lo opuesto, y tratarlo como una
+// limitación conocida llevaría a trocear un día que no tiene nada que
+// trocear: el problema no es cuántos documentos hay, es que el portal no
+// contestó.
+//
+// `codigo` lleva el `CODIGO: NN.NN.NNN.NN.NNN.NN` que cita el aviso, sólo para
+// mostrarlo en el mensaje (es lo que el SII pide dar en su mesa de ayuda). NO
+// participa de la detección: esos octetos parecen llevar datos de sesión o de
+// servidor y van a variar entre corridas, así que la detección se apoya en el
+// título y la frase fija del aviso.
+export class PortalSiiNoDisponible extends Error {
+  readonly codigo?: string;
+
+  constructor(mensaje: string, opciones?: { codigo?: string }) {
+    super(mensaje);
+    this.name = new.target.name;
+    this.codigo = opciones?.codigo;
+  }
+}
