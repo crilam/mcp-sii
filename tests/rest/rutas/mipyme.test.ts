@@ -37,6 +37,7 @@ describe('registrarRutasMipyme', () => {
       empresaRut: '44444444-4', origen: 'RCP' as const,
       fechaDesde: '2026-08-01', fechaHasta: '2026-08-31', documentos: 2,
       tramos: [{ fechaDesde: '2026-08-01', fechaHasta: '2026-08-31', documentos: 2, xml: '<SetDTE></SetDTE>' }],
+      limitaciones: [],
     };
 
     it('devuelve el XML crudo, sin base64', async () => {
@@ -179,6 +180,52 @@ describe('registrarRutasMipyme', () => {
 
       expect((r.body as any).tramos[0].nombre_archivo)
         .toBe('mipyme-respaldo-recibidos-444444444-2026-08-01-2026-08-31.xml');
+    });
+
+    // El consumidor (agenticerp) decide si tiene un respaldo PARCIAL mirando
+    // este campo: tiene que venir en snake_case, como el resto del contrato.
+    it('expone las limitaciones en snake_case, con lista vacía cuando no hubo', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue(RESULTADO);
+      const r1 = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+      expect((r1.body as any).limitaciones).toEqual([]);
+
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        tramos: [{ fechaDesde: '2026-08-01', fechaHasta: '2026-08-16', documentos: 2, xml: '<SetDTE></SetDTE>' }],
+        limitaciones: [
+          { fechaDesde: '2026-08-17', fechaHasta: '2026-08-31', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
+        ],
+      });
+      const r2 = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+      const body2 = r2.body as any;
+      expect(body2.ok).toBe(true);
+      expect(body2.limitaciones).toEqual([
+        { fecha_desde: '2026-08-17', fecha_hasta: '2026-08-31', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
+      ]);
+    });
+
+    // Cuando NO se bajó nada —todos los sub-rangos toparon, o el único tramo
+    // pedido topó y no había hermanos— un ok:true con tramos:[] sería
+    // indistinguible de "el período no tuvo documentos". La ruta sigue
+    // respondiendo ok:false/LIMITE_CONOCIDO, igual que antes de que el scraper
+    // dejara de lanzar.
+    it('responde ok:false LIMITE_CONOCIDO cuando ningún sub-rango se pudo bajar', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        documentos: 0,
+        tramos: [],
+        limitaciones: [
+          { fechaDesde: '2026-08-01', fechaHasta: '2026-08-01', motivo: 'El día 2026-08-01 tiene más de 20 documentos y el SII no entrega más por descarga. Pedí ese día con tipo_dte.' },
+        ],
+      });
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+
+      expect(r.status).toBe(200);
+      const body = r.body as any;
+      expect(body.ok).toBe(false);
+      expect(body.error).toBe('LIMITE_CONOCIDO');
+      expect(body.detalle).toMatch(/2026-08-01.*tipo_dte|tipo_dte.*2026-08-01/s);
     });
   });
 

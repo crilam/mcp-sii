@@ -264,50 +264,82 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(r.tramos[0].xml).toContain('Asesorías');
   });
 
-  // Los tramos ya bajados se pierden al fallar: el error tiene que decir cuáles
-  // eran, o el consumidor reintenta el rango entero y repite llamadas al SII que
-  // ya habían salido bien.
-  it('al fallar informa qué sub-rango sí se había descargado', async () => {
+  // Los tramos que ya se bajaron ya NO se pierden cuando otro sub-rango topa:
+  // vuelven en `tramos`, y el que topó queda en `limitaciones` con precisión
+  // para que el consumidor pueda reintentarlo acotado.
+  it('cuando un sub-rango topa sin fondo, lo bajado se devuelve y el resto queda como limitación', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock)
-      .mockResolvedValueOnce(binarioDemasiados())  // el rango entero
-      .mockResolvedValueOnce(binarioXml())         // primera mitad, OK
-      .mockResolvedValue(binarioDemasiados());     // segunda mitad, sin fondo
+      .mockResolvedValueOnce(binarioDemasiados())  // el rango entero (dos días)
+      .mockResolvedValueOnce(binarioXml())         // el primer día, OK
+      .mockResolvedValue(binarioDemasiados());     // el segundo día, sin fondo
 
-    await expect(scraper.respaldoXml(RANGO)).rejects.toThrow(/2026-08-01\.\.2026-08-16/);
+    const r = await scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-01', fechaHasta: '2026-08-02' });
+
+    expect(r.tramos).toHaveLength(1);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: '2026-08-01', fechaHasta: '2026-08-01' });
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ fechaDesde: '2026-08-02', fechaHasta: '2026-08-02' });
+    expect(r.documentos).toBe(2);
   });
 
   // Un solo día con más de 20 documentos no se puede partir más: el filtro por
-  // fecha se agotó. Falla con el motivo, en vez de devolver un respaldo
-  // incompleto que se lee igual que uno completo.
-  it('falla con un mensaje accionable cuando un solo día excede el tope', async () => {
+  // fecha se agotó. Se registra como limitación con el motivo, en vez de
+  // tirar todo el respaldo.
+  it('registra una limitación con mensaje accionable cuando un solo día excede el tope', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
 
-    await expect(scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-05', fechaHasta: '2026-08-05' }))
-      .rejects.toThrow(/2026-08-05.*más de 20|más de 20.*2026-08-05/s);
+    const r = await scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-05', fechaHasta: '2026-08-05' });
+
+    expect(r.tramos).toHaveLength(0);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].fechaDesde).toBe('2026-08-05');
+    expect(r.limitaciones[0].fechaHasta).toBe('2026-08-05');
+    expect(r.limitaciones[0].motivo).toMatch(/2026-08-05.*más de 20|más de 20.*2026-08-05/s);
   });
 
-  it('corta con aviso si el troceo supera el tope de tramos', async () => {
+  it('registra la limitación del rango pendiente si el troceo supera el tope de tramos', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
 
-    await expect(scraper.respaldoXml({ ...RANGO, maxTramos: 3 }))
-      .rejects.toThrow(/tramos/i);
+    const r = await scraper.respaldoXml({ ...RANGO, maxTramos: 3 });
+
+    expect(r.tramos).toHaveLength(0);
+    expect(r.limitaciones.length).toBeGreaterThan(0);
+    for (const l of r.limitaciones) {
+      expect(l.motivo).toMatch(/tramos/i);
+    }
   });
 
-  // El TIPO del error decide si el consumidor recibe la instrucción o no: un
-  // Error genérico sale de la ruta como `ERROR` y SIN detalle, que en este
-  // servicio significa "reintentá" — y estos dos fallos no se arreglan
-  // reintentando, así que el consumidor entraría en loop contra el SII.
-  it('los fallos permanentes del troceo son LimitacionConocida, no Error genérico', async () => {
+  // Cuando NINGÚN tope se toca, `limitaciones` es `[]` y todo lo demás sigue
+  // igual que antes del cambio: es la regresión que asegura que un respaldo
+  // sano no cambió de forma.
+  it('sin ningún tope, limitaciones es un arreglo vacío', async () => {
     const { scraper, http } = armar();
-    (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
+    (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
 
-    await expect(scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-05', fechaHasta: '2026-08-05' }))
-      .rejects.toBeInstanceOf(LimitacionConocida);
-    await expect(scraper.respaldoXml({ ...RANGO, maxTramos: 3 }))
-      .rejects.toBeInstanceOf(LimitacionConocida);
+    const r = await scraper.respaldoXml(RANGO);
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+  });
+
+  // `maxTramos` alcanzado a mitad de camino: lo bajado se devuelve, y la
+  // limitación describe exactamente el rango que quedó sin pedir (no el rango
+  // pedido completo, ni uno aproximado).
+  it('maxTramos alcanzado a mitad de camino devuelve lo bajado y limita sólo lo pendiente', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados())  // 08-01..08-31
+      .mockResolvedValueOnce(binarioXml());        // 08-01..08-16, OK — se agota el tope acá
+
+    const r = await scraper.respaldoXml({ ...RANGO, maxTramos: 2 });
+
+    expect(r.tramos).toHaveLength(1);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: '2026-08-01', fechaHasta: '2026-08-16' });
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ fechaDesde: '2026-08-17', fechaHasta: '2026-08-31' });
   });
 
   // Éste NO: se verificó en vivo que el mismo rango falla una vez y responde el
