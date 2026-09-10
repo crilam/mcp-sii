@@ -1464,6 +1464,55 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(llamadas[1][1]).toMatchObject({ FOLIO: '10', FOLIOHASTA: '11' });
   });
 
+  // Criterio corregido (ronda 9): sólo se descarta un tipo MAPEADO que no
+  // coincide, no lo que `TIPO_DTE_NOMBRES` no supo mapear (`tipoDte` cae en
+  // `0`). Una variante de nombre ausente del mapa NO puede perder folios
+  // reales: se piden igual, junto con los del tipo pedido.
+  it('emitidos: una variante de nombre no mapeada por TIPO_DTE_NOMBRES no se descarta, se pide igual', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 10, tipoNombre: 'Factura Electronica' },      // tipo 33, el de DIA
+      { folio: 999, tipoNombre: 'Variante Rara Sin Mapear' }, // TIPO_DTE_NOMBRES no la tiene: tipoDte 0
+    ];
+    mockearListado(http, historialEmitidosMixtoHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero, sin folio
+      .mockResolvedValueOnce(binarioXmlConFolios(33, [10, 999])); // el grupo, con AMBOS folios
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+    expect(r.documentos).toBe(2);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    // El folio 999 (sin mapear) SIGUE en el grupo pedido: si se descartara
+    // como el tipo ajeno (5000 del test anterior), este rango sería 10..10.
+    expect(llamadas[1][1]).toMatchObject({ FOLIO: '10', FOLIOHASTA: '999' });
+  });
+
+  // Con TODOS los documentos sin mapear (el bug real que motivó el criterio:
+  // una variante de nombre ausente hace que `folios` termine vacío después de
+  // acotar por `folio_desde`/`folio_hasta`), la limitación de "no devolvió
+  // ningún folio" tiene que avisar que `TIPO_DTE_NOMBRES` puede ser la causa,
+  // no sólo culpar al portal.
+  it('emitidos: con folios sin mapear presentes, el motivo de "sin folios" nombra TIPO_DTE_NOMBRES', async () => {
+    const { scraper, http } = armar();
+    // El único documento del día es de una variante no mapeada (tipoDte 0,
+    // pasa el filtro), pero su folio (500) queda FUERA del rango de folio que
+    // pide el caller (1..10): `acotarPorFolio` lo saca y `folios` da vacío.
+    const docs = [{ folio: 500, tipoNombre: 'Variante Rara Sin Mapear' }];
+    mockearListado(http, historialEmitidosMixtoHtml(docs));
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', ...DIA, folioDesde: 1, folioHasta: 10,
+    });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/TIPO_DTE_NOMBRES/);
+  });
+
   // Espejo del caso ENV equivalente: si el listado de recibidos no trae NINGÚN
   // emisor, la limitación tiene que llevar el `folio_desde`/`folio_hasta` del
   // caller igual que del lado emitido — es el mismo filtro exacto que no se

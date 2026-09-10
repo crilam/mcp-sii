@@ -214,6 +214,21 @@ const TIPO_DTE_NOMBRES: Record<string, number> = {
   'Factura de Compra Electronica': 46,
 };
 
+// Cláusula corta para adjuntar al `motivo` de cualquier limitación de un
+// día+tipo cuando el listado trajo documentos con un nombre de tipo que
+// `TIPO_DTE_NOMBRES` no supo mapear (`tipoDte` cayó en `0`, ver el comentario
+// del mapa más arriba). Esos documentos se INCLUYEN al trocear por folio o
+// contraparte —no se descartan, ver `trocearPorEjeFino`—, pero si el
+// resultado igual sorprende (menos folios de los esperados, un rango que no
+// cierra), el mapa incompleto es una causa tan probable como el portal, y sin
+// esta nota el diagnóstico apunta sólo al SII.
+function notaTipoNoMapeado(sinMapear: number): string {
+  if (sinMapear === 0) return '';
+  return ` Ojo: el listado trajo ${sinMapear} documento${sinMapear === 1 ? '' : 's'} con un nombre de `
+    + `tipo que TIPO_DTE_NOMBRES no reconoce (tipoDte cayó en 0); si este resultado sorprende, revisá `
+    + `el mapa antes de asumir que es el portal.`;
+}
+
 export interface DteEmitidoMipyme {
   tipoDte: number;
   tipoDteNombre: string;
@@ -1029,7 +1044,18 @@ export class MipymeHttpScraper {
       // convierte ese barrido silencioso en cero folios de este tipo +
       // limitación explícita, igual que "el listado no devolvió ningún folio"
       // de más abajo.
-      const documentosDelTipo = documentos.filter(d => d.tipoDte === ctx.filtros.tipoDte);
+      //
+      // `|| d.tipoDte === 0`: sólo se descarta lo que tiene un tipo MAPEADO
+      // que no coincide —el único caso donde este filtro protege contra un
+      // CGI que ignora `TPO_DOC`—. Lo que `TIPO_DTE_NOMBRES` no supo mapear
+      // (una variante de nombre que falta en el mapa, ya pasó en vivo) se
+      // DEJA PASAR: descartarlo perdería documentos reales y el diagnóstico
+      // de la limitación de "no devolvió ningún folio" apuntaría al portal en
+      // vez de al mapa incompleto. Bajar de más ya se acepta en el resto del
+      // troceo (ver el comentario sobre folios no contiguos); perder
+      // documentos, no.
+      const documentosDelTipo = documentos.filter(d => d.tipoDte === ctx.filtros.tipoDte || d.tipoDte === 0);
+      const sinMapear = documentos.filter(d => d.tipoDte === 0).length;
 
       // El listado NO filtra por rango de folio (no lo soporta como filtro de
       // fecha/tipo), así que trae TODOS los folios del día+tipo. Se acota ACÁ
@@ -1059,12 +1085,12 @@ export class MipymeHttpScraper {
             `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
             + `(tipo ${ctx.filtros.tipoDte}), pero el listado de emitidos no devolvió ningún folio`
             + `${rango} para ese día y tipo. El listado y la descarga no cuentan igual; sin folios `
-            + `no se puede trocear más fino.`,
+            + `no se puede trocear más fino.${notaTipoNoMapeado(sinMapear)}`,
         });
         return;
       }
       await this.descargarListaDeGrupos(
-        ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos);
+        ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos, sinMapear);
       return;
     }
 
@@ -1096,7 +1122,14 @@ export class MipymeHttpScraper {
     // Filtrar acá convierte ese barrido silencioso en cero folios de este
     // tipo + limitación explícita, igual que "el listado no devolvió ningún
     // emisor" de más abajo.
-    const documentosDelTipo = documentos.filter(d => d.tipoDte === ctx.filtros.tipoDte);
+    //
+    // `|| d.tipoDte === 0`: igual que del lado ENV, sólo se descarta lo que
+    // tiene un tipo MAPEADO que no coincide. Lo que `TIPO_DTE_NOMBRES` no supo
+    // mapear se deja pasar —descartarlo perdería documentos reales por un
+    // nombre de variante que falta en el mapa, y el diagnóstico de "no
+    // devolvió ningún emisor" apuntaría al portal en vez de al mapa—.
+    const documentosDelTipo = documentos.filter(d => d.tipoDte === ctx.filtros.tipoDte || d.tipoDte === 0);
+    const sinMapear = documentos.filter(d => d.tipoDte === 0).length;
 
     const foliosPorEmisor = new Map<string, number[]>();
     for (const d of documentosDelTipo) {
@@ -1118,7 +1151,7 @@ export class MipymeHttpScraper {
           `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
           + `(tipo ${ctx.filtros.tipoDte}), pero el listado de recibidos no devolvió ningún emisor `
           + `para ese día y tipo. El listado y la descarga no cuentan igual; sin emisores no se `
-          + `puede trocear más fino.`,
+          + `puede trocear más fino.${notaTipoNoMapeado(sinMapear)}`,
       });
       return;
     }
@@ -1160,7 +1193,7 @@ export class MipymeHttpScraper {
             `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para trocear por `
             + `contraparte el ${dia} (tipo ${ctx.filtros.tipoDte}): quedaron ${pendientes.length} `
             + `emisores sin procesar (${listados}${resto}). Pedí este día con un maxTramos más alto `
-            + `o acotá con contraparte_rut.`,
+            + `o acotá con contraparte_rut.${notaTipoNoMapeado(sinMapear)}`,
         });
         break;
       }
@@ -1184,7 +1217,7 @@ export class MipymeHttpScraper {
       if (ctx.filtros.contraparteRut != null || folios.length >= TOPE_DOCUMENTOS_SII) {
         await this.descargarListaDeGrupos(
           ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
-          tramos, limitaciones, maxTramos);
+          tramos, limitaciones, maxTramos, sinMapear);
         continue;
       }
 
@@ -1197,7 +1230,7 @@ export class MipymeHttpScraper {
         // gasta el presupuesto en una llamada condenada a fallar.
         await this.descargarListaDeGrupos(
           ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
-          tramos, limitaciones, maxTramos);
+          tramos, limitaciones, maxTramos, sinMapear);
         continue;
       }
       tramos.push({
@@ -1298,7 +1331,8 @@ export class MipymeHttpScraper {
   // sin rango): es un dato roto, no hay forma de afinar más. Se factoriza acá
   // porque los dos call-sites arman el mismo mensaje.
   private limitacionFolioUnico(
-    dia: string, folio: number, tipoDte: number | undefined, contraparteRut: string | undefined
+    dia: string, folio: number, tipoDte: number | undefined, contraparteRut: string | undefined,
+    sinMapear: number = 0
   ): LimitacionRespaldoXml {
     const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
     return {
@@ -1307,7 +1341,8 @@ export class MipymeHttpScraper {
       motivo:
         `El folio ${folio} del ${dia}${contraparte} excede por sí solo el tope de `
         + `${TOPE_DOCUMENTOS_SII} documentos del SII: es un único folio y el filtro ya no se `
-        + `puede afinar más. El listado y la descarga no cuentan igual para este caso puntual.`,
+        + `puede afinar más. El listado y la descarga no cuentan igual para este caso puntual.`
+        + `${notaTipoNoMapeado(sinMapear)}`,
     };
   }
 
@@ -1329,16 +1364,25 @@ export class MipymeHttpScraper {
     folioDesde: number,
     folioHasta: number,
     contraparteRut: string | undefined,
-    maxTramos: number
+    maxTramos: number,
+    sinMapear: number = 0
   ): LimitacionRespaldoXml {
     const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
       contraparteRut, folioDesde, folioHasta,
+      // `folioDesde`/`folioHasta` acá son el ENVOLVENTE (`Math.min`/`Math.max`)
+      // de los folios PENDIENTES, no necesariamente contiguo: con huecos entre
+      // grupos (p.ej. folios 100..101 y 900..901 pendientes), el rango sale
+      // 100..901 aunque los folios de en medio ya se hayan bajado o sean de
+      // otro tipo. Repetir este rango es seguro —vuelve a traer documentos ya
+      // guardados o ajenos, nunca los pierde— pero baja de más; no es "el
+      // filtro exacto" que prometen otras limitaciones de este mismo tipo.
       motivo:
         `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para bajar los `
-        + `folios ${folioDesde}..${folioHasta} del ${dia}${contraparte}. Pedí un maxTramos más `
-        + `alto o acotá el rango de folios.`,
+        + `folios ${folioDesde}..${folioHasta} del ${dia}${contraparte} (rango envolvente de los `
+        + `folios pendientes, puede incluir folios ya bajados o de otro tipo). Pedí un maxTramos `
+        + `más alto o acotá el rango de folios.${notaTipoNoMapeado(sinMapear)}`,
     };
   }
 
@@ -1364,7 +1408,8 @@ export class MipymeHttpScraper {
     overrideBase: { contraparteRut?: string },
     tramos: TramoRespaldoXml[],
     limitaciones: LimitacionRespaldoXml[],
-    maxTramos: number
+    maxTramos: number,
+    sinMapear: number = 0
   ): Promise<void> {
     for (let i = 0; i < grupos.length; i++) {
       if (ctx.descargas >= maxTramos) {
@@ -1376,10 +1421,11 @@ export class MipymeHttpScraper {
         // `contraparte_rut` que hace falta para repetir el pedido exacto.
         limitaciones.push(this.limitacionPresupuestoFolios(
           ctx, dia, Math.min(...restantes), Math.max(...restantes),
-          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos));
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos, sinMapear));
         return;
       }
-      await this.descargarGrupoConBiseccion(ctx, dia, grupos[i], overrideBase, tramos, limitaciones, maxTramos);
+      await this.descargarGrupoConBiseccion(
+        ctx, dia, grupos[i], overrideBase, tramos, limitaciones, maxTramos, sinMapear);
     }
   }
 
@@ -1390,7 +1436,8 @@ export class MipymeHttpScraper {
     overrideBase: { contraparteRut?: string },
     tramos: TramoRespaldoXml[],
     limitaciones: LimitacionRespaldoXml[],
-    maxTramos: number
+    maxTramos: number,
+    sinMapear: number = 0
   ): Promise<void> {
     // Iterativo con una PILA (no recursión) para poder COLAPSAR los grupos
     // hermanos que quedan sin intentar cuando se agota `maxTramos` a mitad de
@@ -1410,7 +1457,7 @@ export class MipymeHttpScraper {
         // fijado (vive en `ctx.filtros`).
         limitaciones.push(this.limitacionPresupuestoFolios(
           ctx, dia, Math.min(...restantes), Math.max(...restantes),
-          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos));
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos, sinMapear));
         return;
       }
 
@@ -1423,7 +1470,8 @@ export class MipymeHttpScraper {
       if (respuesta.excedeTope) {
         if (grupo.length === 1) {
           limitaciones.push(this.limitacionFolioUnico(
-            dia, folioDesde, ctx.filtros.tipoDte, overrideBase.contraparteRut ?? ctx.filtros.contraparteRut));
+            dia, folioDesde, ctx.filtros.tipoDte, overrideBase.contraparteRut ?? ctx.filtros.contraparteRut,
+            sinMapear));
           continue;
         }
         const mitad = Math.floor(grupo.length / 2);
