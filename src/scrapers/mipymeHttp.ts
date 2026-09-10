@@ -1055,49 +1055,24 @@ export class MipymeHttpScraper {
     if (ctx.descargas > 0) await esperar(pausaConfigurada());
     ctx.descargas += 1;
 
-    let respuesta: { xml: string; excedeTope: boolean };
-    try {
-      respuesta = await this.descargarTramo(ctx, desde, hasta);
-    } catch (e) {
-      // ESTE es el camino que corre SIEMPRE, con o sin
-      // `RESPALDO_XML_TERCER_NIVEL` (que en producción está apagado): a
-      // diferencia de `listarEmitidosDelDia`/`listarRecibidosDelDia`, que
-      // sólo se alcanzan con el flag prendido, `descargarTramo` es la
-      // descarga principal y corre en TODA empresa. Dejar escapar
-      // `PortalSiiNoDisponible` acá —como hacía antes de este arreglo— se
-      // lleva puesto el arreglo `tramos` de los rangos hermanos que YA se
-      // habían bajado bien: el mismo desperdicio de #98, pero en el camino
-      // que de verdad se ejecuta en producción, no en el opcional.
-      //
-      // Se re-lanza cualquier OTRA cosa (el propio "no es un SetDTE" de
-      // `descargarTramo`, un bug real, lo que sea): un catch ancho acá
-      // convertiría un error nuestro en una limitación silenciosa, que es
-      // justo la clase de fallo que este PR entero existe para sacar a la
-      // luz. Sólo `PortalSiiNoDisponible` tiene un diagnóstico conocido y
-      // reintentable que vale la pena cargar como limitación en vez de
-      // hacer explotar la corrida entera.
-      if (!(e instanceof PortalSiiNoDisponible)) throw e;
-      // Contador de DESCARGA (ver `DIAS_PORTAL_CAIDO_PARA_CORTAR`): esta es
-      // una de las superficies que corre siempre, con o sin el tercer nivel.
-      ctx.diasPortalCaidoDescarga += 1;
+    // ESTE es el camino que corre SIEMPRE, con o sin
+    // `RESPALDO_XML_TERCER_NIVEL` (que en producción está apagado): a
+    // diferencia de `listarEmitidosDelDia`/`listarRecibidosDelDia`, que sólo
+    // se alcanzan con el flag prendido, `descargarTramo` (vía
+    // `descargarTramoSeguro`, ver ahí el porqué de este wrapper único) es la
+    // descarga principal y corre en TODA empresa.
+    const resultado = await this.descargarTramoSeguro(ctx, desde, hasta);
+    if ('error' in resultado) {
       limitaciones.push({
         fechaDesde: desde,
         fechaHasta: hasta,
         motivo:
           `El portal del SII no contestó para ${desde}${desde !== hasta ? `..${hasta}` : ''}: `
-          + `${e.message}`,
+          + `${resultado.error.message}`,
       });
       return;
     }
-    // El reset va DESPUÉS del chequeo de `excedeTope`, no acá: un rango
-    // intermedio que excede el tope es sólo una parada de la bisección, no
-    // una confirmación de que el día en curso está sano. Verificado en vivo:
-    // con un rango parejo (p.ej. 8 días → 4+4 → 2+2), cada nodo intermedio
-    // que exceda el tope resetea la racha de fallos ANTES de que los días
-    // hoja lleguen a acumular `DIAS_PORTAL_CAIDO_PARA_CORTAR` seguidos,
-    // dejando el corte CIEGO para siempre en un rango ancho con el portal
-    // realmente caído. Sólo una descarga que trae contenido real (sin
-    // exceder el tope) es evidencia de que el portal está respondiendo.
+    const respuesta = resultado;
     if (respuesta.excedeTope) {
       if (desde === hasta) {
         // El filtro por fecha se agotó: un solo día no se puede partir más. Con
@@ -1143,10 +1118,8 @@ export class MipymeHttpScraper {
       return;
     }
 
-    // Contenido real, sin exceder el tope: acá sí es evidencia de que el
-    // portal está respondiendo. Rompe la racha de fallos de DESCARGA; no
-    // toca `diasPortalCaidoListado` (son CGI distintos).
-    ctx.diasPortalCaidoDescarga = 0;
+    // El reset de `diasPortalCaidoDescarga` ya ocurrió dentro de
+    // `descargarTramoSeguro` (sólo si `!excedeTope`, ver ahí el porqué).
     tramos.push({
       fechaDesde: desde,
       fechaHasta: hasta,
@@ -1426,6 +1399,27 @@ export class MipymeHttpScraper {
         });
         break;
       }
+      // Mismo corte que en `acumularTramos`/`descargarGrupoConBiseccion`/
+      // `descargarListaDeGrupos` (ver `limitacionPortalCaidoDescarga`): sin
+      // este chequeo ACÁ, la descarga plana por emisor podría iterar todos
+      // los emisores del día contra un portal caído antes de que
+      // `acumularTramos` vuelva a mirar el contador.
+      if (ctx.diasPortalCaidoDescarga >= DIAS_PORTAL_CAIDO_PARA_CORTAR) {
+        const pendientes = entradas.slice(i).map(([rut]) => rut);
+        const listados = pendientes.slice(0, 10).join(', ');
+        const resto = pendientes.length > 10 ? ` y ${pendientes.length - 10} más` : '';
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
+          contraparteRut: ctx.filtros.contraparteRut,
+          motivo:
+            `El portal del SII respondió su página de error genérica en ${ctx.diasPortalCaidoDescarga} `
+            + `descargas consecutivas: parece estar caído. Quedaron ${pendientes.length} emisores sin `
+            + `procesar del ${dia} (tipo ${ctx.filtros.tipoDte}) (${listados}${resto}); reintentá más `
+            + `tarde.${notaTipoNoMapeado(sinMapear)}`,
+        });
+        break;
+      }
 
       // Dos atajos que se saltan la descarga "plana" del emisor entero
       // porque ya se sabe (o se sospecha con fundamento) que va a exceder:
@@ -1454,7 +1448,21 @@ export class MipymeHttpScraper {
       }
 
       await this.consumirPresupuesto(ctx, maxTramos);
-      const respuesta = await this.descargarTramo(ctx, dia, dia, { contraparteRut: emisorRut });
+      // Descarga PLANA del emisor entero (sin agrupar por folio): mismo
+      // wrapper que las otras dos superficies de descarga por tramo — ver
+      // `descargarTramoSeguro` para el porqué de que sea uno solo.
+      const resultado = await this.descargarTramoSeguro(ctx, dia, dia, { contraparteRut: emisorRut });
+      if ('error' in resultado) {
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          contraparteRut: emisorRut, razonSocial: ctx.filtros.razonSocial,
+          motivo:
+            `El portal del SII no contestó para el emisor ${emisorRut} del ${dia}: `
+            + `${resultado.error.message}`,
+        });
+        continue;
+      }
+      const respuesta = resultado;
       if (respuesta.excedeTope) {
         // Igual que ENV: el grupo que se intenta primero es de a lo sumo
         // `TOPE_DOCUMENTOS_SII` folios, no el emisor entero — con 45 folios de
@@ -1930,18 +1938,10 @@ export class MipymeHttpScraper {
       const folioHasta = grupo[grupo.length - 1];
 
       await this.consumirPresupuesto(ctx, maxTramos);
-      let respuesta: { xml: string; excedeTope: boolean };
-      try {
-        respuesta = await this.descargarTramo(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
-      } catch (e) {
-        // Misma superficie de DESCARGA que la de `acumularTramos` (mismo CGI,
-        // `lista_documentos.cgi`/`download.cgi`, sólo que acá con filtro de
-        // folio): sin este catch, el error escapa por toda la cadena
-        // (`descargarListaDeGrupos` ← `trocearPorEjeFino` ← `acumularTramos`)
-        // sin que nadie más lo atrape, y se lleva puesto el arreglo `tramos`
-        // de los grupos y días hermanos ya bajados.
-        if (!(e instanceof PortalSiiNoDisponible)) throw e;
-        ctx.diasPortalCaidoDescarga += 1;
+      // Mismo wrapper que las otras dos superficies de descarga por tramo —
+      // ver `descargarTramoSeguro`.
+      const resultado = await this.descargarTramoSeguro(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
+      if ('error' in resultado) {
         // Mismo campo (folioDesde/folioHasta) que `limitacionPresupuestoFolios`
         // pero motivo propio: acá no se agotó el presupuesto, el portal no
         // contestó para este rango de folios puntual.
@@ -1952,14 +1952,11 @@ export class MipymeHttpScraper {
           folioDesde, folioHasta,
           motivo:
             `El portal del SII no contestó para los folios ${folioDesde}..${folioHasta} del ${dia}: `
-            + `${e.message}`,
+            + `${resultado.error.message}`,
         });
         continue;
       }
-      // Mismo criterio que en `acumularTramos`: un grupo que excede el tope
-      // es sólo una parada de ESTA bisección por folio, no evidencia de que
-      // el portal esté sano — resetear acá también dejaría ciego el corte
-      // ante un rango parejo de folios con el portal realmente caído.
+      const respuesta = resultado;
       if (respuesta.excedeTope) {
         if (grupo.length === 1) {
           limitaciones.push(this.limitacionFolioUnico(
@@ -1973,9 +1970,8 @@ export class MipymeHttpScraper {
         pendientes.push(grupo.slice(0, mitad));   // izquierda: queda en el tope de la pila
         continue;
       }
-      // Contenido real, sin exceder el tope: rompe la racha de fallos de
-      // DESCARGA; no toca `diasPortalCaidoListado`.
-      ctx.diasPortalCaidoDescarga = 0;
+      // El reset de `diasPortalCaidoDescarga` ya ocurrió dentro de
+      // `descargarTramoSeguro` (sólo si `!excedeTope`).
 
       // `grupo` es una LISTA DISCRETA de folios (los extremos pedidos como
       // rango son sólo el filtro más económico en llamadas: pedir folio por
@@ -2000,6 +1996,62 @@ export class MipymeHttpScraper {
         xml: respuesta.xml,
       });
     }
+  }
+
+  // ÚNICO punto por el que puede pasar una descarga de tramo: cuatro rondas
+  // seguidas de review encontraron la MISMA clase de bug —un call-site nuevo
+  // de `descargarTramo` sin su propio try/catch, que se lleva puestos los
+  // tramos hermanos ya bajados cuando el portal devuelve su página de
+  // error— cada vez en una superficie distinta (la descarga principal, la
+  // descarga por folio del tercer nivel, la descarga plana por emisor). Ya
+  // no alcanza con parchear una por una: este wrapper hace el catch y el
+  // conteo de `diasPortalCaidoDescarga` una sola vez, así que agregar un
+  // call-site nuevo que se olvide de la protección deja de ser posible por
+  // descuido — el único camino hacia `descargarTramo` es a través de acá.
+  // `descargarTramo` en sí queda privado y SIN otro llamador en el archivo;
+  // un test en `mipymeRespaldoXml.test.ts` (`grep`-eando el código fuente)
+  // verifica que siga siendo así, para que la invariante no dependa sólo de
+  // este comentario si alguien agrega un call-site nuevo sin pasar por acá.
+  //
+  // El caller decide qué hacer con el resultado —seguir bisectando o armar
+  // SU PROPIA limitación— porque cada superficie conoce datos que este
+  // método no tiene (el folio, la contraparte, el emisor); centralizar eso
+  // acá obligaría a este wrapper a conocer la forma de cinco limitaciones
+  // distintas. Se devuelve el error atrapado, no un `null` genérico, para
+  // que el caller arme su mensaje con `error.message` sin tener que volver a
+  // capturar nada.
+  private async descargarTramoSeguro(
+    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; diasPortalCaidoDescarga: number },
+    desde: string,
+    hasta: string,
+    overrides?: Partial<Pick<FiltrosRespaldoXml, 'folioDesde' | 'folioHasta' | 'contraparteRut'>>
+  ): Promise<{ xml: string; excedeTope: boolean } | { error: PortalSiiNoDisponible }> {
+    let respuesta: { xml: string; excedeTope: boolean };
+    try {
+      respuesta = await this.descargarTramo(ctx, desde, hasta, overrides);
+    } catch (e) {
+      // Se re-lanza cualquier OTRA cosa (el propio "no es un SetDTE" de
+      // `descargarTramo`, un bug real, lo que sea): un catch ancho acá
+      // convertiría un error nuestro en una limitación silenciosa, que es
+      // justo la clase de fallo que este PR entero existe para sacar a la
+      // luz. Sólo `PortalSiiNoDisponible` tiene un diagnóstico conocido y
+      // reintentable que vale la pena cargar como limitación en vez de
+      // hacer explotar la corrida entera.
+      if (!(e instanceof PortalSiiNoDisponible)) throw e;
+      ctx.diasPortalCaidoDescarga += 1;
+      return { error: e };
+    }
+    // El reset va DESPUÉS del chequeo de `excedeTope`, no antes: un rango (o
+    // grupo de folios) intermedio que excede el tope es sólo una parada de
+    // la bisección, no una confirmación de que el día en curso está sano.
+    // Verificado en vivo: con un split parejo, cada nodo intermedio que
+    // exceda el tope resetearía la racha de fallos ANTES de que las hojas
+    // lleguen a acumular `DIAS_PORTAL_CAIDO_PARA_CORTAR` seguidos, dejando
+    // el corte CIEGO para siempre en un rango ancho con el portal realmente
+    // caído. Sólo una descarga que trae contenido real es evidencia de que
+    // el portal está respondiendo.
+    if (!respuesta.excedeTope) ctx.diasPortalCaidoDescarga = 0;
+    return respuesta;
   }
 
   private async descargarTramo(
@@ -2852,11 +2904,15 @@ export class MipymeHttpScraper {
   // Vive SOLO, sin depender de `assertEmpresaSeleccionada` ni fundirse con
   // ella (ver el comentario en los call-sites del historial): es un tipo de
   // error DISTINTO —no se sabe que falta la selección de empresa, se sabe que
-  // el portal no pudo responder—, y hoy lo llaman siete lugares que no
-  // comparten nada más: los cuatro del historial (par con
-  // `assertEmpresaSeleccionada`), y `descargarTramo`/`dtePdf`/`pedirBorradores`
-  // (solos, sin ese otro chequeo, porque el CGI de esas tres reporta la falta
-  // de selección con SU PROPIO mensaje, no con éste).
+  // el portal no pudo responder.
+  //
+  // A propósito NO se enumeran acá los call-sites ni su cantidad: esa cuenta
+  // envejece cada vez que se agrega una superficie nueva y ya quedó vieja
+  // más de una vez. La invariante que importa es otra: cualquier llamada al
+  // portal que pueda recibir esta página tiene que pasar por este assert (o,
+  // si es parte de la acumulación de tramos del respaldo XML, por
+  // `descargarTramoSeguro`, el único wrapper por el que `descargarTramo`
+  // puede llamarse — ver su comentario para el porqué).
   //
   // FUERA de esta lista, a propósito: `emitirDte`/`guardarBorrador`
   // (`PREVIEW_URL`/`FIRMA_URL`/`GRABA_BORRADOR_URL`). Esas rutas de ESCRITURA

@@ -1296,6 +1296,77 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     });
   });
 
+  // La quinta superficie: la descarga PLANA por emisor (RCP, emisor con ≤20
+  // folios y sin `contraparteRut` fijado por el caller) llamaba a
+  // `descargarTramo` directo, sin pasar por ningún wrapper — el camino más
+  // común de un día RCP con pocos documentos por contraparte. Un día previo
+  // que baja bien tiene que sobrevivir en `tramos` cuando el emisor
+  // SIGUIENTE del mismo día choca con la página de error.
+  it('recibidos: un día que baja bien + un emisor cuya descarga plana devuelve la página de error — el día anterior sobrevive, el emisor queda como limitación', async () => {
+    const { scraper, http } = armar();
+    const DIA_1 = '2026-08-05';
+    const DIA_2 = '2026-08-06';
+    const docs = [
+      { folio: 1, emisorRut: '11111111-1' },
+      { folio: 2, emisorRut: '22222222-2' },
+    ];
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValueOnce(historialRecibidosHtml(docs)); // listado del día 2: OK
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // rango completo: excede, bisecta
+      .mockResolvedValueOnce(binarioXml())        // día 1 solo: baja completo
+      .mockResolvedValueOnce(binarioDemasiados()) // día 2 solo: excede, dispara el tercer nivel
+      .mockResolvedValueOnce(binarioXml())        // emisor 11111111, plano: baja bien
+      .mockResolvedValueOnce({                    // emisor 22222222, plano: página de error
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', fechaDesde: DIA_1, fechaHasta: DIA_2, tipoDte: 33,
+    });
+
+    // El día 1 Y el emisor 11111111 (que bajó antes que el que falla)
+    // SOBREVIVEN: esto es lo que un `throw` sin capturar destruía.
+    expect(r.tramos).toHaveLength(2);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: DIA_1, fechaHasta: DIA_1 });
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({
+      fechaDesde: DIA_2, fechaHasta: DIA_2, contraparteRut: '22222222-2',
+    });
+    expect(r.limitaciones[0].motivo).toMatch(/no contestó/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // Mismo corte que en las otras superficies de descarga (ver
+  // `DIAS_PORTAL_CAIDO_PARA_CORTAR`), acá aplicado al loop por emisor: con
+  // muchos emisores y el portal caído para toda descarga plana, el número de
+  // llamadas queda acotado por el corte, no por la cantidad de emisores.
+  it('recibidos: con muchos emisores y toda descarga plana devolviendo la página de error, el corte acota las llamadas', async () => {
+    const { scraper, http } = armar();
+    const docs = Array.from({ length: 20 }, (_, i) => ({
+      folio: i + 1, emisorRut: `${10000000 + i}-${i % 10}`,
+    }));
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.RUT_RECP === '') return Promise.resolve(binarioDemasiados()); // el día entero, sin emisor
+      return Promise.resolve({
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+    });
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA, maxTramos: 48 });
+
+    expect(r.tramos).toEqual([]);
+    // Muy por debajo de las 20 llamadas de emisor que saldrían sin el corte
+    // (+1 del día entero): el corte se dispara a los 3 fallos consecutivos.
+    expect((http.getBinario as jest.Mock).mock.calls.length).toBeLessThanOrEqual(6);
+    expect(r.limitaciones.some(l => l.motivo.includes('parece estar caído'))).toBe(true);
+  });
+
   // El presupuesto puede agotarse a mitad de la BISECCIÓN de un emisor y
   // ANTES de llegar al siguiente: dos limitaciones distintas, no una — la del
   // primer emisor con los folios que le quedaron pendientes (colapsados por
@@ -2400,5 +2471,22 @@ describe('enGrupos', () => {
 
   it('lista vacía, ningún grupo', () => {
     expect(enGrupos([], 20)).toEqual([]);
+  });
+});
+
+// Invariante estructural: cuatro rondas seguidas de review encontraron el
+// mismo bug (un call-site de `descargarTramo` sin su propio try/catch para
+// `PortalSiiNoDisponible`, cada vez en una superficie distinta), porque nada
+// impedía agregar uno nuevo sin la protección. `descargarTramoSeguro` es
+// ahora el único wrapper permitido: este test lee el código fuente y falla
+// si aparece una segunda llamada a `this.descargarTramo(` fuera de él, para
+// que la próxima superficie que alguien agregue no pueda repetir el bug sin
+// que la suite lo note.
+describe('invariante: descargarTramo sólo se llama desde descargarTramoSeguro', () => {
+  it('no hay un call-site nuevo de this.descargarTramo( por fuera del wrapper', () => {
+    const fuente = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'scrapers', 'mipymeHttp.ts'), 'utf-8');
+    const ocurrencias = fuente.match(/this\.descargarTramo\(/g) ?? [];
+    expect(ocurrencias).toHaveLength(1);
   });
 });
