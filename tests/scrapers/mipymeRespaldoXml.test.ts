@@ -36,6 +36,16 @@ function fixture(nombre: string): string {
 const SEL_EMPRESA = fixture('mipyme-sel-empresa.html');
 const SET_DTE = fixture('mipyme-respaldo-setdte.xml');
 const DEMASIADOS = fixture('mipyme-respaldo-demasiados.html');
+const PORTAL_NO_DISPONIBLE = fixture('mipyme-portal-no-disponible.html');
+
+// El título («Error al contribuyente») vive en el `<head>` y el aviso («no se
+// puede responder...») al final del `<body>`, en los extremos opuestos de la
+// página real (envuelta en el layout completo del portal: menú, JS, hojas de
+// estilo, a diferencia del fixture sintético). Un slice que corte antes de
+// llegar al aviso deja pasar la página sin detectarla.
+function conRelleno(html: string, bytes = 6000): string {
+  return html.replace('<script', `<!-- ${'x'.repeat(bytes)} -->\n<script`);
+}
 
 function binarioXml(xml: string = SET_DTE) {
   return {
@@ -580,6 +590,171 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     await expect(scraper.respaldoXml(RANGO)).rejects.toThrow(/SetDTE|no devolvió/i);
   });
 
+  // Unifica el mismo síntoma con el del historial: la descarga del respaldo
+  // puede recibir la misma página de error genérica del portal.
+  // `acumularTramos` la captura y la carga como `LimitacionRespaldoXml` del
+  // rango que estaba pidiendo (no como el Error genérico de "no SetDTE" ni
+  // propagada), y `respaldoXml` sigue resolviendo sin perder tramos hermanos
+  // (ver el test multi-día más abajo).
+  it('la página de error genérica del portal queda como limitación del rango, no como el Error genérico de "no SetDTE" ni propagada', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValue({
+      contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+      contentType: 'text/html',
+    });
+
+    const r = await scraper.respaldoXml(RANGO);
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió|SetDTE/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // Con varios KB de relleno entre el título y el aviso —como viene la página
+  // real, envuelta en el layout del portal—, un slice de los primeros bytes
+  // corta el aviso antes de llegar a él y la detección no dispara. Falla sin
+  // pasar el texto completo al assert.
+  it('detecta la página de error aunque haya varios KB de relleno entre el título y el aviso', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValue({
+      contenido: Buffer.from(conRelleno(PORTAL_NO_DISPONIBLE), 'latin1'),
+      contentType: 'text/html',
+    });
+
+    const r = await scraper.respaldoXml(RANGO);
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió|SetDTE/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // Este camino (`descargarTramo` dentro de `acumularTramos`) corre SIEMPRE,
+  // con o sin `RESPALDO_XML_TERCER_NIVEL` —que en producción está APAGADO—.
+  // Dos días: el primero baja su SetDTE completo; el segundo excede el tope
+  // UNA vez (fuerza la bisección a día por día) y, al pedirse solo, el portal
+  // devuelve su página de error en vez del SetDTE. El día 1 tiene que
+  // SOBREVIVIR en `tramos`, que es justo lo que un test de un solo día no
+  // puede verificar (sin tramo previo no hay nada que perder).
+  it('un día que baja bien + un día que falla en la DESCARGA (no en el listado), sin el tercer nivel: el primero sobrevive, el segundo queda como limitación', async () => {
+    const { scraper, http } = armar();
+    const DIA_1 = '2026-08-05';
+    const DIA_2 = '2026-08-06';
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.FEC_DESDE !== params.FEC_HASTA) {
+        // El rango completo (día1..día2) excede el tope: fuerza la bisección
+        // a un día por vez, que es donde se distingue el día bueno del malo.
+        return Promise.resolve(binarioDemasiados());
+      }
+      if (params.FEC_DESDE === DIA_2) {
+        return Promise.resolve({
+          contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+          contentType: 'text/html',
+        });
+      }
+      return Promise.resolve(binarioXml());
+    });
+
+    const r = await scraper.respaldoXml({ ...RANGO, fechaDesde: DIA_1, fechaHasta: DIA_2 });
+
+    // El día 1 SOBREVIVE: esto es lo que un `throw` sin capturar destruía.
+    expect(r.tramos).toHaveLength(1);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: DIA_1, fechaHasta: DIA_1 });
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ fechaDesde: DIA_2, fechaHasta: DIA_2 });
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió|SetDTE/);
+  });
+
+  // El corte temprano alcanzado SIN ningún listado de por medio: seis días,
+  // sin `tipo_dte` ni tercer nivel. Los rangos MULTI-día siempre exceden el
+  // tope (fuerza la bisección hasta el día); los días SUELTOS devuelven la
+  // página de error del portal. Los primeros tres días consecutivos (05, 06,
+  // 07) tienen que salir como limitaciones individuales — el corte recién se
+  // cumple AL TERMINAR el tercero —, y los tres restantes (08, 09, 10)
+  // colapsan en UNA sola limitación del rango [08, 10].
+  it('el corte temprano corta el resto del rango con fallos de DESCARGA únicamente, sin listados involucrados', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.FEC_DESDE !== params.FEC_HASTA) {
+        return Promise.resolve(binarioDemasiados());
+      }
+      return Promise.resolve({
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+    });
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, fechaDesde: '2026-08-05', fechaHasta: '2026-08-10',
+    });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(4);
+    const individuales = r.limitaciones.filter(l => l.fechaDesde === l.fechaHasta);
+    expect(individuales.map(l => l.fechaDesde).sort()).toEqual(['2026-08-05', '2026-08-06', '2026-08-07']);
+    const deCorte = r.limitaciones.find(l => l.motivo.includes('parece estar caído'));
+    expect(deCorte).toMatchObject({ fechaDesde: '2026-08-08', fechaHasta: '2026-08-10' });
+    expect(deCorte!.motivo).toMatch(/3 días consecutivos/);
+  });
+
+  // Regresión puntual: un rango cuya bisección cae en un split PAREJO (8 días
+  // → 4+4 → 2+2) atraviesa nodos intermedios multi-día que exceden el tope
+  // ANTES de completar tres fallos día-a-día consecutivos. Si el reset de
+  // `diasPortalCaidoDescarga` disparara con CUALQUIER respuesta del portal
+  // (incluido "excede el tope" de un nodo intermedio, que no es evidencia de
+  // que el día en curso esté sano), esos nodos borran la racha antes de
+  // llegar al tope y el corte queda ciego para siempre en un rango ancho. El
+  // conteo de días SUELTOS pedidos (no sólo de limitaciones) es lo que
+  // demuestra que el corte respeta el N elegido pase lo que pase con la forma
+  // del árbol de bisección.
+  it('el corte respeta el N configurado incluso cuando la bisección pasa por nodos intermedios que exceden el tope', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.FEC_DESDE !== params.FEC_HASTA) {
+        return Promise.resolve(binarioDemasiados());
+      }
+      return Promise.resolve({
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+    });
+
+    await scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-01', fechaHasta: '2026-08-08' });
+
+    const diasSueltosPedidos = (http.getBinario as jest.Mock).mock.calls
+      .filter(([, params]) => params.FEC_DESDE === params.FEC_HASTA);
+    expect(diasSueltosPedidos).toHaveLength(3);
+  });
+
+  // Un rango largo (el mes entero) hace que el corte se dispare varias veces
+  // en subárboles hermanos distintos de la bisección —cada uno con su propia
+  // limitación de "portal caído"—, en vez de una sola vez. Sin un motivo
+  // GENÉRICO (sin el rango puntual embebido en el texto), cada una queda
+  // suelta y el consumidor lee el mismo diagnóstico repetido una vez por
+  // subárbol; con el motivo genérico, `fusionarLimitacionesContiguas` las une
+  // en una sola limitación que cubre TODO el resto del mes.
+  it('el corte disparado varias veces en subárboles distintos fusiona en una sola limitación', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.FEC_DESDE !== params.FEC_HASTA) return Promise.resolve(binarioDemasiados());
+      return Promise.resolve({
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+    });
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, fechaDesde: '2026-08-01', fechaHasta: '2026-08-31', maxTramos: 48,
+    });
+
+    const deCorte = r.limitaciones.filter(l => l.motivo.includes('parece estar caído'));
+    expect(deCorte).toHaveLength(1);
+    expect(deCorte[0]).toMatchObject({ fechaDesde: '2026-08-04', fechaHasta: '2026-08-31' });
+    expect(deCorte[0].motivo).not.toMatch(/2026-08-04\.\.2026-08-31/);
+  });
+
   it('pasa el tipo de documento como TPO_DOC cuando se pide', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
@@ -894,6 +1069,181 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.limitaciones[0].motivo).toMatch(/excede/);
   });
 
+  // El bug real: el listado del tercer nivel (`listarEmitidosDelDia`) puede
+  // recibir la misma página de error transitorio que el historial normal. Sin
+  // capturarlo, `parseHistorial` lo leía como "cero filas" y
+  // `trocearPorEjeFino` lo reportaba como "el listado no devolvió ningún
+  // folio" — la limitación de un dato genuinamente vacío, no la de un portal
+  // que no contestó. El fallo se CARGA COMO LIMITACIÓN de este día puntual
+  // —igual que las otras dos salidas de esta función (tope de tramos, listado
+  // demasiado grande)— y no se propaga: un `throw` sin capturar acá escapa
+  // por `acumularTramos`/`respaldoXml` sin que nadie lo atrape y, en un rango
+  // de varios días, se lleva puesto el arreglo `tramos` de los días
+  // anteriores que ya se habían bajado bien.
+  it('emitidos: si el listado del tercer nivel devuelve la página de error del portal, queda como limitación de ESE día (no como "no devolvió ningún folio", y sin propagar)', async () => {
+    const { scraper, http } = armar();
+    mockearListado(http, PORTAL_NO_DISPONIBLE);
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió ningún folio/);
+    expect(r.limitaciones[0].motivo).toMatch(/no se pudo leer/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // Espejo RCP del test anterior: `listarRecibidosDelDia` puede recibir la
+  // misma página, y por el mismo motivo (ver el comentario de arriba) tiene
+  // que quedar como limitación de este día, sin propagar y sin perder
+  // tramos ya bajados.
+  it('recibidos: si el listado del tercer nivel devuelve la página de error del portal, queda como limitación de ESE día (no como "no devolvió ningún emisor", y sin propagar)', async () => {
+    const { scraper, http } = armar();
+    mockearListado(http, PORTAL_NO_DISPONIBLE);
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió ningún emisor/);
+    expect(r.limitaciones[0].motivo).toMatch(/no se pudo leer/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // El test que habría cazado el bloqueante de arriba: DOS días, el primero
+  // baja su SetDTE completo y el segundo excede el tope y su listado del
+  // tercer nivel devuelve la página de error del portal. El día 1 tiene que
+  // SOBREVIVIR en `tramos` — que es justo lo que un test de un solo día no
+  // puede verificar, porque sin tramo previo no hay nada que perder.
+  it('emitidos: un día que baja bien + un día con la página de error — el primero sobrevive en tramos, el segundo queda como limitación', async () => {
+    const { scraper, http } = armar();
+    const DIA_1 = '2026-08-05';
+    const DIA_2 = '2026-08-06';
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)   // parseEmpresas
+      .mockResolvedValueOnce('<html></html>') // auth.cgi
+      // El tercer nivel sólo se dispara para el día 2 (el único que excede el
+      // tope); el día 1 nunca llega a pedir un listado.
+      .mockResolvedValueOnce(PORTAL_NO_DISPONIBLE);
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // rango completo (día1..día2): excede, bisecta
+      .mockResolvedValueOnce(binarioXml())        // día 1 solo: baja completo, sin exceder
+      .mockResolvedValueOnce(binarioDemasiados()); // día 2 solo: excede, dispara el tercer nivel
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: DIA_1, fechaHasta: DIA_2, tipoDte: 33,
+    });
+
+    // El día 1 SOBREVIVE: esto es lo que un `throw` sin capturar destruía.
+    expect(r.tramos).toHaveLength(1);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: DIA_1, fechaHasta: DIA_1 });
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ fechaDesde: DIA_2, fechaHasta: DIA_2 });
+    expect(r.limitaciones[0].motivo).toMatch(/no se pudo leer/);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió ningún folio/);
+  });
+
+  // La cuarta superficie: el listado del tercer nivel contesta BIEN (trae los
+  // folios), pero la descarga POR FOLIO que arma `descargarGrupoConBiseccion`
+  // —fuera del try/catch de `acumularTramos`, en su propia cadena
+  // (`descargarListaDeGrupos` ← `trocearPorEjeFino`)— es la que recibe la
+  // página de error del portal. Mismo bug que las otras tres superficies: sin
+  // captura acá, el error escapa por toda la cadena y se lleva puesto el
+  // tramo del día 1 ya bajado.
+  it('emitidos: listado OK pero la descarga por folio del tercer nivel devuelve la página de error — el día 1 sobrevive, el día 2 queda como limitación con su rango de folio', async () => {
+    const { scraper, http } = armar();
+    const DIA_1 = '2026-08-05';
+    const DIA_2 = '2026-08-06';
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValueOnce(historialEmitidosHtml([1, 2, 3])); // listado del día 2: OK
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // rango completo: excede, bisecta
+      .mockResolvedValueOnce(binarioXml())        // día 1 solo: baja completo
+      .mockResolvedValueOnce(binarioDemasiados()) // día 2 solo: excede, dispara el tercer nivel
+      .mockResolvedValueOnce({                    // descarga del grupo de folios [1,2,3]: página de error
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: DIA_1, fechaHasta: DIA_2, tipoDte: 33,
+    });
+
+    // El día 1 SOBREVIVE: esto es lo que un `throw` sin capturar destruía.
+    expect(r.tramos).toHaveLength(1);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: DIA_1, fechaHasta: DIA_1 });
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({
+      fechaDesde: DIA_2, fechaHasta: DIA_2, folioDesde: 1, folioHasta: 3,
+    });
+    expect(r.limitaciones[0].motivo).toMatch(/no contestó/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // `descargarGrupoConBiseccion`/`descargarListaDeGrupos` incrementan
+  // `diasPortalCaidoDescarga` en su catch, pero sin chequearlo: el único
+  // chequeo vivía en `acumularTramos`, que no vuelve a correr hasta agotar
+  // TODOS los folios pendientes del día. Con 900 folios
+  // (45 grupos de a 20) y el portal caído para toda descarga por folio, sin
+  // el corte serían 45 llamadas consecutivas contra un portal que no
+  // contesta y 45 limitaciones casi idénticas. Con el corte, se abandona a
+  // las `DIAS_PORTAL_CAIDO_PARA_CORTAR` (3) y el resto colapsa en una sola.
+  it('emitidos: con 900 folios y toda descarga por folio devolviendo la página de error, el número de llamadas queda acotado por el corte, no por la cantidad de folios', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 900 }, (_, i) => i + 1);
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.FOLIO === '') return Promise.resolve(binarioDemasiados()); // el día entero, sin folio
+      return Promise.resolve({
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+    });
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 48 });
+
+    expect(r.tramos).toEqual([]);
+    // Muy por debajo de las 45 llamadas de folio que saldrían sin el corte
+    // (+1 del día entero): el corte se dispara a los 3 fallos consecutivos.
+    expect((http.getBinario as jest.Mock).mock.calls.length).toBeLessThanOrEqual(6);
+    expect(r.limitaciones.some(l => l.motivo.includes('parece estar caído'))).toBe(true);
+  });
+
+  // Listado (`mipeAdminDocs*.cgi`) y descarga (`lista_documentos.cgi`/
+  // `download.cgi`) son CGI distintos que se observó fallar por separado
+  // contra el SII real: la descarga de cada día sigue contestando (aunque
+  // exceda el tope, que es una respuesta del portal, no un fallo suyo)
+  // mientras el listado de ese mismo día no contesta nada. Con contadores
+  // por superficie, ese éxito de descarga NO limpia la racha de listados
+  // caídos, así que el corte se alcanza igual: los primeros tres días quedan
+  // como limitaciones individuales y el resto del rango colapsa.
+  it('emitidos: si la descarga de cada día sigue contestando bien, el listado fallando 3 veces seguidas SÍ alcanza el corte (CGI distintos, contadores independientes)', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValue(PORTAL_NO_DISPONIBLE); // cualquier listado del tercer nivel, persistente
+    (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados()); // toda descarga excede, pero CONTESTA
+
+    const r = await scraper.respaldoXml({
+      // maxTramos alto a propósito: cada día que llega al tercer nivel gasta
+      // DOS descargas (la propia + el listado).
+      ...RANGO, origen: 'ENV', fechaDesde: '2026-08-05', fechaHasta: '2026-08-10', tipoDte: 33,
+      maxTramos: 30,
+    });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(4);
+    const individuales = r.limitaciones.filter(l => l.fechaDesde === l.fechaHasta);
+    expect(individuales.map(l => l.fechaDesde).sort()).toEqual(['2026-08-05', '2026-08-06', '2026-08-07']);
+    const deCorte = r.limitaciones.find(l => l.motivo.includes('parece estar caído'));
+    expect(deCorte).toMatchObject({ fechaDesde: '2026-08-08', fechaHasta: '2026-08-10' });
+  });
+
   it('recibidos: el listado de 3 emisores agrupa en 3 descargas por contraparte', async () => {
     const { scraper, http } = armar();
     const docs = [
@@ -944,6 +1294,77 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.limitaciones[0]).toMatchObject({
       contraparteRut: '11111111-1', folioDesde: 10, folioHasta: 10, tipoDte: 33,
     });
+  });
+
+  // La quinta superficie: la descarga PLANA por emisor (RCP, emisor con ≤20
+  // folios y sin `contraparteRut` fijado por el caller) llamaba a
+  // `descargarTramo` directo, sin pasar por ningún wrapper — el camino más
+  // común de un día RCP con pocos documentos por contraparte. Un día previo
+  // que baja bien tiene que sobrevivir en `tramos` cuando el emisor
+  // SIGUIENTE del mismo día choca con la página de error.
+  it('recibidos: un día que baja bien + un emisor cuya descarga plana devuelve la página de error — el día anterior sobrevive, el emisor queda como limitación', async () => {
+    const { scraper, http } = armar();
+    const DIA_1 = '2026-08-05';
+    const DIA_2 = '2026-08-06';
+    const docs = [
+      { folio: 1, emisorRut: '11111111-1' },
+      { folio: 2, emisorRut: '22222222-2' },
+    ];
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValueOnce(historialRecibidosHtml(docs)); // listado del día 2: OK
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // rango completo: excede, bisecta
+      .mockResolvedValueOnce(binarioXml())        // día 1 solo: baja completo
+      .mockResolvedValueOnce(binarioDemasiados()) // día 2 solo: excede, dispara el tercer nivel
+      .mockResolvedValueOnce(binarioXml())        // emisor 11111111, plano: baja bien
+      .mockResolvedValueOnce({                    // emisor 22222222, plano: página de error
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', fechaDesde: DIA_1, fechaHasta: DIA_2, tipoDte: 33,
+    });
+
+    // El día 1 Y el emisor 11111111 (que bajó antes que el que falla)
+    // SOBREVIVEN: esto es lo que un `throw` sin capturar destruía.
+    expect(r.tramos).toHaveLength(2);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: DIA_1, fechaHasta: DIA_1 });
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({
+      fechaDesde: DIA_2, fechaHasta: DIA_2, contraparteRut: '22222222-2',
+    });
+    expect(r.limitaciones[0].motivo).toMatch(/no contestó/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // Mismo corte que en las otras superficies de descarga (ver
+  // `DIAS_PORTAL_CAIDO_PARA_CORTAR`), acá aplicado al loop por emisor: con
+  // muchos emisores y el portal caído para toda descarga plana, el número de
+  // llamadas queda acotado por el corte, no por la cantidad de emisores.
+  it('recibidos: con muchos emisores y toda descarga plana devolviendo la página de error, el corte acota las llamadas', async () => {
+    const { scraper, http } = armar();
+    const docs = Array.from({ length: 20 }, (_, i) => ({
+      folio: i + 1, emisorRut: `${10000000 + i}-${i % 10}`,
+    }));
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.RUT_RECP === '') return Promise.resolve(binarioDemasiados()); // el día entero, sin emisor
+      return Promise.resolve({
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+    });
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA, maxTramos: 48 });
+
+    expect(r.tramos).toEqual([]);
+    // Muy por debajo de las 20 llamadas de emisor que saldrían sin el corte
+    // (+1 del día entero): el corte se dispara a los 3 fallos consecutivos.
+    expect((http.getBinario as jest.Mock).mock.calls.length).toBeLessThanOrEqual(6);
+    expect(r.limitaciones.some(l => l.motivo.includes('parece estar caído'))).toBe(true);
   });
 
   // El presupuesto puede agotarse a mitad de la BISECCIÓN de un emisor y
@@ -2050,5 +2471,22 @@ describe('enGrupos', () => {
 
   it('lista vacía, ningún grupo', () => {
     expect(enGrupos([], 20)).toEqual([]);
+  });
+});
+
+// Invariante estructural: cuatro rondas seguidas de review encontraron el
+// mismo bug (un call-site de `descargarTramo` sin su propio try/catch para
+// `PortalSiiNoDisponible`, cada vez en una superficie distinta), porque nada
+// impedía agregar uno nuevo sin la protección. `descargarTramoSeguro` es
+// ahora el único wrapper permitido: este test lee el código fuente y falla
+// si aparece una segunda llamada a `this.descargarTramo(` fuera de él, para
+// que la próxima superficie que alguien agregue no pueda repetir el bug sin
+// que la suite lo note.
+describe('invariante: descargarTramo sólo se llama desde descargarTramoSeguro', () => {
+  it('no hay un call-site nuevo de this.descargarTramo( por fuera del wrapper', () => {
+    const fuente = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'src', 'scrapers', 'mipymeHttp.ts'), 'utf-8');
+    const ocurrencias = fuente.match(/this\.descargarTramo\(/g) ?? [];
+    expect(ocurrencias).toHaveLength(1);
   });
 });

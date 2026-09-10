@@ -161,3 +161,19 @@ export class ServicioOcupado extends Error {
     this.name = new.target.name;
   }
 }
+
+// El portal mipyme devolvió su PROPIA página de error interno («Error al
+// contribuyente» + «Por el momento no se puede responder a sus
+// requerimientos. Por favor, inténtelo más tarde») en vez de la respuesta
+// pedida. NO es `LimitacionConocida`: esa familia significa "el SII confirmó
+// un límite/dato y no lo arregla reintentar"; acá el propio portal pide
+// reintentar más tarde, así que tratarlo como límite conocido llevaría a
+// trocear un rango que no tiene nada que trocear. El `CODIGO:` del aviso
+// viaja interpolado en `mensaje` (ver `assertNoPaginaDeErrorDelPortal`); no
+// tiene campo propio porque nadie lo lee por separado.
+export class PortalSiiNoDisponible extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = new.target.name;
+  }
+}

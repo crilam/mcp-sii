@@ -113,7 +113,7 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 
 | Código | Status | `detalle` | Qué pasó | ¿Reintentar? |
 |---|---|---|---|---|
-| `ERROR` | 200 | **sí** | Fallo no clasificado: timeout, red, portal caído. | **Sí.** El único reintentable. |
+| `ERROR` | 200 | **sí** | Fallo no clasificado: timeout, red, portal caído. | **Sí.** El único genuinamente ambiguo (no se sabe si es transitorio o un bug permanente); ver §4 para los otros cuatro códigos que también conviene reintentar. |
 | `CREDENCIALES_INVALIDAS` | 200 | no | El SII rechazó la clave o el certificado. | No. Pedí credenciales nuevas. |
 | `EMPRESA_NO_AUTORIZADA` | 200 | **sí** | El selector de empresas del portal mipyme es un permiso a nivel de PERSONA, no de empresa: el RUT autenticado no tiene la empresa pedida en su selector (ver §6.5). | No, es permanente para esa credencial. |
 | `SESIONES_SIMULTANEAS` | 200 | **sí** | El RUT ya tiene demasiadas sesiones abiertas en el SII. | **Sí**, después de esperar. |
@@ -122,6 +122,7 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 | `NO_ENCONTRADO` | 200 | **sí** | El SII confirmó que el dato no existe. | No, es permanente. |
 | `SIN_PROPUESTA` | 200 | no, pero trae `generada_en` | El SII no arma propuesta de F29 para ese período (ver §6.11). No es un error: es el estado normal de un mes que todavía no cerró. | No ya mismo, pero **sí más adelante**: es el único código que cambia solo con el paso del tiempo. |
 | `LIMITE_CONOCIDO` | 200 | **sí** | Límite conocido de lo que se puede leer del portal (ver §7). | No, es permanente. |
+| `SII_NO_DISPONIBLE` | 200 | **sí** | El portal mipyme respondió su propia página de error interno («Error al contribuyente» / «no se puede responder a sus requerimientos») en vez del historial o listado pedido. | **Sí**, más tarde: el propio aviso del SII pide reintentar. |
 | `BAD_REQUEST` | 400 | **sí** | El body no valida. El `detalle` nombra el campo. | No, arreglá el request. |
 | `CONFIRMAR_NO_SOPORTADO` | 400 | no | Mandaste `confirmar:true` a `emitir-dte`. | No, ver §6.5. |
 | `UNAUTHORIZED` | 401 | no | Falta el header, no es `Bearer`, o la key es desconocida o está revocada. | No. |
@@ -134,7 +135,8 @@ Dos precisiones que evitan bugs:
 
 - **`LIMITE_SII` significa parar, no reintentar rápido.** El SII cortó por volumen de consultas. Reintentar de inmediato es lo que mantiene el corte: hay que esperar de verdad —minutos, no segundos— y bajar el ritmo. Aparece cuando se le hacen muchas consultas al mismo portal en poco tiempo, y afecta a ese portal entero mientras dura.
 - **`SERVICIO_OCUPADO` es nuestro, no del SII, y se espera en segundos.** Las rutas de indicadores serializan sus bajadas contra el portal público a propósito: un barrido en paralelo es lo que hace que el SII corte por volumen. Cuando hay demasiadas esperando turno, preferimos rechazar rápido antes que dejarte la conexión abierta varios minutos sin decirte nada. Reintentá en unos segundos; si aparece seguido, el que está pidiendo de más probablemente seas vos.
-- **`ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII` y `SERVICIO_OCUPADO` son los cuatro que conviene reintentar**, con esperas muy distintas. `NO_ENCONTRADO`, `LIMITE_CONOCIDO` y `EMPRESA_NO_AUTORIZADA` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII. `SIN_PROPUESTA` es el caso aparte: no se reintenta *ahora* —el mes no cerró y volver a pedirlo no lo cambia—, pero el mismo request va a funcionar cuando cierre, así que tampoco se descarta para siempre como los otros tres.
+- **`ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII`, `SERVICIO_OCUPADO` y `SII_NO_DISPONIBLE` son los cinco que conviene reintentar**, con esperas muy distintas. `NO_ENCONTRADO`, `LIMITE_CONOCIDO` y `EMPRESA_NO_AUTORIZADA` son determinísticos: el mismo request va a fallar igual siempre, y reintentarlos sólo gasta sesiones del SII. `SIN_PROPUESTA` es el caso aparte: no se reintenta *ahora* —el mes no cerró y volver a pedirlo no lo cambia—, pero el mismo request va a funcionar cuando cierre, así que tampoco se descarta para siempre como los otros tres.
+- **`SII_NO_DISPONIBLE` NO es `LIMITE_CONOCIDO`, aunque los dos vengan del historial/listado de mipyme.** `LIMITE_CONOCIDO` significa "el SII ya contestó y esto no se arregla reintentando"; `SII_NO_DISPONIBLE` significa lo contrario: el portal ni siquiera llegó a contestar el historial pedido, respondió su propia página de error interno, y el mensaje del propio SII pide reintentar más tarde. Antes de este código, esa página se leía silenciosamente como "cero documentos" — un fallo transitorio del portal, disfrazado de dato vacío.
 - **`ERROR` ahora siempre trae `detalle`**, con el mensaje de la excepción (redactado de secretos conocidos y truncado). Sigue siendo el único código genuinamente ambiguo del contrato —no se sabe si el fallo es transitorio o un bug permanente—, así que el criterio de reintento no cambia; lo que cambia es que ya no llega mudo.
 - **`SESIONES_SIMULTANEAS` merece su propio mensaje al usuario.** Reintentar es correcto igual que con `ERROR`, así que el comportamiento no cambia — lo que cambia es lo que le podés decir a la persona. Con `ERROR` sólo cabe "probá de nuevo en unos minutos"; con éste podés decirle que hay **otra consulta en curso sobre el mismo contribuyente**, y eso es accionable: sabe que dejó otra pestaña abierta, o que un colega está mirando el mismo caso. Aparece cuando el RUT supera el límite de sesiones simultáneas del SII.
 
@@ -825,7 +827,7 @@ El criterio detrás de todas: **es preferible fallar explícito a devolver un da
 ## 8. Recomendaciones de integración
 
 1. **Ramificá por `ok`, no por el status HTTP.** El status sólo importa para 429 y 401.
-2. **Reintentá `ERROR` y nada más**, con backoff. Reintentar `LIMITE_CONOCIDO` o `NO_ENCONTRADO` sólo gasta sesiones del SII.
+2. **Reintentá `ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII`, `SERVICIO_OCUPADO` y `SII_NO_DISPONIBLE`**, con backoff y esperas distintas para cada uno (ver §4). Reintentar `LIMITE_CONOCIDO`, `NO_ENCONTRADO` o `EMPRESA_NO_AUTORIZADA` sólo gasta sesiones del SII: son determinísticos, el mismo request va a fallar igual siempre. `SIN_PROPUESTA` es un caso aparte y no entra en ninguno de los dos grupos: no vale la pena reintentarlo ya mismo (el mes no cerró y pedirlo de nuevo no lo cambia), pero sí más adelante —es el único código que pasa a `ok:true` solo con el paso del tiempo—, así que no lo descartes para siempre como a los determinísticos.
 3. **Serializá las llamadas por RUT.** El SII limita las sesiones simultáneas por contribuyente; paralelizar el mismo RUT provoca fallos que parecen aleatorios.
 4. **Distinguí `null` de `0`.** En este contrato `null` significa siempre "el SII no informa esto", nunca cero. Vale para `retencionEmisor`, `totales`, `totalPaginas`, `eventoReceptor` y los folios de un mes sin actividad.
 5. **Validá la clave con `/v1/sesion/validar-clave`** antes de guardarla, en vez de descubrir que es inválida en la primera consulta real.

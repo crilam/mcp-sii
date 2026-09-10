@@ -526,7 +526,8 @@ Lo que un consumidor necesita saber de cada código es **si reintentar sirve**:
 | `SESIONES_SIMULTANEAS` | **Sí**, tras esperar | El RUT ya tiene demasiadas sesiones abiertas en el SII. Trae `detalle` |
 | `LIMITE_SII` | **Sí, esperando de verdad** | El SII cortó las consultas por volumen (su propio error 429). Trae `detalle` |
 | `SERVICIO_OCUPADO` | **Sí, en segundos** | Nosotros estamos ocupados: demasiadas consultas de indicadores esperando turno. Trae `detalle` |
-| `ERROR` | **Sí** | Todo lo demás: cola de espera del SII, portal caído, fallo de red |
+| `SII_NO_DISPONIBLE` | **Sí**, más tarde | El portal mipyme respondió su propia página de error interno («Error al contribuyente») en vez del historial o listado pedido. Trae `detalle` |
+| `ERROR` | **Sí** | Todo lo demás: cola de espera del SII, fallo de red, una excepción no controlada |
 
 `LIMITE_SII` es el que más cambia qué hacer: el SII tiene rate limiting propio y,
 con muchas consultas al mismo portal en poco tiempo, corta ESE PORTAL ENTERO por

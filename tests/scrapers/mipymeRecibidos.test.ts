@@ -3,6 +3,7 @@ import * as path from 'path';
 import { MipymeHttpScraper } from '../../src/scrapers/mipymeHttp';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
+import { PortalSiiNoDisponible } from '../../src/erroresConsulta';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -17,6 +18,16 @@ function fixture(nombre: string): string {
 const SEL_EMPRESA = fixture('mipyme-sel-empresa.html');
 const RECIBIDOS = fixture('mipyme-historial-recibidos.html');
 const SIN_EMPRESA = fixture('mipyme-sin-empresa.html');
+const PORTAL_NO_DISPONIBLE = fixture('mipyme-portal-no-disponible.html');
+
+// El título («Error al contribuyente») vive en el `<head>` y el aviso («no se
+// puede responder...») al final del `<body>`, en los extremos opuestos de la
+// página real (que, a diferencia del fixture sintético, viene envuelta en el
+// layout completo del portal: menú, JS, hojas de estilo). Un slice que corte
+// antes de llegar al aviso deja pasar la página sin detectarla.
+function conRelleno(html: string, bytes = 6000): string {
+  return html.replace('<script', `<!-- ${'x'.repeat(bytes)} -->\n<script`);
+}
 
 function armar() {
   const session = new MockSession({} as any, {} as any);
@@ -161,6 +172,27 @@ describe('MipymeHttpScraper.listDteRecibidos', () => {
       .rejects.toThrow(/no ha seleccionado una empresa/i);
   });
 
+  // El bug real, medido contra el SII: `mipeAdminDocsRcp.cgi` devolvió su
+  // propia página de error interno («Error al contribuyente» / «no se puede
+  // responder a sus requerimientos») para una empresa de alto volumen, y
+  // `parseHistorialRecibidos` —que sólo sabe leer filas `<tr>`— no encontró
+  // ninguna fila de datos ahí adentro y lo interpretó como "cero documentos".
+  // Tiene que fallar con `PortalSiiNoDisponible` y el código del SII en el
+  // mensaje, nunca devolver `{documentos: []}`.
+  it('falla con PortalSiiNoDisponible si el portal devuelve su página de error interno, en vez de "cero documentos"', async () => {
+    const { scraper } = conHistorial(PORTAL_NO_DISPONIBLE);
+
+    let error: unknown;
+    try {
+      await scraper.listDteRecibidos({ empresaRut: '33333333-3' });
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
   // Una fila que ES de datos y que el parser no supo leer no se saltea en
   // silencio: cien documentos convertidos en lista vacía se leen como "esta
   // empresa no recibió nada", que es el vacío ambiguo de siempre.
@@ -248,6 +280,44 @@ describe('MipymeHttpScraper.dtePdf', () => {
 
     await expect(scraper.dtePdf('1897586940', '33333333-3'))
       .rejects.toThrow(/02\.35\.209\.59\.203\.2/);
+  });
+
+  // Unifica el mismo síntoma con el del historial: si el CGI de PDF devuelve
+  // la misma página de error genérica del portal, antes de este arreglo salía
+  // como el `Error` genérico de "no devolvió un PDF" — el mismo síntoma con
+  // otro código, sólo porque entró por otra superficie.
+  it('la página de error genérica del portal sale como PortalSiiNoDisponible, no como el Error genérico de "no PDF"', async () => {
+    const html = Buffer.from(PORTAL_NO_DISPONIBLE);
+    const { scraper } = conPdf(html, 'text/html');
+
+    let error: unknown;
+    try {
+      await scraper.dtePdf('1897586940', '33333333-3');
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // Con varios KB de relleno entre el título y el aviso —como viene la página
+  // real, envuelta en el layout del portal—, un slice de los primeros bytes
+  // corta el aviso y la detección no dispara. Falla sin pasar el texto
+  // completo al assert.
+  it('detecta la página de error aunque haya varios KB de relleno entre el título y el aviso', async () => {
+    const html = Buffer.from(conRelleno(PORTAL_NO_DISPONIBLE));
+    const { scraper } = conPdf(html, 'text/html');
+
+    let error: unknown;
+    try {
+      await scraper.dtePdf('1897586940', '33333333-3');
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
   });
 
   // El identificador es el `codigo` del listado, no el folio: el folio se repite
@@ -388,6 +458,26 @@ describe('MipymeHttpScraper.listBorradores', () => {
     const { scraper } = conRespuesta('<html>HTTP Status 404</html>');
 
     await expect(scraper.listBorradores('33333333-3')).rejects.toThrow(/no devolvió JSON/);
+  });
+
+  // Antes de este arreglo, la página de error genérica del portal —que
+  // tampoco parsea como JSON— caía en el mensaje de arriba y sugería
+  // "sesión caída", un diagnóstico equivocado que manda a reautenticar
+  // cuando el problema es del portal, no de la sesión. Mismo síntoma que en
+  // el historial, mismo tipo, para que un integrador no tenga que aprender
+  // un código por superficie.
+  it('la página de error genérica del portal sale como PortalSiiNoDisponible, no como "sesión caída"', async () => {
+    const { scraper } = conRespuesta(PORTAL_NO_DISPONIBLE);
+
+    let error: unknown;
+    try {
+      await scraper.listBorradores('33333333-3');
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
   });
 
   // Un JSON que no es una lista tampoco es "no hay borradores": devolver [] haría

@@ -3,7 +3,7 @@ import * as path from 'path';
 import { MipymeHttpScraper } from '../../src/scrapers/mipymeHttp';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
-import { SelectorEmpresasVacio, EmpresaNoAutorizada } from '../../src/erroresConsulta';
+import { SelectorEmpresasVacio, EmpresaNoAutorizada, PortalSiiNoDisponible } from '../../src/erroresConsulta';
 
 jest.mock('../../src/http');
 jest.mock('../../src/session');
@@ -18,6 +18,7 @@ function fixture(nombre: string): string {
 const SEL_EMPRESA = fixture('mipyme-sel-empresa.html');
 const HISTORIAL = fixture('mipyme-historial-emitidos.html');
 const SIN_EMPRESA = fixture('mipyme-sin-empresa.html');
+const PORTAL_NO_DISPONIBLE = fixture('mipyme-portal-no-disponible.html');
 
 function armar() {
   const session = new MockSession({} as any, {} as any);
@@ -145,6 +146,130 @@ describe('MipymeHttpScraper.listDteEmitidos', () => {
 
     await expect(scraper.listDteEmitidos({ empresaRut: '33333333-3' }))
       .rejects.toThrow(/no ha seleccionado una empresa/i);
+  });
+
+  // El bug medido contra el SII real: `mipeAdminDocsRcp.cgi` devolvió su propia
+  // página de error interno («Error al contribuyente» / «no se puede responder
+  // a sus requerimientos») para una empresa de alto volumen, y el parser —que
+  // sólo sabe leer filas `<tr>`— no encontró ninguna fila de datos ahí adentro
+  // y lo leyó como "cero documentos". Un fallo transitorio del portal
+  // reportado como un historial vacío es peor que un error: el consumidor
+  // concluye que esta empresa no emitió nada, cuando en realidad el SII no
+  // llegó a contestar. Tiene que fallar con `PortalSiiNoDisponible`, con el
+  // código del SII en el mensaje, y NO devolver `{documentos: []}`.
+  it('falla con PortalSiiNoDisponible si el portal devuelve su página de error interno, en vez de "cero documentos"', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce(PORTAL_NO_DISPONIBLE);
+    (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+    let error: unknown;
+    try {
+      await scraper.listDteEmitidos({ empresaRut: '33333333-3' });
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // El marcado de la página de error NO es contrato del SII: puede cambiar sin
+  // aviso (una palabra envuelta en un tag, una entidad en vez de un espacio, la
+  // frase partida en varias líneas) sin que el AVISO en sí cambie. Los tres
+  // casos de acá deforman la MISMA página real de la misma manera en que un
+  // volcado a mano —o un rediseño futuro del portal— podría hacerlo, y los
+  // tres tienen que seguir disparando.
+  describe('la detección de la página de error sobrevive a deformaciones del marcado', () => {
+    async function esperarPortalSiiNoDisponible(html: string): Promise<Error> {
+      const { scraper, http } = armar();
+      (http.get as jest.Mock)
+        .mockResolvedValueOnce(SEL_EMPRESA)
+        .mockResolvedValueOnce(html);
+      (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+      let error: unknown;
+      try {
+        await scraper.listDteEmitidos({ empresaRut: '33333333-3' });
+        throw new Error('debía lanzar');
+      } catch (e) {
+        error = e;
+      }
+      return error as Error;
+    }
+
+    it('con un tag partiendo la frase del título ("Error al <b>contribuyente</b>")', async () => {
+      const html = `<html><head><title>Error al <b>contribuyente</b></title></head><body>
+        <script>alert('Por el momento no se puede responder a sus requerimientos. ` +
+        `CODIGO: 04.77.113.29.408.51');</script></body></html>`;
+
+      const error = await esperarPortalSiiNoDisponible(html);
+
+      expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+      expect(error.message).toMatch(/04\.77\.113\.29\.408\.51/);
+    });
+
+    it('con &nbsp; en vez de espacio entre palabras', async () => {
+      const html = `<html><head><title>Error&nbsp;al&nbsp;contribuyente</title></head><body>
+        <script>alert('Por&nbsp;el&nbsp;momento no&nbsp;se puede responder a sus ` +
+        `requerimientos.&nbsp;CODIGO:&nbsp;04.77.113.29.408.51');</script></body></html>`;
+
+      const error = await esperarPortalSiiNoDisponible(html);
+
+      expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+      expect(error.message).toMatch(/04\.77\.113\.29\.408\.51/);
+    });
+
+    it('con la frase repartida en varias líneas y con sangría', async () => {
+      const html = `<html><head><title>Error al contribuyente</title></head><body>
+        <script>alert('Por el momento no se puede responder
+            a sus
+        requerimientos. Por favor, inténtelo más tarde.
+
+        CODIGO: 04.77.113.29.408.51');</script></body></html>`;
+
+      const error = await esperarPortalSiiNoDisponible(html);
+
+      expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+      expect(error.message).toMatch(/04\.77\.113\.29\.408\.51/);
+    });
+  });
+
+  // Negativo: normalizar el HTML antes de buscar las frases AMPLÍA lo que
+  // puede matchear (ya no hace falta que la frase sea un substring literal del
+  // HTML crudo), así que la exigencia de las DOS frases —no una sola— importa
+  // más todavía para no convertir una consulta legítima en un fallo.
+  describe('la detección no confunde datos legítimos con la página de error', () => {
+    it('el historial real (fixture HISTORIAL) no dispara PortalSiiNoDisponible', async () => {
+      const { scraper, http } = armar();
+      (http.get as jest.Mock)
+        .mockResolvedValueOnce(SEL_EMPRESA)
+        .mockResolvedValueOnce(HISTORIAL);
+      (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+      await expect(scraper.listDteEmitidos({ empresaRut: '33333333-3' })).resolves.toBeDefined();
+    });
+
+    // Una razón social de fantasía ("ERROR AL CONTRIBUYENTE SPA") no es
+    // descabellada, y el título de la página de error real tampoco es un texto
+    // tan raro como para asumir que nunca va a aparecer en un dato de verdad.
+    // Sin la SEGUNDA frase, que es la que de verdad sólo trae la página de
+    // error, esto no puede disparar.
+    it('una razón social que dice literalmente "Error al contribuyente" no dispara sola, sin la segunda frase', async () => {
+      const { scraper, http } = armar();
+      const conRazonSocialRara = HISTORIAL.replace(
+        'COMERCIAL TRES LTDA', 'ERROR AL CONTRIBUYENTE SPA'
+      );
+      (http.get as jest.Mock)
+        .mockResolvedValueOnce(SEL_EMPRESA)
+        .mockResolvedValueOnce(conRazonSocialRara);
+      (http.postForm as jest.Mock).mockResolvedValue('<html></html>');
+
+      const res = await scraper.listDteEmitidos({ empresaRut: '33333333-3' });
+
+      expect(res.documentos.some(d => d.receptorNombre === 'ERROR AL CONTRIBUYENTE SPA')).toBe(true);
+    });
   });
 
   // El caso "selector no vacío, pero la empresa pedida no está entre las
