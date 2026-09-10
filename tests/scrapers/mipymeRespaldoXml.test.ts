@@ -590,3 +590,192 @@ describe('MipymeHttpScraper.respaldoXml', () => {
       expect.any(String), expect.objectContaining({ ORIGEN: 'ENV' }), { charset: 'latin1' });
   });
 });
+
+// Tercer nivel de troceo: cuando un DÍA con `tipo_dte` puesto sigue excediendo
+// el tope, el eje más fino es el folio (emitidos) o la contraparte (recibidos).
+// Las filas de estos fixtures se arman a mano en vez de reusar
+// mipyme-historial-*.html: esos fixtures tienen sólo dos filas con paginación
+// real, y acá hace falta controlar folios y emisores exactos por caso.
+describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / contraparte)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  function filaEmitido(folio: number, codigo: number, receptorRut = '77777777-7'): string {
+    return `<tr>
+      <td><a href="/cgi-bin/Portal001/mipeGesDocEmi.cgi?CODIGO=${codigo}"><img></a></td>
+      <td>${receptorRut}</td>
+      <td>Receptor ${receptorRut}</td>
+      <td>Factura Electronica</td>
+      <td>${folio}</td>
+      <td>2026-08-05</td>
+      <td>1000</td>
+      <td>Documento Emitido</td>
+    </tr>`;
+  }
+
+  function historialEmitidosHtml(folios: number[]): string {
+    return `<table>${folios.map((f, i) => filaEmitido(f, 1000 + i)).join('\n')}</table>`;
+  }
+
+  function filaRecibido(folio: number, codigo: number, emisorRut: string): string {
+    return `<tr>
+      <td><a href="/cgi-bin/Portal001/mipeGesDocRcp.cgi?CODIGO=${codigo}"><img></a></td>
+      <td>${emisorRut}</td>
+      <td>Emisor ${emisorRut}</td>
+      <td>Factura Electronica</td>
+      <td>${folio}</td>
+      <td>2026-08-05</td>
+      <td>1000</td>
+      <td>Documento Recibido</td>
+    </tr>`;
+  }
+
+  function historialRecibidosHtml(docs: { folio: number; emisorRut: string }[]): string {
+    return `<table>${docs.map((d, i) => filaRecibido(d.folio, 2000 + i, d.emisorRut)).join('\n')}</table>`;
+  }
+
+  // Un día suelto con `tipoDte` puesto: la secuencia de `http.get` es
+  // parseEmpresas → auth.cgi → el listado del día+tipo (una sola página en
+  // estos fixtures).
+  function mockearListado(http: { get: unknown }, html: string) {
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValueOnce(html);
+  }
+
+  const DIA = { fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33 };
+
+  it('emitidos: el listado de 45 folios agrupa en 3 descargas por folio, sin limitaciones', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 45 }, (_, i) => i + 1);
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero, sin folio
+      .mockResolvedValue(binarioXml());           // cada grupo de folios
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(3);
+    expect(r.documentos).toBe(6); // 3 tramos × 2 <DTE> del fixture SET_DTE
+
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    expect(llamadas).toHaveLength(4);
+    expect(llamadas[1][1]).toMatchObject({ FOLIO: '1', FOLIOHASTA: '20' });
+    expect(llamadas[2][1]).toMatchObject({ FOLIO: '21', FOLIOHASTA: '40' });
+    expect(llamadas[3][1]).toMatchObject({ FOLIO: '41', FOLIOHASTA: '45' });
+  });
+
+  // El listado y la descarga no cuentan igual (ver el comentario de
+  // `acumularTramos`): un grupo de sólo 3 folios puede seguir excediendo el
+  // tope de la descarga. Se bisecta por folio hasta llegar a uno solo, que
+  // queda como limitación con el folio exacto.
+  it('emitidos: un grupo de folios que igual excede se bisecta hasta el folio único', async () => {
+    const { scraper, http } = armar();
+    mockearListado(http, historialEmitidosHtml([1, 2, 3]));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioDemasiados()) // grupo [1,2,3]
+      .mockResolvedValueOnce(binarioDemasiados()) // folio [1] solo, sigue excediendo
+      .mockResolvedValueOnce(binarioXml());       // folios [2,3]
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
+
+    expect(r.tramos).toHaveLength(1);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({
+      fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33, folioDesde: 1, folioHasta: 1,
+    });
+    expect(r.limitaciones[0].motivo).toMatch(/folio 1/);
+    expect(r.limitaciones[0].motivo).toMatch(/excede/);
+  });
+
+  it('recibidos: el listado de 3 emisores agrupa en 3 descargas por contraparte', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 1, emisorRut: '11111111-1' },
+      { folio: 2, emisorRut: '22222222-2' },
+      { folio: 3, emisorRut: '77777777-7' },
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados())
+      .mockResolvedValue(binarioXml());
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(3);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    expect(llamadas).toHaveLength(4);
+    expect(llamadas[1][1]).toMatchObject({ RUT_RECP: '11111111' });
+    expect(llamadas[2][1]).toMatchObject({ RUT_RECP: '22222222' });
+    expect(llamadas[3][1]).toMatchObject({ RUT_RECP: '77777777' });
+  });
+
+  // Un emisor por sí solo excede el tope, así que se bisecta por folio DENTRO
+  // de ese emisor (folio + contraparte juntos); el resto de los emisores no se
+  // ve afectado.
+  it('recibidos: un emisor que por sí solo excede el tope se bisecta por folio', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 10, emisorRut: '11111111-1' },
+      { folio: 11, emisorRut: '11111111-1' },
+      { folio: 12, emisorRut: '11111111-1' },
+      { folio: 1, emisorRut: '22222222-2' },
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioDemasiados()) // emisor 11111111, plano
+      .mockResolvedValueOnce(binarioDemasiados()) // emisor 11111111, folios [10,11,12]
+      .mockResolvedValueOnce(binarioDemasiados()) // folio [10] solo, sigue excediendo
+      .mockResolvedValueOnce(binarioXml())        // folios [11,12]
+      .mockResolvedValueOnce(binarioXml());       // emisor 22222222, plano
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+
+    expect(r.tramos).toHaveLength(2);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({
+      contraparteRut: '11111111-1', folioDesde: 10, folioHasta: 10, tipoDte: 33,
+    });
+  });
+
+  // Regresión explícita: sin `tipo_dte` el tercer nivel ni se intenta, aunque
+  // el día exceda el tope — sigue la limitación de siempre («pedí con
+  // tipo_dte»), y no se llama a ningún listado.
+  it('sin tipo_dte no activa el tercer nivel: sigue la limitación "pedí con tipo_dte"', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
+
+    const r = await scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-05', fechaHasta: '2026-08-05' });
+
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/tipo_dte/);
+    expect(http.get).not.toHaveBeenCalledWith(expect.stringContaining('mipeAdminDocs'));
+  });
+
+  // `maxTramos` puede agotarse DENTRO del tercer nivel (listando o bajando
+  // grupos de folios): la limitación tiene que quedar precisa, y nada se
+  // lanza — el mismo contrato que en los otros dos niveles.
+  it('maxTramos agotado dentro del tercer nivel: limitación precisa y nada se lanza', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 25 }, (_, i) => i + 1);
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero, consume 1/2
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 2 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones.length).toBeGreaterThan(0);
+    for (const l of r.limitaciones) {
+      expect(l.motivo).toMatch(/tramos/i);
+      expect(l.fechaDesde).toBe('2026-08-05');
+      expect(l.tipoDte).toBe(33);
+    }
+    // El listado sí alcanzó a pedirse (consumió el 2º y último tramo del
+    // presupuesto); lo que se agotó es lo que vino DESPUÉS.
+    expect(http.getBinario).toHaveBeenCalledTimes(1);
+  });
+});

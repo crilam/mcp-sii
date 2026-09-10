@@ -92,6 +92,12 @@ const MAX_TRAMOS_POR_DEFECTO = 10;
 // arreglo es un presupuesto por ventana, no bajar este número.
 const MAX_TRAMOS_ABSOLUTO = 48;
 
+// Un día calendario, en milisegundos. Vive acá arriba y no repetido en cada
+// función que hace aritmética de fechas en UTC (partirRango, fusionarLimitacionesContiguas):
+// dos literales `24 * 60 * 60 * 1000` que hoy dicen lo mismo podrían divergir
+// mañana si alguien ajusta uno y no el otro.
+const DIA_MS = 24 * 60 * 60 * 1000;
+
 // Los BORRADORES no viven en el portal viejo. El menú los publica con una
 // función JavaScript (`printLinkAdmBorradores`, definida en `valores.js`) que
 // arma un enlace a otra aplicación, en otro host y con otra tecnología: una SPA
@@ -253,6 +259,15 @@ export interface LimitacionRespaldoXml {
   fechaDesde: string;
   fechaHasta: string;
   motivo: string;
+  // Reconstruible por máquina, no sólo por texto: cuando el motivo viene del
+  // tercer nivel de troceo (folio para emitidos, contraparte para recibidos),
+  // estos campos son EXACTAMENTE el filtro que el consumidor tiene que repetir
+  // para pedir de nuevo ese sub-rango. Ausentes cuando el motivo es de fecha
+  // (día lleno) o de tope de tramos sin haber entrado al tercer nivel.
+  tipoDte?: number;
+  contraparteRut?: string;
+  folioDesde?: number;
+  folioHasta?: number;
 }
 
 export interface RespaldoXmlResult {
@@ -793,13 +808,20 @@ export class MipymeHttpScraper {
   // orden: la rama izquierda de un nivel se resuelve entera (incluida su propia
   // sub-bisección) antes de arrancar la derecha, así que dos limitaciones
   // vecinas en el calendario pueden llegar lejos una de la otra en el arreglo.
+  //
+  // OJO: el motivo de "día lleno" EMBEBE la fecha del día en el texto (`El día
+  // 2026-08-05 tiene más de...`), así que dos días llenos consecutivos NUNCA
+  // fusionan por esta vía — el texto de cada uno ya difiere aunque la causa sea
+  // la misma. Es razonable: cada día lleno se reintenta aparte con `tipo_dte`
+  // (o, desde el tercer nivel, por folio/contraparte), y unificar el mensaje de
+  // dos días distintos sería menos preciso que tenerlos por separado.
   private fusionarLimitacionesContiguas(limitaciones: LimitacionRespaldoXml[]): LimitacionRespaldoXml[] {
     const ordenadas = [...limitaciones].sort((a, b) => a.fechaDesde.localeCompare(b.fechaDesde));
     const fusionadas: LimitacionRespaldoXml[] = [];
     for (const actual of ordenadas) {
       const anterior = fusionadas[fusionadas.length - 1];
       const contigua = anterior != null
-        && aIsoUtc(Date.parse(`${anterior.fechaHasta}T00:00:00Z`) + 24 * 60 * 60 * 1000) === actual.fechaDesde;
+        && aIsoUtc(Date.parse(`${anterior.fechaHasta}T00:00:00Z`) + DIA_MS) === actual.fechaDesde;
       if (anterior != null && contigua && anterior.motivo === actual.motivo) {
         anterior.fechaHasta = actual.fechaHasta;
       } else {
@@ -853,8 +875,15 @@ export class MipymeHttpScraper {
     const respuesta = await this.descargarTramo(ctx, desde, hasta);
     if (respuesta.excedeTope) {
       if (desde === hasta) {
-        // Un solo día no se puede partir más: el filtro por fecha se agotó. Se
-        // registra como limitación de ESE día en vez de tirar todo lo demás.
+        // El filtro por fecha se agotó: un solo día no se puede partir más. Con
+        // `tipo_dte` puesto queda un eje MÁS FINO —folio o contraparte, según el
+        // origen— y ahí es donde entra el tercer nivel de troceo; sin
+        // `tipo_dte` ese eje no existe todavía (lo maneja el consumidor
+        // pidiendo por tipo), y se registra la limitación de siempre.
+        if (ctx.filtros.tipoDte != null) {
+          await this.trocearPorEjeFino(ctx, desde, tramos, limitaciones, maxTramos);
+          return;
+        }
         limitaciones.push({
           fechaDesde: desde,
           fechaHasta: hasta,
@@ -885,12 +914,280 @@ export class MipymeHttpScraper {
     });
   }
 
+  // Espera el ritmo salvo en la primera llamada, y consume un lugar del
+  // presupuesto de `maxTramos`. Repite las dos líneas que `acumularTramos` ya
+  // hacía inline, para que el tercer nivel —que agrega varias llamadas
+  // propias, listados incluidos— las pague igual: el tope protege al portal y
+  // no puede haber una llamada que se lo salte.
+  private async consumirPresupuesto(ctx: { descargas: number }): Promise<void> {
+    if (ctx.descargas > 0) await esperar(pausaConfigurada());
+    ctx.descargas += 1;
+  }
+
+  // Agrupa un arreglo en trozos de a lo sumo `tamano` elementos, preservando
+  // el orden. Los `folios` ya vienen ordenados por el llamador; acá sólo se
+  // trocean en grupos consecutivos del arreglo, no por valor.
+  private enGrupos<T>(items: T[], tamano: number): T[][] {
+    const grupos: T[][] = [];
+    for (let i = 0; i < items.length; i += tamano) grupos.push(items.slice(i, i + tamano));
+    return grupos;
+  }
+
+  // El tercer nivel de troceo: se llega acá sólo cuando un DÍA con `tipo_dte`
+  // puesto sigue excediendo el tope, o sea que ni la fecha ni el tipo alcanzan
+  // para bajar los 20 documentos por descarga del SII. Hace falta un eje MÁS
+  // FINO, y ese eje depende de quién es dueño de la numeración:
+  //
+  //   - `ENV` (emitidos): el folio ordena, porque la empresa es la emisora y
+  //     los folios de UN emisor no se repiten dentro de un mismo tipo de
+  //     documento.
+  //   - `RCP` (recibidos): los folios de distintos emisores SÍ colisionan (cada
+  //     uno numera el suyo), así que el eje que sí separa es la CONTRAPARTE.
+  //
+  // Cada llamada del listado (paginado) y de la descarga cuenta contra
+  // `maxTramos` y lleva la misma pausa que las demás — el tope protege al
+  // portal, y el tercer nivel no es una excepción.
+  private async trocearPorEjeFino(
+    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    tramos: TramoRespaldoXml[],
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number
+  ): Promise<void> {
+    if (ctx.filtros.origen === 'ENV') {
+      const documentos = await this.listarEmitidosDelDia(ctx, dia, limitaciones, maxTramos);
+      if (documentos === null) return; // maxTramos se agotó listando; limitación ya cargada.
+
+      const folios = [...new Set(documentos.map(d => d.folio))].sort((a, b) => a - b);
+      if (folios.length === 0) {
+        // El listado y la descarga no cuentan igual (documentado más arriba,
+        // en `acumularTramos`): acá es el caso extremo donde la descarga dice
+        // que sobran documentos y el listado no encuentra ni uno del mismo
+        // día y tipo. Sin folios no hay por dónde agrupar.
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          motivo:
+            `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
+            + `(tipo ${ctx.filtros.tipoDte}), pero el listado de emitidos no devolvió ningún folio `
+            + `para ese día y tipo. El listado y la descarga no cuentan igual; sin folios no se puede `
+            + `trocear más fino.`,
+        });
+        return;
+      }
+      for (const grupo of this.enGrupos(folios, TOPE_DOCUMENTOS_SII)) {
+        await this.descargarGrupoDeFolios(ctx, dia, grupo, {}, tramos, limitaciones, maxTramos);
+      }
+      return;
+    }
+
+    // RCP: la contraparte es el eje. Se agrupan los folios por EMISOR y se
+    // pide una descarga por emisor; sólo si un emisor por sí solo sigue
+    // excediendo el tope se baja también por folio, igual que del lado ENV.
+    const documentos = await this.listarRecibidosDelDia(ctx, dia, limitaciones, maxTramos);
+    if (documentos === null) return;
+
+    const foliosPorEmisor = new Map<string, number[]>();
+    for (const d of documentos) {
+      const lista = foliosPorEmisor.get(d.emisorRut) ?? [];
+      lista.push(d.folio);
+      foliosPorEmisor.set(d.emisorRut, lista);
+    }
+    if (foliosPorEmisor.size === 0) {
+      limitaciones.push({
+        fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+        motivo:
+          `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
+          + `(tipo ${ctx.filtros.tipoDte}), pero el listado de recibidos no devolvió ningún emisor `
+          + `para ese día y tipo. El listado y la descarga no cuentan igual; sin emisores no se `
+          + `puede trocear más fino.`,
+      });
+      return;
+    }
+
+    for (const [emisorRut, folios] of foliosPorEmisor) {
+      folios.sort((a, b) => a - b);
+      if (ctx.descargas >= maxTramos) {
+        // Se agota el presupuesto entre un emisor y el siguiente: los que
+        // quedan sin pedir se registran juntos, no uno por uno — no se
+        // intentó ninguna descarga por ellos, así que no hay un folio
+        // puntual que reportar.
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          motivo:
+            `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para trocear por `
+            + `contraparte el ${dia} (tipo ${ctx.filtros.tipoDte}): quedaron emisores sin procesar. `
+            + `Pedí este día con un maxTramos más alto o acotá con contraparte_rut.`,
+        });
+        break;
+      }
+      await this.consumirPresupuesto(ctx);
+      const respuesta = await this.descargarTramo(ctx, dia, dia, { contraparteRut: emisorRut });
+      if (respuesta.excedeTope) {
+        await this.descargarGrupoDeFolios(
+          ctx, dia, folios, { contraparteRut: emisorRut }, tramos, limitaciones, maxTramos);
+        continue;
+      }
+      tramos.push({
+        fechaDesde: dia,
+        fechaHasta: dia,
+        documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
+        xml: respuesta.xml,
+      });
+    }
+  }
+
+  // Folios de UN día y tipo, del lado emitido. Pagina el mismo listado que usa
+  // `listDteEmitidos` pero SIN volver a seleccionar la empresa (ya está
+  // seleccionada por `respaldoXml`) y contando cada página contra `maxTramos`.
+  // `null` si el presupuesto se agotó a mitad de la paginación: la limitación
+  // ya queda cargada por el llamador de esta función.
+  private async listarEmitidosDelDia(
+    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number
+  ): Promise<DteEmitidoMipyme[] | null> {
+    const documentos: DteEmitidoMipyme[] = [];
+    let pagina = 1;
+    for (;;) {
+      if (ctx.descargas >= maxTramos) {
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          motivo:
+            `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más de `
+            + `${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día con `
+            + `un maxTramos más alto.`,
+        });
+        return null;
+      }
+      await this.consumirPresupuesto(ctx);
+      const html = await this.http.get(HISTORIAL_URL, this.params({
+        tipoDte: ctx.filtros.tipoDte,
+        fechaDesde: dia,
+        fechaHasta: dia,
+        receptorRut: ctx.filtros.contraparteRut,
+      }, pagina));
+      this.assertEmpresaSeleccionada(html);
+      documentos.push(...this.parseHistorial(html));
+      const totalPaginas = this.parseTotalPaginas(html);
+      if (totalPaginas == null || pagina >= totalPaginas) break;
+      pagina += 1;
+    }
+    return documentos;
+  }
+
+  // Igual que `listarEmitidosDelDia`, del lado recibido: la contraparte acá es
+  // el EMISOR, no el receptor (la empresa misma).
+  private async listarRecibidosDelDia(
+    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number
+  ): Promise<DteRecibidoMipyme[] | null> {
+    const documentos: DteRecibidoMipyme[] = [];
+    let pagina = 1;
+    for (;;) {
+      if (ctx.descargas >= maxTramos) {
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          motivo:
+            `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más `
+            + `de ${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día `
+            + `con un maxTramos más alto.`,
+        });
+        return null;
+      }
+      await this.consumirPresupuesto(ctx);
+      const html = await this.http.get(HISTORIAL_RECIBIDOS_URL, this.paramsRecibidos({
+        tipoDte: ctx.filtros.tipoDte,
+        fechaDesde: dia,
+        fechaHasta: dia,
+        emisorRut: ctx.filtros.contraparteRut,
+      }, pagina));
+      this.assertEmpresaSeleccionada(html);
+      documentos.push(...this.parseHistorialRecibidos(html));
+      const totalPaginas = this.parseTotalPaginas(html);
+      if (totalPaginas == null || pagina >= totalPaginas) break;
+      pagina += 1;
+    }
+    return documentos;
+  }
+
+  // Baja un grupo de folios de a lo sumo `TOPE_DOCUMENTOS_SII` (viene ya
+  // acotado por el llamador) con `folioDesde`/`folioHasta` en los extremos del
+  // grupo. Si la descarga IGUAL excede el tope —el listado y la descarga no
+  // cuentan igual, ver el comentario de `acumularTramos`— se bisecta el grupo
+  // por la MITAD DEL ARREGLO (no por valor de folio, que puede tener huecos)
+  // hasta llegar a un solo folio. Un folio único que por sí solo excede el
+  // tope es un dato roto: no hay forma de afinar más, y queda como limitación
+  // con el folio exacto.
+  private async descargarGrupoDeFolios(
+    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    folios: number[],
+    overrideBase: { contraparteRut?: string },
+    tramos: TramoRespaldoXml[],
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number
+  ): Promise<void> {
+    const folioDesde = folios[0];
+    const folioHasta = folios[folios.length - 1];
+    const contraparte = overrideBase.contraparteRut ? ` (contraparte ${overrideBase.contraparteRut})` : '';
+
+    if (ctx.descargas >= maxTramos) {
+      limitaciones.push({
+        fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+        contraparteRut: overrideBase.contraparteRut, folioDesde, folioHasta,
+        motivo:
+          `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para bajar los `
+          + `folios ${folioDesde}..${folioHasta} del ${dia}${contraparte}. Pedí un maxTramos más `
+          + `alto o acotá el rango de folios.`,
+      });
+      return;
+    }
+
+    await this.consumirPresupuesto(ctx);
+    const respuesta = await this.descargarTramo(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
+    if (respuesta.excedeTope) {
+      if (folios.length === 1) {
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          contraparteRut: overrideBase.contraparteRut, folioDesde, folioHasta,
+          motivo:
+            `El folio ${folioDesde} del ${dia}${contraparte} excede por sí solo el tope de `
+            + `${TOPE_DOCUMENTOS_SII} documentos del SII: es un único folio y el filtro ya no se `
+            + `puede afinar más. El listado y la descarga no cuentan igual para este caso puntual.`,
+        });
+        return;
+      }
+      const mitad = Math.floor(folios.length / 2);
+      await this.descargarGrupoDeFolios(
+        ctx, dia, folios.slice(0, mitad), overrideBase, tramos, limitaciones, maxTramos);
+      await this.descargarGrupoDeFolios(
+        ctx, dia, folios.slice(mitad), overrideBase, tramos, limitaciones, maxTramos);
+      return;
+    }
+
+    tramos.push({
+      fechaDesde: dia,
+      fechaHasta: dia,
+      documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
+      xml: respuesta.xml,
+    });
+  }
+
   private async descargarTramo(
     ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml },
     desde: string,
-    hasta: string
+    hasta: string,
+    // El tercer nivel de troceo pide el MISMO día con un folio o una
+    // contraparte más finos que los filtros originales del caller (que pueden
+    // no traer ninguno de los dos). No se muta `ctx.filtros` — cada grupo de
+    // folios necesita su propio recorte y los hermanos no tienen por qué
+    // compartirlo.
+    overrides?: Partial<Pick<FiltrosRespaldoXml, 'folioDesde' | 'folioHasta' | 'contraparteRut'>>
   ): Promise<{ xml: string; excedeTope: boolean }> {
-    const f = ctx.filtros;
+    const f: FiltrosRespaldoXml = overrides ? { ...ctx.filtros, ...overrides } : ctx.filtros;
     const comunes = {
       RUT_EMP: ctx.rut,
       DV_EMP: ctx.dv,
@@ -983,7 +1280,6 @@ export class MipymeHttpScraper {
   private partirRango(desde: string, hasta: string): [string, string] {
     const inicio = Date.parse(`${desde}T00:00:00Z`);
     const fin = Date.parse(`${hasta}T00:00:00Z`);
-    const DIA_MS = 24 * 60 * 60 * 1000;
     // Se redondea HACIA ABAJO para que la primera mitad nunca quede vacía
     // cuando el rango son dos días.
     const medio = inicio + Math.floor((fin - inicio) / (2 * DIA_MS)) * DIA_MS;
