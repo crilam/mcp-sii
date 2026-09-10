@@ -6,6 +6,7 @@ import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { registrarRutasMipyme } from '../rest/rutas/mipyme';
 import { RutaHandler } from '../rest/rutas/comun';
 import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacion';
+import { soloCuerpoRut } from '../scrapers/mipymeHttp';
 
 // Verifica `respaldo-xml` contra el SII real, por el handler REST.
 //
@@ -129,20 +130,36 @@ async function main() {
         tipos.length === 0 ? null : tipos.length === 1 && tipos[0] === tipoPedido;
       const folioDesde = numeroDe('VERIF_FOLIO');
       const folioHasta = numeroDe('VERIF_FOLIO_HASTA') ?? folioDesde;
-      const folioOk = folioDesde == null
-        || folios.every(f => Number(f) >= folioDesde && Number(f) <= (folioHasta as number));
-      // Igualdad de CUERPO de RUT a los dos lados, no `startsWith`: un prefijo
-      // ("7600000" contra "76000001") daba falso positivo, y este chequeo es
-      // justo la evidencia que decide si se prende el flag — no puede mentir.
-      const cuerpoContraparte = process.env.VERIF_CONTRAPARTE?.split('-')[0];
-      const contraparteOk = !cuerpoContraparte || (
-        process.env.VERIF_ORIGEN === 'emitidos'
-          ? receptores.every(r => r.split('-')[0] === cuerpoContraparte)
-          : emisores.every(e => e.split('-')[0] === cuerpoContraparte)
-      );
-      const veredicto = tipoOk === null
-        ? 'NO CONCLUYENTE — el XML no trae <TipoDTE>, no se puede confirmar si el filtro de tipo se respetó'
-        : tipoOk && folioOk && contraparteOk
+      // Mismo tratamiento que `tipoOk`: `every` sobre un arreglo vacío da
+      // `true` vacuo, y un XML sin `<Folio>` (SetDTE vacío, u otro formato)
+      // imprimía RESPETADO sin haber verificado nada. `null` cuando el
+      // filtro SÍ se pidió pero no hay con qué chequearlo.
+      const folioOk: boolean | null = folioDesde == null
+        ? true
+        : folios.length === 0
+          ? null
+          : folios.every(f => Number(f) >= folioDesde && Number(f) <= (folioHasta as number));
+      // `soloCuerpoRut`, no `split('-')[0]` a mano: el contrato público de
+      // `contraparte_rut` es "con o sin DV", y separar por guión a mano deja
+      // pasar un RUT sin DV tal cual en vez de normalizarlo al cuerpo.
+      const cuerpoContraparte = process.env.VERIF_CONTRAPARTE
+        ? soloCuerpoRut(process.env.VERIF_CONTRAPARTE)
+        : undefined;
+      const listaContraparte = process.env.VERIF_ORIGEN === 'emitidos' ? receptores : emisores;
+      // Mismo vacuo que `folioOk`: sin contrapartes en el XML (filtro pedido)
+      // no se puede confirmar nada, es `null`, no `true`.
+      const contraparteOk: boolean | null = !cuerpoContraparte
+        ? true
+        : listaContraparte.length === 0
+          ? null
+          : listaContraparte.every(r => soloCuerpoRut(r) === cuerpoContraparte);
+      const inconcluyentes: string[] = [];
+      if (tipoOk === null) inconcluyentes.push('no trae <TipoDTE>');
+      if (folioOk === null) inconcluyentes.push('no trae <Folio>');
+      if (contraparteOk === null) inconcluyentes.push('no trae <RUTRecep>/<RUTEmisor>');
+      const veredicto = inconcluyentes.length > 0
+        ? `NO CONCLUYENTE — el XML ${inconcluyentes.join(' y ')}, no se puede confirmar si el filtro se respetó`
+        : tipoOk === true && folioOk === true && contraparteOk === true
           ? 'RESPETADO'
           : 'NO RESPETADO — revisar antes de prender RESPALDO_XML_TERCER_NIVEL';
       console.log(

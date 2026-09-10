@@ -15,7 +15,7 @@ function aIsoUtc(ms: number): string {
 // formulario de descarga. Acepta las dos formas que manda la gente —"77777777-7"
 // y "77777777"— porque mandar el DV pegado no da error: da CERO resultados, y un
 // respaldo vacío se lee igual que "no hubo documentos en el período".
-function soloCuerpoRut(rut: string): string {
+export function soloCuerpoRut(rut: string): string {
   return rut.trim().replace(/\./g, '').split('-')[0];
 }
 
@@ -822,7 +822,20 @@ export class MipymeHttpScraper {
       const anterior = fusionadas[fusionadas.length - 1];
       const contigua = anterior != null
         && aIsoUtc(Date.parse(`${anterior.fechaHasta}T00:00:00Z`) + DIA_MS) === actual.fechaDesde;
-      if (anterior != null && contigua && anterior.motivo === actual.motivo) {
+      // El mismo `motivo` textual no alcanza: al fusionar se conserva
+      // `tipoDte`/`folioDesde`/`folioHasta`/`contraparteRut` de `anterior` y
+      // se descartan los de `actual` — dos limitaciones del tercer nivel con
+      // el mismo motivo genérico ("necesita más de N tramos...") pero
+      // `contraparteRut` distinto fusionarían en una que sólo menciona la
+      // PRIMERA contraparte, perdiendo la segunda. Exigir estos cuatro
+      // campos iguales (incluido `undefined === undefined`, el caso sin
+      // tercer nivel) es lo que hace la fusión segura.
+      const mismosCamposTercerNivel = anterior != null
+        && anterior.tipoDte === actual.tipoDte
+        && anterior.folioDesde === actual.folioDesde
+        && anterior.folioHasta === actual.folioHasta
+        && anterior.contraparteRut === actual.contraparteRut;
+      if (anterior != null && contigua && anterior.motivo === actual.motivo && mismosCamposTercerNivel) {
         anterior.fechaHasta = actual.fechaHasta;
       } else {
         fusionadas.push({ ...actual });

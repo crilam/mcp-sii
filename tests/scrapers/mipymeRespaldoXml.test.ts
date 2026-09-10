@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { MipymeHttpScraper } from '../../src/scrapers/mipymeHttp';
+import { MipymeHttpScraper, LimitacionRespaldoXml } from '../../src/scrapers/mipymeHttp';
 import { LimitacionConocida } from '../../src/erroresConsulta';
 import { esperar } from '../../src/ritmoSii';
 import { SiiHttpClient } from '../../src/http';
@@ -362,6 +362,33 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(r.limitaciones[0]).toMatchObject({ fechaDesde: '2026-08-05', fechaHasta: '2026-08-05' });
     expect(r.limitaciones[1]).toMatchObject({ fechaDesde: '2026-08-06', fechaHasta: '2026-08-06' });
     expect(r.limitaciones[0].motivo).not.toBe(r.limitaciones[1].motivo);
+  });
+
+  // Fusionar sólo por `fechaDesde`/`fechaHasta` contiguas + mismo `motivo`
+  // textual no alcanza: la fusión conserva `tipoDte`/`folioDesde`/
+  // `folioHasta`/`contraparteRut` de la PRIMERA limitación y descarta los de
+  // la segunda. Dos limitaciones contiguas con el mismo motivo genérico de
+  // `maxTramos` pero `contraparteRut` distinto fusionarían en una sola que
+  // sólo menciona la primera contraparte, perdiendo la segunda — se prueba
+  // directo sobre `fusionarLimitacionesContiguas` porque ningún mensaje real
+  // de hoy combina un motivo idéntico con `contraparteRut` diferente (los
+  // mensajes del tercer nivel embeben folio/día en el texto), pero la
+  // función tiene que ser segura igual para cualquier call-site futuro.
+  it('fusionarLimitacionesContiguas no fusiona limitaciones contiguas con el mismo motivo si el contraparteRut difiere', () => {
+    const { scraper } = armar();
+    const limitaciones: LimitacionRespaldoXml[] = [
+      { fechaDesde: '2026-08-01', fechaHasta: '2026-08-01', contraparteRut: '11111111-1', motivo: 'Motivo genérico de maxTramos.' },
+      { fechaDesde: '2026-08-02', fechaHasta: '2026-08-02', contraparteRut: '22222222-2', motivo: 'Motivo genérico de maxTramos.' },
+    ];
+    const fusionar = scraper as unknown as {
+      fusionarLimitacionesContiguas(l: LimitacionRespaldoXml[]): LimitacionRespaldoXml[];
+    };
+
+    const fusionadas = fusionar.fusionarLimitacionesContiguas(limitaciones);
+
+    expect(fusionadas).toHaveLength(2);
+    expect(fusionadas[0].contraparteRut).toBe('11111111-1');
+    expect(fusionadas[1].contraparteRut).toBe('22222222-2');
   });
 
   // Cuando NINGÚN tope se toca, `limitaciones` es `[]` y todo lo demás sigue
@@ -748,6 +775,40 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.limitaciones[0]).toMatchObject({
       contraparteRut: '11111111-1', folioDesde: 10, folioHasta: 10, tipoDte: 33,
     });
+  });
+
+  // El presupuesto puede agotarse a mitad de la BISECCIÓN de un emisor y
+  // ANTES de llegar al siguiente: dos limitaciones distintas, no una — la del
+  // primer emisor con los folios que le quedaron pendientes (colapsados por
+  // `descargarGrupoDeFolios`), y la de "emisores sin procesar" nombrando al
+  // segundo, que ni se intentó.
+  it('recibidos: presupuesto agotado a mitad de la bisección del primer emisor deja DOS limitaciones', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 10, emisorRut: '11111111-1' },
+      { folio: 11, emisorRut: '11111111-1' },
+      { folio: 12, emisorRut: '11111111-1' },
+      { folio: 1, emisorRut: '22222222-2' },
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero (descargas: 1)
+      .mockResolvedValueOnce(binarioDemasiados()) // emisor 11111111, plano (descargas: 3, tras el listado)
+      .mockResolvedValueOnce(binarioDemasiados()); // grupo [10,11,12] (descargas: 4 — se agota acá)
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA, maxTramos: 4 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(2);
+    // La primera: los folios del emisor 11111111 que quedaron sin bajar,
+    // colapsados en un solo rango (10..12).
+    expect(r.limitaciones[0]).toMatchObject({
+      contraparteRut: '11111111-1', folioDesde: 10, folioHasta: 12, tipoDte: 33,
+    });
+    // La segunda: el emisor 22222222 ni se intentó, nombrado en el motivo.
+    expect(r.limitaciones[1].contraparteRut).toBeUndefined();
+    expect(r.limitaciones[1].motivo).toMatch(/22222222-2/);
+    expect(http.getBinario).toHaveBeenCalledTimes(3);
   });
 
   // Un emisor con MÁS de 20 folios en el día tiene que agruparse de a lo sumo
