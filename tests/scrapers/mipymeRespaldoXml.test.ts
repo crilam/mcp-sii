@@ -937,7 +937,7 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
   });
 
   // Si el caller YA pidió un folio único (folio_desde === folio_hasta, o sólo
-  // folio_desde), el intento que acaba de excedeer el tope en `acumularTramos`
+  // folio_desde), el intento que acaba de exceder el tope en `acumularTramos`
   // usó ese MISMO filtro (fecha+tipo+folio). Listar el día y volver a pedir
   // exactamente ese folio son dos llamadas cuyo resultado ya se conoce.
   it('emitidos: folio único ya pedido por el caller corta directo a la limitación, sin listar', async () => {
@@ -988,6 +988,28 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(http.getBinario).toHaveBeenCalledTimes(3);
   });
 
+  // Con el presupuesto agotado ENTRE dos grupos de folios (no dentro de la
+  // bisección de UNO, que ya cubre el test de arriba), cada grupo restante
+  // entraba igual a `descargarGrupoDeFolios`, veía el presupuesto agotado y
+  // empujaba su propia limitación — acá habría sido `21..40` y después
+  // `41..45` en vez de una sola `21..45`.
+  it('emitidos: maxTramos agotado ENTRE grupos de folios colapsa el resto en UNA sola limitación', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 45 }, (_, i) => i + 1);
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero (descargas: 1)
+      .mockResolvedValueOnce(binarioXml());       // grupo [1..20] (descargas: 3, tras el listado)
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 3 });
+
+    expect(r.tramos).toHaveLength(1);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ folioDesde: 21, folioHasta: 45, tipoDte: 33 });
+    expect(r.limitaciones[0].motivo).toMatch(/tramos/i);
+    expect(http.getBinario).toHaveBeenCalledTimes(2);
+  });
+
   // `contraparte_rut` (el receptor, del lado emitidos) del caller original
   // tiene que seguir viajando en CADA grupo de folios del tercer nivel, no
   // sólo en el intento inicial: si se perdiera al agrupar, el primer grupo
@@ -1011,6 +1033,36 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     for (const [, params] of llamadas) {
       expect(params).toMatchObject({ RUT_RECP: '77777777' });
     }
+  });
+
+  // `contraparte_rut` es "con o sin DV" para quien llama, pero el listado del
+  // portal —igual que la descarga en `descargarTramo`— sólo matchea el CUERPO
+  // sin guión. Si el filtro crudo llegara con DV al listado, el CGI no
+  // encontraría coincidencias, el listado volvería vacío y
+  // `trocearPorEjeFino` terminaría en la limitación silenciosa "el listado no
+  // devolvió ningún folio" sin haber bajado nada. Acá el mock del listado SÍ
+  // mira el parámetro de RUT (a diferencia de `mockearListado`, que lo
+  // ignora) para que este test falle si la normalización se pierde.
+  it('emitidos: contraparte_rut llega al listado sin DV, igual que a la descarga', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 25 }, (_, i) => i + 1);
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockImplementationOnce((_url: string, params?: Record<string, string>) => {
+        expect(params?.RUT_RECP).toBe('77777777');
+        return Promise.resolve(historialEmitidosHtml(folios));
+      });
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValue(binarioXml());           // cada grupo de folios
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', ...DIA, contraparteRut: '77777777-7',
+    });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos.length).toBeGreaterThan(0);
   });
 
   // Espejo del caso ENV equivalente: si el listado de recibidos no trae NINGÚN

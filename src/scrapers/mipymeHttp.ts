@@ -988,7 +988,7 @@ export class MipymeHttpScraper {
   ): Promise<void> {
     if (ctx.filtros.origen === 'ENV') {
       // El caller ya pidió UN folio exacto (`folioDesde === folioHasta`, o
-      // sólo `folioDesde`). El intento que acaba de excedeer el tope en
+      // sólo `folioDesde`). El intento que acaba de exceder el tope en
       // `acumularTramos` usó ese MISMO filtro (fecha+tipo+folio único), así
       // que listar el día y volver a pedir exactamente ese folio es repetir
       // dos llamadas cuyo resultado ya se conoce: es un dato roto, no un
@@ -1032,9 +1032,8 @@ export class MipymeHttpScraper {
         });
         return;
       }
-      for (const grupo of this.enGrupos(folios, TOPE_DOCUMENTOS_SII)) {
-        await this.descargarGrupoDeFolios(ctx, dia, grupo, {}, tramos, limitaciones, maxTramos);
-      }
+      await this.descargarGruposDeFolios(
+        ctx, dia, this.enGrupos(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos);
       return;
     }
 
@@ -1103,10 +1102,9 @@ export class MipymeHttpScraper {
         // `TOPE_DOCUMENTOS_SII` folios, no el emisor entero — con 45 folios de
         // un mismo emisor, pedir el grupo completo de entrada excede seguro y
         // gasta el presupuesto en una llamada condenada a fallar.
-        for (const grupo of this.enGrupos(folios, TOPE_DOCUMENTOS_SII)) {
-          await this.descargarGrupoDeFolios(
-            ctx, dia, grupo, { contraparteRut: emisorRut }, tramos, limitaciones, maxTramos);
-        }
+        await this.descargarGruposDeFolios(
+          ctx, dia, this.enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
+          tramos, limitaciones, maxTramos);
         continue;
       }
       tramos.push({
@@ -1147,7 +1145,12 @@ export class MipymeHttpScraper {
         tipoDte: ctx.filtros.tipoDte,
         fechaDesde: dia,
         fechaHasta: dia,
-        receptorRut: ctx.filtros.contraparteRut,
+        // Igual que en `descargarTramo`: el listado tampoco filtra con el DV
+        // pegado. Un `contraparteRut` crudo ("con o sin DV" es el contrato
+        // público) le da al CGI de listado un valor que no matchea nada, el
+        // listado vuelve vacío, y `trocearPorEjeFino` lo lee como "no hay
+        // folios de esta contraparte" en vez de ir a buscarlos.
+        receptorRut: ctx.filtros.contraparteRut ? soloCuerpoRut(ctx.filtros.contraparteRut) : undefined,
       }, pagina));
       this.assertEmpresaSeleccionada(html);
       documentos.push(...this.parseHistorial(html));
@@ -1184,7 +1187,9 @@ export class MipymeHttpScraper {
         tipoDte: ctx.filtros.tipoDte,
         fechaDesde: dia,
         fechaHasta: dia,
-        emisorRut: ctx.filtros.contraparteRut,
+        // Mismo motivo que en `listarEmitidosDelDia`: el listado tampoco
+        // acepta el RUT con DV pegado.
+        emisorRut: ctx.filtros.contraparteRut ? soloCuerpoRut(ctx.filtros.contraparteRut) : undefined,
       }, pagina));
       this.assertEmpresaSeleccionada(html);
       documentos.push(...this.parseHistorialRecibidos(html));
@@ -1195,14 +1200,6 @@ export class MipymeHttpScraper {
     return documentos;
   }
 
-  // Baja un grupo de folios de a lo sumo `TOPE_DOCUMENTOS_SII` (viene ya
-  // acotado por el llamador) con `folioDesde`/`folioHasta` en los extremos del
-  // grupo. Si la descarga IGUAL excede el tope —el listado y la descarga no
-  // cuentan igual, ver el comentario de `acumularTramos`— se bisecta el grupo
-  // por la MITAD DEL ARREGLO (no por valor de folio, que puede tener huecos)
-  // hasta llegar a un solo folio. Un folio único que por sí solo excede el
-  // tope es un dato roto: no hay forma de afinar más, y queda como limitación
-  // con el folio exacto.
   // Un folio único que por sí solo excede el tope, o que ya se sabe condenado
   // de antemano (ver el atajo de `trocearPorEjeFino` para un `folio_desde`
   // sin rango): es un dato roto, no hay forma de afinar más. Se factoriza acá
@@ -1219,6 +1216,64 @@ export class MipymeHttpScraper {
         + `${TOPE_DOCUMENTOS_SII} documentos del SII: es un único folio y el filtro ya no se `
         + `puede afinar más. El listado y la descarga no cuentan igual para este caso puntual.`,
     };
+  }
+
+  // Baja un grupo de folios de a lo sumo `TOPE_DOCUMENTOS_SII` (viene ya
+  // acotado por el llamador) con `folioDesde`/`folioHasta` en los extremos del
+  // grupo. Si la descarga IGUAL excede el tope —el listado y la descarga no
+  // cuentan igual, ver el comentario de `acumularTramos`— se bisecta el grupo
+  // por la MITAD DEL ARREGLO (no por valor de folio, que puede tener huecos)
+  // hasta llegar a un solo folio. Un folio único que por sí solo excede el
+  // tope es un dato roto: no hay forma de afinar más, y queda como limitación
+  // con el folio exacto.
+  // El mismo motivo con el que `descargarGrupoDeFolios` colapsa los hermanos
+  // que quedan sin intentar dentro de UNA bisección, factorizado para que
+  // `descargarGruposDeFolios` arme la MISMA limitación cuando lo que colapsa
+  // es una lista entera de grupos (ver ahí el motivo del colapso).
+  private limitacionPresupuestoFolios(
+    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string },
+    dia: string,
+    folioDesde: number,
+    folioHasta: number,
+    contraparteRut: string | undefined,
+    maxTramos: number
+  ): LimitacionRespaldoXml {
+    const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
+    return {
+      fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+      contraparteRut, folioDesde, folioHasta,
+      motivo:
+        `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para bajar los `
+        + `folios ${folioDesde}..${folioHasta} del ${dia}${contraparte}. Pedí un maxTramos más `
+        + `alto o acotá el rango de folios.`,
+    };
+  }
+
+  // Aplica el chequeo de `maxTramos` ENTRE grupos hermanos (no sólo dentro de
+  // la bisección de uno, que ya resuelve `descargarGrupoDeFolios` con su
+  // pila): sin esto, con el presupuesto agotado a mitad de una lista de
+  // grupos, cada grupo restante entraba igual a `descargarGrupoDeFolios`, veía
+  // el presupuesto agotado y empujaba SU PROPIA limitación — por ejemplo
+  // `21..40` y después `41..45` en vez de una sola `21..45`. Se colapsan acá,
+  // ANTES de entrar a cada grupo.
+  private async descargarGruposDeFolios(
+    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    grupos: number[][],
+    overrideBase: { contraparteRut?: string },
+    tramos: TramoRespaldoXml[],
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number
+  ): Promise<void> {
+    for (let i = 0; i < grupos.length; i++) {
+      if (ctx.descargas >= maxTramos) {
+        const restantes = grupos.slice(i).flat();
+        limitaciones.push(this.limitacionPresupuestoFolios(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes), overrideBase.contraparteRut, maxTramos));
+        return;
+      }
+      await this.descargarGrupoDeFolios(ctx, dia, grupos[i], overrideBase, tramos, limitaciones, maxTramos);
+    }
   }
 
   private async descargarGrupoDeFolios(
@@ -1239,21 +1294,12 @@ export class MipymeHttpScraper {
     // mismo orden que tenía la recursión original (`await izquierda();
     // await derecha();`), así que el orden de las descargas no cambia.
     const pendientes: number[][] = [folios];
-    const contraparte = overrideBase.contraparteRut ? ` (contraparte ${overrideBase.contraparteRut})` : '';
 
     while (pendientes.length > 0) {
       if (ctx.descargas >= maxTramos) {
         const restantes = pendientes.flat();
-        const folioDesde = Math.min(...restantes);
-        const folioHasta = Math.max(...restantes);
-        limitaciones.push({
-          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
-          contraparteRut: overrideBase.contraparteRut, folioDesde, folioHasta,
-          motivo:
-            `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para bajar los `
-            + `folios ${folioDesde}..${folioHasta} del ${dia}${contraparte}. Pedí un maxTramos más `
-            + `alto o acotá el rango de folios.`,
-        });
+        limitaciones.push(this.limitacionPresupuestoFolios(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes), overrideBase.contraparteRut, maxTramos));
         return;
       }
 

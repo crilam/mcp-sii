@@ -120,7 +120,13 @@ async function main() {
     // que confirmar antes de prender el flag.
     const tipoPedido = process.env.VERIF_TIPO_DTE;
     if (tipoPedido && (process.env.VERIF_FOLIO || process.env.VERIF_CONTRAPARTE)) {
-      const tipoOk = tipos.length === 0 || (tipos.length === 1 && tipos[0] === tipoPedido);
+      // `null` (no `true`) cuando el XML no trae ni un `<TipoDTE>`: no es que
+      // el filtro se haya respetado, es que este chequeo no tiene con qué
+      // confirmarlo. Antes contaba como OK, y un XML sin `<TipoDTE>` (SetDTE
+      // vacío, u otro formato) imprimía RESPETADO sin haber verificado nada —
+      // justo la evidencia que decide si se prende RESPALDO_XML_TERCER_NIVEL.
+      const tipoOk: boolean | null =
+        tipos.length === 0 ? null : tipos.length === 1 && tipos[0] === tipoPedido;
       const folioDesde = numeroDe('VERIF_FOLIO');
       const folioHasta = numeroDe('VERIF_FOLIO_HASTA') ?? folioDesde;
       const folioOk = folioDesde == null
@@ -134,8 +140,13 @@ async function main() {
           ? receptores.every(r => r.split('-')[0] === cuerpoContraparte)
           : emisores.every(e => e.split('-')[0] === cuerpoContraparte)
       );
+      const veredicto = tipoOk === null
+        ? 'NO CONCLUYENTE — el XML no trae <TipoDTE>, no se puede confirmar si el filtro de tipo se respetó'
+        : tipoOk && folioOk && contraparteOk
+          ? 'RESPETADO'
+          : 'NO RESPETADO — revisar antes de prender RESPALDO_XML_TERCER_NIVEL';
       console.log(
-        `    tipo_dte+folio/contraparte: ${tipoOk && folioOk && contraparteOk ? 'RESPETADO' : 'NO RESPETADO — revisar antes de prender RESPALDO_XML_TERCER_NIVEL'}`
+        `    tipo_dte+folio/contraparte: ${veredicto}`
         + ` (tipo=${tipoOk}, folio=${folioOk}, contraparte=${contraparteOk})`);
     }
 
