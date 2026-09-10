@@ -827,7 +827,7 @@ El criterio detrás de todas: **es preferible fallar explícito a devolver un da
 ## 8. Recomendaciones de integración
 
 1. **Ramificá por `ok`, no por el status HTTP.** El status sólo importa para 429 y 401.
-2. **Reintentá `ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII`, `SERVICIO_OCUPADO` y `SII_NO_DISPONIBLE`**, con backoff y esperas distintas para cada uno (ver §4). Reintentar `LIMITE_CONOCIDO`, `NO_ENCONTRADO` o `EMPRESA_NO_AUTORIZADA` sólo gasta sesiones del SII: son determinísticos, el mismo request va a fallar igual siempre.
+2. **Reintentá `ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII`, `SERVICIO_OCUPADO` y `SII_NO_DISPONIBLE`**, con backoff y esperas distintas para cada uno (ver §4). Reintentar `LIMITE_CONOCIDO`, `NO_ENCONTRADO` o `EMPRESA_NO_AUTORIZADA` sólo gasta sesiones del SII: son determinísticos, el mismo request va a fallar igual siempre. `SIN_PROPUESTA` es un caso aparte y no entra en ninguno de los dos grupos: no vale la pena reintentarlo ya mismo (el mes no cerró y pedirlo de nuevo no lo cambia), pero sí más adelante —es el único código que pasa a `ok:true` solo con el paso del tiempo—, así que no lo descartes para siempre como a los determinísticos.
 3. **Serializá las llamadas por RUT.** El SII limita las sesiones simultáneas por contribuyente; paralelizar el mismo RUT provoca fallos que parecen aleatorios.
 4. **Distinguí `null` de `0`.** En este contrato `null` significa siempre "el SII no informa esto", nunca cero. Vale para `retencionEmisor`, `totales`, `totalPaginas`, `eventoReceptor` y los folios de un mes sin actividad.
 5. **Validá la clave con `/v1/sesion/validar-clave`** antes de guardarla, en vez de descubrir que es inválida en la primera consulta real.

@@ -919,45 +919,116 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
 
   // El bug real: el listado del tercer nivel (`listarEmitidosDelDia`) puede
   // recibir la misma página de error transitorio que el historial normal.
-  // Antes de este arreglo, `parseHistorial` la leía como "cero filas" y
-  // `trocearPorEjeFino` la reportaba como "el listado no devolvió ningún
-  // folio" — la limitación de un dato genuinamente vacío, no la de un portal
-  // que no contestó. El fallo tiene que PROPAGARSE tal cual (no convertirse en
-  // limitación) para que el consumidor sepa que hay que reintentar, no que
-  // ese día está vacío.
-  it('emitidos: si el listado del tercer nivel devuelve la página de error del portal, el fallo se propaga sin convertirse en "no devolvió ningún folio"', async () => {
+  // Antes de la primera ronda de este arreglo, `parseHistorial` la leía como
+  // "cero filas" y `trocearPorEjeFino` la reportaba como "el listado no
+  // devolvió ningún folio" — la limitación de un dato genuinamente vacío, no
+  // la de un portal que no contestó.
+  //
+  // BLOQUEANTE detectado después: hacer que el error se PROPAGARA (versión
+  // anterior de este test) resolvía la confusión de motivo pero rompía algo
+  // peor — un `throw` sin capturar en `listarEmitidosDelDia` escapa por
+  // `acumularTramos`/`respaldoXml` sin que nadie lo atrape, y en un rango de
+  // VARIOS días se lleva puesto el arreglo `tramos` de los días anteriores
+  // que ya se habían bajado bien (el desperdicio que #98 eliminó). Por eso
+  // el fallo se CARGA COMO LIMITACIÓN de este día puntual —igual que las
+  // otras dos salidas de esta función (tope de tramos, listado demasiado
+  // grande)— y no se propaga: `respaldoXml` sigue resolviendo, con lo que sí
+  // se pudo bajar más la limitación de este día con su motivo real.
+  it('emitidos: si el listado del tercer nivel devuelve la página de error del portal, queda como limitación de ESE día (no como "no devolvió ningún folio", y sin propagar)', async () => {
     const { scraper, http } = armar();
     mockearListado(http, PORTAL_NO_DISPONIBLE);
     (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
 
-    let error: unknown;
-    try {
-      await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
-      throw new Error('debía lanzar');
-    } catch (e) {
-      error = e;
-    }
-    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
-    expect((error as Error).message).not.toMatch(/no devolvió ningún folio/);
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió ningún folio/);
+    expect(r.limitaciones[0].motivo).toMatch(/no se pudo leer/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
   });
 
   // Espejo RCP del test anterior: `listarRecibidosDelDia` puede recibir la
-  // misma página, y antes de este arreglo terminaba en "el listado no
-  // devolvió ningún emisor" en vez de propagar el fallo transitorio.
-  it('recibidos: si el listado del tercer nivel devuelve la página de error del portal, el fallo se propaga sin convertirse en "no devolvió ningún emisor"', async () => {
+  // misma página, y por el mismo motivo (ver el comentario de arriba) tiene
+  // que quedar como limitación de este día, sin propagar y sin perder
+  // tramos ya bajados.
+  it('recibidos: si el listado del tercer nivel devuelve la página de error del portal, queda como limitación de ESE día (no como "no devolvió ningún emisor", y sin propagar)', async () => {
     const { scraper, http } = armar();
     mockearListado(http, PORTAL_NO_DISPONIBLE);
     (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
 
-    let error: unknown;
-    try {
-      await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
-      throw new Error('debía lanzar');
-    } catch (e) {
-      error = e;
-    }
-    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
-    expect((error as Error).message).not.toMatch(/no devolvió ningún emisor/);
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió ningún emisor/);
+    expect(r.limitaciones[0].motivo).toMatch(/no se pudo leer/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // El test que habría cazado el bloqueante de arriba: DOS días, el primero
+  // baja su SetDTE completo y el segundo excede el tope y su listado del
+  // tercer nivel devuelve la página de error del portal. El día 1 tiene que
+  // SOBREVIVIR en `tramos` — que es justo lo que un test de un solo día no
+  // puede verificar, porque sin tramo previo no hay nada que perder.
+  it('emitidos: un día que baja bien + un día con la página de error — el primero sobrevive en tramos, el segundo queda como limitación', async () => {
+    const { scraper, http } = armar();
+    const DIA_1 = '2026-08-05';
+    const DIA_2 = '2026-08-06';
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)   // parseEmpresas
+      .mockResolvedValueOnce('<html></html>') // auth.cgi
+      // El tercer nivel sólo se dispara para el día 2 (el único que excede el
+      // tope); el día 1 nunca llega a pedir un listado.
+      .mockResolvedValueOnce(PORTAL_NO_DISPONIBLE);
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // rango completo (día1..día2): excede, bisecta
+      .mockResolvedValueOnce(binarioXml())        // día 1 solo: baja completo, sin exceder
+      .mockResolvedValueOnce(binarioDemasiados()); // día 2 solo: excede, dispara el tercer nivel
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: DIA_1, fechaHasta: DIA_2, tipoDte: 33,
+    });
+
+    // El día 1 SOBREVIVE: esto es lo que un `throw` sin capturar destruía.
+    expect(r.tramos).toHaveLength(1);
+    expect(r.tramos[0]).toMatchObject({ fechaDesde: DIA_1, fechaHasta: DIA_1 });
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ fechaDesde: DIA_2, fechaHasta: DIA_2 });
+    expect(r.limitaciones[0].motivo).toMatch(/no se pudo leer/);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió ningún folio/);
+  });
+
+  // El corte temprano: `DIAS_PORTAL_CAIDO_PARA_CORTAR` (3) días CONSECUTIVOS
+  // con la página de error abandonan el RESTO del rango en UNA sola
+  // limitación, en vez de seguir golpeando un portal caído día por día. Seis
+  // días para que el ahorro sea inequívoco: los primeros tres (05, 06, 07)
+  // tienen que salir como tres limitaciones INDIVIDUALES (el corte no actúa
+  // todavía — recién se cumplen los 3 consecutivos AL TERMINAR el tercero), y
+  // los tres restantes (08, 09, 10) tienen que colapsar en UNA sola
+  // limitación con el rango [08, 10] — sin que el listado del tercer nivel
+  // llegue a pedirse para ninguno de esos tres días.
+  it('emitidos: N días consecutivos con la página de error cortan el resto del rango en UNA limitación', async () => {
+    const { scraper, http } = armar();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValue(PORTAL_NO_DISPONIBLE); // cualquier listado del tercer nivel, persistente
+    (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados()); // todos los días exceden
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: '2026-08-05', fechaHasta: '2026-08-10', tipoDte: 33,
+    });
+
+    expect(r.tramos).toEqual([]);
+    // Sin el corte, saldrían seis limitaciones individuales (una por día). Con
+    // el corte, salen sólo cuatro: tres individuales + una colapsada.
+    expect(r.limitaciones).toHaveLength(4);
+    const individuales = r.limitaciones.filter(l => l.fechaDesde === l.fechaHasta);
+    expect(individuales.map(l => l.fechaDesde).sort()).toEqual(['2026-08-05', '2026-08-06', '2026-08-07']);
+    const deCorte = r.limitaciones.find(l => l.motivo.includes('parece estar caído'));
+    expect(deCorte).toMatchObject({ fechaDesde: '2026-08-08', fechaHasta: '2026-08-10' });
+    expect(deCorte!.motivo).toMatch(/3 días consecutivos/);
   });
 
   it('recibidos: el listado de 3 emisores agrupa en 3 descargas por contraparte', async () => {

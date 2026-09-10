@@ -154,6 +154,18 @@ const TOPE_PAGINAS_LISTADO = 10;
 // se sabe que van a perder—.
 const TOPE_FOLIOS_UNICOS_POR_DIA = 10;
 
+// Cuántos días CONSECUTIVOS con la página de error genérica del portal
+// (`PortalSiiNoDisponible`, ver erroresConsulta.ts) hacen que se abandone el
+// resto del rango en vez de seguir pidiéndolo día por día. Un solo día podría
+// ser un blip de sesión; dos, todavía coincidencia de carga. Tres listados de
+// DÍAS DISTINTOS devolviendo la misma página puntual de "no puedo responder,
+// reintentá más tarde" ya no es ruido: es el portal caído, y seguir golpeando
+// un portal caído es exactamente lo que atrasa que se recupere (mismo
+// espíritu que `ritmoSii.ts`, que existe por el mismo motivo con el 429 del
+// RCV). El contador se resetea apenas un día se procesa sin esta página —así
+// que exige que sean SEGUIDOS, no acumulados a lo largo de todo el rango—.
+const DIAS_PORTAL_CAIDO_PARA_CORTAR = 3;
+
 // Un día calendario, en milisegundos. Vive acá arriba y no repetido en cada
 // función que hace aritmética de fechas en UTC (partirRango, fusionarLimitacionesContiguas):
 // dos literales `24 * 60 * 60 * 1000` que hoy dicen lo mismo podrían divergir
@@ -881,7 +893,11 @@ export class MipymeHttpScraper {
       // mitad de camino.
       const tercerNivelOn = tercerNivelHabilitado();
       await this.acumularTramos(
-        { rut, dv, filtros, empresaRut, descargas: 0, tercerNivelOn },
+        // `diasPortalCaidoSeguidos` arranca en 0 y viaja por REFERENCIA a
+        // través de toda la recursión (bisección + tercer nivel): es la
+        // misma técnica que `descargas`, mutado in-place para que todas las
+        // ramas compartan un único contador. Ver `DIAS_PORTAL_CAIDO_PARA_CORTAR`.
+        { rut, dv, filtros, empresaRut, descargas: 0, tercerNivelOn, diasPortalCaidoSeguidos: 0 },
         fechaDesde, fechaHasta, tramos, limitaciones, maxTramos);
 
       return {
@@ -957,7 +973,7 @@ export class MipymeHttpScraper {
   private async acumularTramos(
     ctx: {
       rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
-      tercerNivelOn: boolean;
+      tercerNivelOn: boolean; diasPortalCaidoSeguidos: number;
     },
     desde: string,
     hasta: string,
@@ -984,6 +1000,33 @@ export class MipymeHttpScraper {
           + `tope de ${TOPE_DOCUMENTOS_SII} documentos por descarga del SII. Pedí un rango más corto `
           + `o filtrá por tipo de documento; subir el tope convierte la consulta en un barrido, que `
           + `es lo que hace que el SII bloquee el portal.`,
+      });
+      return;
+    }
+
+    // Corte temprano: el mismo colapso que el de arriba (por presupuesto),
+    // pero por causa DISTINTA. `diasPortalCaidoSeguidos` lo incrementan
+    // `listarEmitidosDelDia`/`listarRecibidosDelDia` cada vez que el listado
+    // de un día devuelve la página de error genérica del portal, y lo
+    // resetea CUALQUIER día que se procese sin ella (más abajo, y en esas dos
+    // funciones) — así que llegar acá con el contador en el tope significa
+    // que los últimos `DIAS_PORTAL_CAIDO_PARA_CORTAR` días, EN SECUENCIA,
+    // chocaron con esa página. Insistir día por día contra un portal caído no
+    // sólo pierde tiempo: es la misma clase de barrido que `ritmoSii.ts`
+    // existe para evitar. [desde, hasta] en este punto de la recursión es
+    // justo el rango que todavía no se intentó —la bisección visita el
+    // calendario en orden, así que el próximo `acumularTramos` siempre
+    // representa lo que sigue cronológicamente— y se colapsa entero en UNA
+    // limitación, igual que el colapso por presupuesto.
+    if (ctx.diasPortalCaidoSeguidos >= DIAS_PORTAL_CAIDO_PARA_CORTAR) {
+      limitaciones.push({
+        fechaDesde: desde,
+        fechaHasta: hasta,
+        motivo:
+          `El portal del SII respondió su página de error genérica en ${ctx.diasPortalCaidoSeguidos} `
+          + `días consecutivos: parece estar caído, no ser un problema puntual de este rango. Se `
+          + `abandona el resto (${desde}..${hasta}) para no seguir insistiendo contra un portal caído; `
+          + `reintentá este tramo más tarde.`,
       });
       return;
     }
@@ -1038,6 +1081,14 @@ export class MipymeHttpScraper {
       await this.acumularTramos(ctx, segundoInicio, hasta, tramos, limitaciones, maxTramos);
       return;
     }
+
+    // Este rango se bajó bien —sin excedeTope y sin la página de error del
+    // portal—: rompe cualquier racha de días caídos que venía acumulándose.
+    // "Consecutivos" exige esto; si no se reseteara, un portal que falla cada
+    // dos o tres días entre medio de días buenos terminaría cortando el
+    // rango igual, que no es el escenario que motiva el corte (portal caído
+    // DE VERDAD, no intermitencia).
+    ctx.diasPortalCaidoSeguidos = 0;
 
     tramos.push({
       fechaDesde: desde,
@@ -1099,7 +1150,10 @@ export class MipymeHttpScraper {
   // `maxTramos` y lleva la misma pausa que las demás — el tope protege al
   // portal, y el tercer nivel no es una excepción.
   private async trocearPorEjeFino(
-    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    ctx: {
+      rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
+      diasPortalCaidoSeguidos: number;
+    },
     dia: string,
     tramos: TramoRespaldoXml[],
     limitaciones: LimitacionRespaldoXml[],
@@ -1369,7 +1423,10 @@ export class MipymeHttpScraper {
   // `null` si el presupuesto se agotó a mitad de la paginación: la limitación
   // ya queda cargada por el llamador de esta función.
   private async listarEmitidosDelDia(
-    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    ctx: {
+      filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
+      diasPortalCaidoSeguidos: number;
+    },
     dia: string,
     limitaciones: LimitacionRespaldoXml[],
     maxTramos: number
@@ -1427,7 +1484,46 @@ export class MipymeHttpScraper {
       // comentario de `assertNoPaginaDeErrorDelPortal`), y ninguno esconde al
       // otro detrás de un nombre que sólo anuncia el primero.
       this.assertEmpresaSeleccionada(html);
-      this.assertNoPaginaDeErrorDelPortal(html);
+      // BLOQUEANTE detectado en producción (post-PR #98): esta función NO
+      // tiene try/catch propio, y `acumularTramos`/`respaldoXml` tampoco lo
+      // tienen alrededor de la llamada al tercer nivel — así que dejar
+      // escapar `PortalSiiNoDisponible` acá se llevaba puesto el arreglo
+      // `tramos` YA acumulado de los días anteriores que sí bajaron bien.
+      // #98 eliminó justamente ese desperdicio (repetir al SII lo que ya se
+      // había bajado); un throw sin capturar en este punto lo hubiera
+      // reintroducido para el caso puntual de esta página de error. Se
+      // captura ACÁ —y no más arriba, en `acumularTramos`— porque acá es
+      // donde se sabe que el fallo es "este DÍA, este LISTADO" y se puede
+      // armar la limitación con esa precisión, siguiendo el mismo patrón que
+      // los otros dos `return null` de esta función (tope de tramos, listado
+      // demasiado grande).
+      try {
+        this.assertNoPaginaDeErrorDelPortal(html);
+      } catch (e) {
+        if (!(e instanceof PortalSiiNoDisponible)) throw e;
+        // Cuenta contra el corte temprano de `DIAS_PORTAL_CAIDO_PARA_CORTAR`
+        // (ver esa constante y el chequeo en `acumularTramos`): días
+        // CONSECUTIVOS con esta misma página son la señal de que el portal
+        // está caído, no de que este día puntual tiene un problema.
+        ctx.diasPortalCaidoSeguidos += 1;
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
+          // A propósito NO dice "el listado no devolvió ningún folio": ese
+          // motivo es para un día genuinamente vacío o mal filtrado. Acá el
+          // listado no llegó a contestar — el portal devolvió su propia
+          // página de error—, así que el motivo tiene que decir eso y
+          // apuntar a reintentar, no a revisar el filtro.
+          motivo:
+            `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) no se pudo leer: `
+            + `${e.message}`,
+        });
+        return null;
+      }
+      // Este listado SÍ contestó bien: rompe cualquier racha de días caídos
+      // que venía acumulándose (mismo razonamiento que el reset en
+      // `acumularTramos`).
+      ctx.diasPortalCaidoSeguidos = 0;
       documentos.push(...this.parseHistorial(html));
       const totalPaginas = this.parseTotalPaginas(html);
       if (totalPaginas == null || pagina >= totalPaginas) break;
@@ -1439,7 +1535,10 @@ export class MipymeHttpScraper {
   // Igual que `listarEmitidosDelDia`, del lado recibido: la contraparte acá es
   // el EMISOR, no el receptor (la empresa misma).
   private async listarRecibidosDelDia(
-    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    ctx: {
+      filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
+      diasPortalCaidoSeguidos: number;
+    },
     dia: string,
     limitaciones: LimitacionRespaldoXml[],
     maxTramos: number
@@ -1491,7 +1590,30 @@ export class MipymeHttpScraper {
       // comentario de `assertNoPaginaDeErrorDelPortal`), y ninguno esconde al
       // otro detrás de un nombre que sólo anuncia el primero.
       this.assertEmpresaSeleccionada(html);
-      this.assertNoPaginaDeErrorDelPortal(html);
+      // Mismo motivo que en `listarEmitidosDelDia`: sin este try/catch acá,
+      // `PortalSiiNoDisponible` escapa sin que nadie lo atrape (ni esta
+      // función ni `acumularTramos`/`respaldoXml` tienen un catch propio) y
+      // se lleva puesto el arreglo `tramos` de los días anteriores que ya se
+      // habían bajado bien — el desperdicio que #98 eliminó, reintroducido
+      // para este caso puntual.
+      try {
+        this.assertNoPaginaDeErrorDelPortal(html);
+      } catch (e) {
+        if (!(e instanceof PortalSiiNoDisponible)) throw e;
+        ctx.diasPortalCaidoSeguidos += 1;
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
+          // A propósito NO dice "el listado no devolvió ningún emisor": ese
+          // motivo es para un día genuinamente vacío o mal filtrado. Acá el
+          // portal ni llegó a contestar el listado.
+          motivo:
+            `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) no se pudo `
+            + `leer: ${e.message}`,
+        });
+        return null;
+      }
+      ctx.diasPortalCaidoSeguidos = 0;
       documentos.push(...this.parseHistorialRecibidos(html));
       const totalPaginas = this.parseTotalPaginas(html);
       if (totalPaginas == null || pagina >= totalPaginas) break;
@@ -2594,6 +2716,26 @@ export class MipymeHttpScraper {
   // `assertEmpresaSeleccionada`), y `descargarTramo`/`dtePdf`/`pedirBorradores`
   // (solos, sin ese otro chequeo, porque el CGI de esas tres reporta la falta
   // de selección con SU PROPIO mensaje, no con éste).
+  //
+  // FUERA de esta lista, a propósito: `emitirDte`/`guardarBorrador`
+  // (`PREVIEW_URL`/`FIRMA_URL`/`GRABA_BORRADOR_URL`). Esas rutas de ESCRITURA
+  // ya tienen su propio lector de errores, `assertPrevisualizacionValida`,
+  // que no asume ninguna forma fija de página: lee el `alert()` de JavaScript
+  // que el CGI manda ante CUALQUIER rechazo (de negocio o de portal) y lo
+  // reporta tal cual, palabra por palabra, en vez de intentar reconocer casos
+  // puntuales. Si esta misma página de error apareciera ahí, ya sale con su
+  // propio mensaje («Por el momento no se puede responder...») en vez de
+  // silenciarse — no hace falta esta detección para que no sea muda. Lo que
+  // SÍ falta, y es una brecha real y no cerrada por este PR, es la
+  // CLASIFICACIÓN: hoy sale como `Error` genérico ("el portal rechazó el
+  // documento"), no como `PortalSiiNoDisponible`/`SII_NO_DISPONIBLE`, así que
+  // un consumidor no puede distinguir todavía "el SII no está respondiendo,
+  // reintentá" de "tu documento tiene un dato inválido, corregilo" en estas
+  // dos rutas de escritura. No se cierra en esta ronda porque escribir es más
+  // delicado que leer: hay que confirmar que reconocer esta página ACÁ no
+  // reclasifique por error un rechazo de negocio legítimo como reintentable,
+  // y eso pide mirar en vivo qué otros `alert()` puede mandar el CGI de
+  // emisión — no está relevado.
   //
   // Detección por TÍTULO + FRASE, no por el `CODIGO:` (que sí se extrae, sólo
   // para citarlo en el mensaje): esos octetos parecen llevar datos de sesión o
