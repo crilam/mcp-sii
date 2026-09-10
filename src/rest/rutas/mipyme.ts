@@ -197,6 +197,7 @@ export function registrarRutasMipyme(
           // recibidos). Ver docs/integracion-api.md.
           tipo_dte: l.tipoDte,
           contraparte_rut: l.contraparteRut,
+          razon_social: l.razonSocial,
           folio_desde: l.folioDesde,
           folio_hasta: l.folioHasta,
         })),

@@ -117,6 +117,23 @@ const MAX_TRAMOS_POR_DEFECTO = 10;
 // arreglo es un presupuesto por ventana, no bajar este número.
 const MAX_TRAMOS_ABSOLUTO = 48;
 
+// Tope explícito de páginas al listar un día+tipo dentro del tercer nivel de
+// troceo (`listarEmitidosDelDia`/`listarRecibidosDelDia`). Sin esto, el único
+// freno era `maxTramos`: un día de 500 documentos (25 páginas, a ojo del
+// mismo orden que `TOPE_DOCUMENTOS_SII` por página) se come TODO el
+// presupuesto sólo en listar, antes de bajar un solo grupo, y la limitación
+// que sale es la genérica de "subí maxTramos" — que con el techo absoluto de
+// `MAX_TRAMOS_ABSOLUTO` (48) puede seguir sin alcanzar para bajar nada, ni
+// siquiera terminando de listar. 10 páginas (~200 documentos, asumiendo un
+// tamaño de página del orden de `TOPE_DOCUMENTOS_SII`) es un piso razonable
+// para una pyme: pasado ese punto el problema no es el presupuesto sino que
+// el día+tipo es demasiado grande para listar entero, y subir `maxTramos` no
+// lo arregla —haría falta acotar con `contraparte_rut`/`razon_social`, que sí
+// reduce lo que el propio CGI de listado devuelve—. Motivo propio y distinto
+// del genérico de `maxTramos` para que el consumidor sepa cuál de las dos
+// cosas hacer.
+const TOPE_PAGINAS_LISTADO = 10;
+
 // Un día calendario, en milisegundos. Vive acá arriba y no repetido en cada
 // función que hace aritmética de fechas en UTC (partirRango, fusionarLimitacionesContiguas):
 // dos literales `24 * 60 * 60 * 1000` que hoy dicen lo mismo podrían divergir
@@ -308,6 +325,10 @@ export interface LimitacionRespaldoXml {
   contraparteRut?: string;
   folioDesde?: number;
   folioHasta?: number;
+  // Es parte del filtro exacto a repetir tanto como `tipoDte`: si el caller
+  // fijó `razonSocial`, hay que devolvérselo para que el reintento del
+  // sub-rango no se olvide de acotar por ella.
+  razonSocial?: string;
 }
 
 export interface RespaldoXmlResult {
@@ -328,6 +349,7 @@ export interface FiltrosDteRecibidos {
   // El filtro por contraparte es por EMISOR, no por receptor: del lado recibido
   // la contraparte es quien emitió el documento.
   emisorRut?: string;
+  razonSocial?: string;
   folio?: number;
   pagina?: number;
 }
@@ -358,6 +380,7 @@ export interface FiltrosDteEmitidos {
   fechaDesde?: string;
   fechaHasta?: string;
   receptorRut?: string;
+  razonSocial?: string;
   folio?: number;
   pagina?: number;
 }
@@ -817,8 +840,15 @@ export class MipymeHttpScraper {
       const [rut, dv] = this.partirRut(empresaRut);
       const tramos: TramoRespaldoXml[] = [];
       const limitaciones: LimitacionRespaldoXml[] = [];
+      // Leído UNA sola vez acá y no en cada llamada dentro del loop de
+      // bisección: el flag es de ARRANQUE, y una request larga (varios días,
+      // varias bisecciones) no puede quedar mitad con el tercer nivel
+      // prendido y mitad con él apagado sólo porque alguien tocó el env a
+      // mitad de camino.
+      const tercerNivelOn = tercerNivelHabilitado();
       await this.acumularTramos(
-        { rut, dv, filtros, empresaRut, descargas: 0 }, fechaDesde, fechaHasta, tramos, limitaciones, maxTramos);
+        { rut, dv, filtros, empresaRut, descargas: 0, tercerNivelOn },
+        fechaDesde, fechaHasta, tramos, limitaciones, maxTramos);
 
       return {
         empresaRut,
@@ -863,18 +893,19 @@ export class MipymeHttpScraper {
       const contigua = anterior != null
         && aIsoUtc(Date.parse(`${anterior.fechaHasta}T00:00:00Z`) + DIA_MS) === actual.fechaDesde;
       // El mismo `motivo` textual no alcanza: al fusionar se conserva
-      // `tipoDte`/`folioDesde`/`folioHasta`/`contraparteRut` de `anterior` y
-      // se descartan los de `actual` — dos limitaciones del tercer nivel con
-      // el mismo motivo genérico ("necesita más de N tramos...") pero
-      // `contraparteRut` distinto fusionarían en una que sólo menciona la
-      // PRIMERA contraparte, perdiendo la segunda. Exigir estos cuatro
-      // campos iguales (incluido `undefined === undefined`, el caso sin
-      // tercer nivel) es lo que hace la fusión segura.
+      // `tipoDte`/`folioDesde`/`folioHasta`/`contraparteRut`/`razonSocial` de
+      // `anterior` y se descartan los de `actual` — dos limitaciones del
+      // tercer nivel con el mismo motivo genérico ("necesita más de N
+      // tramos...") pero `contraparteRut` distinto fusionarían en una que
+      // sólo menciona la PRIMERA contraparte, perdiendo la segunda. Exigir
+      // estos cinco campos iguales (incluido `undefined === undefined`, el
+      // caso sin tercer nivel) es lo que hace la fusión segura.
       const mismosCamposTercerNivel = anterior != null
         && anterior.tipoDte === actual.tipoDte
         && anterior.folioDesde === actual.folioDesde
         && anterior.folioHasta === actual.folioHasta
-        && anterior.contraparteRut === actual.contraparteRut;
+        && anterior.contraparteRut === actual.contraparteRut
+        && anterior.razonSocial === actual.razonSocial;
       if (anterior != null && contigua && anterior.motivo === actual.motivo && mismosCamposTercerNivel) {
         anterior.fechaHasta = actual.fechaHasta;
       } else {
@@ -890,7 +921,10 @@ export class MipymeHttpScraper {
   // coincidir —filtran distinto—, y porque así el corte lo decide el SII, que es
   // el único que sabe cuántos documentos hay.
   private async acumularTramos(
-    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    ctx: {
+      rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
+      tercerNivelOn: boolean;
+    },
     desde: string,
     hasta: string,
     tramos: TramoRespaldoXml[],
@@ -934,7 +968,7 @@ export class MipymeHttpScraper {
         // `tipo_dte` ese eje no existe todavía (lo maneja el consumidor
         // pidiendo por tipo), y se registra la limitación de siempre.
         if (ctx.filtros.tipoDte != null) {
-          if (!tercerNivelHabilitado()) {
+          if (!ctx.tercerNivelOn) {
             // Ver el comentario de `tercerNivelHabilitado` en ritmoSii.ts: la
             // combinación tipo_dte+folio/contraparte no está verificada contra
             // el SII real, y activarla a ciegas puede convertir un día lleno
@@ -1026,7 +1060,8 @@ export class MipymeHttpScraper {
       if (ctx.filtros.folioDesde != null
           && (ctx.filtros.folioHasta ?? ctx.filtros.folioDesde) === ctx.filtros.folioDesde) {
         limitaciones.push(this.limitacionFolioUnico(
-          dia, ctx.filtros.folioDesde, ctx.filtros.tipoDte, ctx.filtros.contraparteRut));
+          dia, ctx.filtros.folioDesde, ctx.filtros.tipoDte, ctx.filtros.contraparteRut,
+          ctx.filtros.razonSocial));
         return;
       }
 
@@ -1078,9 +1113,11 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           folioDesde: ctx.filtros.folioDesde, folioHasta: ctx.filtros.folioHasta,
-          // El filtro exacto que hay que repetir incluye la contraparte si el
-          // llamador la fijó, aunque este camino no la haya usado para nada.
+          // El filtro exacto que hay que repetir incluye la contraparte y la
+          // razón social si el llamador las fijó, aunque este camino no las
+          // haya usado para nada.
           contraparteRut: ctx.filtros.contraparteRut,
+          razonSocial: ctx.filtros.razonSocial,
           motivo:
             `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
             + `(tipo ${ctx.filtros.tipoDte}), pero el listado de emitidos no devolvió ningún folio`
@@ -1105,7 +1142,8 @@ export class MipymeHttpScraper {
     if (ctx.filtros.folioDesde != null
         && (ctx.filtros.folioHasta ?? ctx.filtros.folioDesde) === ctx.filtros.folioDesde) {
       limitaciones.push(this.limitacionFolioUnico(
-        dia, ctx.filtros.folioDesde, ctx.filtros.tipoDte, ctx.filtros.contraparteRut));
+        dia, ctx.filtros.folioDesde, ctx.filtros.tipoDte, ctx.filtros.contraparteRut,
+        ctx.filtros.razonSocial));
       return;
     }
 
@@ -1144,9 +1182,11 @@ export class MipymeHttpScraper {
         // folio, va acá también — es parte del filtro exacto que no se pudo
         // trocear más fino.
         folioDesde: ctx.filtros.folioDesde, folioHasta: ctx.filtros.folioHasta,
-        // Ídem: el filtro exacto a repetir incluye la contraparte si el
-        // llamador la fijó, aunque este camino no la haya usado para nada.
+        // Ídem: el filtro exacto a repetir incluye la contraparte y la razón
+        // social si el llamador las fijó, aunque este camino no las haya
+        // usado para nada.
         contraparteRut: ctx.filtros.contraparteRut,
+        razonSocial: ctx.filtros.razonSocial,
         motivo:
           `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
           + `(tipo ${ctx.filtros.tipoDte}), pero el listado de recibidos no devolvió ningún emisor `
@@ -1189,6 +1229,10 @@ export class MipymeHttpScraper {
         const resto = pendientes.length > 10 ? ` y ${pendientes.length - 10} más` : '';
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          // Igual que `razonSocial` en las otras limitaciones de este mismo
+          // día+tipo: si el llamador la fijó, el listado ya vino acotado por
+          // ella (vía `RZN_SOC`), así que forma parte del filtro a repetir.
+          razonSocial: ctx.filtros.razonSocial,
           motivo:
             `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para trocear por `
             + `contraparte el ${dia} (tipo ${ctx.filtros.tipoDte}): quedaron ${pendientes.length} `
@@ -1259,10 +1303,28 @@ export class MipymeHttpScraper {
       if (ctx.descargas >= maxTramos) {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
           motivo:
             `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más de `
             + `${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día con `
             + `un maxTramos más alto.`,
+        });
+        return null;
+      }
+      if (pagina > TOPE_PAGINAS_LISTADO) {
+        // Motivo DISTINTO del de arriba a propósito: acá el presupuesto no se
+        // agotó, es el LISTADO el que es demasiado grande para leerse entero
+        // dentro de un tope razonable. Subir `maxTramos` no resuelve esto —
+        // seguiría leyendo página tras página del mismo día enorme—; lo que
+        // sirve es acotar lo que el propio CGI de listado filtra.
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
+          motivo:
+            `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) tiene más de `
+            + `${TOPE_PAGINAS_LISTADO} páginas: es demasiado grande para leerlo entero. Subir `
+            + `maxTramos no alcanza acá; acotá con contraparte_rut o razon_social para que el `
+            + `propio listado del SII devuelva menos filas.`,
         });
         return null;
       }
@@ -1277,6 +1339,12 @@ export class MipymeHttpScraper {
         // listado vuelve vacío, y `trocearPorEjeFino` lo lee como "no hay
         // folios de esta contraparte" en vez de ir a buscarlos.
         receptorRut: ctx.filtros.contraparteRut ? soloCuerpoRut(ctx.filtros.contraparteRut) : undefined,
+        // Sin esto, `params` mandaba `RZN_SOC: ''` hardcodeado: un pedido con
+        // `razon_social` filtraba en el intento inicial (`descargarTramo`) pero
+        // NO en este listado, que volvía con los folios de TODAS las
+        // contrapartes del día — ensanchando de más el rango envolvente que
+        // arma `trocearPorEjeFino`.
+        razonSocial: ctx.filtros.razonSocial,
       }, pagina));
       this.assertEmpresaSeleccionada(html);
       documentos.push(...this.parseHistorial(html));
@@ -1301,10 +1369,26 @@ export class MipymeHttpScraper {
       if (ctx.descargas >= maxTramos) {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
           motivo:
             `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más `
             + `de ${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día `
             + `con un maxTramos más alto.`,
+        });
+        return null;
+      }
+      if (pagina > TOPE_PAGINAS_LISTADO) {
+        // Mismo motivo distinto que del lado ENV: acotar con contraparte_rut
+        // o razon_social, no subir maxTramos, que no resuelve un listado
+        // demasiado grande.
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
+          motivo:
+            `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) tiene más de `
+            + `${TOPE_PAGINAS_LISTADO} páginas: es demasiado grande para leerlo entero. Subir `
+            + `maxTramos no alcanza acá; acotá con contraparte_rut o razon_social para que el `
+            + `propio listado del SII devuelva menos filas.`,
         });
         return null;
       }
@@ -1316,6 +1400,11 @@ export class MipymeHttpScraper {
         // Mismo motivo que en `listarEmitidosDelDia`: el listado tampoco
         // acepta el RUT con DV pegado.
         emisorRut: ctx.filtros.contraparteRut ? soloCuerpoRut(ctx.filtros.contraparteRut) : undefined,
+        // Mismo motivo que en `listarEmitidosDelDia`: sin esto el listado de
+        // recibidos pedía una descarga por CADA emisor del día (no sólo los
+        // que matchean `razon_social`) — el barrido de llamadas inútiles que
+        // el flag del tercer nivel existe para evitar, con el flag prendido.
+        razonSocial: ctx.filtros.razonSocial,
       }, pagina));
       this.assertEmpresaSeleccionada(html);
       documentos.push(...this.parseHistorialRecibidos(html));
@@ -1332,12 +1421,12 @@ export class MipymeHttpScraper {
   // porque los dos call-sites arman el mismo mensaje.
   private limitacionFolioUnico(
     dia: string, folio: number, tipoDte: number | undefined, contraparteRut: string | undefined,
-    sinMapear: number = 0
+    razonSocial: string | undefined = undefined, sinMapear: number = 0
   ): LimitacionRespaldoXml {
     const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte,
-      contraparteRut, folioDesde: folio, folioHasta: folio,
+      contraparteRut, razonSocial, folioDesde: folio, folioHasta: folio,
       motivo:
         `El folio ${folio} del ${dia}${contraparte} excede por sí solo el tope de `
         + `${TOPE_DOCUMENTOS_SII} documentos del SII: es un único folio y el filtro ya no se `
@@ -1370,7 +1459,11 @@ export class MipymeHttpScraper {
     const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
-      contraparteRut, folioDesde, folioHasta,
+      // `ctx.filtros.razonSocial` directo (no un parámetro propio, como
+      // `contraparteRut`): a diferencia de la contraparte, la razón social no
+      // tiene un `overrideBase` por grupo — el filtro es siempre el del
+      // llamador original.
+      contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
       // `folioDesde`/`folioHasta` acá son el ENVOLVENTE (`Math.min`/`Math.max`)
       // de los folios PENDIENTES, no necesariamente contiguo: con huecos entre
       // grupos (p.ej. folios 100..101 y 900..901 pendientes), el rango sale
@@ -1471,7 +1564,7 @@ export class MipymeHttpScraper {
         if (grupo.length === 1) {
           limitaciones.push(this.limitacionFolioUnico(
             dia, folioDesde, ctx.filtros.tipoDte, overrideBase.contraparteRut ?? ctx.filtros.contraparteRut,
-            sinMapear));
+            ctx.filtros.razonSocial, sinMapear));
           continue;
         }
         const mitad = Math.floor(grupo.length / 2);
@@ -2280,7 +2373,7 @@ export class MipymeHttpScraper {
     return {
       RUT_RECP: filtros.receptorRut ?? '',
       FOLIO: filtros.folio ? String(filtros.folio) : '',
-      RZN_SOC: '',
+      RZN_SOC: filtros.razonSocial ?? '',
       FEC_DESDE: filtros.fechaDesde ? this.aFechaSii(filtros.fechaDesde) : '',
       FEC_HASTA: filtros.fechaHasta ? this.aFechaSii(filtros.fechaHasta) : '',
       TPO_DOC: filtros.tipoDte ? String(filtros.tipoDte) : '',
@@ -2296,7 +2389,7 @@ export class MipymeHttpScraper {
     return {
       RUT_EMI: filtros.emisorRut ?? '',
       FOLIO: filtros.folio ? String(filtros.folio) : '',
-      RZN_SOC: '',
+      RZN_SOC: filtros.razonSocial ?? '',
       FEC_DESDE: filtros.fechaDesde ? this.aFechaSii(filtros.fechaDesde) : '',
       FEC_HASTA: filtros.fechaHasta ? this.aFechaSii(filtros.fechaHasta) : '',
       TPO_DOC: filtros.tipoDte ? String(filtros.tipoDte) : '',

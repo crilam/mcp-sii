@@ -468,6 +468,26 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(fusionadas[1]).toMatchObject({ folioDesde: 20, folioHasta: 30 });
   });
 
+  // Mismo guard, con `razonSocial` distinto: dos limitaciones contiguas del
+  // tercer nivel con razones sociales distintas no pueden fusionarse en una
+  // que sólo mencione la primera.
+  it('fusionarLimitacionesContiguas no fusiona limitaciones contiguas con el mismo motivo si razonSocial difiere', () => {
+    const { scraper } = armar();
+    const limitaciones: LimitacionRespaldoXml[] = [
+      { fechaDesde: '2026-08-01', fechaHasta: '2026-08-01', razonSocial: 'Muñoz', motivo: 'Motivo genérico de maxTramos.' },
+      { fechaDesde: '2026-08-02', fechaHasta: '2026-08-02', razonSocial: 'Pérez', motivo: 'Motivo genérico de maxTramos.' },
+    ];
+    const fusionar = scraper as unknown as {
+      fusionarLimitacionesContiguas(l: LimitacionRespaldoXml[]): LimitacionRespaldoXml[];
+    };
+
+    const fusionadas = fusionar.fusionarLimitacionesContiguas(limitaciones);
+
+    expect(fusionadas).toHaveLength(2);
+    expect(fusionadas[0].razonSocial).toBe('Muñoz');
+    expect(fusionadas[1].razonSocial).toBe('Pérez');
+  });
+
   // Cuando NINGÚN tope se toca, `limitaciones` es `[]` y todo lo demás sigue
   // igual que antes del cambio: es la regresión que asegura que un respaldo
   // sano no cambió de forma.
@@ -1092,6 +1112,37 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(http.get).toHaveBeenCalledTimes(3);
   });
 
+  // Tope EXPLÍCITO de páginas (distinto del de `maxTramos`): un día
+  // anormalmente grande no se resuelve subiendo `maxTramos` —seguiría
+  // leyendo página tras página del mismo día enorme—, así que corta antes,
+  // con un `maxTramos` alto de sobra para que quede claro que NO es el
+  // presupuesto lo que se agotó.
+  it('emitidos: tope explícito de páginas del listado, distinto de maxTramos agotado', async () => {
+    const { scraper, http } = armar();
+    // Cada página "dice" que hay 15 en total (el máximo NUM_PAG que aparece);
+    // con el tope de páginas en 10, el loop corta ANTES de llegar a la 15.
+    const paginaConQuinceEnTotal =
+      '<table></table>'
+      + '<div class="paginacion">'
+      + '<a href="/cgi-bin/Portal001/mipeAdminDocsEmi.cgi?NUM_PAG=15">15</a>'
+      + '</div>';
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValue(paginaConQuinceEnTotal);
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 20 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/más de 10 páginas/);
+    expect(r.limitaciones[0].motivo).not.toMatch(/mitad de camino/);
+    // parseEmpresas, auth.cgi, y sólo 10 páginas del listado (no 15, ni las
+    // que el presupuesto de 20 hubiera permitido).
+    expect(http.get).toHaveBeenCalledTimes(2 + 10);
+  });
+
   // El presupuesto también puede agotarse ENTRE dos emisores del lado
   // recibido, después de haber procesado el primero con éxito.
   it('recibidos: maxTramos agotado ENTRE emisores deja una limitación explicando qué quedó sin procesar', async () => {
@@ -1114,6 +1165,29 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     // El motivo tiene que nombrar CUÁLES emisores quedaron pendientes: sin
     // esto, "acotá con contraparte_rut" es una sugerencia a ciegas.
     expect(r.limitaciones[0].motivo).toMatch(/22222222-2/);
+  });
+
+  // Espejo RCP del tope explícito de páginas del listado.
+  it('recibidos: tope explícito de páginas del listado, distinto de maxTramos agotado', async () => {
+    const { scraper, http } = armar();
+    const paginaConQuinceEnTotal =
+      '<table></table>'
+      + '<div class="paginacion">'
+      + '<a href="/cgi-bin/Portal001/mipeAdminDocsRcp.cgi?NUM_PAG=15">15</a>'
+      + '</div>';
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValue(paginaConQuinceEnTotal);
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA, maxTramos: 20 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/más de 10 páginas/);
+    expect(r.limitaciones[0].motivo).not.toMatch(/mitad de camino/);
+    expect(http.get).toHaveBeenCalledTimes(2 + 10);
   });
 
   // Con más de 10 emisores pendientes, el motivo trunca la lista (los
@@ -1406,6 +1480,63 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(r.tramos.length).toBeGreaterThan(0);
   });
 
+  // BLOQUEANTE de la ronda 10: `params`/`paramsRecibidos` mandaban
+  // `RZN_SOC: ''` hardcodeado sin importar el filtro, así que un pedido con
+  // `razon_social` filtraba en `descargarTramo` (el intento inicial) pero NO
+  // en este listado del tercer nivel: el listado devolvía los folios de TODAS
+  // las contrapartes del día, ensanchando el rango envolvente que arma
+  // `trocearPorEjeFino` de más.
+  it('emitidos: razon_social llega al listado, no sólo a la descarga', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 25 }, (_, i) => i + 1);
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockImplementationOnce((_url: string, params?: Record<string, string>) => {
+        expect(params?.RZN_SOC).toBe('Muñoz');
+        return Promise.resolve(historialEmitidosHtml(folios));
+      });
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValue(binarioXml());           // cada grupo de folios
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', ...DIA, razonSocial: 'Muñoz',
+    });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos.length).toBeGreaterThan(0);
+  });
+
+  // Espejo RCP: mismo bug era posible ahí, con la misma consecuencia agravada
+  // —una descarga por CADA emisor del día, no sólo los que matchean
+  // `razon_social`, el barrido de llamadas inútiles que el flag del tercer
+  // nivel existe para evitar—.
+  it('recibidos: razon_social llega al listado, no sólo a la descarga', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 1, emisorRut: '77777777-7' },
+      { folio: 2, emisorRut: '88888888-8' },
+    ];
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockImplementationOnce((_url: string, params?: Record<string, string>) => {
+        expect(params?.RZN_SOC).toBe('Muñoz');
+        return Promise.resolve(historialRecibidosHtml(docs));
+      });
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValue(binarioXml());           // cada emisor
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', ...DIA, razonSocial: 'Muñoz',
+    });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos.length).toBeGreaterThan(0);
+  });
+
   // Defensivo: `parseHistorialRecibidos` resuelve `tipoDte` con
   // `TIPO_DTE_NOMBRES[nombre] ?? 0`, y nada filtraba por `ctx.filtros.tipoDte`
   // antes de agrupar por emisor. Un documento de OTRO tipo mezclado en el
@@ -1517,6 +1648,29 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
   // emisor, la limitación tiene que llevar el `folio_desde`/`folio_hasta` del
   // caller igual que del lado emitido — es el mismo filtro exacto que no se
   // pudo trocear más fino.
+  // Espejo RCP de la nota `TIPO_DTE_NOMBRES`, en el motivo de "quedaron N
+  // emisores sin procesar" (presupuesto agotado ENTRE emisores). El OTRO
+  // motivo RCP con la misma nota —"el listado no devolvió ningún emisor"—
+  // no se puede alcanzar con `sinMapear > 0`: un documento sin mapear
+  // (`tipoDte === 0`) siempre PASA el filtro y entra a `foliosPorEmisor`
+  // (ver el criterio de la ronda 9), así que ese Map nunca puede quedar
+  // vacío si hay al menos un documento sin mapear en el listado.
+  it('recibidos: con folios sin mapear presentes, "quedaron N emisores sin procesar" nombra TIPO_DTE_NOMBRES', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 1, emisorRut: '11111111-1', tipoNombre: 'Factura Electronica' },       // tipo 33, el de DIA
+      { folio: 2, emisorRut: '11111111-1', tipoNombre: 'Variante Rara Sin Mapear' },  // tipoDte 0
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA, maxTramos: 2 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/TIPO_DTE_NOMBRES/);
+  });
+
   it('recibidos: sin emisores en el listado, la limitación lleva folio_desde/folio_hasta del caller', async () => {
     const { scraper, http } = armar();
     mockearListado(http, historialRecibidosHtml([]));
@@ -1648,6 +1802,52 @@ describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () 
 
     expect(r.limitaciones).toEqual([]);
     expect(r.tramos).toHaveLength(1);
+  });
+
+  // El flag es de ARRANQUE: se lee UNA sola vez al entrar a `respaldoXml`, no
+  // en cada chequeo dentro del loop de bisección. Con dos días llenos en el
+  // mismo pedido, se prende el flag, se lo apaga A MITAD del primer día (justo
+  // después de su listado), y el SEGUNDO día tiene que seguir tratándolo como
+  // prendido: si se releyera `process.env` en cada chequeo, el segundo día
+  // saldría con la limitación de "tercer nivel desactivado" en vez de trocear.
+  it('el flag se lee una sola vez: un cambio de env a mitad de la request no la dejas mitad y mitad', async () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = '1';
+    const { scraper, http } = armar();
+    const filaDia = (dia: string, folio: number, codigo: number) => `<tr>
+      <td><a href="/cgi-bin/Portal001/mipeGesDocEmi.cgi?CODIGO=${codigo}"><img></a></td>
+      <td>77777777-7</td>
+      <td>Receptor</td>
+      <td>Factura Electronica</td>
+      <td>${folio}</td>
+      <td>${dia}</td>
+      <td>1000</td>
+      <td>Documento Emitido</td>
+    </tr>`;
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockImplementationOnce(() => {
+        // Se apaga ACÁ, justo tras el listado del PRIMER día: si el flag se
+        // releyera por chequeo, el segundo día ya lo vería apagado.
+        process.env.RESPALDO_XML_TERCER_NIVEL = '0';
+        return Promise.resolve(`<table>${filaDia('2026-08-05', 1, 9200)}</table>`);
+      })
+      .mockResolvedValueOnce(`<table>${filaDia('2026-08-06', 2, 9201)}</table>`);
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el rango completo (2 días), excede
+      .mockResolvedValueOnce(binarioDemasiados()) // día 1 solo, excede -> tercer nivel
+      .mockResolvedValueOnce(binarioXml())        // día 1: grupo de folios
+      .mockResolvedValueOnce(binarioDemasiados()) // día 2 solo, excede -> tercer nivel
+      .mockResolvedValueOnce(binarioXml());       // día 2: grupo de folios
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: '2026-08-05', fechaHasta: '2026-08-06', tipoDte: 33,
+    });
+
+    // Si el flag se hubiera releído, el día 2 saldría con la limitación de
+    // "tercer nivel desactivado" en vez de un tramo bajado.
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(2);
   });
 });
 

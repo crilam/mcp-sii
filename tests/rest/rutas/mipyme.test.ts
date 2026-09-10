@@ -213,14 +213,14 @@ describe('registrarRutasMipyme', () => {
     // para recibidos) tienen que llegar en snake_case, igual que el resto del
     // contrato: son lo que le permite a agenticerp reconstruir el pedido sin
     // parsear el texto de `motivo`.
-    it('expone tipo_dte, contraparte_rut y el rango de folio de una limitación del tercer nivel', async () => {
+    it('expone tipo_dte, contraparte_rut, razon_social y el rango de folio de una limitación del tercer nivel', async () => {
       (core.respaldoXml as jest.Mock).mockResolvedValue({
         ...RESULTADO,
         tramos: [{ fechaDesde: '2026-08-01', fechaHasta: '2026-08-16', documentos: 2, xml: '<SetDTE></SetDTE>' }],
         limitaciones: [
           {
             fechaDesde: '2026-08-17', fechaHasta: '2026-08-17',
-            tipoDte: 33, contraparteRut: '77777777-7', folioDesde: 100, folioHasta: 100,
+            tipoDte: 33, contraparteRut: '77777777-7', razonSocial: 'Muñoz', folioDesde: 100, folioHasta: 100,
             motivo: 'El folio 100 del 2026-08-17 (contraparte 77777777-7) excede por sí solo el tope.',
           },
         ],
@@ -228,12 +228,12 @@ describe('registrarRutasMipyme', () => {
       const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
       const body = r.body as any;
       expect(body.limitaciones[0]).toMatchObject({
-        tipo_dte: 33, contraparte_rut: '77777777-7', folio_desde: 100, folio_hasta: 100,
+        tipo_dte: 33, contraparte_rut: '77777777-7', razon_social: 'Muñoz', folio_desde: 100, folio_hasta: 100,
       });
     });
 
     // Espejo del test anterior: cuando el motivo NO sale del tercer nivel
-    // (día lleno sin `tipo_dte`, o tope de `max_tramos` genérico), los cuatro
+    // (día lleno sin `tipo_dte`, o tope de `max_tramos` genérico), los cinco
     // campos son `undefined` en el objeto que arma la ruta — y `undefined`
     // sólo es "ausente" cuando de verdad se serializa a JSON (que es lo que
     // hace `responderJson` con `JSON.stringify`, no lo que devuelve el
@@ -242,7 +242,7 @@ describe('registrarRutasMipyme', () => {
     // podría llegar con `"tipo_dte":null` si algún día la serialización
     // cambia (p.ej. un `JSON.stringify` con replacer, o un paso intermedio
     // que no preserve `undefined`).
-    it('omite tipo_dte/contraparte_rut/folio_desde/folio_hasta del JSON cuando el motivo no es del tercer nivel', async () => {
+    it('omite tipo_dte/contraparte_rut/razon_social/folio_desde/folio_hasta del JSON cuando el motivo no es del tercer nivel', async () => {
       (core.respaldoXml as jest.Mock).mockResolvedValue({
         ...RESULTADO,
         limitaciones: [
