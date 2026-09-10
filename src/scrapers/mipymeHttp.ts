@@ -1005,19 +1005,25 @@ export class MipymeHttpScraper {
     }
 
     // Corte temprano: el mismo colapso que el de arriba (por presupuesto),
-    // pero por causa DISTINTA. `diasPortalCaidoSeguidos` lo incrementan
-    // `listarEmitidosDelDia`/`listarRecibidosDelDia` cada vez que el listado
-    // de un día devuelve la página de error genérica del portal, y lo
-    // resetea CUALQUIER día que se procese sin ella (más abajo, y en esas dos
-    // funciones) — así que llegar acá con el contador en el tope significa
-    // que los últimos `DIAS_PORTAL_CAIDO_PARA_CORTAR` días, EN SECUENCIA,
-    // chocaron con esa página. Insistir día por día contra un portal caído no
-    // sólo pierde tiempo: es la misma clase de barrido que `ritmoSii.ts`
-    // existe para evitar. [desde, hasta] en este punto de la recursión es
-    // justo el rango que todavía no se intentó —la bisección visita el
-    // calendario en orden, así que el próximo `acumularTramos` siempre
-    // representa lo que sigue cronológicamente— y se colapsa entero en UNA
-    // limitación, igual que el colapso por presupuesto.
+    // pero por causa DISTINTA. `diasPortalCaidoSeguidos` lo incrementan las
+    // TRES superficies que pueden chocar con la página de error genérica del
+    // portal: la descarga principal de acá abajo (`descargarTramo`, la que
+    // corre SIEMPRE, con o sin el tercer nivel) y, del lado del tercer nivel
+    // —sólo si `RESPALDO_XML_TERCER_NIVEL` está prendido—,
+    // `listarEmitidosDelDia`/`listarRecibidosDelDia`. Unificado en un solo
+    // contador a propósito: si sólo contaran los listados, el corte quedaría
+    // CIEGO en producción, donde ese flag está apagado y el listado nunca se
+    // llega a pedir. Se resetea con CUALQUIER operación de las tres que
+    // conteste (más abajo, y en esas dos funciones) — así que llegar acá con
+    // el contador en el tope significa que los últimos
+    // `DIAS_PORTAL_CAIDO_PARA_CORTAR` intentos, EN SECUENCIA, chocaron con
+    // esa página. Insistir contra un portal caído no sólo pierde tiempo: es
+    // la misma clase de barrido que `ritmoSii.ts` existe para evitar.
+    // [desde, hasta] en este punto de la recursión es justo el rango que
+    // todavía no se intentó —la bisección visita el calendario en orden, así
+    // que el próximo `acumularTramos` siempre representa lo que sigue
+    // cronológicamente— y se colapsa entero en UNA limitación, igual que el
+    // colapso por presupuesto.
     if (ctx.diasPortalCaidoSeguidos >= DIAS_PORTAL_CAIDO_PARA_CORTAR) {
       limitaciones.push({
         fechaDesde: desde,
@@ -1036,7 +1042,48 @@ export class MipymeHttpScraper {
     if (ctx.descargas > 0) await esperar(pausaConfigurada());
     ctx.descargas += 1;
 
-    const respuesta = await this.descargarTramo(ctx, desde, hasta);
+    let respuesta: { xml: string; excedeTope: boolean };
+    try {
+      respuesta = await this.descargarTramo(ctx, desde, hasta);
+    } catch (e) {
+      // ESTE es el camino que corre SIEMPRE, con o sin
+      // `RESPALDO_XML_TERCER_NIVEL` (que en producción está apagado): a
+      // diferencia de `listarEmitidosDelDia`/`listarRecibidosDelDia`, que
+      // sólo se alcanzan con el flag prendido, `descargarTramo` es la
+      // descarga principal y corre en TODA empresa. Dejar escapar
+      // `PortalSiiNoDisponible` acá —como hacía antes de este arreglo— se
+      // lleva puesto el arreglo `tramos` de los rangos hermanos que YA se
+      // habían bajado bien: el mismo desperdicio de #98, pero en el camino
+      // que de verdad se ejecuta en producción, no en el opcional.
+      //
+      // Se re-lanza cualquier OTRA cosa (el propio "no es un SetDTE" de
+      // `descargarTramo`, un bug real, lo que sea): un catch ancho acá
+      // convertiría un error nuestro en una limitación silenciosa, que es
+      // justo la clase de fallo que este PR entero existe para sacar a la
+      // luz. Sólo `PortalSiiNoDisponible` tiene un diagnóstico conocido y
+      // reintentable que vale la pena cargar como limitación en vez de
+      // hacer explotar la corrida entera.
+      if (!(e instanceof PortalSiiNoDisponible)) throw e;
+      // Mismo contador que usan los listados del tercer nivel (ver
+      // `DIAS_PORTAL_CAIDO_PARA_CORTAR`): si no sumara acá, el corte
+      // temprano quedaría CIEGO justo cuando el tercer nivel está apagado
+      // —el caso de producción—, porque nunca se alcanzaría a incrementar.
+      ctx.diasPortalCaidoSeguidos += 1;
+      limitaciones.push({
+        fechaDesde: desde,
+        fechaHasta: hasta,
+        motivo:
+          `El portal del SII no contestó para ${desde}${desde !== hasta ? `..${hasta}` : ''}: `
+          + `${e.message}`,
+      });
+      return;
+    }
+    // La descarga contestó —con o sin exceder el tope, las dos son
+    // respuestas del portal, no un fallo suyo—: rompe cualquier racha de
+    // días caídos que venía acumulándose. Mismo criterio que el reset en
+    // `listarEmitidosDelDia`/`listarRecibidosDelDia`.
+    ctx.diasPortalCaidoSeguidos = 0;
+
     if (respuesta.excedeTope) {
       if (desde === hasta) {
         // El filtro por fecha se agotó: un solo día no se puede partir más. Con
@@ -1081,14 +1128,6 @@ export class MipymeHttpScraper {
       await this.acumularTramos(ctx, segundoInicio, hasta, tramos, limitaciones, maxTramos);
       return;
     }
-
-    // Este rango se bajó bien —sin excedeTope y sin la página de error del
-    // portal—: rompe cualquier racha de días caídos que venía acumulándose.
-    // "Consecutivos" exige esto; si no se reseteara, un portal que falla cada
-    // dos o tres días entre medio de días buenos terminaría cortando el
-    // rango igual, que no es el escenario que motiva el corte (portal caído
-    // DE VERDAD, no intermitencia).
-    ctx.diasPortalCaidoSeguidos = 0;
 
     tramos.push({
       fechaDesde: desde,
