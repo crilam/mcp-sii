@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { MipymeHttpScraper, LimitacionRespaldoXml } from '../../src/scrapers/mipymeHttp';
+import { MipymeHttpScraper, LimitacionRespaldoXml, soloCuerpoRut } from '../../src/scrapers/mipymeHttp';
 import { LimitacionConocida } from '../../src/erroresConsulta';
 import { esperar } from '../../src/ritmoSii';
 import { SiiHttpClient } from '../../src/http';
@@ -32,6 +32,28 @@ function binarioXml(xml: string = SET_DTE) {
     contenido: Buffer.from(xml, 'latin1'),
     contentType: 'application/octet-stream;filename=DTE_Recibidos_33333333.xml',
   };
+}
+
+// Un SetDTE armado con folios y tipo A MEDIDA, a diferencia de `SET_DTE`
+// (fijo, tipo 34, folios 1 y 2): el filtro por folio+tipo de
+// `filtrarDocumentosDelGrupo` descarta lo que no matchea, así que un test
+// que verifique CUÁNTOS documentos sobreviven necesita una respuesta cuyo
+// contenido de verdad corresponda al grupo pedido.
+function xmlSetDteConFolios(tipoDte: number, folios: number[]): string {
+  const documentos = folios.map(folio => `<DTE version="1.0" >
+	<Documento ID="S${folio}">
+		<Encabezado>
+			<IdDoc><TipoDTE>${tipoDte}</TipoDTE><Folio>${folio}</Folio><FchEmis>2026-08-05</FchEmis></IdDoc>
+			<Emisor><RUTEmisor>77777777-7</RUTEmisor><RznSoc>Emisor De Prueba</RznSoc></Emisor>
+		</Encabezado>
+		<Detalle><NroLinDet>1</NroLinDet><NmbItem>ITEM DE PRUEBA</NmbItem><MontoItem>1000</MontoItem></Detalle>
+	</Documento>
+</DTE>`).join('\n');
+  return `<?xml version="1.0" encoding="ISO-8859-1"?>\n<SetDTE>\n${documentos}\n</SetDTE>\n`;
+}
+
+function binarioXmlConFolios(tipoDte: number, folios: number[]) {
+  return binarioXml(xmlSetDteConFolios(tipoDte, folios));
 }
 
 function binarioDemasiados() {
@@ -391,6 +413,52 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(fusionadas[1].contraparteRut).toBe('22222222-2');
   });
 
+  // Mismo guard, con `tipoDte` distinto en vez de `contraparteRut`: dos
+  // limitaciones contiguas del tercer nivel para tipos de documento
+  // distintos no pueden fusionarse en una que sólo mencione el primer tipo.
+  it('fusionarLimitacionesContiguas no fusiona limitaciones contiguas con el mismo motivo si el tipoDte difiere', () => {
+    const { scraper } = armar();
+    const limitaciones: LimitacionRespaldoXml[] = [
+      { fechaDesde: '2026-08-01', fechaHasta: '2026-08-01', tipoDte: 33, motivo: 'Motivo genérico de maxTramos.' },
+      { fechaDesde: '2026-08-02', fechaHasta: '2026-08-02', tipoDte: 61, motivo: 'Motivo genérico de maxTramos.' },
+    ];
+    const fusionar = scraper as unknown as {
+      fusionarLimitacionesContiguas(l: LimitacionRespaldoXml[]): LimitacionRespaldoXml[];
+    };
+
+    const fusionadas = fusionar.fusionarLimitacionesContiguas(limitaciones);
+
+    expect(fusionadas).toHaveLength(2);
+    expect(fusionadas[0].tipoDte).toBe(33);
+    expect(fusionadas[1].tipoDte).toBe(61);
+  });
+
+  // Mismo guard, con `folioDesde`/`folioHasta` distintos: dos limitaciones
+  // contiguas del tercer nivel para RANGOS de folio distintos no pueden
+  // fusionarse en una que sólo mencione el rango de la primera.
+  it('fusionarLimitacionesContiguas no fusiona limitaciones contiguas con el mismo motivo si folioDesde/folioHasta difieren', () => {
+    const { scraper } = armar();
+    const limitaciones: LimitacionRespaldoXml[] = [
+      {
+        fechaDesde: '2026-08-01', fechaHasta: '2026-08-01', folioDesde: 1, folioHasta: 10,
+        motivo: 'Motivo genérico de maxTramos.',
+      },
+      {
+        fechaDesde: '2026-08-02', fechaHasta: '2026-08-02', folioDesde: 20, folioHasta: 30,
+        motivo: 'Motivo genérico de maxTramos.',
+      },
+    ];
+    const fusionar = scraper as unknown as {
+      fusionarLimitacionesContiguas(l: LimitacionRespaldoXml[]): LimitacionRespaldoXml[];
+    };
+
+    const fusionadas = fusionar.fusionarLimitacionesContiguas(limitaciones);
+
+    expect(fusionadas).toHaveLength(2);
+    expect(fusionadas[0]).toMatchObject({ folioDesde: 1, folioHasta: 10 });
+    expect(fusionadas[1]).toMatchObject({ folioDesde: 20, folioHasta: 30 });
+  });
+
   // Cuando NINGÚN tope se toca, `limitaciones` es `[]` y todo lo demás sigue
   // igual que antes del cambio: es la regresión que asegura que un respaldo
   // sano no cambió de forma.
@@ -651,12 +719,14 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     return `<table>${folios.map((f, i) => filaEmitido(f, 1000 + i)).join('\n')}</table>`;
   }
 
-  function filaRecibido(folio: number, codigo: number, emisorRut: string): string {
+  function filaRecibido(
+    folio: number, codigo: number, emisorRut: string, tipoNombre = 'Factura Electronica'
+  ): string {
     return `<tr>
       <td><a href="/cgi-bin/Portal001/mipeGesDocRcp.cgi?CODIGO=${codigo}"><img></a></td>
       <td>${emisorRut}</td>
       <td>Emisor ${emisorRut}</td>
-      <td>Factura Electronica</td>
+      <td>${tipoNombre}</td>
       <td>${folio}</td>
       <td>2026-08-05</td>
       <td>1000</td>
@@ -664,8 +734,8 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     </tr>`;
   }
 
-  function historialRecibidosHtml(docs: { folio: number; emisorRut: string }[]): string {
-    return `<table>${docs.map((d, i) => filaRecibido(d.folio, 2000 + i, d.emisorRut)).join('\n')}</table>`;
+  function historialRecibidosHtml(docs: { folio: number; emisorRut: string; tipoNombre?: string }[]): string {
+    return `<table>${docs.map((d, i) => filaRecibido(d.folio, 2000 + i, d.emisorRut, d.tipoNombre)).join('\n')}</table>`;
   }
 
   // Un día suelto con `tipoDte` puesto: la secuencia de `http.get` es
@@ -686,13 +756,19 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     mockearListado(http, historialEmitidosHtml(folios));
     (http.getBinario as jest.Mock)
       .mockResolvedValueOnce(binarioDemasiados()) // el día entero, sin folio
-      .mockResolvedValue(binarioXml());           // cada grupo de folios
+      // Cada grupo devuelve documentos DENTRO de su propio rango (tipo 33,
+      // igual que `DIA`): con folios y tipo a medida, el filtro de
+      // `descargarGrupoConBiseccion` no descarta nada y `documentos` cuenta
+      // lo esperado.
+      .mockResolvedValueOnce(binarioXmlConFolios(33, [1, 2]))
+      .mockResolvedValueOnce(binarioXmlConFolios(33, [21, 22]))
+      .mockResolvedValueOnce(binarioXmlConFolios(33, [41, 42]));
 
     const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
 
     expect(r.limitaciones).toEqual([]);
     expect(r.tramos).toHaveLength(3);
-    expect(r.documentos).toBe(6); // 3 tramos × 2 <DTE> del fixture SET_DTE
+    expect(r.documentos).toBe(6); // 2 documentos × 3 grupos, ya filtrados por folio+tipo
 
     const llamadas = (http.getBinario as jest.Mock).mock.calls;
     expect(llamadas).toHaveLength(4);
@@ -780,7 +856,7 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
   // El presupuesto puede agotarse a mitad de la BISECCIÓN de un emisor y
   // ANTES de llegar al siguiente: dos limitaciones distintas, no una — la del
   // primer emisor con los folios que le quedaron pendientes (colapsados por
-  // `descargarGrupoDeFolios`), y la de "emisores sin procesar" nombrando al
+  // `descargarGrupoConBiseccion`), y la de "emisores sin procesar" nombrando al
   // segundo, que ni se intentó.
   it('recibidos: presupuesto agotado a mitad de la bisección del primer emisor deja DOS limitaciones', async () => {
     const { scraper, http } = armar();
@@ -1119,9 +1195,32 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(http.getBinario).toHaveBeenCalledTimes(3);
   });
 
+  // El override con el que ENV arma la bisección es `{}` (nunca lleva
+  // `contraparte_rut`, que del lado ENV vive sólo en `ctx.filtros`): sin el
+  // fallback a `ctx.filtros.contraparteRut`, la limitación de presupuesto
+  // agotado saldría sin ese campo aunque el caller lo haya fijado, rompiendo
+  // la promesa de que `limitaciones` trae EXACTAMENTE el filtro a repetir.
+  it('emitidos: la limitación de presupuesto agotado incluye contraparte_rut cuando el caller lo fijó', async () => {
+    const { scraper, http } = armar();
+    const folios = [1, 2, 3, 4, 5, 6, 7, 8];
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioDemasiados()) // grupo [1..8]
+      .mockResolvedValueOnce(binarioDemasiados()); // grupo [1,2,3,4]
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', ...DIA, maxTramos: 4, contraparteRut: '77777777-7',
+    });
+
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].contraparteRut).toBe('77777777-7');
+    expect(r.limitaciones[0]).toMatchObject({ folioDesde: 1, folioHasta: 8, tipoDte: 33 });
+  });
+
   // Con el presupuesto agotado ENTRE dos grupos de folios (no dentro de la
   // bisección de UNO, que ya cubre el test de arriba), cada grupo restante
-  // entraba igual a `descargarGrupoDeFolios`, veía el presupuesto agotado y
+  // entraba igual a `descargarGrupoConBiseccion`, veía el presupuesto agotado y
   // empujaba su propia limitación — acá habría sido `21..40` y después
   // `41..45` en vez de una sola `21..45`.
   it('emitidos: maxTramos agotado ENTRE grupos de folios colapsa el resto en UNA sola limitación', async () => {
@@ -1164,6 +1263,35 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     for (const [, params] of llamadas) {
       expect(params).toMatchObject({ RUT_RECP: '77777777' });
     }
+  });
+
+  // Folios NO contiguos (huecos por anulados, u otro tipo si el CGI no
+  // respetara `TPO_DOC`): `descargarGrupoConBiseccion` pide por los EXTREMOS
+  // del grupo discreto (folio 1..1000), que es económico en llamadas, pero
+  // el SII puede devolver un folio intermedio (250) que el listado del día+
+  // tipo NUNCA mostró. Sin filtrar por el grupo pedido, ese documento ajeno
+  // se cuenta en `documentos` y queda en el XML devuelto.
+  it('emitidos: folios no contiguos no inflan documentos ni filtran de más al pedir por rango', async () => {
+    const { scraper, http } = armar();
+    const folios = [1, 500, 1000]; // el listado: sólo estos tres folios del día+tipo
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero, sin folio
+      // El grupo completo [1,500,1000] se pide como FOLIO=1..FOLIOHASTA=1000;
+      // el SII devuelve esos tres MÁS un cuarto (folio 250) que el listado
+      // nunca mostró — el hueco que el rango expone y la lista discreta no.
+      .mockResolvedValueOnce(binarioXmlConFolios(33, [1, 250, 500, 1000]));
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+    // Sin el filtro, esto daría 4: los tres pedidos MÁS el ajeno (folio 250).
+    expect(r.documentos).toBe(3);
+    expect(r.tramos[0].xml).not.toContain('ID="S250"');
+    expect(r.tramos[0].xml).toContain('ID="S1"');
+    expect(r.tramos[0].xml).toContain('ID="S500"');
+    expect(r.tramos[0].xml).toContain('ID="S1000"');
   });
 
   // `contraparte_rut` es "con o sin DV" para quien llama, pero el listado del
@@ -1224,6 +1352,34 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
 
     expect(r.limitaciones).toEqual([]);
     expect(r.tramos.length).toBeGreaterThan(0);
+  });
+
+  // Defensivo: `parseHistorialRecibidos` resuelve `tipoDte` con
+  // `TIPO_DTE_NOMBRES[nombre] ?? 0`, y nada filtraba por `ctx.filtros.tipoDte`
+  // antes de agrupar por emisor. Un documento de OTRO tipo mezclado en el
+  // listado (si el CGI no respetara `TPO_DOC`) se colaba en el grupo de
+  // folios del emisor, ensuchando el rango pedido con un folio ajeno.
+  it('recibidos: documentos de otro tipo en el listado no contaminan el agrupado por folio', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 10, emisorRut: '11111111-1', tipoNombre: 'Factura Electronica' },        // tipo 33, el de DIA
+      { folio: 99, emisorRut: '11111111-1', tipoNombre: 'Nota de Credito Electronica' }, // tipo 61, ajeno
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioDemasiados()) // emisor 11111111, plano — excede, fuerza agrupar por folio
+      .mockResolvedValueOnce(binarioXmlConFolios(33, [10])); // el grupo, ya sin el folio ajeno
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+    expect(r.documentos).toBe(1);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    // Sin el filtro por tipo, el grupo sería [10,99] y este llamado pediría
+    // FOLIO=10..FOLIOHASTA=99 en vez de sólo el folio 10.
+    expect(llamadas[2][1]).toMatchObject({ FOLIO: '10', FOLIOHASTA: '10' });
   });
 
   // Espejo del caso ENV equivalente: si el listado de recibidos no trae NINGÚN
@@ -1325,5 +1481,22 @@ describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () 
 
     expect(r.limitaciones).toEqual([]);
     expect(r.tramos).toHaveLength(1);
+  });
+});
+
+// `soloCuerpoRut` quedó exportada como API pública (la usan tanto el scraper
+// como `verificarRespaldoXml.ts`) sin tener un test propio: se prueba acá,
+// aparte del comportamiento de `respaldoXml` que la ejercita indirectamente.
+describe('soloCuerpoRut', () => {
+  it('con DV pegado, devuelve sólo el cuerpo', () => {
+    expect(soloCuerpoRut('77777777-7')).toBe('77777777');
+  });
+
+  it('sin DV, lo deja tal cual', () => {
+    expect(soloCuerpoRut('77777777')).toBe('77777777');
+  });
+
+  it('con puntos y DV, limpia los puntos y saca el DV', () => {
+    expect(soloCuerpoRut('77.777.777-7')).toBe('77777777');
   });
 });

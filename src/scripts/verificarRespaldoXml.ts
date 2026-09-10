@@ -66,10 +66,27 @@ async function main() {
   const hasta = process.env.VERIF_HASTA ?? rango.hasta;
   console.log(`Perfil ${NOMBRE}, rango ${desde}..${hasta}`);
 
+  // Normalizado ACÁ, no leído crudo en cada punto que lo necesita: la ruta
+  // REST trata cualquier valor que no sea EXACTAMENTE `'emitidos'` como
+  // recibidos (`origen === 'emitidos' ? 'ENV' : 'RCP'`), así que un
+  // `VERIF_ORIGEN` con mayúsculas, un typo, o el nombre interno `'ENV'`
+  // ejecutaría recibidos EN SILENCIO mientras quien corre el script cree
+  // haber pedido emitidos. Con un solo valor normalizado y compartido, el
+  // chequeo de `contraparteOk` de más abajo no puede leer algo distinto de
+  // lo que de verdad se pidió.
+  const origenCrudo = (process.env.VERIF_ORIGEN ?? 'recibidos').toLowerCase();
+  if (origenCrudo !== 'emitidos' && origenCrudo !== 'recibidos') {
+    throw new Error(
+      `VERIF_ORIGEN="${process.env.VERIF_ORIGEN}" no es válido: sólo "emitidos" o "recibidos" ` +
+      `(la ruta REST trata cualquier otro valor como "recibidos" en silencio, y este script no lo repite).`
+    );
+  }
+  const origen = origenCrudo as 'emitidos' | 'recibidos';
+
   const r = await rutas.get('POST /v1/mipyme/respaldo-xml')!({
     ...cred,
     empresa_rut: process.env.VERIF_EMPRESA,
-    origen: process.env.VERIF_ORIGEN ?? 'recibidos',
+    origen,
     fecha_desde: desde,
     fecha_hasta: hasta,
     contraparte_rut: process.env.VERIF_CONTRAPARTE,
@@ -145,7 +162,7 @@ async function main() {
       const cuerpoContraparte = process.env.VERIF_CONTRAPARTE
         ? soloCuerpoRut(process.env.VERIF_CONTRAPARTE)
         : undefined;
-      const listaContraparte = process.env.VERIF_ORIGEN === 'emitidos' ? receptores : emisores;
+      const listaContraparte = origen === 'emitidos' ? receptores : emisores;
       // Mismo vacuo que `folioOk`: sin contrapartes en el XML (filtro pedido)
       // no se puede confirmar nada, es `null`, no `true`.
       const contraparteOk: boolean | null = !cuerpoContraparte

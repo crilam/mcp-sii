@@ -19,6 +19,70 @@ export function soloCuerpoRut(rut: string): string {
   return rut.trim().replace(/\./g, '').split('-')[0];
 }
 
+// Agrupa un arreglo en trozos de a lo sumo `tamano` elementos, preservando el
+// orden. Los `folios` ya vienen ordenados por el llamador; acá sólo se
+// trocean en grupos consecutivos del arreglo, no por valor. Función de
+// módulo (no método): es pura y así se testea sin castear el scraper a
+// `unknown` para llegar a un miembro privado.
+export function enGrupos<T>(items: T[], tamano: number): T[][] {
+  const grupos: T[][] = [];
+  for (let i = 0; i < items.length; i += tamano) grupos.push(items.slice(i, i + tamano));
+  return grupos;
+}
+
+// Recorta un arreglo de folios (ya ordenados) al rango `folioDesde`/
+// `folioHasta` que pidió el CALLER original, si vino alguno. Sin este
+// recorte, el listado del día+tipo trae TODOS los folios —el filtro de folio
+// original no llega hasta el listado, que no lo soporta como rango— y
+// `descargarGrupoConBiseccion` usa los EXTREMOS de cada grupo como
+// `folioDesde`/`folioHasta`: sin acotar antes, esos extremos se escapan del
+// rango que el llamador pidió y la descarga trae documentos de más.
+export function acotarPorFolio(folios: number[], filtros: FiltrosRespaldoXml): number[] {
+  if (filtros.folioDesde == null) return folios;
+  const desde = filtros.folioDesde;
+  const hasta = filtros.folioHasta ?? filtros.folioDesde;
+  return folios.filter(f => f >= desde && f <= hasta);
+}
+
+// Cada `<DTE>...</DTE>` es un documento SII independiente, con su propia
+// firma enveloped adentro del bloque (no una firma que cubra el `SetDTE`
+// entero): sacar un `<DTE>` completo no toca la firma de los que quedan.
+//
+// `descargarGrupoConBiseccion` pide por RANGO —`folioDesde`/`folioHasta` en
+// los EXTREMOS del grupo, que es lo económico en llamadas— pero el grupo en
+// sí es una LISTA DISCRETA de folios, no necesariamente contigua (huecos por
+// documentos anulados, o folios de otro tipo si el CGI no respetara
+// `TPO_DOC` junto con `FOLIO`). Sin filtrar, un folio intermedio que el
+// listado del día+tipo nunca mostró se cuenta en `documentos` y queda en el
+// XML devuelto aunque el llamador jamás lo pidió — el barrido de datos
+// ajenos que el tercer nivel de troceo tiene que evitar. Se filtra ACÁ, no
+// se cambia la forma de pedir, porque pedir folio por folio en vez de por
+// rango multiplicaría las llamadas contra un portal que ya bloquea por
+// patrón de uso.
+export function filtrarDocumentosDelGrupo(
+  xml: string, foliosPedidos: ReadonlySet<number>, tipoDte: number | undefined
+): { xml: string; documentos: number } {
+  const aperturaSetDte = xml.match(/<SetDTE[^>]*>/);
+  if (aperturaSetDte == null) {
+    // No es un SetDTE reconocible (página de error, u otro formato): no hay
+    // bloques `<DTE>` que filtrar de forma confiable. Se deja pasar tal cual
+    // para que el chequeo `esXml` de más arriba lo detecte como lo que es.
+    return { xml, documentos: (xml.match(/<DTE[\s>]/g) ?? []).length };
+  }
+  const cabecera = xml.slice(0, aperturaSetDte.index! + aperturaSetDte[0].length);
+  const bloques = xml.match(/<DTE[\s\S]*?<\/DTE>/g) ?? [];
+  const permitidos = bloques.filter(bloque => {
+    const folio = Number(bloque.match(/<Folio>(\d+)<\/Folio>/)?.[1]);
+    if (!Number.isFinite(folio) || !foliosPedidos.has(folio)) return false;
+    if (tipoDte == null) return true;
+    return Number(bloque.match(/<TipoDTE>(\d+)<\/TipoDTE>/)?.[1]) === tipoDte;
+  });
+  return {
+    xml: `${cabecera}\n${permitidos.join('\n')}\n</SetDTE>`,
+    documentos: permitidos.length,
+  };
+}
+
 // El round-trip a ISO es lo que descarta un 31 de febrero: el Date lo normaliza
 // al 3 de marzo y deja de coincidir con lo pedido.
 function esFechaDelCalendario(fecha: string): boolean {
@@ -955,29 +1019,6 @@ export class MipymeHttpScraper {
     ctx.descargas += 1;
   }
 
-  // Agrupa un arreglo en trozos de a lo sumo `tamano` elementos, preservando
-  // el orden. Los `folios` ya vienen ordenados por el llamador; acá sólo se
-  // trocean en grupos consecutivos del arreglo, no por valor.
-  private enGrupos<T>(items: T[], tamano: number): T[][] {
-    const grupos: T[][] = [];
-    for (let i = 0; i < items.length; i += tamano) grupos.push(items.slice(i, i + tamano));
-    return grupos;
-  }
-
-  // Recorta un arreglo de folios (ya ordenados) al rango `folioDesde`/
-  // `folioHasta` que pidió el CALLER original, si vino alguno. Sin este
-  // recorte, el listado del día+tipo trae TODOS los folios —el filtro de folio
-  // original no llega hasta el listado, que no lo soporta como rango— y
-  // `descargarGrupoDeFolios` usa los EXTREMOS de cada grupo como
-  // `folioDesde`/`folioHasta`: sin acotar antes, esos extremos se escapan del
-  // rango que el llamador pidió y la descarga trae documentos de más.
-  private acotarPorFolio(folios: number[], filtros: FiltrosRespaldoXml): number[] {
-    if (filtros.folioDesde == null) return folios;
-    const desde = filtros.folioDesde;
-    const hasta = filtros.folioHasta ?? filtros.folioDesde;
-    return folios.filter(f => f >= desde && f <= hasta);
-  }
-
   // El tercer nivel de troceo: se llega acá sólo cuando un DÍA con `tipo_dte`
   // puesto sigue excediendo el tope, o sea que ni la fecha ni el tipo alcanzan
   // para bajar los 20 documentos por descarga del SII. Hace falta un eje MÁS
@@ -1020,8 +1061,8 @@ export class MipymeHttpScraper {
       // fecha/tipo), así que trae TODOS los folios del día+tipo. Se acota ACÁ
       // al `folioDesde`/`folioHasta` que pidió el llamador original antes de
       // agrupar: sin este paso, un grupo terminaría con extremos fuera del
-      // rango pedido y `descargarGrupoDeFolios` bajaría documentos de más.
-      const folios = this.acotarPorFolio(
+      // rango pedido y `descargarGrupoConBiseccion` bajaría documentos de más.
+      const folios = acotarPorFolio(
         [...new Set(documentos.map(d => d.folio))].sort((a, b) => a - b),
         ctx.filtros
       );
@@ -1045,8 +1086,8 @@ export class MipymeHttpScraper {
         });
         return;
       }
-      await this.descargarGruposDeFolios(
-        ctx, dia, this.enGrupos(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos);
+      await this.descargarListaDeGrupos(
+        ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos);
       return;
     }
 
@@ -1068,8 +1109,20 @@ export class MipymeHttpScraper {
     const documentos = await this.listarRecibidosDelDia(ctx, dia, limitaciones, maxTramos);
     if (documentos === null) return;
 
+    // Defensivo: `parseHistorialRecibidos` resuelve `tipoDte` con
+    // `TIPO_DTE_NOMBRES[nombre] ?? 0`, así que un nombre de tipo desconocido
+    // cae en `0`, no en `undefined` — un `d.tipoDte` de otro tipo pasaría
+    // sin filtrar. Si el CGI de listado ignorara `TPO_DOC` (el mismo riesgo
+    // no verificado que justifica `RESPALDO_XML_TERCER_NIVEL`), documentos
+    // de otro tipo se colarían en el agrupado por emisor y la bisección
+    // mezclaría folios de dos tipos que nunca convergen al granularse más.
+    // Filtrar acá convierte ese barrido silencioso en cero folios de este
+    // tipo + limitación explícita, igual que "el listado no devolvió ningún
+    // emisor" de más abajo.
+    const documentosDelTipo = documentos.filter(d => d.tipoDte === ctx.filtros.tipoDte);
+
     const foliosPorEmisor = new Map<string, number[]>();
-    for (const d of documentos) {
+    for (const d of documentosDelTipo) {
       const lista = foliosPorEmisor.get(d.emisorRut) ?? [];
       lista.push(d.folio);
       foliosPorEmisor.set(d.emisorRut, lista);
@@ -1101,7 +1154,7 @@ export class MipymeHttpScraper {
       // llegaría a `[10],[10]` — dos descargas idénticas y dos limitaciones
       // iguales para el mismo folio. Después se acota al rango de folio que
       // pidió el llamador, por la misma razón que del lado ENV.
-      const folios = this.acotarPorFolio(
+      const folios = acotarPorFolio(
         [...new Set(foliosCrudos)].sort((a, b) => a - b),
         ctx.filtros
       );
@@ -1146,8 +1199,8 @@ export class MipymeHttpScraper {
       //     — el mismo costo que ya paga hoy cualquier grupo que se biseccione
       //     de más.
       if (ctx.filtros.contraparteRut != null || folios.length > TOPE_DOCUMENTOS_SII) {
-        await this.descargarGruposDeFolios(
-          ctx, dia, this.enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
+        await this.descargarListaDeGrupos(
+          ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
           tramos, limitaciones, maxTramos);
         continue;
       }
@@ -1159,8 +1212,8 @@ export class MipymeHttpScraper {
         // `TOPE_DOCUMENTOS_SII` folios, no el emisor entero — con 45 folios de
         // un mismo emisor, pedir el grupo completo de entrada excede seguro y
         // gasta el presupuesto en una llamada condenada a fallar.
-        await this.descargarGruposDeFolios(
-          ctx, dia, this.enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
+        await this.descargarListaDeGrupos(
+          ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
           tramos, limitaciones, maxTramos);
         continue;
       }
@@ -1283,9 +1336,9 @@ export class MipymeHttpScraper {
   // hasta llegar a un solo folio. Un folio único que por sí solo excede el
   // tope es un dato roto: no hay forma de afinar más, y queda como limitación
   // con el folio exacto.
-  // El mismo motivo con el que `descargarGrupoDeFolios` colapsa los hermanos
+  // El mismo motivo con el que `descargarGrupoConBiseccion` colapsa los hermanos
   // que quedan sin intentar dentro de UNA bisección, factorizado para que
-  // `descargarGruposDeFolios` arme la MISMA limitación cuando lo que colapsa
+  // `descargarListaDeGrupos` arme la MISMA limitación cuando lo que colapsa
   // es una lista entera de grupos (ver ahí el motivo del colapso).
   private limitacionPresupuestoFolios(
     ctx: { filtros: FiltrosRespaldoXml; empresaRut: string },
@@ -1307,13 +1360,13 @@ export class MipymeHttpScraper {
   }
 
   // Aplica el chequeo de `maxTramos` ENTRE grupos hermanos (no sólo dentro de
-  // la bisección de uno, que ya resuelve `descargarGrupoDeFolios` con su
+  // la bisección de uno, que ya resuelve `descargarGrupoConBiseccion` con su
   // pila): sin esto, con el presupuesto agotado a mitad de una lista de
-  // grupos, cada grupo restante entraba igual a `descargarGrupoDeFolios`, veía
+  // grupos, cada grupo restante entraba igual a `descargarGrupoConBiseccion`, veía
   // el presupuesto agotado y empujaba SU PROPIA limitación — por ejemplo
   // `21..40` y después `41..45` en vez de una sola `21..45`. Se colapsan acá,
   // ANTES de entrar a cada grupo.
-  private async descargarGruposDeFolios(
+  private async descargarListaDeGrupos(
     ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
     dia: string,
     grupos: number[][],
@@ -1325,15 +1378,21 @@ export class MipymeHttpScraper {
     for (let i = 0; i < grupos.length; i++) {
       if (ctx.descargas >= maxTramos) {
         const restantes = grupos.slice(i).flat();
+        // `?? ctx.filtros.contraparteRut`: del lado ENV `overrideBase` es
+        // `{}` aunque el caller haya fijado `contraparte_rut` — ese filtro
+        // vive en `ctx.filtros`, no en el override (que ahí sólo lleva
+        // folios). Sin el fallback, la limitación sale sin el
+        // `contraparte_rut` que hace falta para repetir el pedido exacto.
         limitaciones.push(this.limitacionPresupuestoFolios(
-          ctx, dia, Math.min(...restantes), Math.max(...restantes), overrideBase.contraparteRut, maxTramos));
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos));
         return;
       }
-      await this.descargarGrupoDeFolios(ctx, dia, grupos[i], overrideBase, tramos, limitaciones, maxTramos);
+      await this.descargarGrupoConBiseccion(ctx, dia, grupos[i], overrideBase, tramos, limitaciones, maxTramos);
     }
   }
 
-  private async descargarGrupoDeFolios(
+  private async descargarGrupoConBiseccion(
     ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
     dia: string,
     folios: number[],
@@ -1355,8 +1414,12 @@ export class MipymeHttpScraper {
     while (pendientes.length > 0) {
       if (ctx.descargas >= maxTramos) {
         const restantes = pendientes.flat();
+        // Mismo fallback que en `descargarListaDeGrupos`: del lado ENV
+        // `overrideBase` no lleva `contraparte_rut` aunque el caller lo haya
+        // fijado (vive en `ctx.filtros`).
         limitaciones.push(this.limitacionPresupuestoFolios(
-          ctx, dia, Math.min(...restantes), Math.max(...restantes), overrideBase.contraparteRut, maxTramos));
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos));
         return;
       }
 
@@ -1368,8 +1431,8 @@ export class MipymeHttpScraper {
       const respuesta = await this.descargarTramo(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
       if (respuesta.excedeTope) {
         if (grupo.length === 1) {
-          limitaciones.push(
-            this.limitacionFolioUnico(dia, folioDesde, ctx.filtros.tipoDte, overrideBase.contraparteRut));
+          limitaciones.push(this.limitacionFolioUnico(
+            dia, folioDesde, ctx.filtros.tipoDte, overrideBase.contraparteRut ?? ctx.filtros.contraparteRut));
           continue;
         }
         const mitad = Math.floor(grupo.length / 2);
@@ -1378,11 +1441,17 @@ export class MipymeHttpScraper {
         continue;
       }
 
+      // `grupo` es una LISTA DISCRETA de folios (los extremos pedidos como
+      // rango son sólo el filtro más económico en llamadas), así que puede
+      // traer folios intermedios que el listado del día+tipo nunca mostró —
+      // ver `filtrarDocumentosDelGrupo` más arriba para el porqué completo.
+      // Se filtra ACÁ, con el grupo puntual que se acaba de pedir (no el
+      // `folios` original entero), porque cada bisección pide un SUB-rango
+      // distinto y sólo esos folios son los que este tramo puede reclamar.
       tramos.push({
         fechaDesde: dia,
         fechaHasta: dia,
-        documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
-        xml: respuesta.xml,
+        ...filtrarDocumentosDelGrupo(respuesta.xml, new Set(grupo), ctx.filtros.tipoDte),
       });
     }
   }
