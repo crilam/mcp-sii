@@ -1578,8 +1578,15 @@ export class MipymeHttpScraper {
         });
         return null;
       }
-      // Este listado SÍ contestó bien: rompe la racha de fallos de LISTADO,
-      // pero no toca `diasPortalCaidoDescarga` (son CGI distintos).
+      // Esta PÁGINA SÍ contestó bien: rompe la racha de fallos de LISTADO,
+      // pero no toca `diasPortalCaidoDescarga` (son CGI distintos). El reset
+      // es por página leída, no por día completo: un día cuya página 1 lee
+      // bien y cuya página 2 devuelve la página de error resetea acá antes
+      // de que la página 2 incremente, y el contador queda neto en 1 para
+      // ese día. No cambia el comportamiento observable del corte (varios
+      // días consecutivos que fallen en la misma página igual acumulan hasta
+      // `DIAS_PORTAL_CAIDO_PARA_CORTAR`), pero el conteo real es de páginas,
+      // no de días.
       ctx.diasPortalCaidoListado = 0;
       documentos.push(...this.parseHistorial(html));
       const totalPaginas = this.parseTotalPaginas(html);
