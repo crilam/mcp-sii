@@ -38,6 +38,15 @@ const SET_DTE = fixture('mipyme-respaldo-setdte.xml');
 const DEMASIADOS = fixture('mipyme-respaldo-demasiados.html');
 const PORTAL_NO_DISPONIBLE = fixture('mipyme-portal-no-disponible.html');
 
+// El título («Error al contribuyente») vive en el `<head>` y el aviso («no se
+// puede responder...») al final del `<body>`, en los extremos opuestos de la
+// página real (envuelta en el layout completo del portal: menú, JS, hojas de
+// estilo, a diferencia del fixture sintético). Un slice que corte antes de
+// llegar al aviso deja pasar la página sin detectarla.
+function conRelleno(html: string, bytes = 6000): string {
+  return html.replace('<script', `<!-- ${'x'.repeat(bytes)} -->\n<script`);
+}
+
 function binarioXml(xml: string = SET_DTE) {
   return {
     contenido: Buffer.from(xml, 'latin1'),
@@ -602,6 +611,25 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
   });
 
+  // Con varios KB de relleno entre el título y el aviso —como viene la página
+  // real, envuelta en el layout del portal—, un slice de los primeros bytes
+  // corta el aviso antes de llegar a él y la detección no dispara. Falla sin
+  // pasar el texto completo al assert.
+  it('detecta la página de error aunque haya varios KB de relleno entre el título y el aviso', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValue({
+      contenido: Buffer.from(conRelleno(PORTAL_NO_DISPONIBLE), 'latin1'),
+      contentType: 'text/html',
+    });
+
+    const r = await scraper.respaldoXml(RANGO);
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).not.toMatch(/no devolvió|SetDTE/);
+    expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
   // Este camino (`descargarTramo` dentro de `acumularTramos`) corre SIEMPRE,
   // con o sin `RESPALDO_XML_TERCER_NIVEL` —que en producción está APAGADO—.
   // Dos días: el primero baja su SetDTE completo; el segundo excede el tope
@@ -669,6 +697,35 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     const deCorte = r.limitaciones.find(l => l.motivo.includes('parece estar caído'));
     expect(deCorte).toMatchObject({ fechaDesde: '2026-08-08', fechaHasta: '2026-08-10' });
     expect(deCorte!.motivo).toMatch(/3 días consecutivos/);
+  });
+
+  // Regresión puntual: un rango cuya bisección cae en un split PAREJO (8 días
+  // → 4+4 → 2+2) atraviesa nodos intermedios multi-día que exceden el tope
+  // ANTES de completar tres fallos día-a-día consecutivos. Si el reset de
+  // `diasPortalCaidoDescarga` disparara con CUALQUIER respuesta del portal
+  // (incluido "excede el tope" de un nodo intermedio, que no es evidencia de
+  // que el día en curso esté sano), esos nodos borran la racha antes de
+  // llegar al tope y el corte queda ciego para siempre en un rango ancho. El
+  // conteo de días SUELTOS pedidos (no sólo de limitaciones) es lo que
+  // demuestra que el corte respeta el N elegido pase lo que pase con la forma
+  // del árbol de bisección.
+  it('el corte respeta el N configurado incluso cuando la bisección pasa por nodos intermedios que exceden el tope', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.FEC_DESDE !== params.FEC_HASTA) {
+        return Promise.resolve(binarioDemasiados());
+      }
+      return Promise.resolve({
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+    });
+
+    await scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-01', fechaHasta: '2026-08-08' });
+
+    const diasSueltosPedidos = (http.getBinario as jest.Mock).mock.calls
+      .filter(([, params]) => params.FEC_DESDE === params.FEC_HASTA);
+    expect(diasSueltosPedidos).toHaveLength(3);
   });
 
   it('pasa el tipo de documento como TPO_DOC cuando se pide', async () => {

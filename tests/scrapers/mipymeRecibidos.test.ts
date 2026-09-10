@@ -20,6 +20,15 @@ const RECIBIDOS = fixture('mipyme-historial-recibidos.html');
 const SIN_EMPRESA = fixture('mipyme-sin-empresa.html');
 const PORTAL_NO_DISPONIBLE = fixture('mipyme-portal-no-disponible.html');
 
+// El título («Error al contribuyente») vive en el `<head>` y el aviso («no se
+// puede responder...») al final del `<body>`, en los extremos opuestos de la
+// página real (que, a diferencia del fixture sintético, viene envuelta en el
+// layout completo del portal: menú, JS, hojas de estilo). Un slice que corte
+// antes de llegar al aviso deja pasar la página sin detectarla.
+function conRelleno(html: string, bytes = 6000): string {
+  return html.replace('<script', `<!-- ${'x'.repeat(bytes)} -->\n<script`);
+}
+
 function armar() {
   const session = new MockSession({} as any, {} as any);
   const http = new MockHttp(session);
@@ -279,6 +288,25 @@ describe('MipymeHttpScraper.dtePdf', () => {
   // otro código, sólo porque entró por otra superficie.
   it('la página de error genérica del portal sale como PortalSiiNoDisponible, no como el Error genérico de "no PDF"', async () => {
     const html = Buffer.from(PORTAL_NO_DISPONIBLE);
+    const { scraper } = conPdf(html, 'text/html');
+
+    let error: unknown;
+    try {
+      await scraper.dtePdf('1897586940', '33333333-3');
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // Con varios KB de relleno entre el título y el aviso —como viene la página
+  // real, envuelta en el layout del portal—, un slice de los primeros bytes
+  // corta el aviso y la detección no dispara. Falla sin pasar el texto
+  // completo al assert.
+  it('detecta la página de error aunque haya varios KB de relleno entre el título y el aviso', async () => {
+    const html = Buffer.from(conRelleno(PORTAL_NO_DISPONIBLE));
     const { scraper } = conPdf(html, 'text/html');
 
     let error: unknown;

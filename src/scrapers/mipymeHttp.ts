@@ -797,7 +797,13 @@ export class MipymeHttpScraper {
       // distingue nada: lo que separa un PDF de un error es el Content-Type. Sin
       // este chequeo el fallo viajaría como un "PDF" que ningún lector abre.
       if (!/application\/pdf/i.test(contentType)) {
-        const cuerpo = contenido.subarray(0, 4096).toString('latin1');
+        // Texto COMPLETO, no un slice: el título («Error al contribuyente»)
+        // vive en el `<head>` y el aviso («no se puede responder...») al
+        // final del `<body>`, envueltos en el layout del portal (menú, JS,
+        // hojas de estilo). Un slice que corte entre los dos deja pasar la
+        // página sin detectarla — verificado contra una versión con varios
+        // KB de relleno entre ambas frases.
+        const cuerpo = contenido.toString('latin1');
         // La misma página de error genérica del portal puede salir acá en vez
         // del historial: mismo síntoma, mismo tipo. Va ANTES del Error
         // genérico de más abajo para que un integrador vea un solo código
@@ -1077,11 +1083,15 @@ export class MipymeHttpScraper {
       });
       return;
     }
-    // La descarga contestó —con o sin exceder el tope, las dos son
-    // respuestas del portal, no un fallo suyo—: rompe la racha de fallos de
-    // DESCARGA, pero no toca `diasPortalCaidoListado` (son CGI distintos).
-    ctx.diasPortalCaidoDescarga = 0;
-
+    // El reset va DESPUÉS del chequeo de `excedeTope`, no acá: un rango
+    // intermedio que excede el tope es sólo una parada de la bisección, no
+    // una confirmación de que el día en curso está sano. Verificado en vivo:
+    // con un rango parejo (p.ej. 8 días → 4+4 → 2+2), cada nodo intermedio
+    // que exceda el tope resetea la racha de fallos ANTES de que los días
+    // hoja lleguen a acumular `DIAS_PORTAL_CAIDO_PARA_CORTAR` seguidos,
+    // dejando el corte CIEGO para siempre en un rango ancho con el portal
+    // realmente caído. Sólo una descarga que trae contenido real (sin
+    // exceder el tope) es evidencia de que el portal está respondiendo.
     if (respuesta.excedeTope) {
       if (desde === hasta) {
         // El filtro por fecha se agotó: un solo día no se puede partir más. Con
@@ -1127,6 +1137,10 @@ export class MipymeHttpScraper {
       return;
     }
 
+    // Contenido real, sin exceder el tope: acá sí es evidencia de que el
+    // portal está respondiendo. Rompe la racha de fallos de DESCARGA; no
+    // toca `diasPortalCaidoListado` (son CGI distintos).
+    ctx.diasPortalCaidoDescarga = 0;
     tramos.push({
       fechaDesde: desde,
       fechaHasta: hasta,
@@ -1882,8 +1896,10 @@ export class MipymeHttpScraper {
         });
         continue;
       }
-      // Rompe la racha de fallos de DESCARGA; no toca `diasPortalCaidoListado`.
-      ctx.diasPortalCaidoDescarga = 0;
+      // Mismo criterio que en `acumularTramos`: un grupo que excede el tope
+      // es sólo una parada de ESTA bisección por folio, no evidencia de que
+      // el portal esté sano — resetear acá también dejaría ciego el corte
+      // ante un rango parejo de folios con el portal realmente caído.
       if (respuesta.excedeTope) {
         if (grupo.length === 1) {
           limitaciones.push(this.limitacionFolioUnico(
@@ -1897,6 +1913,9 @@ export class MipymeHttpScraper {
         pendientes.push(grupo.slice(0, mitad));   // izquierda: queda en el tope de la pila
         continue;
       }
+      // Contenido real, sin exceder el tope: rompe la racha de fallos de
+      // DESCARGA; no toca `diasPortalCaidoListado`.
+      ctx.diasPortalCaidoDescarga = 0;
 
       // `grupo` es una LISTA DISCRETA de folios (los extremos pedidos como
       // rango son sólo el filtro más económico en llamadas: pedir folio por
@@ -2010,7 +2029,10 @@ export class MipymeHttpScraper {
     // puede salir acá también, en vez del SetDTE: mismo síntoma que en el
     // historial, mismo tipo. Va ANTES del Error genérico de más abajo para que
     // ese caso puntual salga como `SII_NO_DISPONIBLE` y no como `ERROR` mudo.
-    this.assertNoPaginaDeErrorDelPortal(texto.slice(0, 4096));
+    // Texto COMPLETO, no un slice: el título vive en el `<head>` y el aviso
+    // al final del `<body>`, envueltos en el layout del portal — un slice que
+    // corte entre los dos deja pasar la página sin detectarla.
+    this.assertNoPaginaDeErrorDelPortal(texto);
 
     // Cualquier OTRA respuesta que no sea un SetDTE (y que no matcheó la
     // página de error de arriba) SÍ queda como Error genérico —o sea `ERROR`,
