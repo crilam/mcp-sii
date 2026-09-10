@@ -3,7 +3,7 @@ import { Empresa, SessionManager } from '../session';
 import { rutEsValido } from '../rut';
 import { EscrituraRechazadaPorSii, EmpresaNoAutorizada, SelectorEmpresasVacio } from '../erroresConsulta';
 import { marcarSeguro } from '../idempotenciaEscritura';
-import { esperar, pausaConfigurada } from '../ritmoSii';
+import { esperar, pausaConfigurada, tercerNivelHabilitado } from '../ritmoSii';
 
 const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -881,6 +881,24 @@ export class MipymeHttpScraper {
         // `tipo_dte` ese eje no existe todavía (lo maneja el consumidor
         // pidiendo por tipo), y se registra la limitación de siempre.
         if (ctx.filtros.tipoDte != null) {
+          if (!tercerNivelHabilitado()) {
+            // Ver el comentario de `tercerNivelHabilitado` en ritmoSii.ts: la
+            // combinación tipo_dte+folio/contraparte no está verificada contra
+            // el SII real, y activarla a ciegas puede convertir un día lleno
+            // en un barrido de `maxTramos` llamadas inútiles.
+            limitaciones.push({
+              fechaDesde: desde,
+              fechaHasta: hasta,
+              tipoDte: ctx.filtros.tipoDte,
+              motivo:
+                `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos del tipo `
+                + `${ctx.filtros.tipoDte} y el tercer nivel de troceo (por folio o por contraparte) `
+                + `está DESACTIVADO por defecto: esa combinación de filtros no está verificada `
+                + `contra el SII real. Activalo con RESPALDO_XML_TERCER_NIVEL=1 recién después de `
+                + `confirmarlo en vivo (ver src/scripts/verificarRespaldoXml.ts).`,
+            });
+            return;
+          }
           await this.trocearPorEjeFino(ctx, desde, tramos, limitaciones, maxTramos);
           return;
         }
@@ -933,6 +951,20 @@ export class MipymeHttpScraper {
     return grupos;
   }
 
+  // Recorta un arreglo de folios (ya ordenados) al rango `folioDesde`/
+  // `folioHasta` que pidió el CALLER original, si vino alguno. Sin este
+  // recorte, el listado del día+tipo trae TODOS los folios —el filtro de folio
+  // original no llega hasta el listado, que no lo soporta como rango— y
+  // `descargarGrupoDeFolios` usa los EXTREMOS de cada grupo como
+  // `folioDesde`/`folioHasta`: sin acotar antes, esos extremos se escapan del
+  // rango que el llamador pidió y la descarga trae documentos de más.
+  private acotarPorFolio(folios: number[], filtros: FiltrosRespaldoXml): number[] {
+    if (filtros.folioDesde == null) return folios;
+    const desde = filtros.folioDesde;
+    const hasta = filtros.folioHasta ?? filtros.folioDesde;
+    return folios.filter(f => f >= desde && f <= hasta);
+  }
+
   // El tercer nivel de troceo: se llega acá sólo cuando un DÍA con `tipo_dte`
   // puesto sigue excediendo el tope, o sea que ni la fecha ni el tipo alcanzan
   // para bajar los 20 documentos por descarga del SII. Hace falta un eje MÁS
@@ -958,19 +990,32 @@ export class MipymeHttpScraper {
       const documentos = await this.listarEmitidosDelDia(ctx, dia, limitaciones, maxTramos);
       if (documentos === null) return; // maxTramos se agotó listando; limitación ya cargada.
 
-      const folios = [...new Set(documentos.map(d => d.folio))].sort((a, b) => a - b);
+      // El listado NO filtra por rango de folio (no lo soporta como filtro de
+      // fecha/tipo), así que trae TODOS los folios del día+tipo. Se acota ACÁ
+      // al `folioDesde`/`folioHasta` que pidió el llamador original antes de
+      // agrupar: sin este paso, un grupo terminaría con extremos fuera del
+      // rango pedido y `descargarGrupoDeFolios` bajaría documentos de más.
+      const folios = this.acotarPorFolio(
+        [...new Set(documentos.map(d => d.folio))].sort((a, b) => a - b),
+        ctx.filtros
+      );
       if (folios.length === 0) {
+        const rango = ctx.filtros.folioDesde != null
+          ? ` dentro del rango de folio pedido (${ctx.filtros.folioDesde}..${ctx.filtros.folioHasta ?? ctx.filtros.folioDesde})`
+          : '';
         // El listado y la descarga no cuentan igual (documentado más arriba,
         // en `acumularTramos`): acá es el caso extremo donde la descarga dice
-        // que sobran documentos y el listado no encuentra ni uno del mismo
-        // día y tipo. Sin folios no hay por dónde agrupar.
+        // que sobran documentos y el listado no encuentra ni un folio del
+        // mismo día y tipo (o ninguno dentro del rango de folio pedido). Sin
+        // folios no hay por dónde agrupar.
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          folioDesde: ctx.filtros.folioDesde, folioHasta: ctx.filtros.folioHasta,
           motivo:
             `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
-            + `(tipo ${ctx.filtros.tipoDte}), pero el listado de emitidos no devolvió ningún folio `
-            + `para ese día y tipo. El listado y la descarga no cuentan igual; sin folios no se puede `
-            + `trocear más fino.`,
+            + `(tipo ${ctx.filtros.tipoDte}), pero el listado de emitidos no devolvió ningún folio`
+            + `${rango} para ese día y tipo. El listado y la descarga no cuentan igual; sin folios `
+            + `no se puede trocear más fino.`,
         });
         return;
       }
@@ -1004,8 +1049,22 @@ export class MipymeHttpScraper {
       return;
     }
 
-    for (const [emisorRut, folios] of foliosPorEmisor) {
-      folios.sort((a, b) => a - b);
+    for (const [emisorRut, foliosCrudos] of foliosPorEmisor) {
+      // Dedupe con `Set`, igual que ENV: el listado puede repetir un folio (una
+      // fila por página, u otra razón del portal), y sin dedupe la bisección
+      // llegaría a `[10],[10]` — dos descargas idénticas y dos limitaciones
+      // iguales para el mismo folio. Después se acota al rango de folio que
+      // pidió el llamador, por la misma razón que del lado ENV.
+      const folios = this.acotarPorFolio(
+        [...new Set(foliosCrudos)].sort((a, b) => a - b),
+        ctx.filtros
+      );
+      // Sin folios de este emisor dentro del rango pedido: no hay nada que
+      // bajar de él, y no es un fallo — es justo lo que el filtro de folio
+      // pidió. No cuenta contra `maxTramos` porque no se intenta ninguna
+      // descarga.
+      if (folios.length === 0) continue;
+
       if (ctx.descargas >= maxTramos) {
         // Se agota el presupuesto entre un emisor y el siguiente: los que
         // quedan sin pedir se registran juntos, no uno por uno — no se
@@ -1023,8 +1082,14 @@ export class MipymeHttpScraper {
       await this.consumirPresupuesto(ctx);
       const respuesta = await this.descargarTramo(ctx, dia, dia, { contraparteRut: emisorRut });
       if (respuesta.excedeTope) {
-        await this.descargarGrupoDeFolios(
-          ctx, dia, folios, { contraparteRut: emisorRut }, tramos, limitaciones, maxTramos);
+        // Igual que ENV: el grupo que se intenta primero es de a lo sumo
+        // `TOPE_DOCUMENTOS_SII` folios, no el emisor entero — con 45 folios de
+        // un mismo emisor, pedir el grupo completo de entrada excede seguro y
+        // gasta el presupuesto en una llamada condenada a fallar.
+        for (const grupo of this.enGrupos(folios, TOPE_DOCUMENTOS_SII)) {
+          await this.descargarGrupoDeFolios(
+            ctx, dia, grupo, { contraparteRut: emisorRut }, tramos, limitaciones, maxTramos);
+        }
         continue;
       }
       tramos.push({

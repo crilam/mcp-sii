@@ -597,7 +597,15 @@ describe('MipymeHttpScraper.respaldoXml', () => {
 // mipyme-historial-*.html: esos fixtures tienen sólo dos filas con paginación
 // real, y acá hace falta controlar folios y emisores exactos por caso.
 describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / contraparte)', () => {
-  beforeEach(() => jest.clearAllMocks());
+  // El tercer nivel queda APAGADO por defecto (ver `tercerNivelHabilitado` en
+  // ritmoSii.ts: la combinación tipo_dte+folio/contraparte no está verificada
+  // contra el SII real). Los tests de este describe verifican el TROCEO en sí,
+  // así que lo prenden acá; los tests del flag mismo lo apagan explícitamente.
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.RESPALDO_XML_TERCER_NIVEL = '1';
+  });
+  afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
 
   function filaEmitido(folio: number, codigo: number, receptorRut = '77777777-7'): string {
     return `<tr>
@@ -742,6 +750,60 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     });
   });
 
+  // Un emisor con MÁS de 20 folios en el día tiene que agruparse de a lo sumo
+  // `TOPE_DOCUMENTOS_SII` (igual que ENV) antes de intentar la descarga: pasar
+  // los 45 folios de una sola vez excede seguro y quema una llamada condenada
+  // a fallar.
+  it('recibidos: un emisor con 45 folios se agrupa de a 20 antes de bisectar', async () => {
+    const { scraper, http } = armar();
+    const docs = Array.from({ length: 45 }, (_, i) => ({ folio: i + 1, emisorRut: '11111111-1' }));
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioDemasiados()) // el emisor, plano
+      .mockResolvedValue(binarioXml());           // cada grupo de a lo sumo 20 folios
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(3);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    expect(llamadas).toHaveLength(5); // día entero + emisor plano + 3 grupos
+    expect(llamadas[2][1]).toMatchObject({ FOLIO: '1', FOLIOHASTA: '20' });
+    expect(llamadas[3][1]).toMatchObject({ FOLIO: '21', FOLIOHASTA: '40' });
+    expect(llamadas[4][1]).toMatchObject({ FOLIO: '41', FOLIOHASTA: '45' });
+  });
+
+  // Un folio repetido en el listado (una fila por página, u otra razón del
+  // portal) no puede duplicar la descarga: sin dedupe, la bisección de un
+  // emisor con folios repetidos llegaría a `[10],[10]` — dos descargas
+  // idénticas y dos limitaciones iguales para el mismo folio.
+  it('recibidos: deduplica folios repetidos antes de bisectar (evita descargas idénticas)', async () => {
+    const { scraper, http } = armar();
+    // El mismo folio dos veces: sin dedupe, el grupo queda con 2 elementos en
+    // vez de 1, y si igual excede se bisecta en DOS llamadas idénticas
+    // (folioDesde=folioHasta=10 las dos) en vez de reconocer el folio único que
+    // no se puede afinar más. Sólo se mockean 3 respuestas: si el código
+    // pidiera una 4ª llamada (la duplicada), el test fallaría al no tener
+    // mock para ella.
+    const docs = [
+      { folio: 10, emisorRut: '11111111-1' },
+      { folio: 10, emisorRut: '11111111-1' }, // repetido
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioDemasiados()) // el emisor, plano
+      .mockResolvedValueOnce(binarioDemasiados()); // el grupo [10]: folio único que excede
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ contraparteRut: '11111111-1', folioDesde: 10, folioHasta: 10 });
+    expect(http.getBinario).toHaveBeenCalledTimes(3);
+  });
+
   // Regresión explícita: sin `tipo_dte` el tercer nivel ni se intenta, aunque
   // el día exceda el tope — sigue la limitación de siempre («pedí con
   // tipo_dte»), y no se llama a ningún listado.
@@ -777,5 +839,183 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     // El listado sí alcanzó a pedirse (consumió el 2º y último tramo del
     // presupuesto); lo que se agotó es lo que vino DESPUÉS.
     expect(http.getBinario).toHaveBeenCalledTimes(1);
+  });
+
+  // El listado NO filtra por rango de folio, así que trae TODOS los folios del
+  // día+tipo (acá, 45). Si `folio_desde`/`folio_hasta` del llamador no se
+  // aplicaran ANTES de agrupar, el grupo terminaría con extremos fuera del
+  // rango pedido y la descarga bajaría documentos de más.
+  it('emitidos: respeta folio_desde/folio_hasta del llamador al agrupar (no se escapa del rango pedido)', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 45 }, (_, i) => i + 1);
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero, ya con folio 10..15 puesto
+      .mockResolvedValueOnce(binarioXml());       // el grupo acotado
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', ...DIA, folioDesde: 10, folioHasta: 15,
+    });
+
+    expect(r.tramos).toHaveLength(1);
+    expect(r.limitaciones).toEqual([]);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    expect(llamadas).toHaveLength(2);
+    expect(llamadas[1][1]).toMatchObject({ FOLIO: '10', FOLIOHASTA: '15' });
+  });
+
+  // Mismo caso del lado recibido: el emisor tiene folios fuera del rango
+  // pedido (1 y 50) y la bisección tiene que ignorarlos.
+  it('recibidos: respeta folio_desde/folio_hasta del llamador al bisectar un emisor', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 1, emisorRut: '11111111-1' },
+      { folio: 10, emisorRut: '11111111-1' },
+      { folio: 11, emisorRut: '11111111-1' },
+      { folio: 50, emisorRut: '11111111-1' },
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioDemasiados()) // el emisor, plano (ya con folio 10..11 puesto)
+      .mockResolvedValueOnce(binarioXml());       // el grupo acotado [10,11]
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', ...DIA, folioDesde: 10, folioHasta: 11,
+    });
+
+    expect(r.tramos).toHaveLength(1);
+    expect(r.limitaciones).toEqual([]);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    expect(llamadas).toHaveLength(3);
+    expect(llamadas[2][1]).toMatchObject({ FOLIO: '10', FOLIOHASTA: '11' });
+  });
+
+  // `maxTramos` puede agotarse a mitad de la PAGINACIÓN del listado, no sólo
+  // al bajar grupos: cada página cuenta contra el presupuesto igual que una
+  // descarga.
+  it('emitidos: maxTramos se agota a mitad de la paginación del listado', async () => {
+    const { scraper, http } = armar();
+    const paginaUno =
+      '<table></table>'
+      + '<div class="paginacion">'
+      + '<a href="/cgi-bin/Portal001/mipeAdminDocsEmi.cgi?NUM_PAG=1">1</a>'
+      + '<a href="/cgi-bin/Portal001/mipeAdminDocsEmi.cgi?NUM_PAG=2">2</a>'
+      + '</div>';
+    mockearListado(http, paginaUno);
+    (http.getBinario as jest.Mock).mockResolvedValueOnce(binarioDemasiados()); // el día entero
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 2 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/listado/i);
+    expect(r.limitaciones[0].motivo).toMatch(/mitad de camino/i);
+    // parseEmpresas, auth.cgi, página 1 — nunca llega a pedir la página 2.
+    expect(http.get).toHaveBeenCalledTimes(3);
+  });
+
+  // El presupuesto también puede agotarse ENTRE dos emisores del lado
+  // recibido, después de haber procesado el primero con éxito.
+  it('recibidos: maxTramos agotado ENTRE emisores deja una limitación explicando qué quedó sin procesar', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 1, emisorRut: '11111111-1' },
+      { folio: 2, emisorRut: '22222222-2' },
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero (1er tramo)
+      .mockResolvedValueOnce(binarioXml());       // emisor 11111111 (2º tramo) — el listado ya usó uno
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA, maxTramos: 3 });
+
+    expect(r.tramos).toHaveLength(1);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/tramos/i);
+    expect(r.limitaciones[0].motivo).toMatch(/emisores/i);
+  });
+});
+
+// El tercer nivel está APAGADO por defecto porque la combinación
+// tipo_dte+folio/contraparte no está verificada contra el SII real (ver
+// `tercerNivelHabilitado` en ritmoSii.ts). Este describe NO toca el flag en
+// `beforeEach`: cada test lo deja tal como está o lo prende explícitamente.
+describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () => {
+  beforeEach(() => jest.clearAllMocks());
+  afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
+
+  it('apagado (default): el tercer nivel no se intenta y el motivo explica cómo activarlo', async () => {
+    delete process.env.RESPALDO_XML_TERCER_NIVEL;
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
+
+    const r = await scraper.respaldoXml({ ...RANGO, fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33 });
+
+    expect(r.tramos).toEqual([]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/RESPALDO_XML_TERCER_NIVEL/);
+    expect(r.limitaciones[0].motivo).toMatch(/DESACTIVADO/i);
+    // Ningún listado de folios/emisores: con el flag apagado ni se intenta.
+    expect(http.get).not.toHaveBeenCalledWith(expect.stringContaining('mipeAdminDocs'));
+  });
+
+  it('prendido con "1": el tercer nivel se activa y trocea por folio', async () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = '1';
+    const { scraper, http } = armar();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValueOnce(`<table>${[1, 2, 3].map((f, i) => `
+        <tr>
+          <td><a href="/cgi-bin/Portal001/mipeGesDocEmi.cgi?CODIGO=${9000 + i}"><img></a></td>
+          <td>77777777-7</td>
+          <td>Receptor</td>
+          <td>Factura Electronica</td>
+          <td>${f}</td>
+          <td>2026-08-05</td>
+          <td>1000</td>
+          <td>Documento Emitido</td>
+        </tr>`).join('\n')}</table>`);
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados())
+      .mockResolvedValueOnce(binarioXml());
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33,
+    });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+  });
+
+  // Case-insensitive, igual que el resto de los flags booleanos del proyecto.
+  it('prendido con "true" (case-insensitive): también activa el tercer nivel', async () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = 'TRUE';
+    const { scraper, http } = armar();
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValueOnce(`<table>${[1].map((f, i) => `
+        <tr>
+          <td><a href="/cgi-bin/Portal001/mipeGesDocEmi.cgi?CODIGO=${9100 + i}"><img></a></td>
+          <td>77777777-7</td>
+          <td>Receptor</td>
+          <td>Factura Electronica</td>
+          <td>${f}</td>
+          <td>2026-08-05</td>
+          <td>1000</td>
+          <td>Documento Emitido</td>
+        </tr>`).join('\n')}</table>`);
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados())
+      .mockResolvedValueOnce(binarioXml());
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33,
+    });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
   });
 });

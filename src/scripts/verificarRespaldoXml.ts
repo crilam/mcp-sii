@@ -23,6 +23,14 @@ import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacio
 //   VERIF_RZN_SOC      razón social de la contraparte
 //   VERIF_FOLIO        folio inicial (solo = ese folio exacto)
 //   VERIF_FOLIO_HASTA  folio final del rango
+//   VERIF_TIPO_DTE     tipo de documento (33, 34, 61...). Combinado con
+//                      VERIF_FOLIO/VERIF_FOLIO_HASTA o VERIF_CONTRAPARTE es
+//                      justo la combinación que usa el tercer nivel de troceo
+//                      del respaldo XML (folio para emitidos, contraparte
+//                      para recibidos) y que HOY NO está verificada
+//                      end-to-end contra el SII — correr este script con las
+//                      dos combinaciones antes de prender
+//                      RESPALDO_XML_TERCER_NIVEL=1 en un ambiente real.
 const NOMBRE = (process.argv[2] ?? 'certificado') as NombrePerfil;
 const SALIDA = process.env.VERIF_SALIDA;
 
@@ -67,6 +75,7 @@ async function main() {
     razon_social: process.env.VERIF_RZN_SOC,
     folio_desde: numeroDe('VERIF_FOLIO'),
     folio_hasta: numeroDe('VERIF_FOLIO_HASTA'),
+    tipo_dte: numeroDe('VERIF_TIPO_DTE'),
   });
   const b = r.body as Record<string, unknown>;
 
@@ -97,9 +106,34 @@ async function main() {
     const emisores = [...new Set([...t.xml.matchAll(/<RUTEmisor>(.*?)<\/RUTEmisor>/g)].map(m => m[1]))];
     const receptores = [...new Set([...t.xml.matchAll(/<RUTRecep>(.*?)<\/RUTRecep>/g)].map(m => m[1]))];
     const folios = [...new Set([...t.xml.matchAll(/<Folio>(.*?)<\/Folio>/g)].map(m => m[1]))];
+    const tipos = [...new Set([...t.xml.matchAll(/<TipoDTE>(.*?)<\/TipoDTE>/g)].map(m => m[1]))];
     console.log(`    emisores: ${emisores.join(', ') || '(ninguno)'}`);
     console.log(`    receptores: ${receptores.join(', ') || '(ninguno)'}`);
     console.log(`    folios: ${folios.slice(0, 8).join(', ')}${folios.length > 8 ? ` (+${folios.length - 8})` : ''}`);
+    console.log(`    tipos de documento: ${tipos.join(', ') || '(ninguno)'}`);
+
+    // El tercer nivel de troceo combina TPO_DOC con FOLIO/FOLIOHASTA o con
+    // RUT_RECP en la misma llamada, y esa combinación no está verificada
+    // contra el SII (ver RESPALDO_XML_TERCER_NIVEL en ritmoSii.ts). Si se
+    // pidieron ambos filtros a la vez, este chequeo dice EXPLÍCITAMENTE si el
+    // CGI los respetó los dos o si ignoró alguno — que es justo lo que hay
+    // que confirmar antes de prender el flag.
+    const tipoPedido = process.env.VERIF_TIPO_DTE;
+    if (tipoPedido && (process.env.VERIF_FOLIO || process.env.VERIF_CONTRAPARTE)) {
+      const tipoOk = tipos.length === 0 || (tipos.length === 1 && tipos[0] === tipoPedido);
+      const folioDesde = numeroDe('VERIF_FOLIO');
+      const folioHasta = numeroDe('VERIF_FOLIO_HASTA') ?? folioDesde;
+      const folioOk = folioDesde == null
+        || folios.every(f => Number(f) >= folioDesde && Number(f) <= (folioHasta as number));
+      const contraparteOk = !process.env.VERIF_CONTRAPARTE || (
+        process.env.VERIF_ORIGEN === 'emitidos'
+          ? receptores.every(r => r.startsWith(process.env.VERIF_CONTRAPARTE!.split('-')[0]))
+          : emisores.every(e => e.startsWith(process.env.VERIF_CONTRAPARTE!.split('-')[0]))
+      );
+      console.log(
+        `    tipo_dte+folio/contraparte: ${tipoOk && folioOk && contraparteOk ? 'RESPETADO' : 'NO RESPETADO — revisar antes de prender RESPALDO_XML_TERCER_NIVEL'}`
+        + ` (tipo=${tipoOk}, folio=${folioOk}, contraparte=${contraparteOk})`);
+    }
 
     if (SALIDA && esXml) {
       fs.mkdirSync(SALIDA, { recursive: true });

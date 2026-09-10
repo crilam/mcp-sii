@@ -57,6 +57,28 @@ export function esperar(ms: number): Promise<void> {
 }
 
 /**
+ * El tercer nivel de troceo del respaldo XML (folio para emitidos, contraparte
+ * para recibidos) combina `TPO_DOC` con `FOLIO`/`FOLIOHASTA` o con `RUT_RECP`
+ * en la MISMA llamada al CGI de descarga. Fecha+folio y fecha+contraparte
+ * están verificados contra el SII real (ver docs/integracion-api.md); la
+ * combinación con `tipo_dte` —la que usa este tercer nivel— NO lo está.
+ *
+ * Si el CGI ignorara `TPO_DOC` en presencia de `FOLIO`/`RUT_RECP` (o al revés),
+ * cada folio terminaría siendo "dato roto" en la bisección, y un solo día
+ * lleno quemaría todo `maxTramos` en llamadas inútiles contra un portal que
+ * bloquea por patrón de uso — el mismo riesgo que este módulo documenta más
+ * arriba. Por eso el tercer nivel queda APAGADO por defecto: `false` a menos
+ * que `RESPALDO_XML_TERCER_NIVEL` sea `'1'` o `'true'` (sin importar
+ * mayúsculas). Activarlo sin haberlo verificado en vivo primero (con
+ * `src/scripts/verificarRespaldoXml.ts`) es pedir el mismo bloqueo.
+ */
+export function tercerNivelHabilitado(): boolean {
+  const crudo = process.env.RESPALDO_XML_TERCER_NIVEL;
+  if (crudo == null) return false;
+  return /^(1|true)$/i.test(crudo.trim());
+}
+
+/**
  * Recorre `items` llamando `fn` de a uno, con pausa entre llamadas.
  *
  * En serie y no en paralelo, por dos razones que se refuerzan: el SII limita las
