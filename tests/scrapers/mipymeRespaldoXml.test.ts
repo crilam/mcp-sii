@@ -728,6 +728,33 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(diasSueltosPedidos).toHaveLength(3);
   });
 
+  // Un rango largo (el mes entero) hace que el corte se dispare varias veces
+  // en subárboles hermanos distintos de la bisección —cada uno con su propia
+  // limitación de "portal caído"—, en vez de una sola vez. Sin un motivo
+  // GENÉRICO (sin el rango puntual embebido en el texto), cada una queda
+  // suelta y el consumidor lee el mismo diagnóstico repetido una vez por
+  // subárbol; con el motivo genérico, `fusionarLimitacionesContiguas` las une
+  // en una sola limitación que cubre TODO el resto del mes.
+  it('el corte disparado varias veces en subárboles distintos fusiona en una sola limitación', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.FEC_DESDE !== params.FEC_HASTA) return Promise.resolve(binarioDemasiados());
+      return Promise.resolve({
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+    });
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, fechaDesde: '2026-08-01', fechaHasta: '2026-08-31', maxTramos: 48,
+    });
+
+    const deCorte = r.limitaciones.filter(l => l.motivo.includes('parece estar caído'));
+    expect(deCorte).toHaveLength(1);
+    expect(deCorte[0]).toMatchObject({ fechaDesde: '2026-08-04', fechaHasta: '2026-08-31' });
+    expect(deCorte[0].motivo).not.toMatch(/2026-08-04\.\.2026-08-31/);
+  });
+
   it('pasa el tipo de documento como TPO_DOC cuando se pide', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
@@ -1155,6 +1182,35 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     });
     expect(r.limitaciones[0].motivo).toMatch(/no contestó/);
     expect(r.limitaciones[0].motivo).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
+  // `descargarGrupoConBiseccion`/`descargarListaDeGrupos` incrementan
+  // `diasPortalCaidoDescarga` en su catch, pero sin chequearlo: el único
+  // chequeo vivía en `acumularTramos`, que no vuelve a correr hasta agotar
+  // TODOS los folios pendientes del día. Con 900 folios
+  // (45 grupos de a 20) y el portal caído para toda descarga por folio, sin
+  // el corte serían 45 llamadas consecutivas contra un portal que no
+  // contesta y 45 limitaciones casi idénticas. Con el corte, se abandona a
+  // las `DIAS_PORTAL_CAIDO_PARA_CORTAR` (3) y el resto colapsa en una sola.
+  it('emitidos: con 900 folios y toda descarga por folio devolviendo la página de error, el número de llamadas queda acotado por el corte, no por la cantidad de folios', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 900 }, (_, i) => i + 1);
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      if (params.FOLIO === '') return Promise.resolve(binarioDemasiados()); // el día entero, sin folio
+      return Promise.resolve({
+        contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+        contentType: 'text/html',
+      });
+    });
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 48 });
+
+    expect(r.tramos).toEqual([]);
+    // Muy por debajo de las 45 llamadas de folio que saldrían sin el corte
+    // (+1 del día entero): el corte se dispara a los 3 fallos consecutivos.
+    expect((http.getBinario as jest.Mock).mock.calls.length).toBeLessThanOrEqual(6);
+    expect(r.limitaciones.some(l => l.motivo.includes('parece estar caído'))).toBe(true);
   });
 
   // Listado (`mipeAdminDocs*.cgi`) y descarga (`lista_documentos.cgi`/

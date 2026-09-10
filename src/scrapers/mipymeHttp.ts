@@ -1035,11 +1035,17 @@ export class MipymeHttpScraper {
       limitaciones.push({
         fechaDesde: desde,
         fechaHasta: hasta,
+        // Sin el rango (${desde}..${hasta}) embebido en el texto a propósito
+        // —ya viaja en `fechaDesde`/`fechaHasta`—: un motivo genérico es lo
+        // que permite que `fusionarLimitacionesContiguas` una los VARIOS
+        // tramos de corte que puede dejar un rango ancho (la bisección no
+        // resetea el contador entre subárboles hermanos) en una sola
+        // limitación con el rango total, en vez de repetirle al consumidor
+        // el mismo diagnóstico una vez por subárbol.
         motivo:
           `El portal del SII respondió su página de error genérica en ${dias} días consecutivos: `
-          + `parece estar caído, no ser un problema puntual de este rango. Se abandona el resto `
-          + `(${desde}..${hasta}) para no seguir insistiendo contra un portal caído; reintentá este `
-          + `tramo más tarde.`,
+          + `parece estar caído, no ser un problema puntual de este tramo. Se abandona para no `
+          + `seguir insistiendo contra un portal caído; reintentá más tarde.`,
       });
       return;
     }
@@ -1756,6 +1762,36 @@ export class MipymeHttpScraper {
     };
   }
 
+  // Mismo corte que `DIAS_PORTAL_CAIDO_PARA_CORTAR` en `acumularTramos`, pero
+  // para la descarga por folio del tercer nivel: sin este chequeo ACÁ, el
+  // contador se incrementa (en el catch de `descargarGrupoConBiseccion`) pero
+  // nadie lo mira una vez que la recursión entró al tercer nivel de un día,
+  // porque `acumularTramos` no vuelve a correr hasta que el día completo
+  // termine. Con un día de cientos de folios y el portal caído, eso es
+  // cientos de llamadas consecutivas contra un portal que no contesta — la
+  // rama donde MÁS llamadas se hacen, y la que el corte más necesita cubrir.
+  private limitacionPortalCaidoDescarga(
+    ctx: { filtros: FiltrosRespaldoXml },
+    dia: string,
+    folioDesde: number,
+    folioHasta: number,
+    contraparteRut: string | undefined,
+    dias: number,
+    sinMapear: number = 0
+  ): LimitacionRespaldoXml {
+    const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
+    return {
+      fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+      contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      motivo:
+        `El portal del SII respondió su página de error genérica en ${dias} descargas de folio `
+        + `consecutivas del ${dia}${contraparte}: parece estar caído, no ser un problema puntual de `
+        + `este grupo. Los folios ${folioDesde}..${folioHasta} (rango envolvente de los pendientes, `
+        + `puede incluir folios ya bajados o de otro tipo) quedaron sin bajar; reintentá más `
+        + `tarde.${notaTipoNoMapeado(sinMapear)}`,
+    };
+  }
+
   // Aplica el chequeo de `maxTramos` ENTRE grupos hermanos (no sólo dentro de
   // la bisección de uno, que ya resuelve `descargarGrupoConBiseccion` con su
   // pila): sin esto, con el presupuesto agotado a mitad de una lista de
@@ -1798,6 +1834,16 @@ export class MipymeHttpScraper {
         limitaciones.push(this.limitacionPresupuestoFolios(
           ctx, dia, Math.min(...restantes), Math.max(...restantes),
           overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos, sinMapear));
+        return;
+      }
+      // Mismo corte que en `acumularTramos` (ver `limitacionPortalCaidoDescarga`):
+      // sin este chequeo ACÁ, entre un grupo y el siguiente nadie mira el
+      // contador que `descargarGrupoConBiseccion` viene incrementando.
+      if (ctx.diasPortalCaidoDescarga >= DIAS_PORTAL_CAIDO_PARA_CORTAR) {
+        const restantes = grupos.slice(i).flat();
+        limitaciones.push(this.limitacionPortalCaidoDescarga(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, ctx.diasPortalCaidoDescarga, sinMapear));
         return;
       }
       // Mismo criterio que el chequeo de `maxTramos` de arriba, pero para el
@@ -1862,6 +1908,20 @@ export class MipymeHttpScraper {
         limitaciones.push(this.limitacionDemasiadosFoliosUnicos(
           ctx, dia, Math.min(...restantes), Math.max(...restantes),
           overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, sinMapear));
+        return;
+      }
+      // El catch de más abajo incrementa `ctx.diasPortalCaidoDescarga`, pero
+      // sin este chequeo nadie lo mira acá dentro: el único lugar que lo
+      // comparaba contra `DIAS_PORTAL_CAIDO_PARA_CORTAR` era la entrada de
+      // `acumularTramos`, y esta pila no vuelve a pasar por ahí hasta agotar
+      // TODOS los folios pendientes del día. Con un día de cientos de folios y
+      // el portal caído, eso es cientos de llamadas consecutivas contra un
+      // portal que no contesta: exactamente lo que el corte existe para evitar.
+      if (ctx.diasPortalCaidoDescarga >= DIAS_PORTAL_CAIDO_PARA_CORTAR) {
+        const restantes = pendientes.flat();
+        limitaciones.push(this.limitacionPortalCaidoDescarga(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, ctx.diasPortalCaidoDescarga, sinMapear));
         return;
       }
 
@@ -2841,6 +2901,12 @@ export class MipymeHttpScraper {
   // por otro motivo (un nombre de fantasía, un observación copiada). Las dos
   // frases juntas, aunque cada una por separado sea más común, es la
   // combinación que en la práctica sólo produce esta página.
+  //
+  // Corre sobre el texto COMPLETO (`descargarTramo`/`dtePdf` no le pasan un
+  // slice, ver esos call-sites): medido, esta normalización + las dos regex
+  // tardan ~19ms sobre un SetDTE de 3,3 MB, irrelevante frente a los ~2s de
+  // la llamada HTTP que lo trajo. Si `maxTramos` sube mucho más de lo que
+  // hoy permite `MAX_TRAMOS_ABSOLUTO`, vale remedir.
   private assertNoPaginaDeErrorDelPortal(html: string): void {
     const texto = this.decodificar(html.replace(/<[^>]*>/g, ' '));
     if (/Error al contribuyente/i.test(texto)
