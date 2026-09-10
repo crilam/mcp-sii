@@ -113,7 +113,7 @@ Un cliente robusto lee `body.ok === true` para el camino feliz y `body.error` pa
 
 | Código | Status | `detalle` | Qué pasó | ¿Reintentar? |
 |---|---|---|---|---|
-| `ERROR` | 200 | **sí** | Fallo no clasificado: timeout, red, portal caído. | **Sí.** El único reintentable. |
+| `ERROR` | 200 | **sí** | Fallo no clasificado: timeout, red, portal caído. | **Sí.** El único genuinamente ambiguo (no se sabe si es transitorio o un bug permanente); ver §4 para los otros cuatro códigos que también conviene reintentar. |
 | `CREDENCIALES_INVALIDAS` | 200 | no | El SII rechazó la clave o el certificado. | No. Pedí credenciales nuevas. |
 | `EMPRESA_NO_AUTORIZADA` | 200 | **sí** | El selector de empresas del portal mipyme es un permiso a nivel de PERSONA, no de empresa: el RUT autenticado no tiene la empresa pedida en su selector (ver §6.5). | No, es permanente para esa credencial. |
 | `SESIONES_SIMULTANEAS` | 200 | **sí** | El RUT ya tiene demasiadas sesiones abiertas en el SII. | **Sí**, después de esperar. |
@@ -827,7 +827,7 @@ El criterio detrás de todas: **es preferible fallar explícito a devolver un da
 ## 8. Recomendaciones de integración
 
 1. **Ramificá por `ok`, no por el status HTTP.** El status sólo importa para 429 y 401.
-2. **Reintentá `ERROR` y nada más**, con backoff. Reintentar `LIMITE_CONOCIDO` o `NO_ENCONTRADO` sólo gasta sesiones del SII.
+2. **Reintentá `ERROR`, `SESIONES_SIMULTANEAS`, `LIMITE_SII`, `SERVICIO_OCUPADO` y `SII_NO_DISPONIBLE`**, con backoff y esperas distintas para cada uno (ver §4). Reintentar `LIMITE_CONOCIDO`, `NO_ENCONTRADO` o `EMPRESA_NO_AUTORIZADA` sólo gasta sesiones del SII: son determinísticos, el mismo request va a fallar igual siempre.
 3. **Serializá las llamadas por RUT.** El SII limita las sesiones simultáneas por contribuyente; paralelizar el mismo RUT provoca fallos que parecen aleatorios.
 4. **Distinguí `null` de `0`.** En este contrato `null` significa siempre "el SII no informa esto", nunca cero. Vale para `retencionEmisor`, `totales`, `totalPaginas`, `eventoReceptor` y los folios de un mes sin actividad.
 5. **Validá la clave con `/v1/sesion/validar-clave`** antes de guardarla, en vez de descubrir que es inválida en la primera consulta real.

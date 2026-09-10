@@ -273,6 +273,25 @@ describe('MipymeHttpScraper.dtePdf', () => {
       .rejects.toThrow(/02\.35\.209\.59\.203\.2/);
   });
 
+  // Unifica el mismo síntoma con el del historial: si el CGI de PDF devuelve
+  // la misma página de error genérica del portal, antes de este arreglo salía
+  // como el `Error` genérico de "no devolvió un PDF" — el mismo síntoma con
+  // otro código, sólo porque entró por otra superficie.
+  it('la página de error genérica del portal sale como PortalSiiNoDisponible, no como el Error genérico de "no PDF"', async () => {
+    const html = Buffer.from(PORTAL_NO_DISPONIBLE);
+    const { scraper } = conPdf(html, 'text/html');
+
+    let error: unknown;
+    try {
+      await scraper.dtePdf('1897586940', '33333333-3');
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
   // El identificador es el `codigo` del listado, no el folio: el folio se repite
   // entre emisores y entre tipos, así que no identifica un documento.
   it.each(['205', 'abc', '', '12-34'])('rechaza un codigo que no es del listado (%p)', async (codigo) => {
@@ -411,6 +430,26 @@ describe('MipymeHttpScraper.listBorradores', () => {
     const { scraper } = conRespuesta('<html>HTTP Status 404</html>');
 
     await expect(scraper.listBorradores('33333333-3')).rejects.toThrow(/no devolvió JSON/);
+  });
+
+  // Antes de este arreglo, la página de error genérica del portal —que
+  // tampoco parsea como JSON— caía en el mensaje de arriba y sugería
+  // "sesión caída", un diagnóstico equivocado que manda a reautenticar
+  // cuando el problema es del portal, no de la sesión. Mismo síntoma que en
+  // el historial, mismo tipo, para que un integrador no tenga que aprender
+  // un código por superficie.
+  it('la página de error genérica del portal sale como PortalSiiNoDisponible, no como "sesión caída"', async () => {
+    const { scraper } = conRespuesta(PORTAL_NO_DISPONIBLE);
+
+    let error: unknown;
+    try {
+      await scraper.listBorradores('33333333-3');
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
   });
 
   // Un JSON que no es una lista tampoco es "no hay borradores": devolver [] haría

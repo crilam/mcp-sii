@@ -705,7 +705,11 @@ export class MipymeHttpScraper {
       await this.http.postForm(SEL_EMPRESA_URL, { RUT_EMP: empresaRut });
 
       const html = await this.http.get(HISTORIAL_URL, this.params(filtros, pagina));
+      // Dos asserts explícitos y separados: cada uno chequea UNA cosa (ver el
+      // comentario de `assertNoPaginaDeErrorDelPortal`), y ninguno esconde al
+      // otro detrás de un nombre que sólo anuncia el primero.
       this.assertEmpresaSeleccionada(html);
+      this.assertNoPaginaDeErrorDelPortal(html);
 
       return {
         documentos: this.parseHistorial(html),
@@ -735,7 +739,11 @@ export class MipymeHttpScraper {
 
       const html = await this.http.get(
         HISTORIAL_RECIBIDOS_URL, this.paramsRecibidos(filtros, pagina));
+      // Dos asserts explícitos y separados: cada uno chequea UNA cosa (ver el
+      // comentario de `assertNoPaginaDeErrorDelPortal`), y ninguno esconde al
+      // otro detrás de un nombre que sólo anuncia el primero.
       this.assertEmpresaSeleccionada(html);
+      this.assertNoPaginaDeErrorDelPortal(html);
 
       return {
         documentos: this.parseHistorialRecibidos(html),
@@ -778,6 +786,12 @@ export class MipymeHttpScraper {
       // este chequeo el fallo viajaría como un "PDF" que ningún lector abre.
       if (!/application\/pdf/i.test(contentType)) {
         const cuerpo = contenido.subarray(0, 4096).toString('latin1');
+        // La misma página de error genérica del portal puede salir acá en vez
+        // del historial: mismo síntoma, mismo tipo. Va ANTES del Error
+        // genérico de más abajo para que un integrador vea un solo código
+        // (`SII_NO_DISPONIBLE`) para un solo síntoma, sea cual sea la
+        // superficie por la que entró.
+        this.assertNoPaginaDeErrorDelPortal(cuerpo);
         const codigoSii = cuerpo.match(/CODIGO:\s*([\d.\-]+)/)?.[1];
         throw new Error(
           `El portal mipyme no devolvió un PDF para el documento ${codigo.slice(0, 40)} `
@@ -1409,7 +1423,11 @@ export class MipymeHttpScraper {
         // arma `trocearPorEjeFino`.
         razonSocial: ctx.filtros.razonSocial,
       }, pagina));
+      // Dos asserts explícitos y separados: cada uno chequea UNA cosa (ver el
+      // comentario de `assertNoPaginaDeErrorDelPortal`), y ninguno esconde al
+      // otro detrás de un nombre que sólo anuncia el primero.
       this.assertEmpresaSeleccionada(html);
+      this.assertNoPaginaDeErrorDelPortal(html);
       documentos.push(...this.parseHistorial(html));
       const totalPaginas = this.parseTotalPaginas(html);
       if (totalPaginas == null || pagina >= totalPaginas) break;
@@ -1469,7 +1487,11 @@ export class MipymeHttpScraper {
         // el flag del tercer nivel existe para evitar, con el flag prendido.
         razonSocial: ctx.filtros.razonSocial,
       }, pagina));
+      // Dos asserts explícitos y separados: cada uno chequea UNA cosa (ver el
+      // comentario de `assertNoPaginaDeErrorDelPortal`), y ninguno esconde al
+      // otro detrás de un nombre que sólo anuncia el primero.
       this.assertEmpresaSeleccionada(html);
+      this.assertNoPaginaDeErrorDelPortal(html);
       documentos.push(...this.parseHistorialRecibidos(html));
       const totalPaginas = this.parseTotalPaginas(html);
       if (totalPaginas == null || pagina >= totalPaginas) break;
@@ -1803,10 +1825,17 @@ export class MipymeHttpScraper {
     // fallar.
     if (/demasiados Documentos electr/i.test(texto)) return { xml: '', excedeTope: true };
 
-    // Este SÍ queda como Error genérico —o sea `ERROR`, "reintentá"— y no como
-    // LimitacionConocida: verificado en vivo que es TRANSITORIO. El mismo rango
-    // ancho respondió esta página una vez y el XML completo al reintentarlo un
-    // minuto después, sin cambiar nada.
+    // La página de error genérica del portal (ver `assertNoPaginaDeErrorDelPortal`)
+    // puede salir acá también, en vez del SetDTE: mismo síntoma que en el
+    // historial, mismo tipo. Va ANTES del Error genérico de más abajo para que
+    // ese caso puntual salga como `SII_NO_DISPONIBLE` y no como `ERROR` mudo.
+    this.assertNoPaginaDeErrorDelPortal(texto.slice(0, 4096));
+
+    // Cualquier OTRA respuesta que no sea un SetDTE (y que no matcheó la
+    // página de error de arriba) SÍ queda como Error genérico —o sea `ERROR`,
+    // "reintentá"— y no como LimitacionConocida: verificado en vivo que es
+    // TRANSITORIO. El mismo rango ancho respondió esta página una vez y el
+    // XML completo al reintentarlo un minuto después, sin cambiar nada.
     if (!/<SetDTE/i.test(texto)) {
       const codigoSii = texto.slice(0, 4096).match(/CODIGO:\s*([\d.\-]+)/)?.[1];
       throw new Error(
@@ -1868,8 +1897,15 @@ export class MipymeHttpScraper {
     try {
       resp = JSON.parse(crudo);
     } catch {
-      // El servidor de aplicaciones responde HTML en sus errores (404, 500, la
-      // página de login). Sin este mensaje, el fallo llegaría como un
+      // La misma página de error genérica del portal puede salir acá en vez
+      // del JSON esperado: mismo síntoma que en el historial, mismo tipo. Va
+      // ANTES del mensaje de "no devolvió JSON" de abajo —que hasta acá
+      // apuntaba a "sesión caída", un diagnóstico equivocado para este caso
+      // puntual— para que un integrador vea `SII_NO_DISPONIBLE` y no tenga
+      // que adivinar si hay que reautenticar.
+      this.assertNoPaginaDeErrorDelPortal(crudo);
+      // El servidor de aplicaciones responde HTML en sus otros errores (404,
+      // 500, la página de login). Sin este mensaje, el fallo llegaría como un
       // "Unexpected token <" que no dice nada de lo que pasó.
       throw new Error(
         'La aplicación de borradores del SII no devolvió JSON. Puede ser la sesión '
@@ -2538,35 +2574,55 @@ export class MipymeHttpScraper {
         `La selección se perdió entre el POST y la consulta: reintentá la operación.`
       );
     }
-    this.assertNoPaginaDeErrorDelPortal(html);
   }
 
   // El portal responde 200 con esta página —título «Error al contribuyente» y
   // «Por el momento no se puede responder a sus requerimientos»— en vez del
-  // HTML que se esperaba, medido en vivo contra `mipeAdminDocsRcp.cgi` para
-  // una empresa de alto volumen. Sin este chequeo, un parser que sólo sabe
-  // leer las filas o los campos que espera no encuentra ninguno en esta
-  // página y devuelve "vacío" — cero documentos, cero folios, según quien
-  // llame— en vez de fallar: un error transitorio del portal, disfrazado de
-  // dato legítimo.
+  // HTML/JSON/PDF que se esperaba, medido en vivo contra `mipeAdminDocsRcp.cgi`
+  // para una empresa de alto volumen. Sin este chequeo, cada superficie que
+  // sólo sabe leer lo que espera (filas, un `Content-Type: application/pdf`,
+  // un `SetDTE`, JSON) no encuentra nada reconocible ahí adentro y lo lee como
+  // "vacío" o como un fallo genérico —cero documentos, cero folios, "no
+  // devolvió JSON"— en vez de fallar por lo que es: un error transitorio del
+  // portal, disfrazado de dato legítimo o de bug propio.
   //
-  // Comparte el mismo choke point que "no ha seleccionado una Empresa" arriba
-  // —las dos páginas de error se detectan ANTES de que el HTML llegue a
-  // `parseHistorial`/`parseHistorialRecibidos`, y todo call-site de esos dos
-  // parsers llama primero a `assertEmpresaSeleccionada`—, pero es un tipo de
-  // error DISTINTO (ver el comentario de `PortalSiiNoDisponible` en
-  // erroresConsulta.ts): no se sabe que falta la selección de empresa, se sabe
-  // que el portal no pudo responder. Por eso vive en su propio método, con su
-  // propia clase, y no se funde con el chequeo de arriba.
+  // Vive SOLO, sin depender de `assertEmpresaSeleccionada` ni fundirse con
+  // ella (ver el comentario en los call-sites del historial): es un tipo de
+  // error DISTINTO —no se sabe que falta la selección de empresa, se sabe que
+  // el portal no pudo responder—, y hoy lo llaman siete lugares que no
+  // comparten nada más: los cuatro del historial (par con
+  // `assertEmpresaSeleccionada`), y `descargarTramo`/`dtePdf`/`pedirBorradores`
+  // (solos, sin ese otro chequeo, porque el CGI de esas tres reporta la falta
+  // de selección con SU PROPIO mensaje, no con éste).
   //
   // Detección por TÍTULO + FRASE, no por el `CODIGO:` (que sí se extrae, sólo
   // para citarlo en el mensaje): esos octetos parecen llevar datos de sesión o
   // de servidor y variar entre corridas, así que atar la detección a un
   // código puntual la rompería en la próxima corrida real.
+  //
+  // La búsqueda corre sobre TEXTO NORMALIZADO, no sobre el HTML crudo: el
+  // marcado de esta página no es contrato del SII y puede cambiar sin aviso
+  // (una palabra envuelta en `<b>`, un `&nbsp;` en vez de espacio, la frase
+  // partida en varias líneas con sangría) sin que el AVISO en sí cambie. Se
+  // sacan los tags (reemplazados por un espacio, no por nada — pegar
+  // "Error al<br>contribuyente" en una sola palabra sería el mismo problema
+  // al revés) y se reusa `decodificar` (entidades comunes + colapso de
+  // espacios), el mismo que ya usan los parsers de historial para las celdas.
+  // Las dos frases clave no llevan tildes, así que la lista de entidades de
+  // `decodificar` es cinturón sobre tirantes más que una necesidad medida.
+  //
+  // Normalizar amplía lo que puede matchear, así que la doble condición —las
+  // DOS frases, no una sola— importa más todavía acá que en una búsqueda
+  // sobre HTML crudo: exigir sólo el título dejaría pasar cualquier historial
+  // legítimo cuya razón social o texto libre dijera "Error al contribuyente"
+  // por otro motivo (un nombre de fantasía, un observación copiada). Las dos
+  // frases juntas, aunque cada una por separado sea más común, es la
+  // combinación que en la práctica sólo produce esta página.
   private assertNoPaginaDeErrorDelPortal(html: string): void {
-    if (/Error al contribuyente/i.test(html)
-        && /no se puede responder a sus requerimientos/i.test(html)) {
-      const codigo = html.match(/CODIGO:\s*([\d.\-]+)/)?.[1];
+    const texto = this.decodificar(html.replace(/<[^>]*>/g, ' '));
+    if (/Error al contribuyente/i.test(texto)
+        && /no se puede responder a sus requerimientos/i.test(texto)) {
+      const codigo = texto.match(/CODIGO:\s*([\d.\-]+)/)?.[1];
       throw new PortalSiiNoDisponible(
         `El portal mipyme respondió con su página de error («Por el momento no se puede ` +
         `responder a sus requerimientos»)${codigo ? ` (código ${codigo})` : ''}. Es un fallo ` +

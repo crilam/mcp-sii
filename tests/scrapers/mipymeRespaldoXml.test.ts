@@ -581,6 +581,28 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     await expect(scraper.respaldoXml(RANGO)).rejects.toThrow(/SetDTE|no devolvió/i);
   });
 
+  // Unifica el mismo síntoma con el del historial: la descarga del respaldo
+  // puede recibir la misma página de error genérica del portal, y antes de
+  // este arreglo salía como el `Error` genérico de "no devolvió un SetDTE" —
+  // el mismo síntoma con dos códigos distintos según por dónde entraba.
+  it('la página de error genérica del portal sale como PortalSiiNoDisponible, no como el Error genérico de "no SetDTE"', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValue({
+      contenido: Buffer.from(PORTAL_NO_DISPONIBLE, 'latin1'),
+      contentType: 'text/html',
+    });
+
+    let error: unknown;
+    try {
+      await scraper.respaldoXml(RANGO);
+      throw new Error('debía lanzar');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(PortalSiiNoDisponible);
+    expect((error as Error).message).toMatch(/04\.77\.113\.29\.408\.51/);
+  });
+
   it('pasa el tipo de documento como TPO_DOC cuando se pide', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
