@@ -189,19 +189,47 @@ describe('registrarRutasMipyme', () => {
       const r1 = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
       expect((r1.body as any).limitaciones).toEqual([]);
 
+      // El motivo es de DÍA SUELTO ("El día X tiene más de 20 documentos"), así
+      // que el rango de la fixture tiene que ser ESE día y no un tramo de
+      // varios: un motivo de día con un rango de dos semanas es un fixture
+      // inconsistente que ningún caso real produce (el troceo por fecha nunca
+      // deja un motivo de día suelto cubriendo más de un día).
       (core.respaldoXml as jest.Mock).mockResolvedValue({
         ...RESULTADO,
         tramos: [{ fechaDesde: '2026-08-01', fechaHasta: '2026-08-16', documentos: 2, xml: '<SetDTE></SetDTE>' }],
         limitaciones: [
-          { fechaDesde: '2026-08-17', fechaHasta: '2026-08-31', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
+          { fechaDesde: '2026-08-17', fechaHasta: '2026-08-17', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
         ],
       });
       const r2 = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
       const body2 = r2.body as any;
       expect(body2.ok).toBe(true);
       expect(body2.limitaciones).toEqual([
-        { fecha_desde: '2026-08-17', fecha_hasta: '2026-08-31', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
+        { fecha_desde: '2026-08-17', fecha_hasta: '2026-08-17', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
       ]);
+    });
+
+    // Los campos del tercer nivel de troceo (folio para emitidos, contraparte
+    // para recibidos) tienen que llegar en snake_case, igual que el resto del
+    // contrato: son lo que le permite a agenticerp reconstruir el pedido sin
+    // parsear el texto de `motivo`.
+    it('expone tipo_dte, contraparte_rut y el rango de folio de una limitación del tercer nivel', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        tramos: [{ fechaDesde: '2026-08-01', fechaHasta: '2026-08-16', documentos: 2, xml: '<SetDTE></SetDTE>' }],
+        limitaciones: [
+          {
+            fechaDesde: '2026-08-17', fechaHasta: '2026-08-17',
+            tipoDte: 33, contraparteRut: '77777777-7', folioDesde: 100, folioHasta: 100,
+            motivo: 'El folio 100 del 2026-08-17 (contraparte 77777777-7) excede por sí solo el tope.',
+          },
+        ],
+      });
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+      const body = r.body as any;
+      expect(body.limitaciones[0]).toMatchObject({
+        tipo_dte: 33, contraparte_rut: '77777777-7', folio_desde: 100, folio_hasta: 100,
+      });
     });
 
     // Cuando NO se bajó nada —todos los sub-rangos toparon, o el único tramo
