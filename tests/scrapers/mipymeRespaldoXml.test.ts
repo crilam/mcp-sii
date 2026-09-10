@@ -422,6 +422,34 @@ describe('MipymeHttpScraper.respaldoXml', () => {
     expect(fusionadas[1].contraparteRut).toBe('22222222-2');
   });
 
+  // `consumirPresupuesto` ya no confía SÓLO en que cada call-site chequee
+  // `ctx.descargas >= maxTramos` antes de llamarla (invariante documentada
+  // en `descargarListaDeGrupos`): si algún path nuevo se la saltara, esta
+  // función revienta en vez de dejar pasar una llamada de más contra el
+  // portal.
+  it('consumirPresupuesto revienta si se lo llama con el presupuesto ya agotado', async () => {
+    const { scraper } = armar();
+    const consumir = scraper as unknown as {
+      consumirPresupuesto(ctx: { descargas: number }, maxTramos: number): Promise<void>;
+    };
+
+    await expect(consumir.consumirPresupuesto({ descargas: 5 }, 5)).rejects.toThrow(/invariante rota/);
+  });
+
+  // Con presupuesto disponible sigue consumiendo normal: el chequeo nuevo no
+  // interfiere con el camino feliz.
+  it('consumirPresupuesto consume normal cuando queda presupuesto', async () => {
+    const { scraper } = armar();
+    const consumir = scraper as unknown as {
+      consumirPresupuesto(ctx: { descargas: number }, maxTramos: number): Promise<void>;
+    };
+    const ctx = { descargas: 0 };
+
+    await consumir.consumirPresupuesto(ctx, 5);
+
+    expect(ctx.descargas).toBe(1);
+  });
+
   // Mismo guard, con `tipoDte` distinto en vez de `contraparteRut`: dos
   // limitaciones contiguas del tercer nivel para tipos de documento
   // distintos no pueden fusionarse en una que sólo mencione el primer tipo.
@@ -812,6 +840,36 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(llamadas[3][1]).toMatchObject({ FOLIO: '41', FOLIOHASTA: '45' });
   });
 
+  // BLOQUEANTE de la ronda 11: con el flag prendido y un CGI que ignorara
+  // `FOLIO` (el riesgo no verificado del flag), TODA descarga de folio único
+  // seguiría excediendo el tope. Sin el tope de `TOPE_FOLIOS_UNICOS_POR_DIA`,
+  // 45 folios producirían hasta 24 limitaciones casi idénticas y 47 llamadas;
+  // con el tope, se corta bien antes: como mucho `TOPE_FOLIOS_UNICOS_POR_DIA`
+  // limitaciones individuales más un puñado de colapsos con rango envolvente
+  // (no necesariamente UNA sola: el colapso corta por CADA bisección o grupo
+  // en curso cuando el contador ya venía alto, así que puede salir más de
+  // una, pero siempre acotado y lejos de las 24 originales).
+  it('emitidos: con TODA descarga excediendo el tope, las limitaciones de folio único se acotan', async () => {
+    const { scraper, http } = armar();
+    const folios = Array.from({ length: 45 }, (_, i) => i + 1);
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 48 });
+
+    expect(r.tramos).toEqual([]);
+    // Muy por debajo de las 24 que saldrían sin el tope.
+    expect(r.limitaciones.length).toBeLessThanOrEqual(15);
+    const individuales = r.limitaciones.filter(l => l.folioDesde === l.folioHasta);
+    expect(individuales.length).toBeLessThanOrEqual(10);
+    const colapsadas = r.limitaciones.filter(l => l.motivo.includes('TIPO_DTE_NOMBRES') === false
+      && l.folioDesde !== l.folioHasta);
+    expect(colapsadas.length).toBeGreaterThan(0);
+    for (const l of colapsadas) expect(l.motivo).toMatch(/rango envolvente de los pendientes/);
+    // Muy por debajo de las 47 llamadas que saldrían sin el tope.
+    expect((http.getBinario as jest.Mock).mock.calls.length).toBeLessThanOrEqual(25);
+  });
+
   // El listado y la descarga no cuentan igual (ver el comentario de
   // `acumularTramos`): un grupo de sólo 3 folios puede seguir excediendo el
   // tope de la descarga. Se bisecta por folio hasta llegar a uno solo, que
@@ -947,25 +1005,47 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(llamadas[3][1]).toMatchObject({ FOLIO: '41', FOLIOHASTA: '45' });
   });
 
-  // Con EXACTAMENTE `TOPE_DOCUMENTOS_SII` folios, `>` no disparaba la
-  // heurística (era falsa con 20) y la plana se intentaba igual — casi
-  // siempre para perder esa llamada, porque el tope es de la DESCARGA, no
-  // del listado. `>=` la trata como condenada de entrada, igual que con 45.
-  it('recibidos: un emisor con EXACTAMENTE 20 folios también se agrupa directo, sin la plana', async () => {
+  // Con EXACTAMENTE `TOPE_DOCUMENTOS_SII` folios la heurística NO se dispara
+  // (`>`, no `>=`): la plana SÍ cabe si los conteos coinciden, así que se
+  // intenta primero — es la llamada más barata (sin combinar folio con
+  // tipo_dte) y, si funciona, ahorra el agrupamiento entero.
+  it('recibidos: un emisor con EXACTAMENTE 20 folios intenta la plana primero (cabe si los conteos coinciden)', async () => {
     const { scraper, http } = armar();
     const docs = Array.from({ length: 20 }, (_, i) => ({ folio: i + 1, emisorRut: '11111111-1' }));
     mockearListado(http, historialRecibidosHtml(docs));
     (http.getBinario as jest.Mock)
       .mockResolvedValueOnce(binarioDemasiados()) // el día entero
-      .mockResolvedValueOnce(binarioXml());       // el único grupo de 20
+      .mockResolvedValueOnce(binarioXml());       // la plana del emisor, cabe
 
     const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
 
     expect(r.limitaciones).toEqual([]);
     expect(r.tramos).toHaveLength(1);
     const llamadas = (http.getBinario as jest.Mock).mock.calls;
-    expect(llamadas).toHaveLength(2); // día entero + el grupo, sin la plana
-    expect(llamadas[1][1]).toMatchObject({ FOLIO: '1', FOLIOHASTA: '20' });
+    expect(llamadas).toHaveLength(2); // día entero + la plana, sin agrupar por folio
+    expect(llamadas[1][1]).toMatchObject({ RUT_RECP: '11111111', FOLIO: '' });
+  });
+
+  // Si la plana de EXACTAMENTE 20 folios SÍ excede (conteos no coinciden
+  // entre listado y descarga), el `if` de abajo la manda a agrupar — una
+  // llamada de más que el caso feliz, el mismo costo que ya paga cualquier
+  // grupo que se biseccione de más.
+  it('recibidos: un emisor con EXACTAMENTE 20 folios, si la plana excede, cae a agrupar por folio', async () => {
+    const { scraper, http } = armar();
+    const docs = Array.from({ length: 20 }, (_, i) => ({ folio: i + 1, emisorRut: '11111111-1' }));
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioDemasiados()) // la plana, excede igual
+      .mockResolvedValueOnce(binarioXml());       // el grupo de folios
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    expect(llamadas).toHaveLength(3); // día entero + plana (falla) + grupo
+    expect(llamadas[2][1]).toMatchObject({ FOLIO: '1', FOLIOHASTA: '20' });
   });
 
   // Un folio repetido en el listado (una fila por página, u otra razón del
@@ -1143,6 +1223,35 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(http.get).toHaveBeenCalledTimes(2 + 10);
   });
 
+  // Borde de `TOPE_PAGINAS_LISTADO`: el loop corta con `pagina >
+  // TOPE_PAGINAS_LISTADO`, así que la página 10 (el tope mismo) tiene que
+  // LEERSE, no cortar — nada más lo fijaba antes de este test.
+  it('emitidos: exactamente 10 páginas del listado se leen completas, sin el tope explícito', async () => {
+    const { scraper, http } = armar();
+    const paginaConDiezEnTotal = (folio: number) =>
+      historialEmitidosHtml([folio])
+      + '<div class="paginacion">'
+      + '<a href="/cgi-bin/Portal001/mipeAdminDocsEmi.cgi?NUM_PAG=10">10</a>'
+      + '</div>';
+    (http.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>');
+    for (let pagina = 1; pagina <= 10; pagina++) {
+      (http.get as jest.Mock).mockResolvedValueOnce(paginaConDiezEnTotal(pagina));
+    }
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioXml());       // el grupo de 10 folios, cabe
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 20 });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+    // parseEmpresas, auth.cgi, y las 10 páginas del listado enteras — el tope
+    // explícito NO se dispara con exactamente 10.
+    expect(http.get).toHaveBeenCalledTimes(2 + 10);
+  });
+
   // El presupuesto también puede agotarse ENTRE dos emisores del lado
   // recibido, después de haber procesado el primero con éxito.
   it('recibidos: maxTramos agotado ENTRE emisores deja una limitación explicando qué quedó sin procesar', async () => {
@@ -1165,6 +1274,38 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     // El motivo tiene que nombrar CUÁLES emisores quedaron pendientes: sin
     // esto, "acotá con contraparte_rut" es una sugerencia a ciegas.
     expect(r.limitaciones[0].motivo).toMatch(/22222222-2/);
+    expect(r.limitaciones[0].motivo).toMatch(/acotá con contraparte_rut/);
+    // Sin contraparte_rut fijado por el caller, el campo estructurado va
+    // ausente (nada que repetir).
+    expect(r.limitaciones[0].contraparteRut).toBeUndefined();
+  });
+
+  // BLOQUEANTE de la ronda 11: la limitación de "emisores sin procesar"
+  // perdía el `contraparteRut` del caller, aunque los otros dos caminos del
+  // mismo `trocearPorEjeFino` (`descargarListaDeGrupos`/
+  // `descargarGrupoConBiseccion`) ya lo conservaban con el mismo fallback
+  // `overrideBase.contraparteRut ?? ctx.filtros.contraparteRut`. Además, si
+  // el caller YA fijó `contraparte_rut`, sugerir "acotá con contraparte_rut"
+  // es un no-op que confunde.
+  it('recibidos: con contraparte_rut fijado, "emisores sin procesar" lo conserva y NO repite la sugerencia', async () => {
+    const { scraper, http } = armar();
+    const docs = [
+      { folio: 1, emisorRut: '11111111-1' },
+      { folio: 2, emisorRut: '22222222-2' },
+    ];
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero (1er tramo)
+      .mockResolvedValueOnce(binarioXml());       // emisor 11111111 (2º tramo)
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', ...DIA, maxTramos: 3, contraparteRut: '11111111-1',
+    });
+
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].contraparteRut).toBe('11111111-1');
+    expect(r.limitaciones[0].motivo).not.toMatch(/acotá con contraparte_rut/);
+    expect(r.limitaciones[0].motivo).toMatch(/maxTramos más alto/);
   });
 
   // Espejo RCP del tope explícito de páginas del listado.

@@ -303,6 +303,55 @@ describe('registrarRutasMipyme', () => {
       expect(body.detalle).not.toContain('\n');
     });
 
+    // El tope de folio único del tercer nivel (ver `TOPE_FOLIOS_UNICOS_POR_DIA`
+    // en mipymeHttp.ts) es lo que evita que este `detalle` llegue a medir los
+    // ~5.6 KB que un día de 45 folios sin ese tope produciría (24 limitaciones
+    // casi idénticas). Acá se simula el escenario YA acotado por el scraper
+    // (12 limitaciones, 10 individuales + 2 colapsadas) para verificar que la
+    // ruta no vuelve a inflar el `detalle` por su cuenta.
+    it('el detalle queda acotado incluso con muchas limitaciones de folio único (tope del tercer nivel)', async () => {
+      const individuales = Array.from({ length: 10 }, (_, i) => ({
+        fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33, folioDesde: i + 1, folioHasta: i + 1,
+        motivo:
+          `El folio ${i + 1} del 2026-08-05 excede por sí solo el tope de 20 documentos del SII: es un `
+          + `único folio y el filtro ya no se puede afinar más. El listado y la descarga no cuentan `
+          + `igual para este caso puntual.`,
+      }));
+      const colapsadas = [
+        {
+          fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33, folioDesde: 11, folioHasta: 20,
+          motivo:
+            'El respaldo de 33333333-3 acumuló más de 10 folios que exceden por sí solos el tope del '
+            + '2026-08-05: se corta acá para no seguir intentando descargas condenadas. Los folios '
+            + '11..20 (rango envolvente de los pendientes, puede incluir folios ya bajados o de otro '
+            + 'tipo) quedaron sin bajar. Si esto se repite, revisá si el SII está respetando el filtro '
+            + 'de folio antes de seguir con RESPALDO_XML_TERCER_NIVEL prendido.',
+        },
+        {
+          fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33, folioDesde: 21, folioHasta: 45,
+          motivo:
+            'El respaldo de 33333333-3 acumuló más de 10 folios que exceden por sí solos el tope del '
+            + '2026-08-05: se corta acá para no seguir intentando descargas condenadas. Los folios '
+            + '21..45 (rango envolvente de los pendientes, puede incluir folios ya bajados o de otro '
+            + 'tipo) quedaron sin bajar. Si esto se repite, revisá si el SII está respetando el filtro '
+            + 'de folio antes de seguir con RESPALDO_XML_TERCER_NIVEL prendido.',
+        },
+      ];
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        documentos: 0,
+        tramos: [],
+        limitaciones: [...individuales, ...colapsadas],
+      });
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+
+      const body = r.body as any;
+      expect(body.error).toBe('LIMITE_CONOCIDO');
+      // Muy por debajo de los ~5.6 KB que 24 limitaciones sin tope medían.
+      expect(body.detalle.length).toBeLessThan(4000);
+    });
+
     // La condición de "nada bajado" depende de esta distinción: `tramos:[]`
     // SIN limitaciones es un período sin documentos, y tiene que seguir siendo
     // ok:true. Si la ruta disparara LIMITE_CONOCIDO acá, un mes real sin DTE

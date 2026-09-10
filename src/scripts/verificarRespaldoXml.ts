@@ -151,8 +151,15 @@ async function main() {
       // `true` vacuo, y un XML sin `<Folio>` (SetDTE vacío, u otro formato)
       // imprimía RESPETADO sin haber verificado nada. `null` cuando el
       // filtro SÍ se pidió pero no hay con qué chequearlo.
-      const folioOk: boolean | null = folioDesde == null
-        ? true
+      //
+      // BLOQUEANTE de la ronda 11: `'n/a'`, no `true`, cuando el filtro NI
+      // SIQUIERA se pidió. Antes un `true` de "no se pidió folio" y un
+      // `true` de "se pidió y el XML lo cumple" se imprimían idénticos —
+      // en la salida que decide si prender RESPALDO_XML_TERCER_NIVEL, un
+      // "no verifiqué nada" que se lee igual que "verificado" es
+      // exactamente el tipo de evidencia que no hay que confundir.
+      const folioOk: boolean | null | 'n/a' = folioDesde == null
+        ? 'n/a'
         : folios.length === 0
           ? null
           : folios.every(f => Number(f) >= folioDesde && Number(f) <= (folioHasta as number));
@@ -164,9 +171,10 @@ async function main() {
         : undefined;
       const listaContraparte = origen === 'emitidos' ? receptores : emisores;
       // Mismo vacuo que `folioOk`: sin contrapartes en el XML (filtro pedido)
-      // no se puede confirmar nada, es `null`, no `true`.
-      const contraparteOk: boolean | null = !cuerpoContraparte
-        ? true
+      // no se puede confirmar nada, es `null`, no `true`. Y mismo `'n/a'`
+      // que `folioOk` cuando el filtro ni se pidió.
+      const contraparteOk: boolean | null | 'n/a' = !cuerpoContraparte
+        ? 'n/a'
         : listaContraparte.length === 0
           ? null
           : listaContraparte.every(r => soloCuerpoRut(r) === cuerpoContraparte);
@@ -174,9 +182,12 @@ async function main() {
       if (tipoOk === null) inconcluyentes.push('no trae <TipoDTE>');
       if (folioOk === null) inconcluyentes.push('no trae <Folio>');
       if (contraparteOk === null) inconcluyentes.push('no trae <RUTRecep>/<RUTEmisor>');
+      // `'n/a'` cuenta como respetado a los fines del veredicto (no había
+      // nada que violar), pero se imprime distinto de `true` más abajo.
       const veredicto = inconcluyentes.length > 0
         ? `NO CONCLUYENTE — el XML ${inconcluyentes.join(' y ')}, no se puede confirmar si el filtro se respetó`
-        : tipoOk === true && folioOk === true && contraparteOk === true
+        : tipoOk === true && (folioOk === true || folioOk === 'n/a')
+            && (contraparteOk === true || contraparteOk === 'n/a')
           ? 'RESPETADO'
           : 'NO RESPETADO — revisar antes de prender RESPALDO_XML_TERCER_NIVEL';
       console.log(

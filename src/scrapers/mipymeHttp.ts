@@ -134,6 +134,24 @@ const MAX_TRAMOS_ABSOLUTO = 48;
 // cosas hacer.
 const TOPE_PAGINAS_LISTADO = 10;
 
+// Tope de limitaciones de "folio único que excede por sí solo el tope" por
+// día+tipo (o día+contraparte, del lado recibido). Escenario que motiva NO
+// activar el tercer nivel por defecto: si el CGI de descarga ignorara
+// `FOLIO`/`FOLIOHASTA` (el riesgo no verificado que documenta
+// `tercerNivelHabilitado` en ritmoSii.ts) con el flag igual prendido, TODA
+// descarga de folio único seguiría excediendo el tope, y un día de 45 folios
+// produce hasta 24 limitaciones casi idénticas (~5.6 KB de `detalle` medidos
+// en la ruta REST en un solo `LIMITE_CONOCIDO`) y 47 llamadas — sin que
+// `fusionarLimitacionesContiguas` las una, porque son del mismo día pero con
+// `folioDesde`/`folioHasta` distintos, y ese guard las deja separadas A
+// PROPÓSITO para no perder ningún folio puntual. Mismo criterio que la lista
+// de emisores pendientes truncada a 10 (ver el motivo de "quedaron N
+// emisores sin procesar"): pasado el tope, se colapsa el resto en UNA
+// limitación con el rango envolvente de los folios que faltan, y se corta el
+// resto de intentos —ahorra además las llamadas que, en este escenario, ya
+// se sabe que van a perder—.
+const TOPE_FOLIOS_UNICOS_POR_DIA = 10;
+
 // Un día calendario, en milisegundos. Vive acá arriba y no repetido en cada
 // función que hace aritmética de fechas en UTC (partirRango, fusionarLimitacionesContiguas):
 // dos literales `24 * 60 * 60 * 1000` que hoy dicen lo mismo podrían divergir
@@ -1024,7 +1042,28 @@ export class MipymeHttpScraper {
   // hacía inline, para que el tercer nivel —que agrega varias llamadas
   // propias, listados incluidos— las pague igual: el tope protege al portal y
   // no puede haber una llamada que se lo salte.
-  private async consumirPresupuesto(ctx: { descargas: number }): Promise<void> {
+  //
+  // El chequeo de tope (`ctx.descargas >= maxTramos`) sigue viviendo en cada
+  // call-site y NO acá: cada uno arma una limitación con un motivo propio
+  // (folio único, lista de emisores pendientes, rango envolvente...) que
+  // depende de datos que sólo ESE call-site tiene a mano (el folio que se
+  // estaba por pedir, el emisor en curso, etc.). Absorber el chequeo acá
+  // obligaría a `consumirPresupuesto` a devolver esos datos también, o a
+  // que el caller arme la limitación DESPUÉS de enterarse de que no había
+  // presupuesto —lo mismo que hace hoy, con un paso extra—.
+  //
+  // Lo que SÍ se vuelve estructural: si algún call-site nuevo olvidara ese
+  // chequeo (violando la invariante documentada en `descargarListaDeGrupos`),
+  // esta función revienta en vez de dejar pasar una llamada de más contra el
+  // portal — `ctx.descargas` nunca puede llegar a esta línea siendo ya
+  // `>= maxTramos`.
+  private async consumirPresupuesto(ctx: { descargas: number }, maxTramos: number): Promise<void> {
+    if (ctx.descargas >= maxTramos) {
+      throw new Error(
+        'invariante rota: consumirPresupuesto() llamado con el presupuesto ya agotado '
+        + `(descargas=${ctx.descargas}, maxTramos=${maxTramos}) — falta el chequeo previo `
+        + 'de ctx.descargas >= maxTramos en el call-site.');
+    }
     if (ctx.descargas > 0) await esperar(pausaConfigurada());
     ctx.descargas += 1;
   }
@@ -1050,6 +1089,11 @@ export class MipymeHttpScraper {
     limitaciones: LimitacionRespaldoXml[],
     maxTramos: number
   ): Promise<void> {
+    // Compartido por TODO este día+tipo (los tres call-sites de
+    // `descargarListaDeGrupos` de acá abajo, incluidas las sucesivas
+    // iteraciones del loop por emisor en RCP): es el contador de
+    // `TOPE_FOLIOS_UNICOS_POR_DIA` — ver el comentario de esa constante.
+    const contadorFolioUnico = { n: 0 };
     if (ctx.filtros.origen === 'ENV') {
       // El caller ya pidió UN folio exacto (`folioDesde === folioHasta`, o
       // sólo `folioDesde`). El intento que acaba de exceder el tope en
@@ -1127,7 +1171,8 @@ export class MipymeHttpScraper {
         return;
       }
       await this.descargarListaDeGrupos(
-        ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos, sinMapear);
+        ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos, sinMapear,
+        contadorFolioUnico);
       return;
     }
 
@@ -1227,17 +1272,30 @@ export class MipymeHttpScraper {
         const pendientes = entradas.slice(i).map(([rut]) => rut);
         const listados = pendientes.slice(0, 10).join(', ');
         const resto = pendientes.length > 10 ? ` y ${pendientes.length - 10} más` : '';
+        // "Acotá con contraparte_rut" es un no-op cuando el caller YA la
+        // fijó (el listado sólo trajo ESE emisor de entrada, y sin embargo
+        // acá sigue habiendo "N emisores pendientes" — improbable en la
+        // práctica con un solo RUT filtrado, pero la sugerencia no aplica
+        // igual si algún día N > 1 con contraparte fijada).
+        const sugerencia = ctx.filtros.contraparteRut != null
+          ? 'Pedí este día con un maxTramos más alto.'
+          : 'Pedí este día con un maxTramos más alto o acotá con contraparte_rut.';
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           // Igual que `razonSocial` en las otras limitaciones de este mismo
           // día+tipo: si el llamador la fijó, el listado ya vino acotado por
           // ella (vía `RZN_SOC`), así que forma parte del filtro a repetir.
+          // Ídem `contraparteRut`: sin este campo, un caller que ya la había
+          // fijado la perdía al reintentar — los otros dos caminos de esta
+          // misma función (`descargarListaDeGrupos`/`descargarGrupoConBiseccion`)
+          // ya usan `overrideBase.contraparteRut ?? ctx.filtros.contraparteRut`
+          // por la misma razón.
           razonSocial: ctx.filtros.razonSocial,
+          contraparteRut: ctx.filtros.contraparteRut,
           motivo:
             `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para trocear por `
             + `contraparte el ${dia} (tipo ${ctx.filtros.tipoDte}): quedaron ${pendientes.length} `
-            + `emisores sin procesar (${listados}${resto}). Pedí este día con un maxTramos más alto `
-            + `o acotá con contraparte_rut.${notaTipoNoMapeado(sinMapear)}`,
+            + `emisores sin procesar (${listados}${resto}). ${sugerencia}${notaTipoNoMapeado(sinMapear)}`,
         });
         break;
       }
@@ -1248,24 +1306,27 @@ export class MipymeHttpScraper {
       //     emisor, así que la plana repetiría fecha+tipo+contraparte
       //     exactos — la misma llamada que acaba de exceder en
       //     `acumularTramos`. Es una llamada condenada, no una sospecha.
-      //   - El listado YA muestra `TOPE_DOCUMENTOS_SII` folios o más para
-      //     este emisor: listado y descarga no cuentan igual (documentado en
-      //     `acumularTramos`), así que esto es una HEURÍSTICA, no una certeza.
-      //     `>=`, no `>`: con EXACTAMENTE el tope, la plana casi seguro
-      //     excede igual (el tope es de la DESCARGA, no del listado, y son
-      //     conteos distintos), así que tratarla como condenada de entrada
-      //     ahorra la llamada perdedora más común. Si acierta, ahorra una
-      //     llamada; si el listado sobreestima y la plana en realidad no
-      //     hubiera excedido, cuesta una llamada de más — el mismo costo que
+      //   - El listado muestra MÁS de `TOPE_DOCUMENTOS_SII` folios para este
+      //     emisor: listado y descarga no cuentan igual (documentado en
+      //     `acumularTramos`), así que esto es una HEURÍSTICA, no una
+      //     certeza, y sólo tiene sentido cuando el listado va POR ENCIMA del
+      //     tope. `>`, no `>=`: con EXACTAMENTE el tope (20 folios), la plana
+      //     SÍ cabe si los conteos coinciden —el caso más común—, así que
+      //     tratarla como condenada de entrada tiraría una llamada segura
+      //     (sin combinar folio con tipo_dte, la parte NO verificada del
+      //     tercer nivel) a cambio de nada: el camino de grupos hace la MISMA
+      //     única llamada de todos modos para un grupo de ≤20 folios. Con
+      //     `>`, si la plana falla igual (conteos no coinciden), el `if` de
+      //     abajo la manda a agrupar — una llamada de más, el mismo costo que
       //     ya paga hoy cualquier grupo que se biseccione de más.
-      if (ctx.filtros.contraparteRut != null || folios.length >= TOPE_DOCUMENTOS_SII) {
+      if (ctx.filtros.contraparteRut != null || folios.length > TOPE_DOCUMENTOS_SII) {
         await this.descargarListaDeGrupos(
           ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
-          tramos, limitaciones, maxTramos, sinMapear);
+          tramos, limitaciones, maxTramos, sinMapear, contadorFolioUnico);
         continue;
       }
 
-      await this.consumirPresupuesto(ctx);
+      await this.consumirPresupuesto(ctx, maxTramos);
       const respuesta = await this.descargarTramo(ctx, dia, dia, { contraparteRut: emisorRut });
       if (respuesta.excedeTope) {
         // Igual que ENV: el grupo que se intenta primero es de a lo sumo
@@ -1274,7 +1335,7 @@ export class MipymeHttpScraper {
         // gasta el presupuesto en una llamada condenada a fallar.
         await this.descargarListaDeGrupos(
           ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
-          tramos, limitaciones, maxTramos, sinMapear);
+          tramos, limitaciones, maxTramos, sinMapear, contadorFolioUnico);
         continue;
       }
       tramos.push({
@@ -1328,7 +1389,7 @@ export class MipymeHttpScraper {
         });
         return null;
       }
-      await this.consumirPresupuesto(ctx);
+      await this.consumirPresupuesto(ctx, maxTramos);
       const html = await this.http.get(HISTORIAL_URL, this.params({
         tipoDte: ctx.filtros.tipoDte,
         fechaDesde: dia,
@@ -1392,7 +1453,7 @@ export class MipymeHttpScraper {
         });
         return null;
       }
-      await this.consumirPresupuesto(ctx);
+      await this.consumirPresupuesto(ctx, maxTramos);
       const html = await this.http.get(HISTORIAL_RECIBIDOS_URL, this.paramsRecibidos({
         tipoDte: ctx.filtros.tipoDte,
         fechaDesde: dia,
@@ -1479,6 +1540,36 @@ export class MipymeHttpScraper {
     };
   }
 
+  // Se arma cuando `TOPE_FOLIOS_UNICOS_POR_DIA` limitaciones de folio único
+  // ya se acumularon para este día+eje (ver el comentario de la constante):
+  // colapsa TODO lo que falta —el folio que se estaba por reportar más lo que
+  // seguía pendiente en la bisección— en una sola, con el mismo criterio de
+  // rango ENVOLVENTE que `limitacionPresupuestoFolios`. El motivo es DISTINTO
+  // del de esa función a propósito: acá no se agotó `maxTramos`, se agotó el
+  // presupuesto de limitaciones individuales, y subir `maxTramos` no cambia
+  // nada si el problema real es que el CGI ignora el filtro de folio.
+  private limitacionDemasiadosFoliosUnicos(
+    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string },
+    dia: string,
+    folioDesde: number,
+    folioHasta: number,
+    contraparteRut: string | undefined,
+    sinMapear: number = 0
+  ): LimitacionRespaldoXml {
+    const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
+    return {
+      fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+      contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      motivo:
+        `El respaldo de ${ctx.empresaRut} acumuló más de ${TOPE_FOLIOS_UNICOS_POR_DIA} folios `
+        + `que exceden por sí solos el tope del ${dia}${contraparte}: se corta acá para no seguir `
+        + `intentando descargas condenadas. Los folios ${folioDesde}..${folioHasta} (rango `
+        + `envolvente de los pendientes, puede incluir folios ya bajados o de otro tipo) quedaron `
+        + `sin bajar. Si esto se repite, revisá si el SII está respetando el filtro de folio antes `
+        + `de seguir con RESPALDO_XML_TERCER_NIVEL prendido.${notaTipoNoMapeado(sinMapear)}`,
+    };
+  }
+
   // Aplica el chequeo de `maxTramos` ENTRE grupos hermanos (no sólo dentro de
   // la bisección de uno, que ya resuelve `descargarGrupoConBiseccion` con su
   // pila): sin esto, con el presupuesto agotado a mitad de una lista de
@@ -1493,7 +1584,9 @@ export class MipymeHttpScraper {
   // plana por emisor (en `trocearPorEjeFino`) como cada listado (paginado)
   // pasan por `consumirPresupuesto` o por el chequeo de `ctx.descargas` de
   // acá arriba — es la pausa que protege al portal contra el bloqueo por
-  // patrón de uso, y no puede haber una llamada que se la salte.
+  // patrón de uso, y no puede haber una llamada que se la salte. Ya no queda
+  // sólo en este comentario: `consumirPresupuesto` revienta si algún path
+  // nuevo la llama con el presupuesto ya agotado, en vez de dejarlo pasar.
   private async descargarListaDeGrupos(
     ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
     dia: string,
@@ -1502,7 +1595,8 @@ export class MipymeHttpScraper {
     tramos: TramoRespaldoXml[],
     limitaciones: LimitacionRespaldoXml[],
     maxTramos: number,
-    sinMapear: number = 0
+    sinMapear: number = 0,
+    contadorFolioUnico: { n: number } = { n: 0 }
   ): Promise<void> {
     for (let i = 0; i < grupos.length; i++) {
       if (ctx.descargas >= maxTramos) {
@@ -1517,8 +1611,21 @@ export class MipymeHttpScraper {
           overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos, sinMapear));
         return;
       }
+      // Mismo criterio que el chequeo de `maxTramos` de arriba, pero para el
+      // OTRO presupuesto que puede agotarse primero: el de limitaciones de
+      // folio único (ver `TOPE_FOLIOS_UNICOS_POR_DIA`). Si ya se llegó al
+      // tope DENTRO de un grupo anterior, ni vale la pena intentar los grupos
+      // que quedan —cada uno terminaría en el mismo destino—, así que se
+      // colapsan acá los que faltan sin gastar más llamadas.
+      if (contadorFolioUnico.n >= TOPE_FOLIOS_UNICOS_POR_DIA) {
+        const restantes = grupos.slice(i).flat();
+        limitaciones.push(this.limitacionDemasiadosFoliosUnicos(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, sinMapear));
+        return;
+      }
       await this.descargarGrupoConBiseccion(
-        ctx, dia, grupos[i], overrideBase, tramos, limitaciones, maxTramos, sinMapear);
+        ctx, dia, grupos[i], overrideBase, tramos, limitaciones, maxTramos, sinMapear, contadorFolioUnico);
     }
   }
 
@@ -1530,7 +1637,8 @@ export class MipymeHttpScraper {
     tramos: TramoRespaldoXml[],
     limitaciones: LimitacionRespaldoXml[],
     maxTramos: number,
-    sinMapear: number = 0
+    sinMapear: number = 0,
+    contadorFolioUnico: { n: number } = { n: 0 }
   ): Promise<void> {
     // Iterativo con una PILA (no recursión) para poder COLAPSAR los grupos
     // hermanos que quedan sin intentar cuando se agota `maxTramos` a mitad de
@@ -1553,18 +1661,30 @@ export class MipymeHttpScraper {
           overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos, sinMapear));
         return;
       }
+      // Mismo tope de folios-único que en `descargarListaDeGrupos`, chequeado
+      // ACÁ TAMBIÉN porque una sola bisección (sin pasar por esa función,
+      // p.ej. un grupo único de ENV) puede por sí sola acumular más de
+      // `TOPE_FOLIOS_UNICOS_POR_DIA` hojas de folio único.
+      if (contadorFolioUnico.n >= TOPE_FOLIOS_UNICOS_POR_DIA) {
+        const restantes = pendientes.flat();
+        limitaciones.push(this.limitacionDemasiadosFoliosUnicos(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, sinMapear));
+        return;
+      }
 
       const grupo = pendientes.pop()!;
       const folioDesde = grupo[0];
       const folioHasta = grupo[grupo.length - 1];
 
-      await this.consumirPresupuesto(ctx);
+      await this.consumirPresupuesto(ctx, maxTramos);
       const respuesta = await this.descargarTramo(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
       if (respuesta.excedeTope) {
         if (grupo.length === 1) {
           limitaciones.push(this.limitacionFolioUnico(
             dia, folioDesde, ctx.filtros.tipoDte, overrideBase.contraparteRut ?? ctx.filtros.contraparteRut,
             ctx.filtros.razonSocial, sinMapear));
+          contadorFolioUnico.n += 1;
           continue;
         }
         const mitad = Math.floor(grupo.length / 2);
