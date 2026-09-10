@@ -232,6 +232,31 @@ describe('registrarRutasMipyme', () => {
       });
     });
 
+    // Espejo del test anterior: cuando el motivo NO sale del tercer nivel
+    // (día lleno sin `tipo_dte`, o tope de `max_tramos` genérico), los cuatro
+    // campos son `undefined` en el objeto que arma la ruta — y `undefined`
+    // sólo es "ausente" cuando de verdad se serializa a JSON (que es lo que
+    // hace `responderJson` con `JSON.stringify`, no lo que devuelve el
+    // `RutaHandler` en memoria). Sin este round-trip, un objeto con
+    // `tipo_dte: undefined` pasaría el test igual y el body real por HTTP
+    // podría llegar con `"tipo_dte":null` si algún día la serialización
+    // cambia (p.ej. un `JSON.stringify` con replacer, o un paso intermedio
+    // que no preserve `undefined`).
+    it('omite tipo_dte/contraparte_rut/folio_desde/folio_hasta del JSON cuando el motivo no es del tercer nivel', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        limitaciones: [
+          { fechaDesde: '2026-08-01', fechaHasta: '2026-08-01', motivo: 'El día 2026-08-01 tiene más de 20 documentos y el SII no entrega más por descarga. Pedí ese día con tipo_dte.' },
+        ],
+      });
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+      // El round-trip de verdad: lo que `responderJson` manda por HTTP.
+      const porHttp = JSON.parse(JSON.stringify(r.body));
+
+      expect(Object.keys(porHttp.limitaciones[0]).sort()).toEqual(['fecha_desde', 'fecha_hasta', 'motivo']);
+    });
+
     // Cuando NO se bajó nada —todos los sub-rangos toparon, o el único tramo
     // pedido topó y no había hermanos— un ok:true con tramos:[] sería
     // indistinguible de "el período no tuvo documentos". La ruta sigue

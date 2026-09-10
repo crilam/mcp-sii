@@ -44,45 +44,6 @@ export function acotarPorFolio(folios: number[], filtros: FiltrosRespaldoXml): n
   return folios.filter(f => f >= desde && f <= hasta);
 }
 
-// Cada `<DTE>...</DTE>` es un documento SII independiente, con su propia
-// firma enveloped adentro del bloque (no una firma que cubra el `SetDTE`
-// entero): sacar un `<DTE>` completo no toca la firma de los que quedan.
-//
-// `descargarGrupoConBiseccion` pide por RANGO —`folioDesde`/`folioHasta` en
-// los EXTREMOS del grupo, que es lo económico en llamadas— pero el grupo en
-// sí es una LISTA DISCRETA de folios, no necesariamente contigua (huecos por
-// documentos anulados, o folios de otro tipo si el CGI no respetara
-// `TPO_DOC` junto con `FOLIO`). Sin filtrar, un folio intermedio que el
-// listado del día+tipo nunca mostró se cuenta en `documentos` y queda en el
-// XML devuelto aunque el llamador jamás lo pidió — el barrido de datos
-// ajenos que el tercer nivel de troceo tiene que evitar. Se filtra ACÁ, no
-// se cambia la forma de pedir, porque pedir folio por folio en vez de por
-// rango multiplicaría las llamadas contra un portal que ya bloquea por
-// patrón de uso.
-export function filtrarDocumentosDelGrupo(
-  xml: string, foliosPedidos: ReadonlySet<number>, tipoDte: number | undefined
-): { xml: string; documentos: number } {
-  const aperturaSetDte = xml.match(/<SetDTE[^>]*>/);
-  if (aperturaSetDte == null) {
-    // No es un SetDTE reconocible (página de error, u otro formato): no hay
-    // bloques `<DTE>` que filtrar de forma confiable. Se deja pasar tal cual
-    // para que el chequeo `esXml` de más arriba lo detecte como lo que es.
-    return { xml, documentos: (xml.match(/<DTE[\s>]/g) ?? []).length };
-  }
-  const cabecera = xml.slice(0, aperturaSetDte.index! + aperturaSetDte[0].length);
-  const bloques = xml.match(/<DTE[\s\S]*?<\/DTE>/g) ?? [];
-  const permitidos = bloques.filter(bloque => {
-    const folio = Number(bloque.match(/<Folio>(\d+)<\/Folio>/)?.[1]);
-    if (!Number.isFinite(folio) || !foliosPedidos.has(folio)) return false;
-    if (tipoDte == null) return true;
-    return Number(bloque.match(/<TipoDTE>(\d+)<\/TipoDTE>/)?.[1]) === tipoDte;
-  });
-  return {
-    xml: `${cabecera}\n${permitidos.join('\n')}\n</SetDTE>`,
-    documentos: permitidos.length,
-  };
-}
-
 // El round-trip a ISO es lo que descarta un 31 de febrero: el Date lo normaliza
 // al 3 de marzo y deja de coincidir con lo pedido.
 function esFechaDelCalendario(fecha: string): boolean {
@@ -1191,14 +1152,17 @@ export class MipymeHttpScraper {
       //     emisor, así que la plana repetiría fecha+tipo+contraparte
       //     exactos — la misma llamada que acaba de exceder en
       //     `acumularTramos`. Es una llamada condenada, no una sospecha.
-      //   - El listado YA muestra más de `TOPE_DOCUMENTOS_SII` folios para
+      //   - El listado YA muestra `TOPE_DOCUMENTOS_SII` folios o más para
       //     este emisor: listado y descarga no cuentan igual (documentado en
       //     `acumularTramos`), así que esto es una HEURÍSTICA, no una certeza.
-      //     Si acierta, ahorra una llamada; si el listado sobreestima y la
-      //     plana en realidad no hubiera excedido, cuesta una llamada de más
-      //     — el mismo costo que ya paga hoy cualquier grupo que se biseccione
-      //     de más.
-      if (ctx.filtros.contraparteRut != null || folios.length > TOPE_DOCUMENTOS_SII) {
+      //     `>=`, no `>`: con EXACTAMENTE el tope, la plana casi seguro
+      //     excede igual (el tope es de la DESCARGA, no del listado, y son
+      //     conteos distintos), así que tratarla como condenada de entrada
+      //     ahorra la llamada perdedora más común. Si acierta, ahorra una
+      //     llamada; si el listado sobreestima y la plana en realidad no
+      //     hubiera excedido, cuesta una llamada de más — el mismo costo que
+      //     ya paga hoy cualquier grupo que se biseccione de más.
+      if (ctx.filtros.contraparteRut != null || folios.length >= TOPE_DOCUMENTOS_SII) {
         await this.descargarListaDeGrupos(
           ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
           tramos, limitaciones, maxTramos);
@@ -1442,16 +1406,26 @@ export class MipymeHttpScraper {
       }
 
       // `grupo` es una LISTA DISCRETA de folios (los extremos pedidos como
-      // rango son sólo el filtro más económico en llamadas), así que puede
-      // traer folios intermedios que el listado del día+tipo nunca mostró —
-      // ver `filtrarDocumentosDelGrupo` más arriba para el porqué completo.
-      // Se filtra ACÁ, con el grupo puntual que se acaba de pedir (no el
-      // `folios` original entero), porque cada bisección pide un SUB-rango
-      // distinto y sólo esos folios son los que este tramo puede reclamar.
+      // rango son sólo el filtro más económico en llamadas: pedir folio por
+      // folio multiplicaría las llamadas contra un portal que bloquea por
+      // NÚMERO de llamadas, no por contenido de una llamada). Con huecos de
+      // folio, el rango completo puede traer documentos vecinos del mismo
+      // día y tipo que el listado no mostró —anulados que igual respondió el
+      // CGI, u otra razón—, pero son documentos REALES de esta empresa: no
+      // hay over-conteo posible porque `enGrupos` parte una lista ORDENADA en
+      // rangos disjuntos por construcción, así que ningún documento cae en
+      // dos grupos. Se guardan tal cual: el XML firmado NO se reescribe para
+      // sacarlos —el `SetDTE` lleva `Caratula` y `Signature` propios del
+      // envío completo, y un documento se identifica por `IdDoc><Folio>`, no
+      // por el primer `<Folio>` del bloque (una nota de crédito trae otro en
+      // `<Referencia>`)— así que sería fácil corromper el respaldo por
+      // intentar acotarlo. Respaldar de más no rompe nada; reescribir un XML
+      // tributario firmado sí. Ver también la nota en docs/integracion-api.md.
       tramos.push({
         fechaDesde: dia,
         fechaHasta: dia,
-        ...filtrarDocumentosDelGrupo(respuesta.xml, new Set(grupo), ctx.filtros.tipoDte),
+        documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
+        xml: respuesta.xml,
       });
     }
   }

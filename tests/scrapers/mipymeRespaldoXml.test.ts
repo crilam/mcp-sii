@@ -35,10 +35,9 @@ function binarioXml(xml: string = SET_DTE) {
 }
 
 // Un SetDTE armado con folios y tipo A MEDIDA, a diferencia de `SET_DTE`
-// (fijo, tipo 34, folios 1 y 2): el filtro por folio+tipo de
-// `filtrarDocumentosDelGrupo` descarta lo que no matchea, así que un test
-// que verifique CUÁNTOS documentos sobreviven necesita una respuesta cuyo
-// contenido de verdad corresponda al grupo pedido.
+// (fijo, tipo 34, folios 1 y 2): sirve para tests que necesitan reconocer un
+// documento puntual por su folio (`ID="S<folio>"`) dentro del XML devuelto,
+// por ejemplo para confirmar que uno en particular sigue ahí.
 function xmlSetDteConFolios(tipoDte: number, folios: number[]): string {
   const documentos = folios.map(folio => `<DTE version="1.0" >
 	<Documento ID="S${folio}">
@@ -912,6 +911,27 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(llamadas[3][1]).toMatchObject({ FOLIO: '41', FOLIOHASTA: '45' });
   });
 
+  // Con EXACTAMENTE `TOPE_DOCUMENTOS_SII` folios, `>` no disparaba la
+  // heurística (era falsa con 20) y la plana se intentaba igual — casi
+  // siempre para perder esa llamada, porque el tope es de la DESCARGA, no
+  // del listado. `>=` la trata como condenada de entrada, igual que con 45.
+  it('recibidos: un emisor con EXACTAMENTE 20 folios también se agrupa directo, sin la plana', async () => {
+    const { scraper, http } = armar();
+    const docs = Array.from({ length: 20 }, (_, i) => ({ folio: i + 1, emisorRut: '11111111-1' }));
+    mockearListado(http, historialRecibidosHtml(docs));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados()) // el día entero
+      .mockResolvedValueOnce(binarioXml());       // el único grupo de 20
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'RCP', ...DIA });
+
+    expect(r.limitaciones).toEqual([]);
+    expect(r.tramos).toHaveLength(1);
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    expect(llamadas).toHaveLength(2); // día entero + el grupo, sin la plana
+    expect(llamadas[1][1]).toMatchObject({ FOLIO: '1', FOLIOHASTA: '20' });
+  });
+
   // Un folio repetido en el listado (una fila por página, u otra razón del
   // portal) no puede duplicar la descarga: sin dedupe, la bisección de un
   // emisor con folios repetidos llegaría a `[10],[10]` — dos descargas
@@ -1271,7 +1291,19 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
   // el SII puede devolver un folio intermedio (250) que el listado del día+
   // tipo NUNCA mostró. Sin filtrar por el grupo pedido, ese documento ajeno
   // se cuenta en `documentos` y queda en el XML devuelto.
-  it('emitidos: folios no contiguos no inflan documentos ni filtran de más al pedir por rango', async () => {
+  // Con folios no contiguos (huecos por anulados, u otra razón), el grupo
+  // completo se pide igual por RANGO —FOLIO=1..FOLIOHASTA=1000, lo económico
+  // en llamadas— y el SII puede devolver un folio intermedio (250) que el
+  // listado del día+tipo no mostró. Eso NO se filtra ni se descarta: es un
+  // documento real de la misma empresa y el mismo día, así que respaldarlo es
+  // respaldo de MÁS, nunca de menos, y no hay over-conteo porque `enGrupos`
+  // parte una lista ordenada en rangos disjuntos por construcción. El XML
+  // firmado se guarda tal como lo entrega el SII —reescribirlo para sacar el
+  // folio 250 le costaría la `Caratula`/`Signature` del envío completo, que
+  // no son parte de ningún `<DTE>` individual, y sería fácil identificar mal
+  // el folio de una nota de crédito (que trae otro `<Folio>` dentro de
+  // `<Referencia>`)—.
+  it('emitidos: folios no contiguos pueden traer documentos vecinos del mismo día, y se guardan tal cual', async () => {
     const { scraper, http } = armar();
     const folios = [1, 500, 1000]; // el listado: sólo estos tres folios del día+tipo
     mockearListado(http, historialEmitidosHtml(folios));
@@ -1286,9 +1318,10 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
 
     expect(r.limitaciones).toEqual([]);
     expect(r.tramos).toHaveLength(1);
-    // Sin el filtro, esto daría 4: los tres pedidos MÁS el ajeno (folio 250).
-    expect(r.documentos).toBe(3);
-    expect(r.tramos[0].xml).not.toContain('ID="S250"');
+    // El folio 250 SIGUE en el respaldo y CUENTA: no se reescribe el XML
+    // firmado para sacarlo.
+    expect(r.documentos).toBe(4);
+    expect(r.tramos[0].xml).toContain('ID="S250"');
     expect(r.tramos[0].xml).toContain('ID="S1"');
     expect(r.tramos[0].xml).toContain('ID="S500"');
     expect(r.tramos[0].xml).toContain('ID="S1000"');
