@@ -3,7 +3,7 @@ import { Empresa, SessionManager } from '../session';
 import { rutEsValido } from '../rut';
 import { EscrituraRechazadaPorSii, EmpresaNoAutorizada, SelectorEmpresasVacio } from '../erroresConsulta';
 import { marcarSeguro } from '../idempotenciaEscritura';
-import { esperar, pausaConfigurada } from '../ritmoSii';
+import { esperar, pausaConfigurada, tercerNivelHabilitado } from '../ritmoSii';
 
 const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -15,8 +15,33 @@ function aIsoUtc(ms: number): string {
 // formulario de descarga. Acepta las dos formas que manda la gente —"77777777-7"
 // y "77777777"— porque mandar el DV pegado no da error: da CERO resultados, y un
 // respaldo vacío se lee igual que "no hubo documentos en el período".
-function soloCuerpoRut(rut: string): string {
+export function soloCuerpoRut(rut: string): string {
   return rut.trim().replace(/\./g, '').split('-')[0];
+}
+
+// Agrupa un arreglo en trozos de a lo sumo `tamano` elementos, preservando el
+// orden. Los `folios` ya vienen ordenados por el llamador; acá sólo se
+// trocean en grupos consecutivos del arreglo, no por valor. Función de
+// módulo (no método): es pura y así se testea sin castear el scraper a
+// `unknown` para llegar a un miembro privado.
+export function enGrupos<T>(items: T[], tamano: number): T[][] {
+  const grupos: T[][] = [];
+  for (let i = 0; i < items.length; i += tamano) grupos.push(items.slice(i, i + tamano));
+  return grupos;
+}
+
+// Recorta un arreglo de folios (ya ordenados) al rango `folioDesde`/
+// `folioHasta` que pidió el CALLER original, si vino alguno. Sin este
+// recorte, el listado del día+tipo trae TODOS los folios —el filtro de folio
+// original no llega hasta el listado, que no lo soporta como rango— y
+// `descargarGrupoConBiseccion` usa los EXTREMOS de cada grupo como
+// `folioDesde`/`folioHasta`: sin acotar antes, esos extremos se escapan del
+// rango que el llamador pidió y la descarga trae documentos de más.
+export function acotarPorFolio(folios: number[], filtros: FiltrosRespaldoXml): number[] {
+  if (filtros.folioDesde == null) return folios;
+  const desde = filtros.folioDesde;
+  const hasta = filtros.folioHasta ?? filtros.folioDesde;
+  return folios.filter(f => f >= desde && f <= hasta);
 }
 
 // El round-trip a ISO es lo que descarta un 31 de febrero: el Date lo normaliza
@@ -91,6 +116,47 @@ const MAX_TRAMOS_POR_DEFECTO = 10;
 // agregado contra el portal. Si alguna vez el SII corta por esta ruta, el
 // arreglo es un presupuesto por ventana, no bajar este número.
 const MAX_TRAMOS_ABSOLUTO = 48;
+
+// Tope explícito de páginas al listar un día+tipo dentro del tercer nivel de
+// troceo (`listarEmitidosDelDia`/`listarRecibidosDelDia`). Sin esto, el único
+// freno era `maxTramos`: un día de 500 documentos (25 páginas, a ojo del
+// mismo orden que `TOPE_DOCUMENTOS_SII` por página) se come TODO el
+// presupuesto sólo en listar, antes de bajar un solo grupo, y la limitación
+// que sale es la genérica de "subí maxTramos" — que con el techo absoluto de
+// `MAX_TRAMOS_ABSOLUTO` (48) puede seguir sin alcanzar para bajar nada, ni
+// siquiera terminando de listar. 10 páginas (~200 documentos, asumiendo un
+// tamaño de página del orden de `TOPE_DOCUMENTOS_SII`) es un piso razonable
+// para una pyme: pasado ese punto el problema no es el presupuesto sino que
+// el día+tipo es demasiado grande para listar entero, y subir `maxTramos` no
+// lo arregla —haría falta acotar con `contraparte_rut`/`razon_social`, que sí
+// reduce lo que el propio CGI de listado devuelve—. Motivo propio y distinto
+// del genérico de `maxTramos` para que el consumidor sepa cuál de las dos
+// cosas hacer.
+const TOPE_PAGINAS_LISTADO = 10;
+
+// Tope de limitaciones de "folio único que excede por sí solo el tope" por
+// día+tipo (o día+contraparte, del lado recibido). Escenario que motiva NO
+// activar el tercer nivel por defecto: si el CGI de descarga ignorara
+// `FOLIO`/`FOLIOHASTA` (el riesgo no verificado que documenta
+// `tercerNivelHabilitado` en ritmoSii.ts) con el flag igual prendido, TODA
+// descarga de folio único seguiría excediendo el tope, y un día de 45 folios
+// produce hasta 24 limitaciones casi idénticas (~5.6 KB de `detalle` medidos
+// en la ruta REST en un solo `LIMITE_CONOCIDO`) y 47 llamadas — sin que
+// `fusionarLimitacionesContiguas` las una, porque son del mismo día pero con
+// `folioDesde`/`folioHasta` distintos, y ese guard las deja separadas A
+// PROPÓSITO para no perder ningún folio puntual. Mismo criterio que la lista
+// de emisores pendientes truncada a 10 (ver el motivo de "quedaron N
+// emisores sin procesar"): pasado el tope, se colapsa el resto en UNA
+// limitación con el rango envolvente de los folios que faltan, y se corta el
+// resto de intentos —ahorra además las llamadas que, en este escenario, ya
+// se sabe que van a perder—.
+const TOPE_FOLIOS_UNICOS_POR_DIA = 10;
+
+// Un día calendario, en milisegundos. Vive acá arriba y no repetido en cada
+// función que hace aritmética de fechas en UTC (partirRango, fusionarLimitacionesContiguas):
+// dos literales `24 * 60 * 60 * 1000` que hoy dicen lo mismo podrían divergir
+// mañana si alguien ajusta uno y no el otro.
+const DIA_MS = 24 * 60 * 60 * 1000;
 
 // Los BORRADORES no viven en el portal viejo. El menú los publica con una
 // función JavaScript (`printLinkAdmBorradores`, definida en `valores.js`) que
@@ -183,6 +249,21 @@ const TIPO_DTE_NOMBRES: Record<string, number> = {
   'Factura de Compra Electronica': 46,
 };
 
+// Cláusula corta para adjuntar al `motivo` de cualquier limitación de un
+// día+tipo cuando el listado trajo documentos con un nombre de tipo que
+// `TIPO_DTE_NOMBRES` no supo mapear (`tipoDte` cayó en `0`, ver el comentario
+// del mapa más arriba). Esos documentos se INCLUYEN al trocear por folio o
+// contraparte —no se descartan, ver `trocearPorEjeFino`—, pero si el
+// resultado igual sorprende (menos folios de los esperados, un rango que no
+// cierra), el mapa incompleto es una causa tan probable como el portal, y sin
+// esta nota el diagnóstico apunta sólo al SII.
+function notaTipoNoMapeado(sinMapear: number): string {
+  if (sinMapear === 0) return '';
+  return ` Ojo: el listado trajo ${sinMapear} documento${sinMapear === 1 ? '' : 's'} con un nombre de `
+    + `tipo que TIPO_DTE_NOMBRES no reconoce (tipoDte cayó en 0); si este resultado sorprende, revisá `
+    + `el mapa antes de asumir que es el portal.`;
+}
+
 export interface DteEmitidoMipyme {
   tipoDte: number;
   tipoDteNombre: string;
@@ -253,6 +334,19 @@ export interface LimitacionRespaldoXml {
   fechaDesde: string;
   fechaHasta: string;
   motivo: string;
+  // Reconstruible por máquina, no sólo por texto: cuando el motivo viene del
+  // tercer nivel de troceo (folio para emitidos, contraparte para recibidos),
+  // estos campos son EXACTAMENTE el filtro que el consumidor tiene que repetir
+  // para pedir de nuevo ese sub-rango. Ausentes cuando el motivo es de fecha
+  // (día lleno) o de tope de tramos sin haber entrado al tercer nivel.
+  tipoDte?: number;
+  contraparteRut?: string;
+  folioDesde?: number;
+  folioHasta?: number;
+  // Es parte del filtro exacto a repetir tanto como `tipoDte`: si el caller
+  // fijó `razonSocial`, hay que devolvérselo para que el reintento del
+  // sub-rango no se olvide de acotar por ella.
+  razonSocial?: string;
 }
 
 export interface RespaldoXmlResult {
@@ -273,6 +367,7 @@ export interface FiltrosDteRecibidos {
   // El filtro por contraparte es por EMISOR, no por receptor: del lado recibido
   // la contraparte es quien emitió el documento.
   emisorRut?: string;
+  razonSocial?: string;
   folio?: number;
   pagina?: number;
 }
@@ -303,6 +398,7 @@ export interface FiltrosDteEmitidos {
   fechaDesde?: string;
   fechaHasta?: string;
   receptorRut?: string;
+  razonSocial?: string;
   folio?: number;
   pagina?: number;
 }
@@ -762,8 +858,15 @@ export class MipymeHttpScraper {
       const [rut, dv] = this.partirRut(empresaRut);
       const tramos: TramoRespaldoXml[] = [];
       const limitaciones: LimitacionRespaldoXml[] = [];
+      // Leído UNA sola vez acá y no en cada llamada dentro del loop de
+      // bisección: el flag es de ARRANQUE, y una request larga (varios días,
+      // varias bisecciones) no puede quedar mitad con el tercer nivel
+      // prendido y mitad con él apagado sólo porque alguien tocó el env a
+      // mitad de camino.
+      const tercerNivelOn = tercerNivelHabilitado();
       await this.acumularTramos(
-        { rut, dv, filtros, empresaRut, descargas: 0 }, fechaDesde, fechaHasta, tramos, limitaciones, maxTramos);
+        { rut, dv, filtros, empresaRut, descargas: 0, tercerNivelOn },
+        fechaDesde, fechaHasta, tramos, limitaciones, maxTramos);
 
       return {
         empresaRut,
@@ -793,14 +896,35 @@ export class MipymeHttpScraper {
   // orden: la rama izquierda de un nivel se resuelve entera (incluida su propia
   // sub-bisección) antes de arrancar la derecha, así que dos limitaciones
   // vecinas en el calendario pueden llegar lejos una de la otra en el arreglo.
+  //
+  // OJO: el motivo de "día lleno" EMBEBE la fecha del día en el texto (`El día
+  // 2026-08-05 tiene más de...`), así que dos días llenos consecutivos NUNCA
+  // fusionan por esta vía — el texto de cada uno ya difiere aunque la causa sea
+  // la misma. Es razonable: cada día lleno se reintenta aparte con `tipo_dte`
+  // (o, desde el tercer nivel, por folio/contraparte), y unificar el mensaje de
+  // dos días distintos sería menos preciso que tenerlos por separado.
   private fusionarLimitacionesContiguas(limitaciones: LimitacionRespaldoXml[]): LimitacionRespaldoXml[] {
     const ordenadas = [...limitaciones].sort((a, b) => a.fechaDesde.localeCompare(b.fechaDesde));
     const fusionadas: LimitacionRespaldoXml[] = [];
     for (const actual of ordenadas) {
       const anterior = fusionadas[fusionadas.length - 1];
       const contigua = anterior != null
-        && aIsoUtc(Date.parse(`${anterior.fechaHasta}T00:00:00Z`) + 24 * 60 * 60 * 1000) === actual.fechaDesde;
-      if (anterior != null && contigua && anterior.motivo === actual.motivo) {
+        && aIsoUtc(Date.parse(`${anterior.fechaHasta}T00:00:00Z`) + DIA_MS) === actual.fechaDesde;
+      // El mismo `motivo` textual no alcanza: al fusionar se conserva
+      // `tipoDte`/`folioDesde`/`folioHasta`/`contraparteRut`/`razonSocial` de
+      // `anterior` y se descartan los de `actual` — dos limitaciones del
+      // tercer nivel con el mismo motivo genérico ("necesita más de N
+      // tramos...") pero `contraparteRut` distinto fusionarían en una que
+      // sólo menciona la PRIMERA contraparte, perdiendo la segunda. Exigir
+      // estos cinco campos iguales (incluido `undefined === undefined`, el
+      // caso sin tercer nivel) es lo que hace la fusión segura.
+      const mismosCamposTercerNivel = anterior != null
+        && anterior.tipoDte === actual.tipoDte
+        && anterior.folioDesde === actual.folioDesde
+        && anterior.folioHasta === actual.folioHasta
+        && anterior.contraparteRut === actual.contraparteRut
+        && anterior.razonSocial === actual.razonSocial;
+      if (anterior != null && contigua && anterior.motivo === actual.motivo && mismosCamposTercerNivel) {
         anterior.fechaHasta = actual.fechaHasta;
       } else {
         fusionadas.push({ ...actual });
@@ -815,7 +939,10 @@ export class MipymeHttpScraper {
   // coincidir —filtran distinto—, y porque así el corte lo decide el SII, que es
   // el único que sabe cuántos documentos hay.
   private async acumularTramos(
-    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    ctx: {
+      rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number;
+      tercerNivelOn: boolean;
+    },
     desde: string,
     hasta: string,
     tramos: TramoRespaldoXml[],
@@ -853,8 +980,33 @@ export class MipymeHttpScraper {
     const respuesta = await this.descargarTramo(ctx, desde, hasta);
     if (respuesta.excedeTope) {
       if (desde === hasta) {
-        // Un solo día no se puede partir más: el filtro por fecha se agotó. Se
-        // registra como limitación de ESE día en vez de tirar todo lo demás.
+        // El filtro por fecha se agotó: un solo día no se puede partir más. Con
+        // `tipo_dte` puesto queda un eje MÁS FINO —folio o contraparte, según el
+        // origen— y ahí es donde entra el tercer nivel de troceo; sin
+        // `tipo_dte` ese eje no existe todavía (lo maneja el consumidor
+        // pidiendo por tipo), y se registra la limitación de siempre.
+        if (ctx.filtros.tipoDte != null) {
+          if (!ctx.tercerNivelOn) {
+            // Ver el comentario de `tercerNivelHabilitado` en ritmoSii.ts: la
+            // combinación tipo_dte+folio/contraparte no está verificada contra
+            // el SII real, y activarla a ciegas puede convertir un día lleno
+            // en un barrido de `maxTramos` llamadas inútiles.
+            limitaciones.push({
+              fechaDesde: desde,
+              fechaHasta: hasta,
+              tipoDte: ctx.filtros.tipoDte,
+              motivo:
+                `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos del tipo `
+                + `${ctx.filtros.tipoDte} y el tercer nivel de troceo (por folio o por contraparte) `
+                + `está DESACTIVADO por defecto: esa combinación de filtros no está verificada `
+                + `contra el SII real. Activalo con RESPALDO_XML_TERCER_NIVEL=1 recién después de `
+                + `confirmarlo en vivo (ver src/scripts/verificarRespaldoXml.ts).`,
+            });
+            return;
+          }
+          await this.trocearPorEjeFino(ctx, desde, tramos, limitaciones, maxTramos);
+          return;
+        }
         limitaciones.push({
           fechaDesde: desde,
           fechaHasta: hasta,
@@ -885,12 +1037,699 @@ export class MipymeHttpScraper {
     });
   }
 
+  // Espera el ritmo salvo en la primera llamada, y consume un lugar del
+  // presupuesto de `maxTramos`. Repite las dos líneas que `acumularTramos` ya
+  // hacía inline, para que el tercer nivel —que agrega varias llamadas
+  // propias, listados incluidos— las pague igual: el tope protege al portal y
+  // no puede haber una llamada que se lo salte.
+  //
+  // El chequeo de tope (`ctx.descargas >= maxTramos`) sigue viviendo en cada
+  // call-site y NO acá: cada uno arma una limitación con un motivo propio
+  // (folio único, lista de emisores pendientes, rango envolvente...) que
+  // depende de datos que sólo ESE call-site tiene a mano (el folio que se
+  // estaba por pedir, el emisor en curso, etc.). Absorber el chequeo acá
+  // obligaría a `consumirPresupuesto` a devolver esos datos también, o a
+  // que el caller arme la limitación DESPUÉS de enterarse de que no había
+  // presupuesto —lo mismo que hace hoy, con un paso extra—.
+  //
+  // Lo que SÍ se vuelve estructural: si algún call-site nuevo olvidara ese
+  // chequeo (violando la invariante documentada en `descargarListaDeGrupos`),
+  // esta función revienta en vez de dejar pasar una llamada de más contra el
+  // portal — `ctx.descargas` nunca puede llegar a esta línea siendo ya
+  // `>= maxTramos`.
+  private async consumirPresupuesto(ctx: { descargas: number }, maxTramos: number): Promise<void> {
+    if (ctx.descargas >= maxTramos) {
+      throw new Error(
+        'invariante rota: consumirPresupuesto() llamado con el presupuesto ya agotado '
+        + `(descargas=${ctx.descargas}, maxTramos=${maxTramos}) — falta el chequeo previo `
+        + 'de ctx.descargas >= maxTramos en el call-site.');
+    }
+    if (ctx.descargas > 0) await esperar(pausaConfigurada());
+    ctx.descargas += 1;
+  }
+
+  // El tercer nivel de troceo: se llega acá sólo cuando un DÍA con `tipo_dte`
+  // puesto sigue excediendo el tope, o sea que ni la fecha ni el tipo alcanzan
+  // para bajar los 20 documentos por descarga del SII. Hace falta un eje MÁS
+  // FINO, y ese eje depende de quién es dueño de la numeración:
+  //
+  //   - `ENV` (emitidos): el folio ordena, porque la empresa es la emisora y
+  //     los folios de UN emisor no se repiten dentro de un mismo tipo de
+  //     documento.
+  //   - `RCP` (recibidos): los folios de distintos emisores SÍ colisionan (cada
+  //     uno numera el suyo), así que el eje que sí separa es la CONTRAPARTE.
+  //
+  // Cada llamada del listado (paginado) y de la descarga cuenta contra
+  // `maxTramos` y lleva la misma pausa que las demás — el tope protege al
+  // portal, y el tercer nivel no es una excepción.
+  private async trocearPorEjeFino(
+    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    tramos: TramoRespaldoXml[],
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number
+  ): Promise<void> {
+    // Compartido por TODO este día+tipo (los tres call-sites de
+    // `descargarListaDeGrupos` de acá abajo, incluidas las sucesivas
+    // iteraciones del loop por emisor en RCP): es el contador de
+    // `TOPE_FOLIOS_UNICOS_POR_DIA` — ver el comentario de esa constante.
+    const contadorFolioUnico = { n: 0 };
+    if (ctx.filtros.origen === 'ENV') {
+      // El caller ya pidió UN folio exacto (`folioDesde === folioHasta`, o
+      // sólo `folioDesde`). El intento que acaba de exceder el tope en
+      // `acumularTramos` usó ese MISMO filtro (fecha+tipo+folio único), así
+      // que listar el día y volver a pedir exactamente ese folio es repetir
+      // dos llamadas cuyo resultado ya se conoce: es un dato roto, no un
+      // sub-rango por afinar.
+      if (ctx.filtros.folioDesde != null
+          && (ctx.filtros.folioHasta ?? ctx.filtros.folioDesde) === ctx.filtros.folioDesde) {
+        limitaciones.push(this.limitacionFolioUnico(
+          dia, ctx.filtros.folioDesde, ctx.filtros.tipoDte, ctx.filtros.contraparteRut,
+          ctx.filtros.razonSocial));
+        return;
+      }
+
+      const documentos = await this.listarEmitidosDelDia(ctx, dia, limitaciones, maxTramos);
+      if (documentos === null) return; // maxTramos se agotó listando; limitación ya cargada.
+
+      // Defensivo: `parseHistorial` resuelve `tipoDte` igual que
+      // `parseHistorialRecibidos`, y `DteEmitidoMipyme.tipoDte` existe igual
+      // que del lado recibido. Si el CGI de emitidos ignorara `TPO_DOC` (el
+      // mismo riesgo no verificado que justifica `RESPALDO_XML_TERCER_NIVEL`),
+      // un día con folios de otro tipo se colaría en el agrupado por folio:
+      // un tipo 33 (folios 10, 11) más un tipo 61 (folio 5000) agruparía
+      // `[10, 11, 5000]` y pediría `FOLIO=10..5000` — un rango 500× más ancho
+      // que bisecciona folios de dos tipos que nunca convergen. Filtrar acá
+      // convierte ese barrido silencioso en cero folios de este tipo +
+      // limitación explícita, igual que "el listado no devolvió ningún folio"
+      // de más abajo.
+      //
+      // `|| d.tipoDte === 0`: sólo se descarta lo que tiene un tipo MAPEADO
+      // que no coincide —el único caso donde este filtro protege contra un
+      // CGI que ignora `TPO_DOC`—. Lo que `TIPO_DTE_NOMBRES` no supo mapear
+      // (una variante de nombre que falta en el mapa, ya pasó en vivo) se
+      // DEJA PASAR: descartarlo perdería documentos reales y el diagnóstico
+      // de la limitación de "no devolvió ningún folio" apuntaría al portal en
+      // vez de al mapa incompleto. Bajar de más ya se acepta en el resto del
+      // troceo (ver el comentario sobre folios no contiguos); perder
+      // documentos, no.
+      const documentosDelTipo = documentos.filter(d => d.tipoDte === ctx.filtros.tipoDte || d.tipoDte === 0);
+      const sinMapear = documentos.filter(d => d.tipoDte === 0).length;
+
+      // El listado NO filtra por rango de folio (no lo soporta como filtro de
+      // fecha/tipo), así que trae TODOS los folios del día+tipo. Se acota ACÁ
+      // al `folioDesde`/`folioHasta` que pidió el llamador original antes de
+      // agrupar: sin este paso, un grupo terminaría con extremos fuera del
+      // rango pedido y `descargarGrupoConBiseccion` bajaría documentos de más.
+      const folios = acotarPorFolio(
+        [...new Set(documentosDelTipo.map(d => d.folio))].sort((a, b) => a - b),
+        ctx.filtros
+      );
+      if (folios.length === 0) {
+        const rango = ctx.filtros.folioDesde != null
+          ? ` dentro del rango de folio pedido (${ctx.filtros.folioDesde}..${ctx.filtros.folioHasta ?? ctx.filtros.folioDesde})`
+          : '';
+        // El listado y la descarga no cuentan igual (documentado más arriba,
+        // en `acumularTramos`): acá es el caso extremo donde la descarga dice
+        // que sobran documentos y el listado no encuentra ni un folio del
+        // mismo día y tipo (o ninguno dentro del rango de folio pedido). Sin
+        // folios no hay por dónde agrupar.
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          folioDesde: ctx.filtros.folioDesde, folioHasta: ctx.filtros.folioHasta,
+          // El filtro exacto que hay que repetir incluye la contraparte y la
+          // razón social si el llamador las fijó, aunque este camino no las
+          // haya usado para nada.
+          contraparteRut: ctx.filtros.contraparteRut,
+          razonSocial: ctx.filtros.razonSocial,
+          motivo:
+            `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
+            + `(tipo ${ctx.filtros.tipoDte}), pero el listado de emitidos no devolvió ningún folio`
+            + `${rango} para ese día y tipo. El listado y la descarga no cuentan igual; sin folios `
+            + `no se puede trocear más fino.${notaTipoNoMapeado(sinMapear)}`,
+        });
+        return;
+      }
+      await this.descargarListaDeGrupos(
+        ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos, sinMapear,
+        contadorFolioUnico);
+      return;
+    }
+
+    // RCP: la contraparte es el eje. Se agrupan los folios por EMISOR y se
+    // pide una descarga por emisor; sólo si un emisor por sí solo sigue
+    // excediendo el tope se baja también por folio, igual que del lado ENV.
+
+    // Espejo exacto del atajo de ENV: el caller ya pidió UN folio exacto y el
+    // intento que acaba de exceder el tope en `acumularTramos` usó ese MISMO
+    // filtro (fecha+tipo+folio, con o sin contraparte). Listar el día y volver
+    // a pedir ese folio es repetir llamadas cuyo resultado ya se conoce.
+    if (ctx.filtros.folioDesde != null
+        && (ctx.filtros.folioHasta ?? ctx.filtros.folioDesde) === ctx.filtros.folioDesde) {
+      limitaciones.push(this.limitacionFolioUnico(
+        dia, ctx.filtros.folioDesde, ctx.filtros.tipoDte, ctx.filtros.contraparteRut,
+        ctx.filtros.razonSocial));
+      return;
+    }
+
+    const documentos = await this.listarRecibidosDelDia(ctx, dia, limitaciones, maxTramos);
+    if (documentos === null) return;
+
+    // Defensivo: `parseHistorialRecibidos` resuelve `tipoDte` con
+    // `TIPO_DTE_NOMBRES[nombre] ?? 0`, así que un nombre de tipo desconocido
+    // cae en `0`, no en `undefined` — un `d.tipoDte` de otro tipo pasaría
+    // sin filtrar. Si el CGI de listado ignorara `TPO_DOC` (el mismo riesgo
+    // no verificado que justifica `RESPALDO_XML_TERCER_NIVEL`), documentos
+    // de otro tipo se colarían en el agrupado por emisor y la bisección
+    // mezclaría folios de dos tipos que nunca convergen al granularse más.
+    // Filtrar acá convierte ese barrido silencioso en cero folios de este
+    // tipo + limitación explícita, igual que "el listado no devolvió ningún
+    // emisor" de más abajo.
+    //
+    // `|| d.tipoDte === 0`: igual que del lado ENV, sólo se descarta lo que
+    // tiene un tipo MAPEADO que no coincide. Lo que `TIPO_DTE_NOMBRES` no supo
+    // mapear se deja pasar —descartarlo perdería documentos reales por un
+    // nombre de variante que falta en el mapa, y el diagnóstico de "no
+    // devolvió ningún emisor" apuntaría al portal en vez de al mapa—.
+    const documentosDelTipo = documentos.filter(d => d.tipoDte === ctx.filtros.tipoDte || d.tipoDte === 0);
+    const sinMapear = documentos.filter(d => d.tipoDte === 0).length;
+
+    const foliosPorEmisor = new Map<string, number[]>();
+    for (const d of documentosDelTipo) {
+      const lista = foliosPorEmisor.get(d.emisorRut) ?? [];
+      lista.push(d.folio);
+      foliosPorEmisor.set(d.emisorRut, lista);
+    }
+    if (foliosPorEmisor.size === 0) {
+      limitaciones.push({
+        fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+        // Igual que el espejo del lado ENV: si el llamador pidió un rango de
+        // folio, va acá también — es parte del filtro exacto que no se pudo
+        // trocear más fino.
+        folioDesde: ctx.filtros.folioDesde, folioHasta: ctx.filtros.folioHasta,
+        // Ídem: el filtro exacto a repetir incluye la contraparte y la razón
+        // social si el llamador las fijó, aunque este camino no las haya
+        // usado para nada.
+        contraparteRut: ctx.filtros.contraparteRut,
+        razonSocial: ctx.filtros.razonSocial,
+        motivo:
+          `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
+          + `(tipo ${ctx.filtros.tipoDte}), pero el listado de recibidos no devolvió ningún emisor `
+          + `para ese día y tipo. El listado y la descarga no cuentan igual; sin emisores no se `
+          + `puede trocear más fino.${notaTipoNoMapeado(sinMapear)}`,
+      });
+      return;
+    }
+
+    // Array indexable (no el `Map` directo) para poder listar los emisores
+    // PENDIENTES por RUT cuando el presupuesto se agota entre uno y el
+    // siguiente — un `for...of` sobre el `Map` no da esa posición.
+    const entradas = [...foliosPorEmisor.entries()];
+    for (let i = 0; i < entradas.length; i++) {
+      const [emisorRut, foliosCrudos] = entradas[i];
+      // Dedupe con `Set`, igual que ENV: el listado puede repetir un folio (una
+      // fila por página, u otra razón del portal), y sin dedupe la bisección
+      // llegaría a `[10],[10]` — dos descargas idénticas y dos limitaciones
+      // iguales para el mismo folio. Después se acota al rango de folio que
+      // pidió el llamador, por la misma razón que del lado ENV.
+      const folios = acotarPorFolio(
+        [...new Set(foliosCrudos)].sort((a, b) => a - b),
+        ctx.filtros
+      );
+      // Sin folios de este emisor dentro del rango pedido: no hay nada que
+      // bajar de él, y no es un fallo — es justo lo que el filtro de folio
+      // pidió. No cuenta contra `maxTramos` porque no se intenta ninguna
+      // descarga.
+      if (folios.length === 0) continue;
+
+      if (ctx.descargas >= maxTramos) {
+        // Se agota el presupuesto entre un emisor y el siguiente: los que
+        // quedan sin pedir se registran juntos, no uno por uno — no se
+        // intentó ninguna descarga por ellos, así que no hay un folio
+        // puntual que reportar. Se nombran los RUT pendientes (los primeros
+        // 10, con un resumen si sobran) para que "acotá con contraparte_rut"
+        // sea accionable y no una sugerencia a ciegas.
+        const pendientes = entradas.slice(i).map(([rut]) => rut);
+        const listados = pendientes.slice(0, 10).join(', ');
+        const resto = pendientes.length > 10 ? ` y ${pendientes.length - 10} más` : '';
+        // "Acotá con contraparte_rut" es un no-op cuando el caller YA la
+        // fijó (el listado sólo trajo ESE emisor de entrada, y sin embargo
+        // acá sigue habiendo "N emisores pendientes" — improbable en la
+        // práctica con un solo RUT filtrado, pero la sugerencia no aplica
+        // igual si algún día N > 1 con contraparte fijada).
+        const sugerencia = ctx.filtros.contraparteRut != null
+          ? 'Pedí este día con un maxTramos más alto.'
+          : 'Pedí este día con un maxTramos más alto o acotá con contraparte_rut.';
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          // Igual que `razonSocial` en las otras limitaciones de este mismo
+          // día+tipo: si el llamador la fijó, el listado ya vino acotado por
+          // ella (vía `RZN_SOC`), así que forma parte del filtro a repetir.
+          // Ídem `contraparteRut`: sin este campo, un caller que ya la había
+          // fijado la perdía al reintentar — los otros dos caminos de esta
+          // misma función (`descargarListaDeGrupos`/`descargarGrupoConBiseccion`)
+          // ya usan `overrideBase.contraparteRut ?? ctx.filtros.contraparteRut`
+          // por la misma razón.
+          razonSocial: ctx.filtros.razonSocial,
+          contraparteRut: ctx.filtros.contraparteRut,
+          motivo:
+            `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para trocear por `
+            + `contraparte el ${dia} (tipo ${ctx.filtros.tipoDte}): quedaron ${pendientes.length} `
+            + `emisores sin procesar (${listados}${resto}). ${sugerencia}${notaTipoNoMapeado(sinMapear)}`,
+        });
+        break;
+      }
+
+      // Dos atajos que se saltan la descarga "plana" del emisor entero
+      // porque ya se sabe (o se sospecha con fundamento) que va a exceder:
+      //   - El caller YA fijó `contraparteRut`: el listado sólo trae ESE
+      //     emisor, así que la plana repetiría fecha+tipo+contraparte
+      //     exactos — la misma llamada que acaba de exceder en
+      //     `acumularTramos`. Es una llamada condenada, no una sospecha.
+      //   - El listado muestra MÁS de `TOPE_DOCUMENTOS_SII` folios para este
+      //     emisor: listado y descarga no cuentan igual (documentado en
+      //     `acumularTramos`), así que esto es una HEURÍSTICA, no una
+      //     certeza, y sólo tiene sentido cuando el listado va POR ENCIMA del
+      //     tope. `>`, no `>=`: con EXACTAMENTE el tope (20 folios), la plana
+      //     SÍ cabe si los conteos coinciden —el caso más común—, así que
+      //     tratarla como condenada de entrada tiraría una llamada segura
+      //     (sin combinar folio con tipo_dte, la parte NO verificada del
+      //     tercer nivel) a cambio de nada: el camino de grupos hace la MISMA
+      //     única llamada de todos modos para un grupo de ≤20 folios. Con
+      //     `>`, si la plana falla igual (conteos no coinciden), el `if` de
+      //     abajo la manda a agrupar — una llamada de más, el mismo costo que
+      //     ya paga hoy cualquier grupo que se biseccione de más.
+      if (ctx.filtros.contraparteRut != null || folios.length > TOPE_DOCUMENTOS_SII) {
+        await this.descargarListaDeGrupos(
+          ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
+          tramos, limitaciones, maxTramos, sinMapear, contadorFolioUnico);
+        continue;
+      }
+
+      await this.consumirPresupuesto(ctx, maxTramos);
+      const respuesta = await this.descargarTramo(ctx, dia, dia, { contraparteRut: emisorRut });
+      if (respuesta.excedeTope) {
+        // Igual que ENV: el grupo que se intenta primero es de a lo sumo
+        // `TOPE_DOCUMENTOS_SII` folios, no el emisor entero — con 45 folios de
+        // un mismo emisor, pedir el grupo completo de entrada excede seguro y
+        // gasta el presupuesto en una llamada condenada a fallar.
+        await this.descargarListaDeGrupos(
+          ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
+          tramos, limitaciones, maxTramos, sinMapear, contadorFolioUnico);
+        continue;
+      }
+      tramos.push({
+        fechaDesde: dia,
+        fechaHasta: dia,
+        documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
+        xml: respuesta.xml,
+      });
+    }
+  }
+
+  // Folios de UN día y tipo, del lado emitido. Pagina el mismo listado que usa
+  // `listDteEmitidos` pero SIN volver a seleccionar la empresa (ya está
+  // seleccionada por `respaldoXml`) y contando cada página contra `maxTramos`.
+  // `null` si el presupuesto se agotó a mitad de la paginación: la limitación
+  // ya queda cargada por el llamador de esta función.
+  private async listarEmitidosDelDia(
+    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number
+  ): Promise<DteEmitidoMipyme[] | null> {
+    const documentos: DteEmitidoMipyme[] = [];
+    let pagina = 1;
+    for (;;) {
+      if (ctx.descargas >= maxTramos) {
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
+          motivo:
+            `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más de `
+            + `${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día con `
+            + `un maxTramos más alto.`,
+        });
+        return null;
+      }
+      if (pagina > TOPE_PAGINAS_LISTADO) {
+        // Motivo DISTINTO del de arriba a propósito: acá el presupuesto no se
+        // agotó, es el LISTADO el que es demasiado grande para leerse entero
+        // dentro de un tope razonable. Subir `maxTramos` no resuelve esto —
+        // seguiría leyendo página tras página del mismo día enorme—; lo que
+        // sirve es acotar lo que el propio CGI de listado filtra.
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
+          motivo:
+            `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) tiene más de `
+            + `${TOPE_PAGINAS_LISTADO} páginas: es demasiado grande para leerlo entero. Subir `
+            + `maxTramos no alcanza acá; acotá con contraparte_rut o razon_social para que el `
+            + `propio listado del SII devuelva menos filas.`,
+        });
+        return null;
+      }
+      await this.consumirPresupuesto(ctx, maxTramos);
+      const html = await this.http.get(HISTORIAL_URL, this.params({
+        tipoDte: ctx.filtros.tipoDte,
+        fechaDesde: dia,
+        fechaHasta: dia,
+        // Igual que en `descargarTramo`: el listado tampoco filtra con el DV
+        // pegado. Un `contraparteRut` crudo ("con o sin DV" es el contrato
+        // público) le da al CGI de listado un valor que no matchea nada, el
+        // listado vuelve vacío, y `trocearPorEjeFino` lo lee como "no hay
+        // folios de esta contraparte" en vez de ir a buscarlos.
+        receptorRut: ctx.filtros.contraparteRut ? soloCuerpoRut(ctx.filtros.contraparteRut) : undefined,
+        // Sin esto, `params` mandaba `RZN_SOC: ''` hardcodeado: un pedido con
+        // `razon_social` filtraba en el intento inicial (`descargarTramo`) pero
+        // NO en este listado, que volvía con los folios de TODAS las
+        // contrapartes del día — ensanchando de más el rango envolvente que
+        // arma `trocearPorEjeFino`.
+        razonSocial: ctx.filtros.razonSocial,
+      }, pagina));
+      this.assertEmpresaSeleccionada(html);
+      documentos.push(...this.parseHistorial(html));
+      const totalPaginas = this.parseTotalPaginas(html);
+      if (totalPaginas == null || pagina >= totalPaginas) break;
+      pagina += 1;
+    }
+    return documentos;
+  }
+
+  // Igual que `listarEmitidosDelDia`, del lado recibido: la contraparte acá es
+  // el EMISOR, no el receptor (la empresa misma).
+  private async listarRecibidosDelDia(
+    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number
+  ): Promise<DteRecibidoMipyme[] | null> {
+    const documentos: DteRecibidoMipyme[] = [];
+    let pagina = 1;
+    for (;;) {
+      if (ctx.descargas >= maxTramos) {
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
+          motivo:
+            `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más `
+            + `de ${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día `
+            + `con un maxTramos más alto.`,
+        });
+        return null;
+      }
+      if (pagina > TOPE_PAGINAS_LISTADO) {
+        // Mismo motivo distinto que del lado ENV: acotar con contraparte_rut
+        // o razon_social, no subir maxTramos, que no resuelve un listado
+        // demasiado grande.
+        limitaciones.push({
+          fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+          razonSocial: ctx.filtros.razonSocial,
+          motivo:
+            `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) tiene más de `
+            + `${TOPE_PAGINAS_LISTADO} páginas: es demasiado grande para leerlo entero. Subir `
+            + `maxTramos no alcanza acá; acotá con contraparte_rut o razon_social para que el `
+            + `propio listado del SII devuelva menos filas.`,
+        });
+        return null;
+      }
+      await this.consumirPresupuesto(ctx, maxTramos);
+      const html = await this.http.get(HISTORIAL_RECIBIDOS_URL, this.paramsRecibidos({
+        tipoDte: ctx.filtros.tipoDte,
+        fechaDesde: dia,
+        fechaHasta: dia,
+        // Mismo motivo que en `listarEmitidosDelDia`: el listado tampoco
+        // acepta el RUT con DV pegado.
+        emisorRut: ctx.filtros.contraparteRut ? soloCuerpoRut(ctx.filtros.contraparteRut) : undefined,
+        // Mismo motivo que en `listarEmitidosDelDia`: sin esto el listado de
+        // recibidos pedía una descarga por CADA emisor del día (no sólo los
+        // que matchean `razon_social`) — el barrido de llamadas inútiles que
+        // el flag del tercer nivel existe para evitar, con el flag prendido.
+        razonSocial: ctx.filtros.razonSocial,
+      }, pagina));
+      this.assertEmpresaSeleccionada(html);
+      documentos.push(...this.parseHistorialRecibidos(html));
+      const totalPaginas = this.parseTotalPaginas(html);
+      if (totalPaginas == null || pagina >= totalPaginas) break;
+      pagina += 1;
+    }
+    return documentos;
+  }
+
+  // Un folio único que por sí solo excede el tope, o que ya se sabe condenado
+  // de antemano (ver el atajo de `trocearPorEjeFino` para un `folio_desde`
+  // sin rango): es un dato roto, no hay forma de afinar más. Se factoriza acá
+  // porque los dos call-sites arman el mismo mensaje.
+  private limitacionFolioUnico(
+    dia: string, folio: number, tipoDte: number | undefined, contraparteRut: string | undefined,
+    razonSocial: string | undefined = undefined, sinMapear: number = 0
+  ): LimitacionRespaldoXml {
+    const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
+    return {
+      fechaDesde: dia, fechaHasta: dia, tipoDte,
+      contraparteRut, razonSocial, folioDesde: folio, folioHasta: folio,
+      motivo:
+        `El folio ${folio} del ${dia}${contraparte} excede por sí solo el tope de `
+        + `${TOPE_DOCUMENTOS_SII} documentos del SII: es un único folio y el filtro ya no se `
+        + `puede afinar más. El listado y la descarga no cuentan igual para este caso puntual.`
+        + `${notaTipoNoMapeado(sinMapear)}`,
+    };
+  }
+
+  // Baja un grupo de folios de a lo sumo `TOPE_DOCUMENTOS_SII` (viene ya
+  // acotado por el llamador) con `folioDesde`/`folioHasta` en los extremos del
+  // grupo. Si la descarga IGUAL excede el tope —el listado y la descarga no
+  // cuentan igual, ver el comentario de `acumularTramos`— se bisecta el grupo
+  // por la MITAD DEL ARREGLO (no por valor de folio, que puede tener huecos)
+  // hasta llegar a un solo folio. Un folio único que por sí solo excede el
+  // tope es un dato roto: no hay forma de afinar más, y queda como limitación
+  // con el folio exacto.
+  // El mismo motivo con el que `descargarGrupoConBiseccion` colapsa los hermanos
+  // que quedan sin intentar dentro de UNA bisección, factorizado para que
+  // `descargarListaDeGrupos` arme la MISMA limitación cuando lo que colapsa
+  // es una lista entera de grupos (ver ahí el motivo del colapso).
+  private limitacionPresupuestoFolios(
+    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string },
+    dia: string,
+    folioDesde: number,
+    folioHasta: number,
+    contraparteRut: string | undefined,
+    maxTramos: number,
+    sinMapear: number = 0
+  ): LimitacionRespaldoXml {
+    const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
+    return {
+      fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+      // `ctx.filtros.razonSocial` directo (no un parámetro propio, como
+      // `contraparteRut`): a diferencia de la contraparte, la razón social no
+      // tiene un `overrideBase` por grupo — el filtro es siempre el del
+      // llamador original.
+      contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      // `folioDesde`/`folioHasta` acá son el ENVOLVENTE (`Math.min`/`Math.max`)
+      // de los folios PENDIENTES, no necesariamente contiguo: con huecos entre
+      // grupos (p.ej. folios 100..101 y 900..901 pendientes), el rango sale
+      // 100..901 aunque los folios de en medio ya se hayan bajado o sean de
+      // otro tipo. Repetir este rango es seguro —vuelve a traer documentos ya
+      // guardados o ajenos, nunca los pierde— pero baja de más; no es "el
+      // filtro exacto" que prometen otras limitaciones de este mismo tipo.
+      motivo:
+        `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para bajar los `
+        + `folios ${folioDesde}..${folioHasta} del ${dia}${contraparte} (rango envolvente de los `
+        + `folios pendientes, puede incluir folios ya bajados o de otro tipo). Pedí un maxTramos `
+        + `más alto o acotá el rango de folios.${notaTipoNoMapeado(sinMapear)}`,
+    };
+  }
+
+  // Se arma cuando `TOPE_FOLIOS_UNICOS_POR_DIA` limitaciones de folio único
+  // ya se acumularon para este día+eje (ver el comentario de la constante):
+  // colapsa TODO lo que falta —el folio que se estaba por reportar más lo que
+  // seguía pendiente en la bisección— en una sola, con el mismo criterio de
+  // rango ENVOLVENTE que `limitacionPresupuestoFolios`. El motivo es DISTINTO
+  // del de esa función a propósito: acá no se agotó `maxTramos`, se agotó el
+  // presupuesto de limitaciones individuales, y subir `maxTramos` no cambia
+  // nada si el problema real es que el CGI ignora el filtro de folio.
+  private limitacionDemasiadosFoliosUnicos(
+    ctx: { filtros: FiltrosRespaldoXml; empresaRut: string },
+    dia: string,
+    folioDesde: number,
+    folioHasta: number,
+    contraparteRut: string | undefined,
+    sinMapear: number = 0
+  ): LimitacionRespaldoXml {
+    const contraparte = contraparteRut ? ` (contraparte ${contraparteRut})` : '';
+    return {
+      fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
+      contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      motivo:
+        `El respaldo de ${ctx.empresaRut} acumuló más de ${TOPE_FOLIOS_UNICOS_POR_DIA} folios `
+        + `que exceden por sí solos el tope del ${dia}${contraparte}: se corta acá para no seguir `
+        + `intentando descargas condenadas. Los folios ${folioDesde}..${folioHasta} (rango `
+        + `envolvente de los pendientes, puede incluir folios ya bajados o de otro tipo) quedaron `
+        + `sin bajar. Si esto se repite, revisá si el SII está respetando el filtro de folio antes `
+        + `de seguir con RESPALDO_XML_TERCER_NIVEL prendido.${notaTipoNoMapeado(sinMapear)}`,
+    };
+  }
+
+  // Aplica el chequeo de `maxTramos` ENTRE grupos hermanos (no sólo dentro de
+  // la bisección de uno, que ya resuelve `descargarGrupoConBiseccion` con su
+  // pila): sin esto, con el presupuesto agotado a mitad de una lista de
+  // grupos, cada grupo restante entraba igual a `descargarGrupoConBiseccion`, veía
+  // el presupuesto agotado y empujaba SU PROPIA limitación — por ejemplo
+  // `21..40` y después `41..45` en vez de una sola `21..45`. Se colapsan acá,
+  // ANTES de entrar a cada grupo.
+  //
+  // Invariante que hay que mantener si se agrega algún path nuevo acá o en
+  // `descargarGrupoConBiseccion`: NINGÚN llamado a `descargarTramo` puede
+  // saltarse `consumirPresupuesto` antes. Hoy se cumple porque tanto la
+  // plana por emisor (en `trocearPorEjeFino`) como cada listado (paginado)
+  // pasan por `consumirPresupuesto` o por el chequeo de `ctx.descargas` de
+  // acá arriba — es la pausa que protege al portal contra el bloqueo por
+  // patrón de uso, y no puede haber una llamada que se la salte. Ya no queda
+  // sólo en este comentario: `consumirPresupuesto` revienta si algún path
+  // nuevo la llama con el presupuesto ya agotado, en vez de dejarlo pasar.
+  private async descargarListaDeGrupos(
+    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    grupos: number[][],
+    overrideBase: { contraparteRut?: string },
+    tramos: TramoRespaldoXml[],
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number,
+    sinMapear: number = 0,
+    contadorFolioUnico: { n: number } = { n: 0 }
+  ): Promise<void> {
+    for (let i = 0; i < grupos.length; i++) {
+      if (ctx.descargas >= maxTramos) {
+        const restantes = grupos.slice(i).flat();
+        // `?? ctx.filtros.contraparteRut`: del lado ENV `overrideBase` es
+        // `{}` aunque el caller haya fijado `contraparte_rut` — ese filtro
+        // vive en `ctx.filtros`, no en el override (que ahí sólo lleva
+        // folios). Sin el fallback, la limitación sale sin el
+        // `contraparte_rut` que hace falta para repetir el pedido exacto.
+        limitaciones.push(this.limitacionPresupuestoFolios(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos, sinMapear));
+        return;
+      }
+      // Mismo criterio que el chequeo de `maxTramos` de arriba, pero para el
+      // OTRO presupuesto que puede agotarse primero: el de limitaciones de
+      // folio único (ver `TOPE_FOLIOS_UNICOS_POR_DIA`). Si ya se llegó al
+      // tope DENTRO de un grupo anterior, ni vale la pena intentar los grupos
+      // que quedan —cada uno terminaría en el mismo destino—, así que se
+      // colapsan acá los que faltan sin gastar más llamadas.
+      if (contadorFolioUnico.n >= TOPE_FOLIOS_UNICOS_POR_DIA) {
+        const restantes = grupos.slice(i).flat();
+        limitaciones.push(this.limitacionDemasiadosFoliosUnicos(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, sinMapear));
+        return;
+      }
+      await this.descargarGrupoConBiseccion(
+        ctx, dia, grupos[i], overrideBase, tramos, limitaciones, maxTramos, sinMapear, contadorFolioUnico);
+    }
+  }
+
+  private async descargarGrupoConBiseccion(
+    ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml; empresaRut: string; descargas: number },
+    dia: string,
+    folios: number[],
+    overrideBase: { contraparteRut?: string },
+    tramos: TramoRespaldoXml[],
+    limitaciones: LimitacionRespaldoXml[],
+    maxTramos: number,
+    sinMapear: number = 0,
+    contadorFolioUnico: { n: number } = { n: 0 }
+  ): Promise<void> {
+    // Iterativo con una PILA (no recursión) para poder COLAPSAR los grupos
+    // hermanos que quedan sin intentar cuando se agota `maxTramos` a mitad de
+    // la bisección: sin esto, cada hoja pendiente empujaba su propia
+    // limitación (hasta ~10 del mismo motivo, con folios distintos) en vez de
+    // una sola que cubra el rango combinado. Se apila DERECHA y después
+    // IZQUIERDA para que la izquierda salga primero al hacer `pop()` — el
+    // mismo orden que tenía la recursión original (`await izquierda();
+    // await derecha();`), así que el orden de las descargas no cambia.
+    const pendientes: number[][] = [folios];
+
+    while (pendientes.length > 0) {
+      if (ctx.descargas >= maxTramos) {
+        const restantes = pendientes.flat();
+        // Mismo fallback que en `descargarListaDeGrupos`: del lado ENV
+        // `overrideBase` no lleva `contraparte_rut` aunque el caller lo haya
+        // fijado (vive en `ctx.filtros`).
+        limitaciones.push(this.limitacionPresupuestoFolios(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, maxTramos, sinMapear));
+        return;
+      }
+      // Mismo tope de folios-único que en `descargarListaDeGrupos`, chequeado
+      // ACÁ TAMBIÉN porque una sola bisección (sin pasar por esa función,
+      // p.ej. un grupo único de ENV) puede por sí sola acumular más de
+      // `TOPE_FOLIOS_UNICOS_POR_DIA` hojas de folio único.
+      if (contadorFolioUnico.n >= TOPE_FOLIOS_UNICOS_POR_DIA) {
+        const restantes = pendientes.flat();
+        limitaciones.push(this.limitacionDemasiadosFoliosUnicos(
+          ctx, dia, Math.min(...restantes), Math.max(...restantes),
+          overrideBase.contraparteRut ?? ctx.filtros.contraparteRut, sinMapear));
+        return;
+      }
+
+      const grupo = pendientes.pop()!;
+      const folioDesde = grupo[0];
+      const folioHasta = grupo[grupo.length - 1];
+
+      await this.consumirPresupuesto(ctx, maxTramos);
+      const respuesta = await this.descargarTramo(ctx, dia, dia, { ...overrideBase, folioDesde, folioHasta });
+      if (respuesta.excedeTope) {
+        if (grupo.length === 1) {
+          limitaciones.push(this.limitacionFolioUnico(
+            dia, folioDesde, ctx.filtros.tipoDte, overrideBase.contraparteRut ?? ctx.filtros.contraparteRut,
+            ctx.filtros.razonSocial, sinMapear));
+          contadorFolioUnico.n += 1;
+          continue;
+        }
+        const mitad = Math.floor(grupo.length / 2);
+        pendientes.push(grupo.slice(mitad));      // derecha: se procesa DESPUÉS
+        pendientes.push(grupo.slice(0, mitad));   // izquierda: queda en el tope de la pila
+        continue;
+      }
+
+      // `grupo` es una LISTA DISCRETA de folios (los extremos pedidos como
+      // rango son sólo el filtro más económico en llamadas: pedir folio por
+      // folio multiplicaría las llamadas contra un portal que bloquea por
+      // NÚMERO de llamadas, no por contenido de una llamada). Con huecos de
+      // folio, el rango completo puede traer documentos vecinos del mismo
+      // día y tipo que el listado no mostró —anulados que igual respondió el
+      // CGI, u otra razón—, pero son documentos REALES de esta empresa: no
+      // hay over-conteo posible porque `enGrupos` parte una lista ORDENADA en
+      // rangos disjuntos por construcción, así que ningún documento cae en
+      // dos grupos. Se guardan tal cual: el XML firmado NO se reescribe para
+      // sacarlos —el `SetDTE` lleva `Caratula` y `Signature` propios del
+      // envío completo, y un documento se identifica por `IdDoc><Folio>`, no
+      // por el primer `<Folio>` del bloque (una nota de crédito trae otro en
+      // `<Referencia>`)— así que sería fácil corromper el respaldo por
+      // intentar acotarlo. Respaldar de más no rompe nada; reescribir un XML
+      // tributario firmado sí. Ver también la nota en docs/integracion-api.md.
+      tramos.push({
+        fechaDesde: dia,
+        fechaHasta: dia,
+        documentos: (respuesta.xml.match(/<DTE[\s>]/g) ?? []).length,
+        xml: respuesta.xml,
+      });
+    }
+  }
+
   private async descargarTramo(
     ctx: { rut: string; dv: string; filtros: FiltrosRespaldoXml },
     desde: string,
-    hasta: string
+    hasta: string,
+    // El tercer nivel de troceo pide el MISMO día con un folio o una
+    // contraparte más finos que los filtros originales del caller (que pueden
+    // no traer ninguno de los dos). No se muta `ctx.filtros` — cada grupo de
+    // folios necesita su propio recorte y los hermanos no tienen por qué
+    // compartirlo.
+    overrides?: Partial<Pick<FiltrosRespaldoXml, 'folioDesde' | 'folioHasta' | 'contraparteRut'>>
   ): Promise<{ xml: string; excedeTope: boolean }> {
-    const f = ctx.filtros;
+    const f: FiltrosRespaldoXml = overrides ? { ...ctx.filtros, ...overrides } : ctx.filtros;
     const comunes = {
       RUT_EMP: ctx.rut,
       DV_EMP: ctx.dv,
@@ -983,7 +1822,6 @@ export class MipymeHttpScraper {
   private partirRango(desde: string, hasta: string): [string, string] {
     const inicio = Date.parse(`${desde}T00:00:00Z`);
     const fin = Date.parse(`${hasta}T00:00:00Z`);
-    const DIA_MS = 24 * 60 * 60 * 1000;
     // Se redondea HACIA ABAJO para que la primera mitad nunca quede vacía
     // cuando el rango son dos días.
     const medio = inicio + Math.floor((fin - inicio) / (2 * DIA_MS)) * DIA_MS;
@@ -1655,7 +2493,7 @@ export class MipymeHttpScraper {
     return {
       RUT_RECP: filtros.receptorRut ?? '',
       FOLIO: filtros.folio ? String(filtros.folio) : '',
-      RZN_SOC: '',
+      RZN_SOC: filtros.razonSocial ?? '',
       FEC_DESDE: filtros.fechaDesde ? this.aFechaSii(filtros.fechaDesde) : '',
       FEC_HASTA: filtros.fechaHasta ? this.aFechaSii(filtros.fechaHasta) : '',
       TPO_DOC: filtros.tipoDte ? String(filtros.tipoDte) : '',
@@ -1671,7 +2509,7 @@ export class MipymeHttpScraper {
     return {
       RUT_EMI: filtros.emisorRut ?? '',
       FOLIO: filtros.folio ? String(filtros.folio) : '',
-      RZN_SOC: '',
+      RZN_SOC: filtros.razonSocial ?? '',
       FEC_DESDE: filtros.fechaDesde ? this.aFechaSii(filtros.fechaDesde) : '',
       FEC_HASTA: filtros.fechaHasta ? this.aFechaSii(filtros.fechaHasta) : '',
       TPO_DOC: filtros.tipoDte ? String(filtros.tipoDte) : '',

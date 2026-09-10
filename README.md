@@ -302,9 +302,14 @@ Dos cosas que definen su forma, las dos verificadas contra el SII:
   mitad se pide aparte, hasta que todas pasen; la respuesta trae un tramo por
   descarga, cada uno un `SetDTE` válido por sí solo. No se concatenan: dos
   `SetDTE` pegados no son XML bien formado, y unificarlos obligaría a reescribir
-  contenido firmado. Un día suelto con más de 20 documentos ya no se puede
-  partir por fecha y falla diciéndolo, en vez de devolver un respaldo incompleto
-  que se lee igual que uno completo.
+  contenido firmado. Lo que no se pudo bajar sale en `limitaciones` en vez de
+  descartar todo el respaldo (ver `docs/integracion-api.md`).
+- Un día suelto que TODAVÍA excede el tope con `tipo_dte` puesto tiene un tercer
+  eje —folio para emitidos, contraparte para recibidos—, pero queda **apagado
+  por defecto**: la variable `RESPALDO_XML_TERCER_NIVEL` (ver `.env.example`) lo
+  prende, y conviene hacerlo recién después de verificarlo en vivo con
+  `src/scripts/verificarRespaldoXml.ts` (`VERIF_TIPO_DTE` + `VERIF_FOLIO` /
+  `VERIF_CONTRAPARTE`).
 
 `sii_mipyme_list_dte_recibidos` es el espejo de `list_dte_emitidos` y comparte su
 forma, con el **emisor** como contraparte en vez del receptor. Trae algo que

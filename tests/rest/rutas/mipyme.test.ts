@@ -189,19 +189,72 @@ describe('registrarRutasMipyme', () => {
       const r1 = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
       expect((r1.body as any).limitaciones).toEqual([]);
 
+      // El motivo es de DÍA SUELTO ("El día X tiene más de 20 documentos"), así
+      // que el rango de la fixture tiene que ser ESE día y no un tramo de
+      // varios: un motivo de día con un rango de dos semanas es un fixture
+      // inconsistente que ningún caso real produce (el troceo por fecha nunca
+      // deja un motivo de día suelto cubriendo más de un día).
       (core.respaldoXml as jest.Mock).mockResolvedValue({
         ...RESULTADO,
         tramos: [{ fechaDesde: '2026-08-01', fechaHasta: '2026-08-16', documentos: 2, xml: '<SetDTE></SetDTE>' }],
         limitaciones: [
-          { fechaDesde: '2026-08-17', fechaHasta: '2026-08-31', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
+          { fechaDesde: '2026-08-17', fechaHasta: '2026-08-17', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
         ],
       });
       const r2 = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
       const body2 = r2.body as any;
       expect(body2.ok).toBe(true);
       expect(body2.limitaciones).toEqual([
-        { fecha_desde: '2026-08-17', fecha_hasta: '2026-08-31', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
+        { fecha_desde: '2026-08-17', fecha_hasta: '2026-08-17', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
       ]);
+    });
+
+    // Los campos del tercer nivel de troceo (folio para emitidos, contraparte
+    // para recibidos) tienen que llegar en snake_case, igual que el resto del
+    // contrato: son lo que le permite a agenticerp reconstruir el pedido sin
+    // parsear el texto de `motivo`.
+    it('expone tipo_dte, contraparte_rut, razon_social y el rango de folio de una limitación del tercer nivel', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        tramos: [{ fechaDesde: '2026-08-01', fechaHasta: '2026-08-16', documentos: 2, xml: '<SetDTE></SetDTE>' }],
+        limitaciones: [
+          {
+            fechaDesde: '2026-08-17', fechaHasta: '2026-08-17',
+            tipoDte: 33, contraparteRut: '77777777-7', razonSocial: 'Muñoz', folioDesde: 100, folioHasta: 100,
+            motivo: 'El folio 100 del 2026-08-17 (contraparte 77777777-7) excede por sí solo el tope.',
+          },
+        ],
+      });
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+      const body = r.body as any;
+      expect(body.limitaciones[0]).toMatchObject({
+        tipo_dte: 33, contraparte_rut: '77777777-7', razon_social: 'Muñoz', folio_desde: 100, folio_hasta: 100,
+      });
+    });
+
+    // Espejo del test anterior: cuando el motivo NO sale del tercer nivel
+    // (día lleno sin `tipo_dte`, o tope de `max_tramos` genérico), los cinco
+    // campos son `undefined` en el objeto que arma la ruta — y `undefined`
+    // sólo es "ausente" cuando de verdad se serializa a JSON (que es lo que
+    // hace `responderJson` con `JSON.stringify`, no lo que devuelve el
+    // `RutaHandler` en memoria). Sin este round-trip, un objeto con
+    // `tipo_dte: undefined` pasaría el test igual y el body real por HTTP
+    // podría llegar con `"tipo_dte":null` si algún día la serialización
+    // cambia (p.ej. un `JSON.stringify` con replacer, o un paso intermedio
+    // que no preserve `undefined`).
+    it('omite tipo_dte/contraparte_rut/razon_social/folio_desde/folio_hasta del JSON cuando el motivo no es del tercer nivel', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        limitaciones: [
+          { fechaDesde: '2026-08-01', fechaHasta: '2026-08-01', motivo: 'El día 2026-08-01 tiene más de 20 documentos y el SII no entrega más por descarga. Pedí ese día con tipo_dte.' },
+        ],
+      });
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+      // El round-trip de verdad: lo que `responderJson` manda por HTTP.
+      const porHttp = JSON.parse(JSON.stringify(r.body));
+
+      expect(Object.keys(porHttp.limitaciones[0]).sort()).toEqual(['fecha_desde', 'fecha_hasta', 'motivo']);
     });
 
     // Cuando NO se bajó nada —todos los sub-rangos toparon, o el único tramo
@@ -226,6 +279,77 @@ describe('registrarRutasMipyme', () => {
       expect(body.ok).toBe(false);
       expect(body.error).toBe('LIMITE_CONOCIDO');
       expect(body.detalle).toMatch(/2026-08-01.*tipo_dte|tipo_dte.*2026-08-01/s);
+    });
+
+    // El `detalle` de varias limitaciones se junta con ' | ' y no con '\n':
+    // los demás `detalle` de este servicio son de una sola línea, y un salto
+    // acá rompería esa uniformidad.
+    it('junta varias limitaciones en el detalle con " | ", no con salto de línea', async () => {
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        documentos: 0,
+        tramos: [],
+        limitaciones: [
+          { fechaDesde: '2026-08-01', fechaHasta: '2026-08-01', motivo: 'Motivo uno.' },
+          { fechaDesde: '2026-08-02', fechaHasta: '2026-08-02', motivo: 'Motivo dos.' },
+        ],
+      });
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+
+      const body = r.body as any;
+      expect(body.detalle).toBe(
+        '2026-08-01..2026-08-01: Motivo uno. | 2026-08-02..2026-08-02: Motivo dos.');
+      expect(body.detalle).not.toContain('\n');
+    });
+
+    // El tope de folio único del tercer nivel (ver `TOPE_FOLIOS_UNICOS_POR_DIA`
+    // en mipymeHttp.ts) es lo que evita que este `detalle` llegue a medir los
+    // ~5.6 KB que un día de 45 folios sin ese tope produciría (24 limitaciones
+    // casi idénticas). Acá se simula el escenario YA acotado por el scraper
+    // (12 limitaciones, 10 individuales + 2 colapsadas) para verificar que la
+    // ruta no vuelve a inflar el `detalle` por su cuenta.
+    it('el detalle queda acotado incluso con muchas limitaciones de folio único (tope del tercer nivel)', async () => {
+      const individuales = Array.from({ length: 10 }, (_, i) => ({
+        fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33, folioDesde: i + 1, folioHasta: i + 1,
+        motivo:
+          `El folio ${i + 1} del 2026-08-05 excede por sí solo el tope de 20 documentos del SII: es un `
+          + `único folio y el filtro ya no se puede afinar más. El listado y la descarga no cuentan `
+          + `igual para este caso puntual.`,
+      }));
+      const colapsadas = [
+        {
+          fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33, folioDesde: 11, folioHasta: 20,
+          motivo:
+            'El respaldo de 33333333-3 acumuló más de 10 folios que exceden por sí solos el tope del '
+            + '2026-08-05: se corta acá para no seguir intentando descargas condenadas. Los folios '
+            + '11..20 (rango envolvente de los pendientes, puede incluir folios ya bajados o de otro '
+            + 'tipo) quedaron sin bajar. Si esto se repite, revisá si el SII está respetando el filtro '
+            + 'de folio antes de seguir con RESPALDO_XML_TERCER_NIVEL prendido.',
+        },
+        {
+          fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33, folioDesde: 21, folioHasta: 45,
+          motivo:
+            'El respaldo de 33333333-3 acumuló más de 10 folios que exceden por sí solos el tope del '
+            + '2026-08-05: se corta acá para no seguir intentando descargas condenadas. Los folios '
+            + '21..45 (rango envolvente de los pendientes, puede incluir folios ya bajados o de otro '
+            + 'tipo) quedaron sin bajar. Si esto se repite, revisá si el SII está respetando el filtro '
+            + 'de folio antes de seguir con RESPALDO_XML_TERCER_NIVEL prendido.',
+        },
+      ];
+      (core.respaldoXml as jest.Mock).mockResolvedValue({
+        ...RESULTADO,
+        documentos: 0,
+        tramos: [],
+        limitaciones: [...individuales, ...colapsadas],
+      });
+
+      const r = await armarRouter().get('POST /v1/mipyme/respaldo-xml')!(BASE);
+
+      const body = r.body as any;
+      expect(body.error).toBe('LIMITE_CONOCIDO');
+      // Muy por debajo de los ~5.6 KB que 24 limitaciones sin tope medían.
+      expect(body.detalle.length).toBeLessThan(4000);
     });
 
     // La condición de "nada bajado" depende de esta distinción: `tramos:[]`

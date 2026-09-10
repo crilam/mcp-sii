@@ -1,4 +1,4 @@
-import { recorrerConRitmo, pausaConfigurada } from '../src/ritmoSii';
+import { recorrerConRitmo, pausaConfigurada, tercerNivelHabilitado } from '../src/ritmoSii';
 
 // El ritmo existe porque el SII bloquea a los scrapers: un barrido de más de
 // doscientas llamadas en pocos minutos dejó el portal del RCV respondiendo error
@@ -115,5 +115,33 @@ describe('pausaConfigurada', () => {
     expect(pausaConfigurada()).toBe(1200);
     process.env.RITMO_SII_MS = '50';
     expect(pausaConfigurada()).toBe(1200);
+  });
+});
+
+// El tercer nivel de troceo del respaldo XML combina tipo_dte con
+// folio/contraparte, una combinación no verificada contra el SII real: por
+// eso queda apagado salvo que se active explícitamente.
+describe('tercerNivelHabilitado', () => {
+  afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
+
+  it('está apagado por defecto (sin la variable definida)', () => {
+    expect(tercerNivelHabilitado()).toBe(false);
+  });
+
+  it('"1" lo activa', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = '1';
+    expect(tercerNivelHabilitado()).toBe(true);
+  });
+
+  it('"true", sin importar mayúsculas, también lo activa', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = 'TRUE';
+    expect(tercerNivelHabilitado()).toBe(true);
+  });
+
+  it('cualquier otro valor lo deja apagado', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = '0';
+    expect(tercerNivelHabilitado()).toBe(false);
+    process.env.RESPALDO_XML_TERCER_NIVEL = 'si';
+    expect(tercerNivelHabilitado()).toBe(false);
   });
 });

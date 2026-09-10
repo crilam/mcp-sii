@@ -162,7 +162,9 @@ export function registrarRutasMipyme(
         throw new LimitacionConocida(
           r.limitaciones
             .map(l => `${l.fechaDesde}..${l.fechaHasta}: ${l.motivo}`)
-            .join('\n'));
+            // ` | ` y no `\n`: los demás `detalle` de este servicio son de una
+            // sola línea, y un salto acá rompía esa uniformidad.
+            .join(' | '));
       }
 
       return {
@@ -190,6 +192,14 @@ export function registrarRutasMipyme(
           fecha_desde: l.fechaDesde,
           fecha_hasta: l.fechaHasta,
           motivo: l.motivo,
+          // Reconstruibles por máquina: presentes sólo cuando el motivo salió
+          // del tercer nivel de troceo (folio para emitidos, contraparte para
+          // recibidos). Ver docs/integracion-api.md.
+          tipo_dte: l.tipoDte,
+          contraparte_rut: l.contraparteRut,
+          razon_social: l.razonSocial,
+          folio_desde: l.folioDesde,
+          folio_hasta: l.folioHasta,
         })),
       };
     });
