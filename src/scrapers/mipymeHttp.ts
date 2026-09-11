@@ -1407,8 +1407,8 @@ export class MipymeHttpScraper {
             // contraparte, que no tiene nada que ver con su pedido.
             const esEmitidos = ctx.filtros.origen === 'ENV';
             const motivoEje = esEmitidos
-              ? `el eje de folio ya se verificó en vivo contra el SII real`
-              : `el eje de contraparte, que usan los recibidos, todavía NO se verificó contra el SII real`;
+              ? 'el eje de folio (emitidos) ya se verificó en vivo contra el SII real'
+              : 'el eje de contraparte, que usan los recibidos, todavía NO se verificó contra el SII real';
             limitaciones.push({
               fechaDesde: desde,
               fechaHasta: hasta,
@@ -1423,9 +1423,11 @@ export class MipymeHttpScraper {
                 + `está DESACTIVADO por defecto: es un interruptor único que prende los dos ejes a `
                 + `la vez, y ${motivoEje}. Activalo con RESPALDO_XML_TERCER_NIVEL=1 `
                 + (esEmitidos
-                  ? `(ver src/scripts/verificarRespaldoXml.ts).`
-                  : `recién después de verificar en vivo el eje de contraparte con `
-                    + `src/scripts/verificarRespaldoXml.ts (VERIF_TIPO_DTE + VERIF_CONTRAPARTE).`),
+                  ? '(esto también habilita el eje de contraparte para recibidos, que NO está '
+                    + 'verificado — ver src/scripts/verificarRespaldoXml.ts si vas a atender ese '
+                    + 'origen).'
+                  : 'recién después de verificar en vivo el eje de contraparte con '
+                    + 'src/scripts/verificarRespaldoXml.ts (VERIF_TIPO_DTE + VERIF_CONTRAPARTE).'),
             });
             return;
           }
