@@ -29,25 +29,33 @@ export const schemaCompactoF29 = {
   periodo,
 };
 
+// El período como STRING AAAAMM, compartido por propuesta y PPM. Se extrae a
+// constante porque antes estaba duplicado entero en los dos esquemas: un
+// arreglo a la regla del formato aplicado en uno y olvidado en el otro habría
+// dejado a las dos rutas validando distinto sin que nadie lo notara hasta que
+// una aceptara (o rechazara) algo que la otra no.
+//
+// Acepta string Y number, y normaliza a string. `estado-declaracion` pide el
+// período como number y ésta como string: son dos contratos distintos bajo el
+// mismo prefijo `/v1/f29`, y una trampa para quien consuma las dos. Aceptar
+// ambos cuesta una coerción y evita un 400 que sólo se explica leyendo el
+// código.
+const periodoStringAAAAMM = z.union([z.string(), z.number().int()])
+  .transform(v => String(v))
+  .refine(p => /^\d{6}$/.test(p), 'periodo debe ser AAAAMM, por ejemplo "202608"')
+  .refine(p => {
+    const anio = Number(p.slice(0, 4)), mes = Number(p.slice(4));
+    return anio >= 2007 && anio <= 2100 && mes >= 1 && mes <= 12;
+  }, 'periodo debe ser AAAAMM, con año 2007-2100 y mes 01-12')
+  .describe('Período tributario en formato AAAAMM (ej. "202608")');
+
 // La propuesta pide el período como STRING AAAAMM y no como number, a diferencia
 // de `schemaEstadoF29`. Es deliberado: este contrato lo consume AgenticERP, que
 // ya maneja el período así en sus otras fuentes, y un number obligaría a los dos
 // lados a convertir de ida y de vuelta. La validación es la misma.
 export const schemaPropuestaF29 = {
   rut: z.string().min(1).describe(RUT_DESC),
-  // Acepta string Y number, y normaliza a string. `estado-declaracion` pide el
-  // período como number y ésta como string: son dos contratos distintos bajo el
-  // mismo prefijo `/v1/f29`, y una trampa para quien consuma las dos. Aceptar
-  // ambos cuesta una coerción y evita un 400 que sólo se explica leyendo el
-  // código.
-  periodo: z.union([z.string(), z.number().int()])
-    .transform(v => String(v))
-    .refine(p => /^\d{6}$/.test(p), 'periodo debe ser AAAAMM, por ejemplo "202608"')
-    .refine(p => {
-      const anio = Number(p.slice(0, 4)), mes = Number(p.slice(4));
-      return anio >= 2007 && anio <= 2100 && mes >= 1 && mes <= 12;
-    }, 'periodo debe ser AAAAMM, con año 2007-2100 y mes 01-12')
-    .describe('Período tributario en formato AAAAMM (ej. "202608")'),
+  periodo: periodoStringAAAAMM,
 };
 
 // PPM pide lo mismo que la propuesta —RUT y período AAAAMM como string—, y por
@@ -59,15 +67,11 @@ export const schemaPropuestaF29 = {
 // opcional propio de esa ruta, PPM lo heredaría en silencio sin que nadie lo
 // decida. Copiando, el día que un contrato cambie hay que tocar el otro a
 // mano, que es lo que corresponde para dos rutas que son distintas aunque
-// hoy coincidan.
+// hoy coincidan. El validador del período SÍ se comparte (`periodoStringAAAAMM`):
+// eso no es el alias que sacamos, porque los dos objetos de esquema siguen
+// siendo distintos y cada uno puede ganar campos propios sin afectar al otro;
+// sólo evita que la REGLA de formato se corrija en un lado y no en el otro.
 export const schemaPpmF29 = {
   rut: z.string().min(1).describe(RUT_DESC),
-  periodo: z.union([z.string(), z.number().int()])
-    .transform(v => String(v))
-    .refine(p => /^\d{6}$/.test(p), 'periodo debe ser AAAAMM, por ejemplo "202608"')
-    .refine(p => {
-      const anio = Number(p.slice(0, 4)), mes = Number(p.slice(4));
-      return anio >= 2007 && anio <= 2100 && mes >= 1 && mes <= 12;
-    }, 'periodo debe ser AAAAMM, con año 2007-2100 y mes 01-12')
-    .describe('Período tributario en formato AAAAMM (ej. "202608")'),
+  periodo: periodoStringAAAAMM,
 };

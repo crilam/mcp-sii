@@ -64,6 +64,10 @@ describe('POST /v1/f29/ppm', () => {
     const json = JSON.stringify(r.body);
     expect(json).not.toContain('rutContribuyente');
     expect(json).not.toContain('77777777');
+    // El dígito verificador también tiene que quedar afuera: sin este assert,
+    // una ruta que filtrara el RUT pero dejara pasar el `dv` (por ejemplo, sólo
+    // borrando la clave `rutContribuyente` y no `dv`) pasaría igual.
+    expect(json).not.toContain('"dv"');
   });
 
   it('un período mal formado es 400 y no llega al SII', async () => {

@@ -52,25 +52,29 @@ async function main() {
   // Lo que NO debe estar. El SII devuelve `rutContribuyente` y `dv` en esta
   // respuesta; la ruta arma el cuerpo campo por campo para dejarlos afuera.
   //
-  // El cuerpo del RUT sale de `soloCuerpoRut`, no de sacarle el último
-  // carácter a mano: eso asumía que `p.rut` siempre trae dígito verificador
-  // pegado, y si algún perfil lo guardara sin DV el corte se comía un dígito
-  // real. Ahí la búsqueda de abajo no encontraba nada, el chequeo daba "SÍ, sin
-  // filtración" — pero por una cadena que nunca existió, no porque la ruta
-  // filtre bien. Un chequeo de filtración que puede dar verde por vacuidad es
-  // peor que no tener chequeo, así que si el cuerpo queda demasiado corto para
-  // ser un RUT, el script corta acá y avisa en vez de seguir con una búsqueda
-  // vacía.
-  const json = JSON.stringify(b);
-  const rutSinFormato = soloCuerpoRut(p.rut);
-  if (rutSinFormato.length < 7) {
+  // Este script ASUME que `p.rut` viene en la forma "cuerpo-DV" (con o sin
+  // puntos en el cuerpo), que es la forma con la que se cargan los perfiles de
+  // verificación. No se tolera la forma sin guion, y es a propósito: si se
+  // tolerara, un identificador sin guion pasa entero por `soloCuerpoRut` (que
+  // sólo separa por el guion) y el "cuerpo" resultante queda con el dígito
+  // verificador todavía pegado. La respuesta del SII trae el cuerpo SOLO, sin
+  // DV, así que esa búsqueda no encuentra nada — ni siquiera si la ruta
+  // filtrara mal — y el chequeo daría "SÍ, sin filtración" por vacuidad, que es
+  // exactamente lo que este script existe para no hacer. Por eso se exige la
+  // forma con guion y se falla ruidosamente si no la trae, en vez de intentar
+  // adivinar el cuerpo de una forma que no se puede distinguir de un cuerpo
+  // sin DV.
+  const rutNormalizado = p.rut.trim().replace(/\./g, '');
+  if (!/^\d{7,8}-[\dkK]$/.test(rutNormalizado)) {
     throw new Error(
-      `el cuerpo del RUT del perfil '${NOMBRE}' quedó en '${rutSinFormato}' (${rutSinFormato.length} ` +
-      `dígitos), demasiado corto para ser un RUT real. El chequeo de filtración no puede correr así: ` +
-      `buscar una cadena vacía o insuficiente siempre "encuentra que no está" y el chequeo daría verde ` +
-      `sin haber probado nada. Revisá el perfil '${NOMBRE}' en perfilesVerificacion.`
+      `el RUT del perfil '${NOMBRE}' es '${p.rut}' y no tiene la forma "cuerpo-DV" que este chequeo ` +
+      `exige (ej. "12345678-9"). Sin el guion no se puede distinguir el cuerpo del dígito verificador, ` +
+      `y buscar el cuerpo mal calculado deja el chequeo de filtración vacío — pasaría "sin filtración" ` +
+      `aunque la ruta filtrara mal. Corregí el RUT del perfil '${NOMBRE}' en perfilesVerificacion.`
     );
   }
+  const json = JSON.stringify(b);
+  const rutSinFormato = soloCuerpoRut(p.rut);
   for (const [que, presente] of [
     ['rutContribuyente', json.includes('rutContribuyente')],
     ['el RUT en cualquier campo', json.includes(rutSinFormato)],
