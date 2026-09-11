@@ -84,4 +84,26 @@ describe('ejecutarPlan respeta el ritmo entre consultas (vía recorrerConRitmo)'
 
     expect(mockRecorrer.mock.calls[0][2]).toEqual({ pausaMs: 0 });
   });
+
+  // Bloqueante de esta ronda: el piso tiene que ser el CONFIGURADO
+  // (RITMO_SII_MS), no la constante `PAUSA_POR_DEFECTO_MS` a secas. Un
+  // operador que subió el ritmo por variable de entorno espera que NINGÚN
+  // plan (ni siquiera uno con `pausa_ms` explícito y más bajo) corra más
+  // rápido que ese piso.
+  it('con RITMO_SII_MS en un valor alto, el plan no baja de ese piso aunque pida menos', async () => {
+    const anterior = process.env.RITMO_SII_MS;
+    process.env.RITMO_SII_MS = '5000';
+    try {
+      mockRecorrer.mockResolvedValue([]);
+      const registro = new RegistroSesiones<{ n: number }>(async () => ({ n: 1 }));
+      const plan: PlanArchivo = { pausa_ms: 1500, consultas: [{}] };
+
+      await ejecutarPlan(plan, registro, '11111111-1', crearScraperVacio(), undefined);
+
+      expect(mockRecorrer.mock.calls[0][2]).toEqual({ pausaMs: 5000 });
+    } finally {
+      if (anterior === undefined) delete process.env.RITMO_SII_MS;
+      else process.env.RITMO_SII_MS = anterior;
+    }
+  });
 });

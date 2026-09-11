@@ -7,11 +7,11 @@ import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { registrarRutasMipyme } from '../rest/rutas/mipyme';
 import { RutaHandler } from '../rest/rutas/comun';
 import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacion';
-import { soloCuerpoRut, MipymeHttpScraper, MAX_TRAMOS_ABSOLUTO } from '../scrapers/mipymeHttp';
+import { soloCuerpoRut, MipymeHttpScraper, MAX_TRAMOS_ABSOLUTO, MAX_TRAMOS_POR_DEFECTO } from '../scrapers/mipymeHttp';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { Browser } from '../browser';
-import { recorrerConRitmo, PAUSA_POR_DEFECTO_MS } from '../ritmoSii';
+import { recorrerConRitmo, pausaConfigurada } from '../ritmoSii';
 import { rutEsValido } from '../rut';
 
 // Verifica `respaldo-xml` contra el SII real, por el handler REST.
@@ -444,19 +444,23 @@ export function leerPlan(rutaJson: string): PlanArchivo {
     }
   });
 
-  // El PISO de ritmo (`ritmoSii.pausaConfigurada`) tiene el mismo criterio que
-  // `RITMO_SII_MS`: el defecto es un piso, no una sugerencia, y no se permite
-  // bajarlo. Sin este chequeo, un JSON de plan con `"pausa_ms": 0` reintroduce
-  // por archivo exactamente el atajo que la variable de entorno tiene
-  // cerrado — y `recorrerConRitmo` sólo aplica el piso cuando `pausaMs` es
+  // El PISO de ritmo es `ritmoSii.pausaConfigurada()`, NO la constante
+  // `PAUSA_POR_DEFECTO_MS` a secas: si el operador subió el piso con
+  // RITMO_SII_MS (por ejemplo a 5000ms), un plan con `"pausa_ms": 1500`
+  // tiene que quedar en 5000, no en 1500 ni en el default de 1200 — usar la
+  // constante en vez del valor configurado reabriría, por el archivo del
+  // plan, el mismo atajo que RITMO_SII_MS existe para cerrar por variable de
+  // entorno. Sin este chequeo, un JSON de plan con `"pausa_ms": 0` haría lo
+  // mismo — y `recorrerConRitmo` sólo aplica el piso cuando `pausaMs` es
   // `undefined`; un `pausaMs` explícito, aunque sea 0, lo pisa por diseño.
+  const piso = pausaConfigurada();
   let pausaMs = typeof obj.pausa_ms === 'number' ? obj.pausa_ms : undefined;
-  if (pausaMs != null && pausaMs < PAUSA_POR_DEFECTO_MS) {
+  if (pausaMs != null && pausaMs < piso) {
     console.warn(
-      `VERIF_PLAN (${rutaJson}): pausa_ms=${pausaMs} está bajo el piso de ${PAUSA_POR_DEFECTO_MS} ms; ` +
+      `VERIF_PLAN (${rutaJson}): pausa_ms=${pausaMs} está bajo el piso configurado de ${piso} ms; ` +
       `se usa el piso. El piso no se puede bajar desde el archivo, igual que RITMO_SII_MS no lo baja por variable de entorno.`
     );
-    pausaMs = PAUSA_POR_DEFECTO_MS;
+    pausaMs = piso;
   }
 
   return {
@@ -648,9 +652,14 @@ export async function ejecutarPlan<T>(
   empresaRut: string | undefined,
   opciones?: { pausaMsSinPiso?: number; onResultado?: (item: ResultadoPlanItem) => void }
 ): Promise<ResultadoPlanItem[]> {
+  // El piso es el CONFIGURADO (`pausaConfigurada()`, que respeta
+  // RITMO_SII_MS), no la constante `PAUSA_POR_DEFECTO_MS`: si el operador
+  // subió el piso por variable de entorno, un `plan.pausa_ms` más bajo (o
+  // ausente, cuando alguien construye `PlanArchivo` a mano sin pasar por
+  // `leerPlan`) tiene que quedar en el piso configurado, no en el default.
   const pausaMs = opciones?.pausaMsSinPiso !== undefined
     ? opciones.pausaMsSinPiso
-    : (plan.pausa_ms != null ? Math.max(plan.pausa_ms, PAUSA_POR_DEFECTO_MS) : undefined);
+    : (plan.pausa_ms != null ? Math.max(plan.pausa_ms, pausaConfigurada()) : undefined);
 
   return recorrerConRitmo(
     plan.consultas,
@@ -685,7 +694,13 @@ function describirFiltros(f: FiltrosNormalizados): string {
   if (f.folio != null) partes.push(`folio=${f.folio}${f.folio_hasta != null ? `-${f.folio_hasta}` : ''}`);
   if (f.contraparte) partes.push(`contraparte=${f.contraparte}`);
   if (f.rzn_soc) partes.push(`rzn_soc="${f.rzn_soc}"`);
-  if (f.max_tramos != null) partes.push(`max_tramos=${f.max_tramos}`);
+  // Siempre el valor EFECTIVO, aunque la consulta lo omita: el scraper igual
+  // corre con `MAX_TRAMOS_POR_DEFECTO` (ver mipymeHttp.ts), y dos consultas
+  // idénticas —una con el valor explícito y otra sin él— tienen que leerse
+  // IGUAL en el reporte, que es el punto entero de un modo que existe para
+  // comparar. `(default)` marca cuál de las dos fue la que no lo puso.
+  const maxTramosEfectivo = f.max_tramos ?? MAX_TRAMOS_POR_DEFECTO;
+  partes.push(`max_tramos=${maxTramosEfectivo}${f.max_tramos == null ? ' (default)' : ''}`);
   return partes.join(' ');
 }
 

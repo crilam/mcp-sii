@@ -355,6 +355,21 @@ describe('leerPlan (caminos de error del parser de entrada)', () => {
     expect(plan.pausa_ms).toBe(5000);
   });
 
+  // Mismo bloqueante que en ejecutarPlan: el piso de leerPlan tiene que ser
+  // el CONFIGURADO (RITMO_SII_MS), no la constante a secas.
+  it('con RITMO_SII_MS en un valor alto, sube pausa_ms a ESE piso y no al default', () => {
+    const anterior = process.env.RITMO_SII_MS;
+    process.env.RITMO_SII_MS = '5000';
+    try {
+      const ruta = archivoTemporal(JSON.stringify({ consultas: [{}], pausa_ms: 1500 }));
+      const plan = leerPlan(ruta);
+      expect(plan.pausa_ms).toBe(5000);
+    } finally {
+      if (anterior === undefined) delete process.env.RITMO_SII_MS;
+      else process.env.RITMO_SII_MS = anterior;
+    }
+  });
+
   // Menor: un elemento de "consultas" que no es un objeto revienta más abajo
   // (en `normalizarFiltros`) con un TypeError sin contexto — el mismo
   // criterio que los chequeos de tipo por campo, aplicado acá para decir

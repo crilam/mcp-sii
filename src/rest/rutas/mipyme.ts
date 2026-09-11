@@ -193,13 +193,19 @@ export function registrarRutasMipyme(
           fecha_hasta: l.fechaHasta,
           motivo: l.motivo,
           // Discriminador ESTRUCTURADO de la causa, para que el tenant no
-          // tenga que parsear `motivo` en prosa para saber si el corte fue
-          // por agotar `max_tramos` (el único caso que hoy hace que un
-          // `ok:true` sea un respaldo PARCIAL). Siempre presente con
-          // `?? 'OTRA'`: un campo que a veces existe y a veces la
-          // serialización JSON elide es más difícil de consumir que uno
-          // que siempre tiene valor. Ver docs/integracion-api.md.
-          causa: l.causa ?? 'OTRA',
+          // tenga que parsear `motivo` en prosa para saber qué acción
+          // corresponde. Siempre presente —un campo que a veces existe y a
+          // veces la serialización JSON elide es más difícil de consumir que
+          // uno que siempre tiene valor—, pero `l.causa` ausente NO es lo
+          // mismo que `'OTRA'`: `'OTRA'` significa "el scraper SÍ clasificó
+          // esto, y ninguna acción particular sirve"; ausente significa "el
+          // scraper no clasificó este corte" (hoy no debería pasar —los 26
+          // lugares que arman una limitación en mipymeHttp.ts están
+          // clasificados—, pero si un `push` nuevo se agrega sin `causa` es
+          // un bug ahí, no una razón para mentirle a este consumidor
+          // diciéndole "es otra cosa" cuando en realidad no se sabe qué es).
+          // Ver docs/integracion-api.md.
+          causa: l.causa ?? 'SIN_CLASIFICAR',
           // Reconstruibles por máquina: presentes sólo cuando el motivo salió
           // del tercer nivel de troceo (folio para emitidos, contraparte para
           // recibidos). Ver docs/integracion-api.md.
