@@ -361,6 +361,26 @@ export interface LimitacionRespaldoXml {
   // fijó `razonSocial`, hay que devolvérselo para que el reintento del
   // sub-rango no se olvide de acotar por ella.
   razonSocial?: string;
+  // Discriminador ESTRUCTURADO de la causa del corte, para que un consumidor
+  // (el ERP vía REST, o quien llame al scraper directo) no tenga que parsear
+  // `motivo` en PROSA para saber si esta limitación viene de agotar el
+  // presupuesto de tramos (`maxTramos`) — el único caso, hoy, que hace que un
+  // respaldo con `ok:true` sea un respaldo PARCIAL comparado con uno que
+  // cubrió el rango entero sin cortarse. Parsear el texto para esa decisión
+  // es frágil: cambiar una palabra del motivo (una traducción, una mejora de
+  // redacción) rompe la detección EN SILENCIO.
+  //
+  // `'OTRA'` agrupa a propósito el resto de las causas (tope de páginas de
+  // listado, folio único que excede por sí solo, portal caído, tercer nivel
+  // apagado, día lleno sin tipo_dte...): no son la misma clase de corte entre
+  // sí, así que agruparlas bajo su propio valor cada una sería agrandar esta
+  // enumeración sin que ningún consumidor lo necesite todavía — se agrega
+  // cuando alguien lo necesite, no antes (mismo criterio que ya usa el
+  // comentario de `TOPE_PAGINAS_LISTADO` más abajo para distinguir motivos).
+  // Opcional y no en TODOS los `push` de limitaciones — es aditivo: no se
+  // reclasificó cada motivo existente, sólo se marcó el que hoy hace falta
+  // distinguir.
+  causa?: 'PRESUPUESTO_TRAMOS' | 'OTRA';
 }
 
 export interface RespaldoXmlResult {
@@ -929,11 +949,15 @@ export class MipymeHttpScraper {
   }
 
   // Junta limitaciones ADYACENTES (el día siguiente al fin de una es el inicio
-  // de la próxima) que comparten el mismo `motivo` textual en una sola, con el
-  // rango unido. Dos limitaciones con motivos distintos —un día lleno al lado
-  // de un corte por tope de tramos— NO se fusionan aunque sean contiguas: el
-  // texto ya no describiría bien a las dos juntas, y el consumidor perdería la
-  // distinción entre "pedí este día con tipo_dte" y "acortá el rango".
+  // de la próxima) que vienen de la MISMA causa en una sola, con el rango
+  // unido. "La misma causa" es `causa === 'PRESUPUESTO_TRAMOS'` en las dos
+  // cuando el discriminador estructurado lo dice; para el resto (`'OTRA'` o
+  // sin clasificar) sigue siendo el `motivo` textual, porque esa bolsa junta
+  // motivos genuinamente distintos y ahí el texto es lo único que los separa.
+  // Dos limitaciones de causa distinta —un día lleno al lado de un corte por
+  // tope de tramos— NO se fusionan aunque sean contiguas: el consumidor
+  // perdería la distinción entre "pedí este día con tipo_dte" y "acortá el
+  // rango".
   //
   // Se ordena por `fechaDesde` primero porque la bisección no las produce en
   // orden: la rama izquierda de un nivel se resuelve entera (incluida su propia
@@ -967,7 +991,26 @@ export class MipymeHttpScraper {
         && anterior.folioHasta === actual.folioHasta
         && anterior.contraparteRut === actual.contraparteRut
         && anterior.razonSocial === actual.razonSocial;
-      if (anterior != null && contigua && anterior.motivo === actual.motivo && mismosCamposTercerNivel) {
+      // El discriminador ESTRUCTURADO (`causa`) reemplaza al texto sólo para
+      // el corte por presupuesto de tramos: ahí ya sabemos que las dos vienen
+      // de la MISMA clase de corte aunque el texto difiera según de qué parte
+      // de la recursión salió cada una (descarga principal, listado, tercer
+      // nivel por folio o por contraparte) — antes esas variantes de texto NO
+      // fusionaban entre sí aunque fueran el mismo tipo de corte en días
+      // vecinos, y esta es la mejora.
+      //
+      // Para todo lo demás (`'OTRA'` o sin clasificar) el texto SIGUE siendo
+      // el único discriminador: esa bolsa junta motivos genuinamente
+      // distintos (portal caído, tope de páginas de listado, folio único,
+      // día lleno...), y es EXACTAMENTE el caso que el comentario de arriba
+      // advierte —"un día lleno al lado de un corte por tope de tramos NO se
+      // fusiona"— así que comparar sólo por `causa` ahí fusionaría motivos
+      // que no deberían mezclarse.
+      const mismaCausaEstructurada = anterior != null
+        && anterior.causa === 'PRESUPUESTO_TRAMOS' && actual.causa === 'PRESUPUESTO_TRAMOS';
+      const mismoOrigenDelCorte = mismaCausaEstructurada
+        || (anterior != null && anterior.motivo === actual.motivo);
+      if (anterior != null && contigua && mismoOrigenDelCorte && mismosCamposTercerNivel) {
         anterior.fechaHasta = actual.fechaHasta;
       } else {
         fusionadas.push({ ...actual });
@@ -1006,6 +1049,7 @@ export class MipymeHttpScraper {
       limitaciones.push({
         fechaDesde: desde,
         fechaHasta: hasta,
+        causa: 'PRESUPUESTO_TRAMOS',
         motivo:
           `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para respetar el `
           + `tope de ${TOPE_DOCUMENTOS_SII} documentos por descarga del SII. Pedí un rango más corto `
@@ -1392,6 +1436,7 @@ export class MipymeHttpScraper {
           // por la misma razón.
           razonSocial: ctx.filtros.razonSocial,
           contraparteRut: ctx.filtros.contraparteRut,
+          causa: 'PRESUPUESTO_TRAMOS',
           motivo:
             `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para trocear por `
             + `contraparte el ${dia} (tipo ${ctx.filtros.tipoDte}): quedaron ${pendientes.length} `
@@ -1503,6 +1548,7 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           razonSocial: ctx.filtros.razonSocial,
+          causa: 'PRESUPUESTO_TRAMOS',
           motivo:
             `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más de `
             + `${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día con `
@@ -1614,6 +1660,7 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           razonSocial: ctx.filtros.razonSocial,
+          causa: 'PRESUPUESTO_TRAMOS',
           motivo:
             `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más `
             + `de ${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día `
@@ -1732,6 +1779,7 @@ export class MipymeHttpScraper {
       // tiene un `overrideBase` por grupo — el filtro es siempre el del
       // llamador original.
       contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      causa: 'PRESUPUESTO_TRAMOS',
       // `folioDesde`/`folioHasta` acá son el ENVOLVENTE (`Math.min`/`Math.max`)
       // de los folios PENDIENTES, no necesariamente contiguo: con huecos entre
       // grupos (p.ej. folios 100..101 y 900..901 pendientes), el rango sale

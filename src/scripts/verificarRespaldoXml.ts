@@ -441,14 +441,18 @@ export interface ResultadoConsulta {
   topoLimiteTramos?: boolean;
 }
 
-// El motivo con que el scraper registra un corte por tope de tramos (ver
-// mipymeHttp.ts, siempre la misma frase: "necesita más de N tramos"). No es
-// un campo estructurado en `LimitacionRespaldoXml` —sólo texto—, así que se
-// detecta por el patrón; es el único lugar donde ese motivo es reconocible.
-const PATRON_TOPE_TRAMOS = /necesita más de \d+ tramos/;
-
 // Lo mínimo que hace falta de un scraper para esta consulta — así un test
 // puede pasar un doble sin construir un `MipymeHttpScraper` real.
+//
+// `limitaciones[].causa` es el discriminador ESTRUCTURADO que el scraper
+// devuelve (ver `LimitacionRespaldoXml` en mipymeHttp.ts):
+// `'PRESUPUESTO_TRAMOS'` cuando el corte fue por agotar `max_tramos`. Antes esto se
+// adivinaba con un regex sobre `motivo` ("necesita más de N tramos"), pero
+// ESE texto es una plantilla de prosa que nadie prometió estable — cambiarle
+// una palabra (una redacción mejor, una traducción) hacía que la marca
+// desapareciera EN SILENCIO y el reporte volviera a mostrar una consulta que
+// topó al lado de una que no, sin avisar. Leer el campo es una lectura de
+// contrato, no una inferencia sobre prosa.
 export interface ScraperRespaldoXml {
   respaldoXml(filtros: {
     empresaRut?: string;
@@ -464,7 +468,7 @@ export interface ScraperRespaldoXml {
   }): Promise<{
     documentos: number;
     tramos: { fechaDesde: string; fechaHasta: string; documentos: number; xml: string }[];
-    limitaciones: { fechaDesde: string; fechaHasta: string; motivo: string }[];
+    limitaciones: { fechaDesde: string; fechaHasta: string; motivo: string; causa?: 'PRESUPUESTO_TRAMOS' | 'OTRA' }[];
   }>;
 }
 
@@ -492,7 +496,7 @@ export async function consultarRespaldoXml<T>(
       maxTramos: filtros.max_tramos,
     }));
 
-    const topoLimiteTramos = r.limitaciones.some(l => PATRON_TOPE_TRAMOS.test(l.motivo));
+    const topoLimiteTramos = r.limitaciones.some(l => l.causa === 'PRESUPUESTO_TRAMOS');
 
     // Mismo criterio que la ruta REST (ver rest/rutas/mipyme.ts): si NO se
     // bajó NADA y hubo limitaciones, es una FALLA — un `ok:true` con

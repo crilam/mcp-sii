@@ -33,7 +33,11 @@ function crearRegistroDoble(): { registro: RegistroSesiones<SesionFake>; constru
   return { registro, construcciones: () => contador };
 }
 
-type RespuestaScraper = { documentos: number; tramos: { fechaDesde: string; fechaHasta: string; documentos: number; xml: string }[]; limitaciones: { fechaDesde: string; fechaHasta: string; motivo: string }[] };
+type RespuestaScraper = {
+  documentos: number;
+  tramos: { fechaDesde: string; fechaHasta: string; documentos: number; xml: string }[];
+  limitaciones: { fechaDesde: string; fechaHasta: string; motivo: string; causa?: 'PRESUPUESTO_TRAMOS' | 'OTRA' }[];
+};
 type FiltrosScraper = Parameters<ScraperRespaldoXml['respaldoXml']>[0];
 
 // Un scraper doble por consulta: la N-ésima llamada a `respaldoXml` devuelve
@@ -153,7 +157,7 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
     expect(resultados[1].resultado.detalle).toMatch(/consultas\[1\]\.folio_hasta requiere folio/);
   });
 
-  it('propaga max_tramos de la consulta al scraper, y marca en el reporte la que topó el tope', async () => {
+  it('propaga max_tramos de la consulta al scraper, y marca en el reporte la que topó el tope leyendo el campo estructurado (NO el texto del motivo)', async () => {
     const { registro } = crearRegistroDoble();
     const llamadas: FiltrosScraper[] = [];
     const crearScraper = scraperProgramado([
@@ -162,7 +166,12 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
         tramos: [{ fechaDesde: '2026-01-01', fechaHasta: '2026-01-15', documentos: 20, xml: '<xml/>' }],
         limitaciones: [{
           fechaDesde: '2026-01-16', fechaHasta: '2026-01-31',
-          motivo: 'El respaldo de 11111111-1 necesita más de 3 tramos para respetar el tope de 20 documentos por descarga del SII.',
+          // Redacción A PROPÓSITO distinta de cualquier plantilla real del
+          // scraper (ni "necesita más de N tramos" ni ninguna otra frase
+          // conocida): si el test sigue pasando, es porque la marca sale del
+          // campo `causa` estructurado, no de adivinar por el texto.
+          motivo: 'ranuras de descarga completamente agotadas para este período, probá de nuevo con otro ajuste',
+          causa: 'PRESUPUESTO_TRAMOS',
         }],
       },
     ], llamadas);
@@ -178,6 +187,35 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
     expect(reporte).toContain('TOPÓ max_tramos');
     expect(reporte).toContain('NO comparable');
     expect(reporte).toContain('max_tramos=3');
+  });
+
+  // La otra mitad de la prueba anterior: una limitación que SÍ usa la
+  // plantilla de texto vieja ("necesita más de N tramos") pero sin `causa`
+  // NO se marca como tope — si la detección todavía mirara el texto, esta
+  // aserción fallaría. Sin el campo estructurado no hay forma honesta de
+  // saber si es un corte por presupuesto o alguna otra limitación que por
+  // casualidad comparte palabras.
+  it('NO marca como tope una limitación con la vieja frase "necesita más de N tramos" si no trae `causa`', async () => {
+    const { registro } = crearRegistroDoble();
+    const crearScraper = scraperProgramado([
+      {
+        documentos: 20,
+        tramos: [{ fechaDesde: '2026-01-01', fechaHasta: '2026-01-15', documentos: 20, xml: '<xml/>' }],
+        limitaciones: [{
+          fechaDesde: '2026-01-16', fechaHasta: '2026-01-31',
+          motivo: 'El respaldo de 11111111-1 necesita más de 3 tramos para respetar el tope de 20 documentos.',
+          // Sin `causa`: a propósito, para separar "el texto lo dice" de
+          // "el campo lo dice".
+        }],
+      },
+    ]);
+    const plan: PlanArchivo = { pausa_ms: 0, consultas: [{ max_tramos: 3 }] };
+
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+
+    expect(resultados[0].resultado.topoLimiteTramos).toBe(false);
+    const reporte = armarReporte(plan, resultados, 1);
+    expect(reporte).not.toContain('TOPÓ max_tramos');
   });
 
   it('describirFiltros muestra rzn_soc en el reporte (dos consultas que sólo difieren en razón social no se leen igual)', async () => {

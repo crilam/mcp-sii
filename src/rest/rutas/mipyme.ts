@@ -192,6 +192,11 @@ export function registrarRutasMipyme(
           fecha_desde: l.fechaDesde,
           fecha_hasta: l.fechaHasta,
           motivo: l.motivo,
+          // Discriminador ESTRUCTURADO de la causa, para que el tenant no
+          // tenga que parsear `motivo` en prosa para saber si el corte fue
+          // por agotar `max_tramos` (el único caso que hoy hace que un
+          // `ok:true` sea un respaldo PARCIAL). Ver docs/integracion-api.md.
+          causa: l.causa,
           // Reconstruibles por máquina: presentes sólo cuando el motivo salió
           // del tercer nivel de troceo (folio para emitidos, contraparte para
           // recibidos). Ver docs/integracion-api.md.
