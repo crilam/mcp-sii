@@ -38,7 +38,10 @@ function crearRegistroDoble(): { registro: RegistroSesiones<SesionFake>; constru
 type RespuestaScraper = {
   documentos: number;
   tramos: { fechaDesde: string; fechaHasta: string; documentos: number; xml: string }[];
-  limitaciones: { fechaDesde: string; fechaHasta: string; motivo: string; causa?: 'PRESUPUESTO_TRAMOS' | 'OTRA' }[];
+  limitaciones: {
+    fechaDesde: string; fechaHasta: string; motivo: string;
+    causa?: 'PRESUPUESTO_TRAMOS' | 'SII_NO_DISPONIBLE' | 'OTRA';
+  }[];
 };
 type FiltrosScraper = Parameters<ScraperRespaldoXml['respaldoXml']>[0];
 
@@ -156,7 +159,7 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
     expect(resultados[1].resultado.detalle).toMatch(/consultas\[1\]\.folio_hasta requiere folio/);
   });
 
-  it('propaga max_tramos de la consulta al scraper, y marca en el reporte la que topó el tope leyendo el campo estructurado (NO el texto del motivo)', async () => {
+  it('propaga max_tramos de la consulta al scraper, y marca en el reporte la que quedó incompleta leyendo el campo estructurado (NO el texto del motivo)', async () => {
     const { registro } = crearRegistroDoble();
     const llamadas: FiltrosScraper[] = [];
     const crearScraper = scraperProgramado([
@@ -180,22 +183,23 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
 
     expect(llamadas[0].maxTramos).toBe(3);
     expect(resultados[0].resultado.ok).toBe(true);
-    expect(resultados[0].resultado.comparabilidad).toBe('TOPO');
+    expect(resultados[0].resultado.completitud).toBe('INCOMPLETO');
 
     const reporte = armarReporte(plan, resultados, 1);
-    expect(reporte).toContain('TOPÓ max_tramos');
+    expect(reporte).toContain('INCOMPLETO');
     expect(reporte).toContain('NO comparable');
+    expect(reporte).toContain('subí max_tramos o acotá el rango');
     expect(reporte).toContain('max_tramos=3');
   });
 
   // La otra mitad de la prueba anterior: una limitación que SÍ usa la
   // plantilla de texto vieja ("necesita más de N tramos") pero sin `causa`
-  // NO se marca como TOPO — si la detección todavía mirara el texto, esta
-  // aserción fallaría. Pero tampoco se marca como NO_TOPO: la ausencia de
-  // `causa` significa "no sé", no "no topó", así que el estado correcto es
-  // NO_CLASIFICADO y el reporte tiene que decir que no puede afirmar
-  // comparabilidad, no callarse.
-  it('sin `causa` la consulta queda NO_CLASIFICADA (no "no topó"), aunque el motivo use la vieja frase "necesita más de N tramos"', async () => {
+  // NO se marca como INCOMPLETO con causa conocida — si la detección
+  // todavía mirara el texto, esta aserción fallaría. La ausencia de `causa`
+  // significa "no sé", así que el estado correcto es NO_CLASIFICADO y el
+  // reporte tiene que decir que no puede afirmar qué acción corresponde, no
+  // callarse.
+  it('sin `causa` la consulta queda NO_CLASIFICADA, aunque el motivo use la vieja frase "necesita más de N tramos"', async () => {
     const { registro } = crearRegistroDoble();
     const crearScraper = scraperProgramado([
       {
@@ -213,14 +217,14 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
 
     const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
 
-    expect(resultados[0].resultado.comparabilidad).toBe('NO_CLASIFICADO');
+    expect(resultados[0].resultado.completitud).toBe('NO_CLASIFICADO');
     const reporte = armarReporte(plan, resultados, 1);
-    expect(reporte).not.toContain('TOPÓ max_tramos');
     expect(reporte).toContain('NO CLASIFICADO');
     expect(reporte).toContain('no se puede afirmar');
+    expect(reporte).toContain('NO comparable');
   });
 
-  it('sin limitaciones (o todas OTRA) la consulta queda NO_TOPO, sin marca en el reporte', async () => {
+  it('sin limitaciones la consulta queda COMPLETO, sin marca en el reporte', async () => {
     const { registro } = crearRegistroDoble();
     const crearScraper = scraperProgramado([
       { documentos: 5, tramos: [{ fechaDesde: '2026-01-01', fechaHasta: '2026-01-31', documentos: 5, xml: '<xml/>' }], limitaciones: [] },
@@ -229,10 +233,65 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
 
     const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
 
-    expect(resultados[0].resultado.comparabilidad).toBe('NO_TOPO');
+    expect(resultados[0].resultado.completitud).toBe('COMPLETO');
     const reporte = armarReporte(plan, resultados, 1);
-    expect(reporte).not.toContain('TOPÓ max_tramos');
+    expect(reporte).not.toContain('INCOMPLETO');
     expect(reporte).not.toContain('NO CLASIFICADO');
+  });
+
+  // Con la pregunta correcta ("¿está completo?") una limitación clasificada
+  // como OTRA también deja la consulta incompleta y NO comparable — antes,
+  // cuando la pregunta era "¿topó el presupuesto?", esto pasaba como
+  // comparable, que es el mismo bug que la prueba de portal caído expone.
+  it('una limitación clasificada como OTRA también deja la consulta INCOMPLETA, NO comparable', async () => {
+    const { registro } = crearRegistroDoble();
+    const crearScraper = scraperProgramado([
+      {
+        documentos: 5,
+        tramos: [{ fechaDesde: '2026-01-01', fechaHasta: '2026-01-15', documentos: 5, xml: '<xml/>' }],
+        limitaciones: [{
+          fechaDesde: '2026-01-16', fechaHasta: '2026-01-31',
+          motivo: 'Motivo cualquiera, clasificado genéricamente.',
+          causa: 'OTRA',
+        }],
+      },
+    ]);
+    const plan: PlanArchivo = { consultas: [{}] };
+
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
+
+    expect(resultados[0].resultado.completitud).toBe('INCOMPLETO');
+    const reporte = armarReporte(plan, resultados, 1);
+    expect(reporte).toContain('NO comparable');
+  });
+
+  // Bug reportado por el coordinador: una limitación por portal caído
+  // (causa SII_NO_DISPONIBLE) deja el respaldo INCOMPLETO igual que una por
+  // presupuesto — trajo menos documentos de los que existen — pero
+  // `comparabilidadDe` sólo miraba si la causa era PRESUPUESTO_TRAMOS, así
+  // que esto pasaba como "NO_TOPO" (comparable). Esta prueba tiene que
+  // fallar ANTES del arreglo y pasar después.
+  it('una limitación de portal caído (SII_NO_DISPONIBLE) deja la consulta NO comparable', async () => {
+    const { registro } = crearRegistroDoble();
+    const crearScraper = scraperProgramado([
+      {
+        documentos: 5,
+        tramos: [{ fechaDesde: '2026-01-01', fechaHasta: '2026-01-15', documentos: 5, xml: '<xml/>' }],
+        limitaciones: [{
+          fechaDesde: '2026-01-16', fechaHasta: '2026-01-31',
+          motivo: 'El portal del SII respondió su página de error genérica; reintentá más tarde.',
+          causa: 'SII_NO_DISPONIBLE',
+        }],
+      },
+    ]);
+    const plan: PlanArchivo = { consultas: [{}] };
+
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
+
+    expect(resultados[0].resultado.completitud).toBe('INCOMPLETO');
+    const reporte = armarReporte(plan, resultados, 1);
+    expect(reporte).toContain('NO comparable');
+    expect(reporte).toContain('esperá y reintentá más tarde');
   });
 
   it('describirFiltros muestra rzn_soc en el reporte (dos consultas que sólo difieren en razón social no se leen igual)', async () => {

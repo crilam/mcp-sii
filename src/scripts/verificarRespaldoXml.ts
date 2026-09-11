@@ -478,24 +478,35 @@ export interface ResultadoConsulta {
   detalle?: string;
   documentos?: number;
   tramos?: TramoConsulta[];
-  // Tres estados, no dos: la AUSENCIA de `causa` en una limitación no
-  // significa "no topó", significa "no sé" — una limitación sin clasificar
-  // puede perfectamente ser un corte por presupuesto de tramos que todavía
-  // no se marcó en `mipymeHttp.ts`. Leer esa ausencia como "no topó" afirma
-  // comparabilidad que no está confirmada.
-  //   'TOPO'           al menos una limitación vino con causa PRESUPUESTO_TRAMOS.
-  //   'NO_CLASIFICADO' ninguna topó, pero hay al menos una sin `causa`: no se
-  //                    puede afirmar que esta consulta sea comparable con otra.
-  //   'NO_TOPO'        sin limitaciones, o todas clasificadas como OTRA.
-  comparabilidad?: 'TOPO' | 'NO_TOPO' | 'NO_CLASIFICADO';
+  // La pregunta que importa NO es "¿el presupuesto de tramos truncó el
+  // resultado?" (eso es sólo UNA causa posible de estar incompleto), es
+  // "¿este resultado está completo?". CUALQUIER limitación —por presupuesto,
+  // por portal caído, por lo que sea— significa que la consulta trajo MENOS
+  // de lo que hay, y eso la hace NO comparable con una que no tuvo ninguna.
+  // Confundir esto fue el bug real: una consulta cuya única limitación era
+  // "portal caído" pasaba como comparable, exactamente la misma clase de
+  // confusión (3 documentos contra 7, sin ningún aviso) que esta tarea vino a
+  // cerrar.
+  //   'COMPLETO'       sin limitaciones: se cubrió el rango entero.
+  //   'INCOMPLETO'     hay al menos una limitación y TODAS traen `causa`: se
+  //                    sabe la causa y qué acción corresponde (ver `causa`
+  //                    en `LimitacionRespaldoXml`), pero el resultado NO es
+  //                    comparable con uno completo igual.
+  //   'NO_CLASIFICADO' hay al menos una limitación SIN `causa`: además de
+  //                    incompleto, no se sabe qué hacer con ella.
+  completitud?: 'COMPLETO' | 'INCOMPLETO' | 'NO_CLASIFICADO';
+  // Las limitaciones del scraper, tal cual, para que el reporte pueda listar
+  // causa + acción de cada una cuando `completitud !== 'COMPLETO'`. Ausente
+  // cuando la consulta falló antes de llegar al scraper (`error: 'ERROR'`).
+  limitaciones?: { fechaDesde: string; fechaHasta: string; motivo: string; causa?: string }[];
 }
 
-function comparabilidadDe(
+function completitudDe(
   limitaciones: { causa?: 'PRESUPUESTO_TRAMOS' | 'SII_NO_DISPONIBLE' | 'OTRA' }[]
-): 'TOPO' | 'NO_TOPO' | 'NO_CLASIFICADO' {
-  if (limitaciones.some(l => l.causa === 'PRESUPUESTO_TRAMOS')) return 'TOPO';
+): 'COMPLETO' | 'INCOMPLETO' | 'NO_CLASIFICADO' {
+  if (limitaciones.length === 0) return 'COMPLETO';
   if (limitaciones.some(l => l.causa === undefined)) return 'NO_CLASIFICADO';
-  return 'NO_TOPO';
+  return 'INCOMPLETO';
 }
 
 // Lo mínimo que hace falta de un scraper para esta consulta — así un test
@@ -556,7 +567,7 @@ export async function consultarRespaldoXml<T>(
       maxTramos: filtros.max_tramos,
     }));
 
-    const comparabilidad = comparabilidadDe(r.limitaciones);
+    const completitud = completitudDe(r.limitaciones);
 
     // Mismo criterio que la ruta REST (ver rest/rutas/mipyme.ts): si NO se
     // bajó NADA y hubo limitaciones, es una FALLA — un `ok:true` con
@@ -566,7 +577,7 @@ export async function consultarRespaldoXml<T>(
         ok: false,
         error: 'LIMITE_CONOCIDO',
         detalle: r.limitaciones.map(l => `${l.fechaDesde}..${l.fechaHasta}: ${l.motivo}`).join(' | '),
-        comparabilidad,
+        completitud,
       };
     }
 
@@ -579,7 +590,11 @@ export async function consultarRespaldoXml<T>(
         documentos: t.documentos,
         veredicto_tercer_nivel: calcularVeredictoTercerNivel(filtros.origen, t.xml, filtros) ?? undefined,
       })),
-      comparabilidad,
+      completitud,
+      // El detalle de causa/acción para el reporte: sólo tiene sentido cuando
+      // el resultado NO está completo (si no hay limitaciones, no hay nada
+      // que explicar).
+      limitaciones: r.limitaciones,
     };
   } catch (e) {
     // Una consulta que falla NO puede tumbar el resto del plan: el valor del
@@ -674,6 +689,22 @@ function describirFiltros(f: FiltrosNormalizados): string {
   return partes.join(' ');
 }
 
+// Qué acción corresponde a cada `causa` — el mismo criterio documentado en
+// `LimitacionRespaldoXml.causa` (mipymeHttp.ts) y en la tabla de
+// docs/integracion-api.md, para que el reporte no sólo diga QUE está
+// incompleto sino QUÉ HACER al respecto.
+function accionParaCausa(causa: string | undefined): string {
+  switch (causa) {
+    case 'PRESUPUESTO_TRAMOS': return 'subí max_tramos o acotá el rango';
+    // NUNCA "subí el presupuesto" acá: reintentar con más tramos contra un
+    // portal caído es el barrido de llamadas que ritmoSii.ts documenta como
+    // la causa del bloqueo.
+    case 'SII_NO_DISPONIBLE': return 'esperá y reintentá más tarde (NO subas max_tramos)';
+    case 'OTRA': return 'revisá el motivo de la limitación para la acción específica';
+    default: return 'sin clasificar: no se sabe qué acción corresponde';
+  }
+}
+
 // Un solo archivo, legible, en el orden en que se ejecutaron las consultas —
 // es lo que permite COMPARAR: hoy el script sólo da un veredicto por corrida,
 // y el valor de un plan está en ver las consultas juntas.
@@ -717,19 +748,22 @@ export function armarReporte(
       lineas.push(`  FALLA  error=${resultado.error} detalle=${resultado.detalle ?? ''}`);
       return;
     }
-    // Marcado ACÁ y no sólo en el detalle de una limitación: una consulta que
-    // topó max_tramos puede seguir siendo ok:true con un respaldo PARCIAL, y
-    // comparar sus documentos contra los de una consulta que no topó es
+    // Marcado ACÁ y no sólo en el detalle de una limitación: CUALQUIER
+    // limitación (sea cual sea su causa) significa que esta consulta trajo
+    // MENOS de lo que hay, y compararla contra una consulta completa es
     // exactamente la comparación no comparable que este modo vino a evitar.
-    // El tercer estado (NO_CLASIFICADO) existe porque la ausencia de `causa`
-    // en una limitación significa "no sé", no "no topó": afirmar
-    // comparabilidad ahí sería afirmar de más.
+    // La pregunta no es "¿topó el presupuesto?" —eso es sólo una causa
+    // posible—, es "¿está completo?": una limitación por portal caído dejaría
+    // este resultado tan incompleto como una por presupuesto.
     let marca: string | undefined;
-    if (resultado.comparabilidad === 'TOPO') {
-      marca = '  ⚠ TOPÓ max_tramos — respaldo PARCIAL, NO comparable con una consulta que no topó';
-    } else if (resultado.comparabilidad === 'NO_CLASIFICADO') {
-      marca = '  ⚠ NO CLASIFICADO — hay limitaciones sin `causa`; no se puede afirmar que esta '
-        + 'consulta sea comparable con otra';
+    if (resultado.completitud === 'INCOMPLETO' || resultado.completitud === 'NO_CLASIFICADO') {
+      const causas = [...new Set((resultado.limitaciones ?? []).map(l => l.causa))];
+      const detalle = causas.map(c => `${c ?? 'sin clasificar'} → ${accionParaCausa(c)}`).join('; ');
+      marca = resultado.completitud === 'NO_CLASIFICADO'
+        ? `  ⚠ NO CLASIFICADO — hay limitaciones sin \`causa\`; no se puede afirmar qué acción `
+          + `corresponde. NO comparable con una consulta completa. (${detalle})`
+        : `  ⚠ INCOMPLETO — respaldo PARCIAL, NO comparable con una consulta completa. `
+          + `Causa(s) y acción: ${detalle}`;
     }
     lineas.push(`  ${resultado.documentos} documentos en ${resultado.tramos?.length ?? 0} tramo(s)`);
     if (marca) lineas.push(marca);
