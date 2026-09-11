@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   MipymeHttpScraper, LimitacionRespaldoXml, soloCuerpoRut, acotarPorFolio, enGrupos,
+  enGruposDeFolios, ANCHO_MAXIMO_RANGO_FOLIO,
 } from '../../src/scrapers/mipymeHttp';
 import { LimitacionConocida } from '../../src/erroresConsulta';
 import { esperar } from '../../src/ritmoSii';
@@ -2472,6 +2473,78 @@ describe('enGrupos', () => {
   it('lista vacía, ningún grupo', () => {
     expect(enGrupos([], 20)).toEqual([]);
   });
+});
+
+// `enGruposDeFolios` es la hermana de `enGrupos` que además acota el ANCHO
+// del rango envolvente (`ultimo - primero`), no sólo la cantidad — medido en
+// vivo que un rango ancho rompe la consulta contra el SII por sí solo,
+// aparte de cuántos folios entren (ver `ANCHO_MAXIMO_RANGO_FOLIO`).
+describe('enGruposDeFolios', () => {
+  it('folios densos: se comporta igual que enGrupos, el ancho no molesta', () => {
+    // Folios consecutivos 100..119: veinte elementos, rango de apenas 19 —
+    // muy por debajo de cualquier ancho máximo razonable, así que el corte
+    // por cantidad sigue siendo el único que actúa (regresión del caso de
+    // siempre).
+    const densos = Array.from({ length: 20 }, (_, i) => 100 + i);
+    expect(enGruposDeFolios(densos, 20)).toEqual([densos]);
+    expect(enGruposDeFolios([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+
+  it('numeración dispersa: se parte en más grupos y ninguno excede el ancho máximo', () => {
+    // Veinte folios (cabrían en un solo grupo por cantidad) pero con huecos
+    // enormes entre ellos: sin el corte por ancho, `enGrupos` los pondría
+    // TODOS juntos y el rango envolvente (folio 1 a folio ~19.000.000) sería
+    // justo el patrón medido como roto contra el SII real.
+    const dispersos = [
+      1, 50, 100,
+      2_000_000, 2_000_050, 2_000_100,
+      8_000_000, 8_000_050, 8_000_100,
+      19_000_000, 19_000_050, 19_000_100,
+    ];
+    const grupos = enGruposDeFolios(dispersos, 20);
+    expect(grupos.length).toBeGreaterThan(1);
+    for (const grupo of grupos) {
+      const ancho = grupo[grupo.length - 1] - grupo[0];
+      expect(ancho).toBeLessThanOrEqual(ANCHO_MAXIMO_RANGO_FOLIO);
+    }
+  });
+
+  it('la concatenación de los grupos es exactamente la entrada, en orden, sin perder ni duplicar folios', () => {
+    const dispersos = [
+      1, 50, 100,
+      2_000_000, 2_000_050, 2_000_100,
+      8_000_000, 8_000_050, 8_000_100,
+      19_000_000, 19_000_050, 19_000_100,
+    ];
+    expect(enGruposDeFolios(dispersos, 20).flat()).toEqual(dispersos);
+    // Ídem con el caso denso, para no depender de un solo arreglo de prueba.
+    const densos = Array.from({ length: 45 }, (_, i) => 100 + i);
+    expect(enGruposDeFolios(densos, 20).flat()).toEqual(densos);
+  });
+
+  it('dos folios separados por más que el ancho máximo terminan en grupos distintos, y los dos se piden', () => {
+    const separados = [10, 10 + ANCHO_MAXIMO_RANGO_FOLIO + 1];
+    const grupos = enGruposDeFolios(separados, 20);
+    expect(grupos).toEqual([[10], [10 + ANCHO_MAXIMO_RANGO_FOLIO + 1]]);
+    expect(grupos.flat()).toEqual(separados);
+  });
+
+  it('arreglo vacío, ningún grupo', () => {
+    expect(enGruposDeFolios([], 20)).toEqual([]);
+  });
+
+  it('un solo folio, un solo grupo de un elemento', () => {
+    expect(enGruposDeFolios([42], 20)).toEqual([[42]]);
+  });
+
+  // Validación por mutación (pedida en el brief): si se quita el corte por
+  // ancho —dejando sólo el corte por cantidad, como estaba `enGrupos`—, este
+  // mismo caso de numeración dispersa tiene que FALLAR. Se deja como
+  // comentario porque no hay forma de "romper" la implementación desde el
+  // test sin acceder a su interior; se verificó a mano comentando la
+  // condición `excederiaAncho` en `enGruposDeFolios` y confirmando que el
+  // test de arriba ("numeración dispersa...") falla (un solo grupo con
+  // ancho ~19.000.099, muy por encima de `ANCHO_MAXIMO_RANGO_FOLIO`).
 });
 
 // Invariante estructural: cuatro rondas seguidas de review encontraron el
