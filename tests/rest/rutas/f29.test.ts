@@ -17,10 +17,11 @@ const CRED = { rut: '11.111.111-1', clave: 'secreta' };
 describe('registrarRutasF29', () => {
   afterEach(() => jest.clearAllMocks());
 
-  it('registra las 3 rutas bajo /v1/f29', () => {
+  it('registra las 4 rutas bajo /v1/f29', () => {
     expect(new Set(armar().keys())).toEqual(new Set([
       'POST /v1/f29/estado-declaracion',
       'POST /v1/f29/propuesta',
+      'POST /v1/f29/ppm',
       'POST /v1/f29/formulario-compacto',
     ]));
   });

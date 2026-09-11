@@ -2,7 +2,7 @@ import { RegistroSesiones } from '../../registroSesiones';
 import { SessionManager } from '../../session';
 import { ProveedorCredencialesRuntime } from '../../credencialesRuntime';
 import * as core from '../../core/f29';
-import { schemaEstadoF29, schemaCompactoF29, schemaPropuestaF29 } from '../../core/schemas/f29';
+import { schemaEstadoF29, schemaCompactoF29, schemaPropuestaF29, schemaPpmF29 } from '../../core/schemas/f29';
 import { ejecutorPara } from '../ejecutorPassThrough';
 import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from './comun';
 
@@ -11,6 +11,7 @@ import { RutaHandler, ejecutar, conCredencial, credencialDe, badRequest } from '
 const zodEstado = conCredencial(schemaEstadoF29);
 const zodCompacto = conCredencial(schemaCompactoF29);
 const zodPropuesta = conCredencial(schemaPropuestaF29);
+const zodPpm = conCredencial(schemaPpmF29);
 
 // Marcador interno para sacar el caso "el SII no arma propuesta" a través de
 // `ejecutar`, que envuelve todo lo que no lanza como `{ok:true, ...}`. El nombre
@@ -86,6 +87,43 @@ export function registrarRutasF29(
       };
     }
     return respuesta;
+  });
+
+  // PPM del período: la cuarta fuente de la cuadratura, y la única que no sale
+  // del Registro de Compras y Ventas — el SII la calcula con la renta del año
+  // anterior.
+  //
+  // No se devuelve `rutContribuyente` ni `dv`, que el SII sí incluye en la
+  // respuesta: quien pregunta ya sabe por qué RUT preguntó, y devolverlo de
+  // vuelta sólo agrega un lugar más donde el RUT puede quedar registrado.
+  //
+  // Los `valor` van como STRING y los códigos sin normalizar, igual que en la
+  // propuesta: la tasa del 115 viene "0.125" y cualquier conversión la rompe.
+  rutas.set('POST /v1/f29/ppm', async body => {
+    const p = zodPpm.safeParse(body);
+    if (!p.success) return badRequest(p.error);
+    const { rut, periodo } = p.data;
+    const ejecutor = ejecutorPara(registro, credenciales, rut, credencialDe(p.data));
+    return ejecutar(async () => {
+      const r = await core.tasaPpm(ejecutor, rut, periodo);
+      return {
+        periodo: r.periodo,
+        casilleros: r.casilleros,
+        cod563_propuesto: r.cod563Propuesto,
+        tasa_idpc: r.tasaIdpc,
+        categoria_tributaria: r.categoriaTributaria,
+        // `false` acá significa que el asistente de PPM no se usó en el período,
+        // y entonces el `563` es lo que el SII PROPONE, no lo declarado. Sin
+        // este campo los dos casos se leen igual.
+        realizado: r.realizado,
+        fuera_de_plazo: r.fueraDePlazo,
+        es_propyme: r.esPropyme,
+        // Cuándo consultamos NOSOTROS, no el SII: misma razón que en la
+        // propuesta — el dato se recalcula solo y una comparación sin marca de
+        // tiempo no se puede auditar después.
+        generada_en: new Date().toISOString(),
+      };
+    });
   });
 
   rutas.set('POST /v1/f29/formulario-compacto', async body => {
