@@ -35,10 +35,13 @@ import { rutEsValido } from '../rut';
 //                      VERIF_FOLIO/VERIF_FOLIO_HASTA o VERIF_CONTRAPARTE es
 //                      justo la combinación que usa el tercer nivel de troceo
 //                      del respaldo XML (folio para emitidos, contraparte
-//                      para recibidos) y que HOY NO está verificada
-//                      end-to-end contra el SII — correr este script con las
-//                      dos combinaciones antes de prender
-//                      RESPALDO_XML_TERCER_NIVEL=1 en un ambiente real.
+//                      para recibidos). La combinación con folio ya se
+//                      verificó end-to-end contra el SII (ver
+//                      `tercerNivelHabilitado` en ritmoSii.ts); la
+//                      combinación con contraparte SIGUE sin verificarse —
+//                      correr este script con VERIF_CONTRAPARTE antes de
+//                      prender RESPALDO_XML_TERCER_NIVEL=1 en un ambiente
+//                      real que dependa del eje de recibidos.
 //   VERIF_MAX_TRAMOS   presupuesto de tramos para esta consulta (entero entre
 //                      1 y MAX_TRAMOS_ABSOLUTO; default MAX_TRAMOS_POR_DEFECTO,
 //                      igual que la ruta REST). Sin esto, un rango ancho en
@@ -261,11 +264,12 @@ function validarFecha(valor: string, etiqueta: string): void {
 }
 
 // El tercer nivel de troceo combina TPO_DOC con FOLIO/FOLIOHASTA o con
-// RUT_RECP en la misma llamada, y esa combinación no está verificada
-// end-to-end contra el SII (ver RESPALDO_XML_TERCER_NIVEL en ritmoSii.ts). Si
-// se pidieron ambos filtros a la vez, esto dice EXPLÍCITAMENTE si el CGI los
-// respetó los dos o si ignoró alguno — que es justo lo que hay que confirmar
-// antes de prender el flag. `null` cuando el chequeo no tiene con qué
+// RUT_RECP en la misma llamada. La combinación con folio ya se verificó
+// end-to-end contra el SII (ver `tercerNivelHabilitado` en ritmoSii.ts); la
+// combinación con contraparte sigue sin verificarse. Si se pidieron ambos
+// filtros a la vez, esto dice EXPLÍCITAMENTE si el CGI los respetó los dos o
+// si ignoró alguno — que es justo lo que hay que confirmar antes de prender
+// el flag para el eje que falte. `null` cuando el chequeo no tiene con qué
 // confirmarse (el XML no trae el campo), no `true`: antes un SetDTE vacío
 // contaba como "respetado" sin haber verificado nada.
 export function calcularVeredictoTercerNivel(

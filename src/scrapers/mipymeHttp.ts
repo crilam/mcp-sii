@@ -294,21 +294,23 @@ export const MAX_TRAMOS_ABSOLUTO = 48;
 const TOPE_PAGINAS_LISTADO = 10;
 
 // Tope de limitaciones de "folio único que excede por sí solo el tope" por
-// día+tipo (o día+contraparte, del lado recibido). Escenario que motiva NO
-// activar el tercer nivel por defecto: si el CGI de descarga ignorara
-// `FOLIO`/`FOLIOHASTA` (el riesgo no verificado que documenta
-// `tercerNivelHabilitado` en ritmoSii.ts) con el flag igual prendido, TODA
-// descarga de folio único seguiría excediendo el tope, y un día de 45 folios
-// produce hasta 24 limitaciones casi idénticas (~5.6 KB de `detalle` medidos
-// en la ruta REST en un solo `LIMITE_CONOCIDO`) y 47 llamadas — sin que
-// `fusionarLimitacionesContiguas` las una, porque son del mismo día pero con
-// `folioDesde`/`folioHasta` distintos, y ese guard las deja separadas A
-// PROPÓSITO para no perder ningún folio puntual. Mismo criterio que la lista
-// de emisores pendientes truncada a 10 (ver el motivo de "quedaron N
-// emisores sin procesar"): pasado el tope, se colapsa el resto en UNA
-// limitación con el rango envolvente de los folios que faltan, y se corta el
-// resto de intentos —ahorra además las llamadas que, en este escenario, ya
-// se sabe que van a perder—.
+// día+tipo (o día+contraparte, del lado recibido). Este tope existe para el
+// escenario adverso en general —si el CGI de descarga ignorara `FOLIO`/
+// `FOLIOHASTA` o `RUT_RECP` con el flag prendido—, aunque para `FOLIO` ese
+// riesgo ya se descartó por medición (ver `tercerNivelHabilitado` en
+// ritmoSii.ts); para `RUT_RECP` sigue sin verificar. Si eso pasara para el
+// eje de FOLIO en particular, TODA descarga de folio único seguiría
+// excediendo el tope, y un día de 45 folios produce hasta 24 limitaciones
+// casi idénticas (~5.6 KB de `detalle` medidos en la ruta REST en un solo
+// `LIMITE_CONOCIDO`) y 47 llamadas — sin que `fusionarLimitacionesContiguas`
+// las una, porque son del mismo día pero con `folioDesde`/`folioHasta`
+// distintos, y ese guard las deja separadas A PROPÓSITO para no perder
+// ningún folio puntual. Mismo criterio que la lista de emisores pendientes
+// truncada a 10 (ver el motivo de "quedaron N emisores sin procesar"):
+// pasado el tope, se colapsa el resto en UNA limitación con el rango
+// envolvente de los folios que faltan, y se corta el resto de intentos
+// —ahorra además las llamadas que, en este escenario, ya se sabe que van a
+// perder—.
 const TOPE_FOLIOS_UNICOS_POR_DIA = 10;
 
 // Cuántos días CONSECUTIVOS con la página de error genérica del portal
@@ -1397,10 +1399,16 @@ export class MipymeHttpScraper {
         // pidiendo por tipo), y se registra la limitación de siempre.
         if (ctx.filtros.tipoDte != null) {
           if (!ctx.tercerNivelOn) {
-            // Ver el comentario de `tercerNivelHabilitado` en ritmoSii.ts: la
-            // combinación tipo_dte+folio/contraparte no está verificada contra
-            // el SII real, y activarla a ciegas puede convertir un día lleno
-            // en un barrido de `maxTramos` llamadas inútiles.
+            // Ver el comentario de `tercerNivelHabilitado` en ritmoSii.ts: el
+            // flag es un interruptor único que prende folio y contraparte a
+            // la vez, sin granularidad. El `motivo` se ramifica por
+            // `ctx.filtros.origen` para no mandar a un consumidor de
+            // `emitidos` (eje folio, ya verificado) a verificar el eje de
+            // contraparte, que no tiene nada que ver con su pedido.
+            const esEmitidos = ctx.filtros.origen === 'ENV';
+            const motivoEje = esEmitidos
+              ? 'el eje de folio (emitidos) ya se verificó en vivo contra el SII real'
+              : 'el eje de contraparte, que usan los recibidos, todavía NO se verificó contra el SII real';
             limitaciones.push({
               fechaDesde: desde,
               fechaHasta: hasta,
@@ -1412,9 +1420,14 @@ export class MipymeHttpScraper {
               motivo:
                 `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos del tipo `
                 + `${ctx.filtros.tipoDte} y el tercer nivel de troceo (por folio o por contraparte) `
-                + `está DESACTIVADO por defecto: esa combinación de filtros no está verificada `
-                + `contra el SII real. Activalo con RESPALDO_XML_TERCER_NIVEL=1 recién después de `
-                + `confirmarlo en vivo (ver src/scripts/verificarRespaldoXml.ts).`,
+                + `está DESACTIVADO por defecto: es un interruptor único que prende los dos ejes a `
+                + `la vez, y ${motivoEje}. Activalo con RESPALDO_XML_TERCER_NIVEL=1 `
+                + (esEmitidos
+                  ? '(esto también habilita el eje de contraparte para recibidos, que NO está '
+                    + 'verificado — ver src/scripts/verificarRespaldoXml.ts si vas a atender ese '
+                    + 'origen).'
+                  : 'recién después de verificar en vivo el eje de contraparte con '
+                    + 'src/scripts/verificarRespaldoXml.ts (VERIF_TIPO_DTE + VERIF_CONTRAPARTE).'),
             });
             return;
           }

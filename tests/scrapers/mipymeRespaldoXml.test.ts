@@ -2519,10 +2519,11 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
   });
 });
 
-// El tercer nivel está APAGADO por defecto porque la combinación
-// tipo_dte+folio/contraparte no está verificada contra el SII real (ver
-// `tercerNivelHabilitado` en ritmoSii.ts). Este describe NO toca el flag en
-// `beforeEach`: cada test lo deja tal como está o lo prende explícitamente.
+// El tercer nivel está APAGADO por defecto porque, aunque tipo_dte+folio ya
+// se verificó contra el SII real, tipo_dte+contraparte todavía no (ver
+// `tercerNivelHabilitado` en ritmoSii.ts): prenderlo es una decisión de
+// despliegue, no un default. Este describe NO toca el flag en `beforeEach`:
+// cada test lo deja tal como está o lo prende explícitamente.
 describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () => {
   beforeEach(() => jest.clearAllMocks());
   afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
@@ -2540,6 +2541,40 @@ describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () 
     expect(r.limitaciones[0].motivo).toMatch(/DESACTIVADO/i);
     // Ningún listado de folios/emisores: con el flag apagado ni se intenta.
     expect(http.get).not.toHaveBeenCalledWith(expect.stringContaining('mipeAdminDocs'));
+  });
+
+  // Regresión: si alguien invierte las ramas del motivo (el texto de emitidos
+  // saliendo para recibidos, o al revés), ambos regexes de arriba
+  // (RESPALDO_XML_TERCER_NIVEL, DESACTIVADO) matchean igual en las dos
+  // variantes y no detectan el error. Cada assertion de acá afirma una frase
+  // que SÓLO aparece en la rama correcta.
+  it('apagado, origen ENV (emitidos): el motivo dice que el eje de FOLIO ya está verificado y no manda a verificar contraparte', async () => {
+    delete process.env.RESPALDO_XML_TERCER_NIVEL;
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33,
+    });
+
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/eje de folio \(emitidos\) ya se verificó en vivo/);
+    expect(r.limitaciones[0].motivo).not.toMatch(/verificar en vivo el eje de contraparte/);
+  });
+
+  it('apagado, origen RCP (recibidos): el motivo dice que el eje de CONTRAPARTE no está verificado y manda a verificarlo', async () => {
+    delete process.env.RESPALDO_XML_TERCER_NIVEL;
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33,
+    });
+
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/eje de contraparte.*todavía NO se verificó/);
+    expect(r.limitaciones[0].motivo).toMatch(/verificar en vivo el eje de contraparte/);
+    expect(r.limitaciones[0].motivo).not.toMatch(/eje de folio \(emitidos\) ya se verificó/);
   });
 
   it('prendido con "1": el tercer nivel se activa y trocea por folio', async () => {
