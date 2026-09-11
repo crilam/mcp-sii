@@ -1165,8 +1165,11 @@ export class MipymeHttpScraper {
       // bisección: el flag es de ARRANQUE, y una request larga (varios días,
       // varias bisecciones) no puede quedar mitad con el tercer nivel
       // prendido y mitad con él apagado sólo porque alguien tocó el env a
-      // mitad de camino.
-      const tercerNivelOn = tercerNivelHabilitado();
+      // mitad de camino. `filtros.origen` no cambia dentro de esta llamada
+      // (una `respaldoXml` es siempre de un solo origen), así que el eje
+      // consultado queda fijo para toda la recursión — no hay riesgo de leer
+      // folio acá y contraparte más abajo.
+      const tercerNivelOn = tercerNivelHabilitado(filtros.origen === 'ENV' ? 'folio' : 'contraparte');
       await this.acumularTramos(
         // Dos contadores, no uno: listado (`mipeAdminDocs*.cgi`) y descarga
         // (`lista_documentos.cgi`/`download.cgi`) son CGI distintos que
@@ -1399,12 +1402,13 @@ export class MipymeHttpScraper {
         // pidiendo por tipo), y se registra la limitación de siempre.
         if (ctx.filtros.tipoDte != null) {
           if (!ctx.tercerNivelOn) {
-            // Ver el comentario de `tercerNivelHabilitado` en ritmoSii.ts: el
-            // flag es un interruptor único que prende folio y contraparte a
-            // la vez, sin granularidad. El `motivo` se ramifica por
-            // `ctx.filtros.origen` para no mandar a un consumidor de
-            // `emitidos` (eje folio, ya verificado) a verificar el eje de
-            // contraparte, que no tiene nada que ver con su pedido.
+            // Ver el comentario de `tercerNivelHabilitado` en ritmoSii.ts:
+            // cada eje tiene SU PROPIA variable, así que el `motivo` nombra
+            // la del eje que corresponde y sólo la de ese eje. El `motivo` se
+            // ramifica por `ctx.filtros.origen` para no mandar a un
+            // consumidor de `emitidos` (eje folio, ya verificado) a verificar
+            // el eje de contraparte, que no tiene nada que ver con su
+            // pedido.
             const esEmitidos = ctx.filtros.origen === 'ENV';
             const motivoEje = esEmitidos
               ? 'el eje de folio (emitidos) ya se verificó en vivo contra el SII real'
@@ -1417,17 +1421,16 @@ export class MipymeHttpScraper {
               // configuración (el flag apagado). Subir maxTramos o reintentar
               // no cambia nada; la acción está en el propio motivo.
               causa: 'OTRA',
-              motivo:
-                `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos del tipo `
-                + `${ctx.filtros.tipoDte} y el tercer nivel de troceo (por folio o por contraparte) `
-                + `está DESACTIVADO por defecto: es un interruptor único que prende los dos ejes a `
-                + `la vez, y ${motivoEje}. Activalo con RESPALDO_XML_TERCER_NIVEL=1 `
-                + (esEmitidos
-                  ? '(esto también habilita el eje de contraparte para recibidos, que NO está '
-                    + 'verificado — ver src/scripts/verificarRespaldoXml.ts si vas a atender ese '
-                    + 'origen).'
-                  : 'recién después de verificar en vivo el eje de contraparte con '
-                    + 'src/scripts/verificarRespaldoXml.ts (VERIF_TIPO_DTE + VERIF_CONTRAPARTE).'),
+              motivo: esEmitidos
+                ? `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos del tipo `
+                  + `${ctx.filtros.tipoDte} y el tercer nivel de troceo por folio está DESACTIVADO `
+                  + `por defecto: ${motivoEje}. Activalo con RESPALDO_XML_TERCER_NIVEL_FOLIO=1.`
+                : `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos del tipo `
+                  + `${ctx.filtros.tipoDte} y el tercer nivel de troceo por contraparte está `
+                  + `DESACTIVADO por defecto: ${motivoEje}. Activalo con `
+                  + 'RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE=1 recién después de verificar en vivo '
+                  + 'el eje de contraparte con src/scripts/verificarRespaldoXml.ts '
+                  + '(VERIF_TIPO_DTE + VERIF_CONTRAPARTE).',
             });
             return;
           }

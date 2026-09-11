@@ -40,8 +40,8 @@ import { rutEsValido } from '../rut';
 //                      `tercerNivelHabilitado` en ritmoSii.ts); la
 //                      combinación con contraparte SIGUE sin verificarse —
 //                      correr este script con VERIF_CONTRAPARTE antes de
-//                      prender RESPALDO_XML_TERCER_NIVEL=1 en un ambiente
-//                      real que dependa del eje de recibidos.
+//                      prender RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE=1 en un
+//                      ambiente real que dependa del eje de recibidos.
 //   VERIF_MAX_TRAMOS   presupuesto de tramos para esta consulta (entero entre
 //                      1 y MAX_TRAMOS_ABSOLUTO; default MAX_TRAMOS_POR_DEFECTO,
 //                      igual que la ruta REST). Sin esto, un rango ancho en
@@ -269,7 +269,8 @@ function validarFecha(valor: string, etiqueta: string): void {
 // combinación con contraparte sigue sin verificarse. Si se pidieron ambos
 // filtros a la vez, esto dice EXPLÍCITAMENTE si el CGI los respetó los dos o
 // si ignoró alguno — que es justo lo que hay que confirmar antes de prender
-// el flag para el eje que falte. `null` cuando el chequeo no tiene con qué
+// la variable del eje que falte (RESPALDO_XML_TERCER_NIVEL_FOLIO o
+// RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE). `null` cuando el chequeo no tiene con qué
 // confirmarse (el XML no trae el campo), no `true`: antes un SetDTE vacío
 // contaba como "respetado" sin haber verificado nada.
 export function calcularVeredictoTercerNivel(
@@ -315,7 +316,10 @@ export function calcularVeredictoTercerNivel(
   }
   const respetado = tipoOk === true && (folioOk === true || folioOk === 'n/a')
     && (contraparteOk === true || contraparteOk === 'n/a');
-  return (respetado ? 'RESPETADO' : 'NO RESPETADO — revisar antes de prender RESPALDO_XML_TERCER_NIVEL')
+  return (respetado
+      ? 'RESPETADO'
+      : 'NO RESPETADO — revisar antes de prender la variable del eje correspondiente '
+        + '(RESPALDO_XML_TERCER_NIVEL_FOLIO o RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE)')
     + ` (tipo=${tipoOk}, folio=${folioOk}, contraparte=${contraparteOk})`;
 }
 
