@@ -12,6 +12,7 @@ import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { Browser } from '../browser';
 import { recorrerConRitmo } from '../ritmoSii';
+import { rutEsValido } from '../rut';
 
 // Verifica `respaldo-xml` contra el SII real, por el handler REST.
 //
@@ -95,6 +96,7 @@ export interface FiltrosCrudos {
   folio_hasta?: number;
   contraparte?: string;
   rzn_soc?: string;
+  max_tramos?: number;
 }
 
 export interface FiltrosNormalizados {
@@ -106,34 +108,137 @@ export interface FiltrosNormalizados {
   folio_hasta?: number;
   contraparte?: string;
   rzn_soc?: string;
+  max_tramos?: number;
 }
 
-// Normalizado ACÁ, no leído crudo en cada punto que lo necesita: la ruta
-// REST trata cualquier valor que no sea EXACTAMENTE `'emitidos'` como
-// recibidos (`origen === 'emitidos' ? 'ENV' : 'RCP'`), así que un origen con
-// mayúsculas, un typo, o el nombre interno `'ENV'` ejecutaría recibidos EN
-// SILENCIO mientras quien corre el script cree haber pedido emitidos. Con un
-// solo punto de normalización, tanto el modo de una consulta como cada
-// consulta del plan quedan protegidos igual.
-export function normalizarFiltros(bruto: FiltrosCrudos, etiquetaOrigen: string): FiltrosNormalizados {
+// El mismo tope que usa `max_tramos` en el schema zod de la ruta REST
+// (schemas/mipyme.ts): 48 es el techo absoluto que el scraper acepta
+// (MAX_TRAMOS_ABSOLUTO en mipymeHttp.ts), no un número inventado acá.
+const MAX_TRAMOS_ABSOLUTO = 48;
+
+// Normaliza Y VALIDA una consulta (las variables VERIF_* del modo de una
+// consulta, o UNA consulta de un plan) con los MISMOS invariantes que el
+// schema zod de `POST /v1/mipyme/respaldo-xml` (ver
+// core/schemas/mipyme.ts y rest/rutas/mipyme.ts). El modo plan NO pasa por
+// esa ruta REST —lo haría perder el reuso de sesión, que es el punto entero
+// de este cambio—, pero tiene que RECHAZAR lo mismo que ella rechaza: un
+// plan que acepta filtros que la ruta real rechazaría termina midiendo algo
+// que esa ruta nunca haría.
+//
+// Se valida temprano y con el ÍNDICE de la consulta en el mensaje (via
+// `etiqueta`) porque la alternativa —dejar que reviente más abajo en el
+// scraper o en el catch genérico de `consultarRespaldoXml`— da un error
+// `ERROR` sin decir CUÁL de las N consultas del plan estaba mal escrita.
+//
+// Invariantes de la ruta REST que replica:
+//   - origen: sólo "emitidos"/"recibidos" (normalizado acá desde siempre).
+//   - fecha_desde/fecha_hasta: formato YYYY-MM-DD y fecha real de calendario.
+//   - fecha_desde <= fecha_hasta.
+//   - tipo_dte: entero.
+//   - folio_desde/folio_hasta: enteros positivos.
+//   - folio_hasta requiere folio_desde, y folio_desde <= folio_hasta.
+//   - contraparte_rut: forma de RUT (con o sin DV) y, si trae DV, que sea
+//     válido.
+//   - razon_social: no vacía (tras trim) y hasta 100 caracteres.
+//   - max_tramos: entero entre 1 y 48.
+// Lo único que NO se replica es la resolución de `empresa_rut` cuando se
+// omite (la ruta la resuelve mirando qué empresas opera el RUT en el
+// portal): esa resolución necesita la sesión ya autenticada, así que no hay
+// forma de validarla sin hacer la llamada — no es un invariante de FORMA
+// como los de arriba, es una consulta en sí misma.
+export function normalizarFiltros(bruto: FiltrosCrudos, etiqueta: string): FiltrosNormalizados {
   const rango = mesPasado();
+
   const origenCrudo = (bruto.origen ?? 'recibidos').toLowerCase();
   if (origenCrudo !== 'emitidos' && origenCrudo !== 'recibidos') {
     throw new Error(
-      `${etiquetaOrigen}="${bruto.origen}" no es válido: sólo "emitidos" o "recibidos" ` +
+      `${etiqueta}.origen="${bruto.origen}" no es válido: sólo "emitidos" o "recibidos" ` +
       `(la ruta REST trata cualquier otro valor como "recibidos" en silencio, y este script no lo repite).`
     );
   }
+  const origen = origenCrudo as 'emitidos' | 'recibidos';
+
+  const desde = bruto.desde ?? rango.desde;
+  const hasta = bruto.hasta ?? rango.hasta;
+  validarFecha(desde, `${etiqueta}.desde`);
+  validarFecha(hasta, `${etiqueta}.hasta`);
+  if (desde > hasta) {
+    throw new Error(`${etiqueta}: desde (${desde}) no puede ser posterior a hasta (${hasta}).`);
+  }
+
+  if (bruto.tipo_dte != null && !Number.isInteger(bruto.tipo_dte)) {
+    throw new Error(`${etiqueta}.tipo_dte tiene que ser un entero; se recibió ${bruto.tipo_dte}.`);
+  }
+
+  if (bruto.folio != null && (!Number.isInteger(bruto.folio) || bruto.folio <= 0)) {
+    throw new Error(`${etiqueta}.folio tiene que ser un entero positivo; se recibió ${bruto.folio}.`);
+  }
+  if (bruto.folio_hasta != null && (!Number.isInteger(bruto.folio_hasta) || bruto.folio_hasta <= 0)) {
+    throw new Error(`${etiqueta}.folio_hasta tiene que ser un entero positivo; se recibió ${bruto.folio_hasta}.`);
+  }
+  if (bruto.folio_hasta != null && bruto.folio == null) {
+    throw new Error(`${etiqueta}.folio_hasta requiere folio (el folio inicial del rango).`);
+  }
+  if (bruto.folio != null && bruto.folio_hasta != null && bruto.folio > bruto.folio_hasta) {
+    throw new Error(`${etiqueta}: folio (${bruto.folio}) no puede ser mayor que folio_hasta (${bruto.folio_hasta}).`);
+  }
+
+  let contraparte = bruto.contraparte;
+  if (contraparte != null) {
+    contraparte = contraparte.replace(/\./g, '').trim();
+    if (!/^\d{5,9}(-[\dkK])?$/.test(contraparte)) {
+      throw new Error(
+        `${etiqueta}.contraparte tiene que ser un RUT (con o sin dígito verificador), ` +
+        `por ejemplo 77777777-7; se recibió "${bruto.contraparte}".`
+      );
+    }
+    if (contraparte.includes('-')) {
+      const [cuerpo, dv] = contraparte.split('-');
+      if (!rutEsValido(cuerpo, dv)) {
+        throw new Error(`${etiqueta}.contraparte: el dígito verificador no corresponde al RUT "${bruto.contraparte}".`);
+      }
+    }
+  }
+
+  let rznSoc = bruto.rzn_soc;
+  if (rznSoc != null) {
+    rznSoc = rznSoc.trim();
+    if (rznSoc.length === 0) throw new Error(`${etiqueta}.rzn_soc no puede ser vacía.`);
+    if (rznSoc.length > 100) throw new Error(`${etiqueta}.rzn_soc no puede superar los 100 caracteres.`);
+  }
+
+  if (bruto.max_tramos != null
+    && (!Number.isInteger(bruto.max_tramos) || bruto.max_tramos < 1 || bruto.max_tramos > MAX_TRAMOS_ABSOLUTO)) {
+    throw new Error(
+      `${etiqueta}.max_tramos tiene que ser un entero entre 1 y ${MAX_TRAMOS_ABSOLUTO}; ` +
+      `se recibió ${bruto.max_tramos}.`
+    );
+  }
+
   return {
-    origen: origenCrudo as 'emitidos' | 'recibidos',
-    desde: bruto.desde ?? rango.desde,
-    hasta: bruto.hasta ?? rango.hasta,
+    origen,
+    desde,
+    hasta,
     tipo_dte: bruto.tipo_dte,
     folio: bruto.folio,
     folio_hasta: bruto.folio_hasta,
-    contraparte: bruto.contraparte,
-    rzn_soc: bruto.rzn_soc,
+    contraparte,
+    rzn_soc: rznSoc,
+    max_tramos: bruto.max_tramos,
   };
+}
+
+// Mismo criterio que `FechaRequerida` en core/schemas/mipyme.ts: formato
+// YYYY-MM-DD Y que exista de verdad en el calendario (un 31 de un mes de 30
+// pasa el regex pero no es una fecha real).
+function validarFecha(valor: string, etiqueta: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(valor)) {
+    throw new Error(`${etiqueta}="${valor}" tiene que tener formato YYYY-MM-DD.`);
+  }
+  const d = new Date(`${valor}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== valor) {
+    throw new Error(`${etiqueta}="${valor}" no es una fecha que exista en el calendario.`);
+  }
 }
 
 // El tercer nivel de troceo combina TPO_DOC con FOLIO/FOLIOHASTA o con
@@ -210,7 +315,7 @@ export async function ejecutarModoUnaConsulta(): Promise<void> {
     folio_hasta: numeroDe('VERIF_FOLIO_HASTA'),
     contraparte: process.env.VERIF_CONTRAPARTE,
     rzn_soc: process.env.VERIF_RZN_SOC,
-  }, 'VERIF_ORIGEN');
+  }, 'VERIF');
 
   console.log(`Perfil ${NOMBRE}, rango ${filtros.desde}..${filtros.hasta}`);
 
@@ -329,7 +434,18 @@ export interface ResultadoConsulta {
   detalle?: string;
   documentos?: number;
   tramos?: TramoConsulta[];
+  // Una consulta que topó su `max_tramos` (o el default de 10 si no se pidió
+  // ninguno) NO es comparable con una que no topó: puede estar devolviendo un
+  // respaldo PARCIAL. Se marca acá para que el reporte lo diga sin que el
+  // lector tenga que cruzar números de tramos a mano.
+  topoLimiteTramos?: boolean;
 }
+
+// El motivo con que el scraper registra un corte por tope de tramos (ver
+// mipymeHttp.ts, siempre la misma frase: "necesita más de N tramos"). No es
+// un campo estructurado en `LimitacionRespaldoXml` —sólo texto—, así que se
+// detecta por el patrón; es el único lugar donde ese motivo es reconocible.
+const PATRON_TOPE_TRAMOS = /necesita más de \d+ tramos/;
 
 // Lo mínimo que hace falta de un scraper para esta consulta — así un test
 // puede pasar un doble sin construir un `MipymeHttpScraper` real.
@@ -344,6 +460,7 @@ export interface ScraperRespaldoXml {
     razonSocial?: string;
     folioDesde?: number;
     folioHasta?: number;
+    maxTramos?: number;
   }): Promise<{
     documentos: number;
     tramos: { fechaDesde: string; fechaHasta: string; documentos: number; xml: string }[];
@@ -372,7 +489,10 @@ export async function consultarRespaldoXml<T>(
       razonSocial: filtros.rzn_soc,
       folioDesde: filtros.folio,
       folioHasta: filtros.folio_hasta,
+      maxTramos: filtros.max_tramos,
     }));
+
+    const topoLimiteTramos = r.limitaciones.some(l => PATRON_TOPE_TRAMOS.test(l.motivo));
 
     // Mismo criterio que la ruta REST (ver rest/rutas/mipyme.ts): si NO se
     // bajó NADA y hubo limitaciones, es una FALLA — un `ok:true` con
@@ -382,6 +502,7 @@ export async function consultarRespaldoXml<T>(
         ok: false,
         error: 'LIMITE_CONOCIDO',
         detalle: r.limitaciones.map(l => `${l.fechaDesde}..${l.fechaHasta}: ${l.motivo}`).join(' | '),
+        topoLimiteTramos,
       };
     }
 
@@ -394,6 +515,7 @@ export async function consultarRespaldoXml<T>(
         documentos: t.documentos,
         veredicto_tercer_nivel: calcularVeredictoTercerNivel(filtros.origen, t.xml, filtros) ?? undefined,
       })),
+      topoLimiteTramos,
     };
   } catch (e) {
     // Una consulta que falla NO puede tumbar el resto del plan: el valor del
@@ -405,7 +527,15 @@ export async function consultarRespaldoXml<T>(
 
 export interface ResultadoPlanItem {
   indice: number;
-  filtros: FiltrosNormalizados;
+  // Lo que traía la consulta CRUDA en el plan, tal cual — se conserva aunque
+  // la validación falle, para que el reporte pueda mostrar qué se pidió.
+  filtrosCrudos: ConsultaPlan;
+  // Ausente cuando la consulta era inválida (no se llegó a normalizar, y
+  // mucho menos a correr). Rellenar esto con los DEFAULTS de una consulta
+  // vacía (como se hacía antes) mentía en el reporte: una consulta con
+  // `origen` mal escrito se leía como "recibidos, mes pasado", como si
+  // hubiera sido eso lo que se pidió.
+  filtros?: FiltrosNormalizados;
   resultado: ResultadoConsulta;
 }
 
@@ -424,18 +554,18 @@ export async function ejecutarPlan<T>(
     plan.consultas,
     async (consultaBruta, indice) => {
       try {
-        const filtros = normalizarFiltros(consultaBruta, `consultas[${indice}].origen`);
+        const filtros = normalizarFiltros(consultaBruta, `consultas[${indice}]`);
         const resultado = await consultarRespaldoXml(ejecutor, rut, crearScraper, empresaRut, filtros);
-        return { indice, filtros, resultado };
+        return { indice, filtrosCrudos: consultaBruta, filtros, resultado };
       } catch (e) {
         // Sólo cae acá un error de VALIDACIÓN (por ejemplo un origen mal
         // escrito): consultarRespaldoXml ya atrapa los errores de la consulta
-        // en sí. Sin este catch, un origen inválido en la consulta 2 de 3
+        // en sí. Sin este catch, una consulta inválida en la posición 2 de 3
         // abortaría el `recorrerConRitmo` entero (no atrapa nada por dentro) y
         // se perdería la 3.
         return {
           indice,
-          filtros: normalizarFiltros({}, `consultas[${indice}].origen`),
+          filtrosCrudos: consultaBruta,
           resultado: { ok: false, error: 'ERROR', detalle: (e as Error).message },
         };
       }
@@ -449,6 +579,8 @@ function describirFiltros(f: FiltrosNormalizados): string {
   if (f.tipo_dte != null) partes.push(`tipo_dte=${f.tipo_dte}`);
   if (f.folio != null) partes.push(`folio=${f.folio}${f.folio_hasta != null ? `-${f.folio_hasta}` : ''}`);
   if (f.contraparte) partes.push(`contraparte=${f.contraparte}`);
+  if (f.rzn_soc) partes.push(`rzn_soc="${f.rzn_soc}"`);
+  if (f.max_tramos != null) partes.push(`max_tramos=${f.max_tramos}`);
   return partes.join(' ');
 }
 
@@ -475,14 +607,29 @@ export function armarReporte(plan: PlanArchivo, resultados: ResultadoPlanItem[],
   }
   lineas.push('');
 
-  resultados.forEach(({ indice, filtros, resultado }) => {
+  resultados.forEach(({ indice, filtros, filtrosCrudos, resultado }) => {
     lineas.push(`--- Consulta ${indice + 1}/${plan.consultas.length} ---`);
-    lineas.push(`  ${describirFiltros(filtros)}`);
+    if (filtros) {
+      lineas.push(`  ${describirFiltros(filtros)}`);
+    } else {
+      // La consulta ni siquiera se pudo normalizar (filtro inválido): se
+      // muestra tal cual vino, NADA de rellenar con los defaults de una
+      // consulta vacía — eso mentiría sobre qué se pidió.
+      lineas.push(`  INVÁLIDA, tal como vino: ${JSON.stringify(filtrosCrudos)}`);
+    }
     if (!resultado.ok) {
       lineas.push(`  FALLA  error=${resultado.error} detalle=${resultado.detalle ?? ''}`);
       return;
     }
+    // Marcado ACÁ y no sólo en el detalle de una limitación: una consulta que
+    // topó max_tramos puede seguir siendo ok:true con un respaldo PARCIAL, y
+    // comparar sus documentos contra los de una consulta que no topó es
+    // exactamente la comparación no comparable que este modo vino a evitar.
+    const marcaTope = resultado.topoLimiteTramos
+      ? '  ⚠ TOPÓ max_tramos — respaldo PARCIAL, NO comparable con una consulta que no topó'
+      : undefined;
     lineas.push(`  ${resultado.documentos} documentos en ${resultado.tramos?.length ?? 0} tramo(s)`);
+    if (marcaTope) lineas.push(marcaTope);
     for (const t of resultado.tramos ?? []) {
       lineas.push(`    ${t.fecha_desde}..${t.fecha_hasta}: ${t.documentos} DTE`
         + (t.veredicto_tercer_nivel ? ` — ${t.veredicto_tercer_nivel}` : ''));
@@ -540,7 +687,16 @@ async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
     // Cierra la sesión compartida al terminar el plan: sin esto el proceso
     // deja un Browser vivo y, peor, la sesión del SII abierta hasta que
     // expire sola (ver registroSesionesSii.ts sobre por qué eso importa).
-    await registro.cerrarYOlvidar(p.rut, sesion => sesion.logout());
+    //
+    // El `cerrar` que recibe `cerrarYOlvidar` es un NO-OP a propósito: el
+    // `destruir` que `crearRegistroSesionesSii` ya le inyectó al registro es
+    // `cerrarSesionSii`, que hace `logout()` Y `cerrarContexto()` — y lo hace
+    // con cada paso en su propio try/catch, así que un logout que falla no
+    // tapa el resultado del plan. Pasar OTRO `sesion.logout()` acá duplicaría
+    // el logout (uno sin protección, el de adentro protegido) y, peor, si
+    // ESE logout desprotegido lanza, `cerrarYOlvidar` lo propaga desde su
+    // `finally` interno y se pierde el error real del plan.
+    await registro.cerrarYOlvidar(p.rut, async () => {});
     credenciales.borrar(p.rut);
   }
 

@@ -334,8 +334,15 @@ Dos cosas que definen su forma, las dos verificadas contra el SII:
     `VERIF_EMPRESA` y `VERIF_SALIDA` siguen valiendo para el plan entero (la
     empresa a consultar y, en este modo, dónde queda el reporte). `VERIF_SALIDA`
     es OBLIGATORIO en modo plan: ahí se escribe `reporte-verificacion-plan.txt`,
-    un solo archivo con las tres consultas EN ORDEN, sus veredictos y —arriba de
-    todo— cuántos logins hizo la corrida.
+    un solo archivo con las tres consultas EN ORDEN, sus veredictos, si alguna
+    TOPÓ su `max_tramos` (no comparable con una que no topó) y —arriba de
+    todo— cuántos logins hizo la corrida. **A diferencia del modo de una
+    consulta, el modo plan NO guarda los XML bajados** — sólo el reporte
+    comparable; si hace falta archivar el XML de una combinación puntual,
+    correla aparte en modo de una consulta con esos mismos filtros.
+    `max_tramos` también se puede fijar por consulta (default 10, igual que
+    la ruta REST), para que un rango ancho no tope el límite y quede como
+    respaldo parcial sin que se note en el reporte.
   - **Por qué existe el modo plan y no alcanza con encadenar corridas
     sueltas:** cada corrida de este script abre un `Browser` nuevo (un login
     nuevo al SII), porque compartir contexto entre sesiones fue un bug real
