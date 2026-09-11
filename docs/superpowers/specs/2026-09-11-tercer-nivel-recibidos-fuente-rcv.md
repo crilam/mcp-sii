@@ -38,29 +38,31 @@ Datos relevantes de esas corridas:
 - **No es el error de secuencia.** `assertEmpresaSeleccionada` —el que detecta
   «no ha seleccionado una Empresa»— no se disparó en ninguna corrida, así que
   no es un problema de orden de llamadas de nuestro lado.
-- **Se descartó la hipótesis de volumen.** Hay un precedente documentado en un
-  comentario de `mipymeHttp.ts` (`assertNoPaginaDeErrorDelPortal`) que midió
-  esta misma página contra este mismo CGI para una empresa de alto volumen, lo
-  que hacía sospechar que el fallo dependiera de cuánto tráfico tuviera la
-  empresa consultada. La hipótesis se descartó: en una sola sesión, con dos
-  llamadas seguidas, una empresa de bajo volumen y una de alto volumen
-  fallaron **las dos** con el mismo código. El volumen no es la causa.
+- **Se descartó la hipótesis de volumen.** Un comentario de `mipymeHttp.ts`
+  (`assertNoPaginaDeErrorDelPortal`) documenta que la medición previa de esta
+  misma página contra este mismo CGI fue con una empresa de alto volumen —el
+  comentario no postula el volumen como causa, sólo registra con qué empresa
+  se midió—. Eso hizo sospechar, en esta investigación, que el fallo pudiera
+  depender de cuánto tráfico tuviera la empresa consultada. La sospecha se
+  descartó: en una sola sesión, con dos llamadas seguidas, una empresa de bajo
+  volumen y una de alto volumen fallaron **las dos** con el mismo código. El
+  volumen no es la causa.
 - Con el volumen descartado, la explicación que queda es el **estado del
   portal en esa ventana de tiempo**. Esa hipótesis quedó **pendiente de
   reintentar en otra ventana horaria** — no se verificó en esta ronda.
 
 ### Una trampa real al leer el código de error
 
-El código medido es `02.35.209.58.260.22`. Comparte el prefijo `02.35.209` con
-el error de «no ha seleccionado una Empresa», documentado como
-`02.35.209.-1.148.10` en el contrato de mipyme HTTP. Los dos prefijos son
-iguales y los dos errores son de significado completamente distinto (uno es
-de secuencia, el otro de disponibilidad del portal): **el prefijo identifica
-el módulo del portal que respondió, no el tipo de error.** Clasificar por
-prefijo de código llevaría a confundir los dos casos; el código base ya
-clasifica por la frase del cuerpo (`assertNoPaginaDeErrorDelPortal` hace
-exactamente eso, y a propósito no ata la detección al `CODIGO:` completo,
-que varía entre corridas).
+El código medido es `02.35.209.58.260.22`. Comparte los **tres primeros
+octetos** (`02.35.209`) con el error de «no ha seleccionado una Empresa»,
+documentado como `02.35.209.-1.148.10` en el contrato de mipyme HTTP — el
+resto del código difiere (`58.260.22` contra `-1.148.10`). Son dos errores de
+significado completamente distinto (uno es de secuencia, el otro de
+disponibilidad del portal) que comparten ese prefijo: clasificar por prefijo
+de código confundiría los dos casos. El código base ya clasifica por la frase
+del cuerpo (`assertNoPaginaDeErrorDelPortal` hace exactamente eso, y a
+propósito no ata la detección al `CODIGO:` completo, que varía entre
+corridas), y es el criterio que conviene seguir usando.
 
 ## La consecuencia práctica
 
@@ -147,7 +149,7 @@ retraso deja de ser un riesgo silencioso — algo que habría que descubrir mira
 discrepancias después de los hechos — y pasa a ser una condición chequeable
 antes de confiar en el dato. Queda pendiente verificar, con mediciones reales
 y no con lectura de código, cuánto retraso tiene `actualizadoAl` en la
-práctica: si typicamente cubre el día de ayer, el día en curso, o algo más
+práctica: si típicamente cubre el día de ayer, el día en curso, o algo más
 lejano, y si ese retraso es estable o varía.
 
 ### 3. Si el RCV lista una contraparte que el respaldo no trae, o al revés, ¿qué significa?
