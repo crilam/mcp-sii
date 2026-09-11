@@ -206,7 +206,16 @@ describe('registrarRutasMipyme', () => {
       const body2 = r2.body as any;
       expect(body2.ok).toBe(true);
       expect(body2.limitaciones).toEqual([
-        { fecha_desde: '2026-08-17', fecha_hasta: '2026-08-17', motivo: 'El día 2026-08-17 tiene más de 20 documentos.' },
+        {
+          fecha_desde: '2026-08-17', fecha_hasta: '2026-08-17',
+          motivo: 'El día 2026-08-17 tiene más de 20 documentos.',
+          // `causa` siempre presente en el wire: la ruta le pone 'OTRA' cuando
+          // el scraper no clasificó la limitación, para que el campo nunca
+          // quede ausente por la elisión de `undefined` en JSON.
+          causa: 'OTRA',
+          tipo_dte: undefined, contraparte_rut: undefined, razon_social: undefined,
+          folio_desde: undefined, folio_hasta: undefined,
+        },
       ]);
     });
 
@@ -255,7 +264,11 @@ describe('registrarRutasMipyme', () => {
       // El round-trip de verdad: lo que `responderJson` manda por HTTP.
       const porHttp = JSON.parse(JSON.stringify(r.body));
 
-      expect(Object.keys(porHttp.limitaciones[0]).sort()).toEqual(['fecha_desde', 'fecha_hasta', 'motivo']);
+      // `causa` viaja siempre (con el default 'OTRA' cuando el scraper no
+      // clasificó), a diferencia de los campos del tercer nivel que sí se
+      // omiten del JSON cuando no aplican.
+      expect(Object.keys(porHttp.limitaciones[0]).sort()).toEqual(['causa', 'fecha_desde', 'fecha_hasta', 'motivo']);
+      expect(porHttp.limitaciones[0].causa).toBe('OTRA');
     });
 
     // Cuando NO se bajó nada —todos los sub-rangos toparon, o el único tramo

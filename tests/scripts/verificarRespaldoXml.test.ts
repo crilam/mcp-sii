@@ -1,5 +1,6 @@
 import { RegistroSesiones } from '../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../src/credencialesRuntime';
+import { SessionManager } from '../../src/session';
 import {
   ejecutarPlan,
   armarReporte,
@@ -181,7 +182,7 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
 
     expect(llamadas[0].maxTramos).toBe(3);
     expect(resultados[0].resultado.ok).toBe(true);
-    expect(resultados[0].resultado.topoLimiteTramos).toBe(true);
+    expect(resultados[0].resultado.comparabilidad).toBe('TOPO');
 
     const reporte = armarReporte(plan, resultados, 1);
     expect(reporte).toContain('TOPÓ max_tramos');
@@ -191,11 +192,12 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
 
   // La otra mitad de la prueba anterior: una limitación que SÍ usa la
   // plantilla de texto vieja ("necesita más de N tramos") pero sin `causa`
-  // NO se marca como tope — si la detección todavía mirara el texto, esta
-  // aserción fallaría. Sin el campo estructurado no hay forma honesta de
-  // saber si es un corte por presupuesto o alguna otra limitación que por
-  // casualidad comparte palabras.
-  it('NO marca como tope una limitación con la vieja frase "necesita más de N tramos" si no trae `causa`', async () => {
+  // NO se marca como TOPO — si la detección todavía mirara el texto, esta
+  // aserción fallaría. Pero tampoco se marca como NO_TOPO: la ausencia de
+  // `causa` significa "no sé", no "no topó", así que el estado correcto es
+  // NO_CLASIFICADO y el reporte tiene que decir que no puede afirmar
+  // comparabilidad, no callarse.
+  it('sin `causa` la consulta queda NO_CLASIFICADA (no "no topó"), aunque el motivo use la vieja frase "necesita más de N tramos"', async () => {
     const { registro } = crearRegistroDoble();
     const crearScraper = scraperProgramado([
       {
@@ -213,9 +215,26 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
 
     const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
 
-    expect(resultados[0].resultado.topoLimiteTramos).toBe(false);
+    expect(resultados[0].resultado.comparabilidad).toBe('NO_CLASIFICADO');
     const reporte = armarReporte(plan, resultados, 1);
     expect(reporte).not.toContain('TOPÓ max_tramos');
+    expect(reporte).toContain('NO CLASIFICADO');
+    expect(reporte).toContain('no se puede afirmar');
+  });
+
+  it('sin limitaciones (o todas OTRA) la consulta queda NO_TOPO, sin marca en el reporte', async () => {
+    const { registro } = crearRegistroDoble();
+    const crearScraper = scraperProgramado([
+      { documentos: 5, tramos: [{ fechaDesde: '2026-01-01', fechaHasta: '2026-01-31', documentos: 5, xml: '<xml/>' }], limitaciones: [] },
+    ]);
+    const plan: PlanArchivo = { pausa_ms: 0, consultas: [{}] };
+
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+
+    expect(resultados[0].resultado.comparabilidad).toBe('NO_TOPO');
+    const reporte = armarReporte(plan, resultados, 1);
+    expect(reporte).not.toContain('TOPÓ max_tramos');
+    expect(reporte).not.toContain('NO CLASIFICADO');
   });
 
   it('describirFiltros muestra rzn_soc en el reporte (dos consultas que sólo difieren en razón social no se leen igual)', async () => {
@@ -261,7 +280,7 @@ describe('leerPlan (caminos de error del parser de entrada)', () => {
 });
 
 describe('armarReporte (comparación y contaminación visible)', () => {
-  it('el conteo de logins aparece en la salida, con aviso explícito si hubo más de uno', () => {
+  it('el conteo de contextos (logins) aparece en la salida, con aviso explícito si hubo más de uno', () => {
     const plan: PlanArchivo = { consultas: [{}] };
     const resultados: ResultadoPlanItem[] = [
       {
@@ -273,26 +292,79 @@ describe('armarReporte (comparación y contaminación visible)', () => {
     ];
 
     const unaSola = armarReporte(plan, resultados, 1);
-    expect(unaSola).toContain('Logins al SII en esta corrida: 1');
+    expect(unaSola).toContain('Contextos (logins) abiertos en esta corrida: 1');
     expect(unaSola).not.toContain('ATENCIÓN');
 
     const varias = armarReporte(plan, resultados, 3);
-    expect(varias).toContain('ATENCIÓN: esta corrida hizo 3 LOGINS al SII');
+    expect(varias).toContain('ATENCIÓN: esta corrida abrió 3 CONTEXTOS (logins) al SII');
     expect(varias).toContain('NO es comparable consigo misma');
+  });
+
+  it('muestra la etiqueta de una consulta del plan cuando viene', () => {
+    const plan: PlanArchivo = { consultas: [{ etiqueta: 'mes con muchos folios' }] };
+    const resultados: ResultadoPlanItem[] = [
+      {
+        indice: 0,
+        filtrosCrudos: { etiqueta: 'mes con muchos folios' },
+        filtros: normalizarFiltros({}, 'x'),
+        resultado: { ok: true, documentos: 0, tramos: [] },
+      },
+    ];
+
+    const reporte = armarReporte(plan, resultados, 1);
+    expect(reporte).toContain('etiqueta: mes con muchos folios');
   });
 });
 
-describe('crearEjecutorDeUnaSesion (conteo de logins = construcciones de Browser)', () => {
-  it('cuenta un solo login aunque el RUT se use varias veces', async () => {
+describe('crearEjecutorDeUnaSesion (conteo de construcciones de contexto)', () => {
+  it('cuenta una sola construcción de contexto aunque el RUT se use varias veces', async () => {
     const credenciales = new ProveedorCredencialesRuntime();
     credenciales.guardar('11111111-1', 'clave-test');
-    const { registro, contarLogins } = crearEjecutorDeUnaSesion(credenciales);
+    const { registro, contarConstruccionesDeContexto } = crearEjecutorDeUnaSesion(credenciales);
 
-    expect(contarLogins()).toBe(0);
+    expect(contarConstruccionesDeContexto()).toBe(0);
     await registro.ejecutar('11111111-1', async s => s);
-    expect(contarLogins()).toBe(1);
+    expect(contarConstruccionesDeContexto()).toBe(1);
     await registro.ejecutar('11111111-1', async s => s);
     // Reuso: la segunda llamada no abre otro contexto de navegador.
-    expect(contarLogins()).toBe(1);
+    expect(contarConstruccionesDeContexto()).toBe(1);
+  });
+
+  // Minor #4 de la última ronda: el test anterior llama al registro directo,
+  // salteando `ejecutarPlan` — no prueba el cableado real entre el ejecutor
+  // de una sesión (producción) y el plan. Esta prueba junta las dos piezas
+  // reales (sólo el scraper queda doble) para confirmar que un plan de varias
+  // consultas, corrido con el ejecutor que arma `ejecutarModoPlan`, construye
+  // UN SOLO contexto.
+  it('un plan de varias consultas corrido con crearEjecutorDeUnaSesion construye un solo contexto', async () => {
+    const credenciales = new ProveedorCredencialesRuntime();
+    credenciales.guardar('11111111-1', 'clave-test');
+    const { registro, contarConstruccionesDeContexto } = crearEjecutorDeUnaSesion(credenciales);
+    const crearScraper = scraperProgramado([
+      { documentos: 1, tramos: [{ fechaDesde: '2026-01-01', fechaHasta: '2026-01-10', documentos: 1, xml: '<xml/>' }], limitaciones: [] },
+      { documentos: 2, tramos: [{ fechaDesde: '2026-01-11', fechaHasta: '2026-01-20', documentos: 2, xml: '<xml/>' }], limitaciones: [] },
+    ]);
+    const plan: PlanArchivo = {
+      pausa_ms: 0,
+      consultas: [
+        { desde: '2026-01-01', hasta: '2026-01-10' },
+        { desde: '2026-01-11', hasta: '2026-01-20' },
+      ],
+    };
+
+    // El doble ignora por completo el parámetro `sesion` (no le hace falta un
+    // `SessionManager` real para devolver respuestas programadas): el cast
+    // sólo cierra el tipo genérico de `ejecutarPlan`, que acá es
+    // `RegistroSesiones<SessionManager>` porque viene del ejecutor real.
+    const resultados = await ejecutarPlan(
+      plan,
+      registro,
+      '11111111-1',
+      crearScraper as unknown as (sesion: SessionManager) => ScraperRespaldoXml,
+      undefined
+    );
+
+    expect(resultados.map(r => r.resultado.documentos)).toEqual([1, 2]);
+    expect(contarConstruccionesDeContexto()).toBe(1);
   });
 });

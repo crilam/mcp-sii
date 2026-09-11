@@ -195,8 +195,11 @@ export function registrarRutasMipyme(
           // Discriminador ESTRUCTURADO de la causa, para que el tenant no
           // tenga que parsear `motivo` en prosa para saber si el corte fue
           // por agotar `max_tramos` (el único caso que hoy hace que un
-          // `ok:true` sea un respaldo PARCIAL). Ver docs/integracion-api.md.
-          causa: l.causa,
+          // `ok:true` sea un respaldo PARCIAL). Siempre presente con
+          // `?? 'OTRA'`: un campo que a veces existe y a veces la
+          // serialización JSON elide es más difícil de consumir que uno
+          // que siempre tiene valor. Ver docs/integracion-api.md.
+          causa: l.causa ?? 'OTRA',
           // Reconstruibles por máquina: presentes sólo cuando el motivo salió
           // del tercer nivel de troceo (folio para emitidos, contraparte para
           // recibidos). Ver docs/integracion-api.md.

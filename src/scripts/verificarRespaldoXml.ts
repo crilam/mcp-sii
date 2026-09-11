@@ -7,7 +7,7 @@ import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { registrarRutasMipyme } from '../rest/rutas/mipyme';
 import { RutaHandler } from '../rest/rutas/comun';
 import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacion';
-import { soloCuerpoRut, MipymeHttpScraper } from '../scrapers/mipymeHttp';
+import { soloCuerpoRut, MipymeHttpScraper, MAX_TRAMOS_ABSOLUTO } from '../scrapers/mipymeHttp';
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { Browser } from '../browser';
@@ -110,11 +110,6 @@ export interface FiltrosNormalizados {
   rzn_soc?: string;
   max_tramos?: number;
 }
-
-// El mismo tope que usa `max_tramos` en el schema zod de la ruta REST
-// (schemas/mipyme.ts): 48 es el techo absoluto que el scraper acepta
-// (MAX_TRAMOS_ABSOLUTO en mipymeHttp.ts), no un número inventado acá.
-const MAX_TRAMOS_ABSOLUTO = 48;
 
 // Normaliza Y VALIDA una consulta (las variables VERIF_* del modo de una
 // consulta, o UNA consulta de un plan) con los MISMOS invariantes que el
@@ -434,11 +429,24 @@ export interface ResultadoConsulta {
   detalle?: string;
   documentos?: number;
   tramos?: TramoConsulta[];
-  // Una consulta que topó su `max_tramos` (o el default de 10 si no se pidió
-  // ninguno) NO es comparable con una que no topó: puede estar devolviendo un
-  // respaldo PARCIAL. Se marca acá para que el reporte lo diga sin que el
-  // lector tenga que cruzar números de tramos a mano.
-  topoLimiteTramos?: boolean;
+  // Tres estados, no dos: la AUSENCIA de `causa` en una limitación no
+  // significa "no topó", significa "no sé" — una limitación sin clasificar
+  // puede perfectamente ser un corte por presupuesto de tramos que todavía
+  // no se marcó en `mipymeHttp.ts`. Leer esa ausencia como "no topó" afirma
+  // comparabilidad que no está confirmada.
+  //   'TOPO'           al menos una limitación vino con causa PRESUPUESTO_TRAMOS.
+  //   'NO_CLASIFICADO' ninguna topó, pero hay al menos una sin `causa`: no se
+  //                    puede afirmar que esta consulta sea comparable con otra.
+  //   'NO_TOPO'        sin limitaciones, o todas clasificadas como OTRA.
+  comparabilidad?: 'TOPO' | 'NO_TOPO' | 'NO_CLASIFICADO';
+}
+
+function comparabilidadDe(
+  limitaciones: { causa?: 'PRESUPUESTO_TRAMOS' | 'OTRA' }[]
+): 'TOPO' | 'NO_TOPO' | 'NO_CLASIFICADO' {
+  if (limitaciones.some(l => l.causa === 'PRESUPUESTO_TRAMOS')) return 'TOPO';
+  if (limitaciones.some(l => l.causa === undefined)) return 'NO_CLASIFICADO';
+  return 'NO_TOPO';
 }
 
 // Lo mínimo que hace falta de un scraper para esta consulta — así un test
@@ -496,7 +504,7 @@ export async function consultarRespaldoXml<T>(
       maxTramos: filtros.max_tramos,
     }));
 
-    const topoLimiteTramos = r.limitaciones.some(l => l.causa === 'PRESUPUESTO_TRAMOS');
+    const comparabilidad = comparabilidadDe(r.limitaciones);
 
     // Mismo criterio que la ruta REST (ver rest/rutas/mipyme.ts): si NO se
     // bajó NADA y hubo limitaciones, es una FALLA — un `ok:true` con
@@ -506,7 +514,7 @@ export async function consultarRespaldoXml<T>(
         ok: false,
         error: 'LIMITE_CONOCIDO',
         detalle: r.limitaciones.map(l => `${l.fechaDesde}..${l.fechaHasta}: ${l.motivo}`).join(' | '),
-        topoLimiteTramos,
+        comparabilidad,
       };
     }
 
@@ -519,7 +527,7 @@ export async function consultarRespaldoXml<T>(
         documentos: t.documentos,
         veredicto_tercer_nivel: calcularVeredictoTercerNivel(filtros.origen, t.xml, filtros) ?? undefined,
       })),
-      topoLimiteTramos,
+      comparabilidad,
     };
   } catch (e) {
     // Una consulta que falla NO puede tumbar el resto del plan: el valor del
@@ -591,7 +599,11 @@ function describirFiltros(f: FiltrosNormalizados): string {
 // Un solo archivo, legible, en el orden en que se ejecutaron las consultas —
 // es lo que permite COMPARAR: hoy el script sólo da un veredicto por corrida,
 // y el valor de un plan está en ver las consultas juntas.
-export function armarReporte(plan: PlanArchivo, resultados: ResultadoPlanItem[], logins: number): string {
+export function armarReporte(
+  plan: PlanArchivo,
+  resultados: ResultadoPlanItem[],
+  construccionesDeContexto: number
+): string {
   const lineas: string[] = [];
   lineas.push('=== Verificación de respaldo XML — plan de consultas ===');
   lineas.push('');
@@ -599,20 +611,22 @@ export function armarReporte(plan: PlanArchivo, resultados: ResultadoPlanItem[],
   // La contaminación tiene que ser IMPOSIBLE de no ver: es lo que impidió
   // darse cuenta la vez pasada, cuando quince corridas sueltas (quince
   // logins) dieron 3 documentos contra 7 para el mismo mes y tipo de
-  // documento, sin ninguna página de error de por medio.
-  if (logins > 1) {
-    lineas.push(`ATENCIÓN: esta corrida hizo ${logins} LOGINS al SII, no uno solo.`);
+  // documento, sin ninguna página de error de por medio. Cada contexto
+  // construido es un login nuevo al SII: contarlos es contar logins.
+  if (construccionesDeContexto > 1) {
+    lineas.push(`ATENCIÓN: esta corrida abrió ${construccionesDeContexto} CONTEXTOS (logins) al SII, no uno solo.`);
     lineas.push('Una verificación con varios logins NO es comparable consigo misma:');
     lineas.push('cada login abre una sesión nueva del portal, y no hay garantía de');
     lineas.push('que dos sesiones del mismo RUT devuelvan lo mismo para el mismo');
     lineas.push('pedido. No saques conclusiones de este reporte.');
   } else {
-    lineas.push(`Logins al SII en esta corrida: ${logins} (una sola sesión para todo el plan).`);
+    lineas.push(`Contextos (logins) abiertos en esta corrida: ${construccionesDeContexto} (una sola sesión para todo el plan).`);
   }
   lineas.push('');
 
   resultados.forEach(({ indice, filtros, filtrosCrudos, resultado }) => {
     lineas.push(`--- Consulta ${indice + 1}/${plan.consultas.length} ---`);
+    if (filtrosCrudos.etiqueta) lineas.push(`  etiqueta: ${filtrosCrudos.etiqueta}`);
     if (filtros) {
       lineas.push(`  ${describirFiltros(filtros)}`);
     } else {
@@ -629,11 +643,18 @@ export function armarReporte(plan: PlanArchivo, resultados: ResultadoPlanItem[],
     // topó max_tramos puede seguir siendo ok:true con un respaldo PARCIAL, y
     // comparar sus documentos contra los de una consulta que no topó es
     // exactamente la comparación no comparable que este modo vino a evitar.
-    const marcaTope = resultado.topoLimiteTramos
-      ? '  ⚠ TOPÓ max_tramos — respaldo PARCIAL, NO comparable con una consulta que no topó'
-      : undefined;
+    // El tercer estado (NO_CLASIFICADO) existe porque la ausencia de `causa`
+    // en una limitación significa "no sé", no "no topó": afirmar
+    // comparabilidad ahí sería afirmar de más.
+    let marca: string | undefined;
+    if (resultado.comparabilidad === 'TOPO') {
+      marca = '  ⚠ TOPÓ max_tramos — respaldo PARCIAL, NO comparable con una consulta que no topó';
+    } else if (resultado.comparabilidad === 'NO_CLASIFICADO') {
+      marca = '  ⚠ NO CLASIFICADO — hay limitaciones sin `causa`; no se puede afirmar que esta '
+        + 'consulta sea comparable con otra';
+    }
     lineas.push(`  ${resultado.documentos} documentos en ${resultado.tramos?.length ?? 0} tramo(s)`);
-    if (marcaTope) lineas.push(marcaTope);
+    if (marca) lineas.push(marca);
     for (const t of resultado.tramos ?? []) {
       lineas.push(`    ${t.fecha_desde}..${t.fecha_hasta}: ${t.documentos} DTE`
         + (t.veredicto_tercer_nivel ? ` — ${t.veredicto_tercer_nivel}` : ''));
@@ -643,17 +664,20 @@ export function armarReporte(plan: PlanArchivo, resultados: ResultadoPlanItem[],
   return lineas.join('\n') + '\n';
 }
 
-// Arma el registro contando cuántas veces se construyó un `Browser` — o sea,
-// cuántos contextos (logins) nuevos abrió esta corrida. No hace falta tocar
-// `registroSesionesSii.ts` para esto: `crearRegistroSesionesSii` ya recibe la
-// factory de `Browser` como parámetro inyectable, y contar ahí es exactamente
-// contar logins sin adivinar por otro lado.
+// Arma el registro contando cuántas veces se CONSTRUYÓ un `Browser` — no
+// cuántos logins hizo el SII, que el registro nunca reporta. Que un contexto
+// nuevo implique un login nuevo es una propiedad de `registroSesionesSii.ts`
+// (un contexto = una sesión autenticada), no algo que este contador verifique
+// por su cuenta; de ahí el nombre. No hace falta tocar `registroSesionesSii.ts`
+// para esto: `crearRegistroSesionesSii` ya recibe la factory de `Browser` como
+// parámetro inyectable, y contar ahí es contar construcciones sin adivinar por
+// otro lado.
 export function crearEjecutorDeUnaSesion(
   credenciales: ProveedorCredencialesRuntime
-): { registro: RegistroSesiones<SessionManager>; contarLogins: () => number } {
-  let logins = 0;
-  const registro = crearRegistroSesionesSii(credenciales, id => { logins += 1; return new Browser(id); });
-  return { registro, contarLogins: () => logins };
+): { registro: RegistroSesiones<SessionManager>; contarConstruccionesDeContexto: () => number } {
+  let construcciones = 0;
+  const registro = crearRegistroSesionesSii(credenciales, id => { construcciones += 1; return new Browser(id); });
+  return { registro, contarConstruccionesDeContexto: () => construcciones };
 }
 
 async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
@@ -673,7 +697,7 @@ async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
     credenciales.guardarCertificado(p.rut, p.credencial.certificadoBase64, p.credencial.certificadoPassword);
   }
 
-  const { registro, contarLogins } = crearEjecutorDeUnaSesion(credenciales);
+  const { registro, contarConstruccionesDeContexto } = crearEjecutorDeUnaSesion(credenciales);
   const empresaRut = process.env.VERIF_EMPRESA;
 
   console.log(`Plan de ${plan.consultas.length} consulta(s), perfil ${NOMBRE}, UNA sola sesión`);
@@ -704,8 +728,8 @@ async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
     credenciales.borrar(p.rut);
   }
 
-  const logins = contarLogins();
-  const reporte = armarReporte(plan, resultados, logins);
+  const construccionesDeContexto = contarConstruccionesDeContexto();
+  const reporte = armarReporte(plan, resultados, construccionesDeContexto);
 
   fs.mkdirSync(SALIDA, { recursive: true });
   const destino = path.join(SALIDA, 'reporte-verificacion-plan.txt');

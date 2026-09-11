@@ -117,7 +117,7 @@ const MAX_TRAMOS_POR_DEFECTO = 10;
 // empresa los serializa —no corren en paralelo— pero no acota el volumen
 // agregado contra el portal. Si alguna vez el SII corta por esta ruta, el
 // arreglo es un presupuesto por ventana, no bajar este número.
-const MAX_TRAMOS_ABSOLUTO = 48;
+export const MAX_TRAMOS_ABSOLUTO = 48;
 
 // Tope explícito de páginas al listar un día+tipo dentro del tercer nivel de
 // troceo (`listarEmitidosDelDia`/`listarRecibidosDelDia`). Sin esto, el único
@@ -991,26 +991,15 @@ export class MipymeHttpScraper {
         && anterior.folioHasta === actual.folioHasta
         && anterior.contraparteRut === actual.contraparteRut
         && anterior.razonSocial === actual.razonSocial;
-      // El discriminador ESTRUCTURADO (`causa`) reemplaza al texto sólo para
-      // el corte por presupuesto de tramos: ahí ya sabemos que las dos vienen
-      // de la MISMA clase de corte aunque el texto difiera según de qué parte
-      // de la recursión salió cada una (descarga principal, listado, tercer
-      // nivel por folio o por contraparte) — antes esas variantes de texto NO
-      // fusionaban entre sí aunque fueran el mismo tipo de corte en días
-      // vecinos, y esta es la mejora.
-      //
-      // Para todo lo demás (`'OTRA'` o sin clasificar) el texto SIGUE siendo
-      // el único discriminador: esa bolsa junta motivos genuinamente
-      // distintos (portal caído, tope de páginas de listado, folio único,
-      // día lleno...), y es EXACTAMENTE el caso que el comentario de arriba
-      // advierte —"un día lleno al lado de un corte por tope de tramos NO se
-      // fusiona"— así que comparar sólo por `causa` ahí fusionaría motivos
-      // que no deberían mezclarse.
-      const mismaCausaEstructurada = anterior != null
-        && anterior.causa === 'PRESUPUESTO_TRAMOS' && actual.causa === 'PRESUPUESTO_TRAMOS';
-      const mismoOrigenDelCorte = mismaCausaEstructurada
-        || (anterior != null && anterior.motivo === actual.motivo);
-      if (anterior != null && contigua && mismoOrigenDelCorte && mismosCamposTercerNivel) {
+      // A propósito NO se usa `causa` acá aunque exista: descarga principal,
+      // listado y tercer nivel son tres superficies del portal que fallan de
+      // forma INDEPENDIENTE, y ya nos costó una vez en esta rama unificar un
+      // conteo entre dos de ellas (portal caído en listado/descarga) — el
+      // éxito de una borró la racha de fallas de la otra. Fusionar por
+      // `causa` repetiría ese daño: el consumidor perdería de vista qué
+      // superficie topó. El texto exacto del motivo es el único
+      // discriminador de fusión; `causa` queda para la marca del reporte.
+      if (anterior != null && contigua && anterior.motivo === actual.motivo && mismosCamposTercerNivel) {
         anterior.fechaHasta = actual.fechaHasta;
       } else {
         fusionadas.push({ ...actual });
@@ -1815,6 +1804,7 @@ export class MipymeHttpScraper {
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
       contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      causa: 'PRESUPUESTO_TRAMOS',
       motivo:
         `El respaldo de ${ctx.empresaRut} acumuló más de ${TOPE_FOLIOS_UNICOS_POR_DIA} folios `
         + `que exceden por sí solos el tope del ${dia}${contraparte}: se corta acá para no seguir `
@@ -1846,6 +1836,7 @@ export class MipymeHttpScraper {
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
       contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      causa: 'PRESUPUESTO_TRAMOS',
       motivo:
         `El portal del SII respondió su página de error genérica en ${dias} descargas de folio `
         + `consecutivas del ${dia}${contraparte}: parece estar caído, no ser un problema puntual de `
