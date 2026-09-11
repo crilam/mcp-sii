@@ -84,10 +84,8 @@ activar folio (verificado) y dejar contraparte (no verificado) apagado.
 con qué folios, en qué fechas. El documento XML se descarga, como hoy, del CGI
 legacy del portal mipyme (`lista_documentos.cgi` / `download.cgi`). La línea
 propuesta reemplazaría el listado que alimenta la **decisión de troceo**
-(cuáles contrapartes tenemos para este día, para desglosar los 20 documentos),
-no la fuente de descarga del documento. El tróceo por contraparte sigue siendo
-una estructura que necesita el XML; lo que cambia es cómo se arma la lista de
-contrapartes a las que esa estructura pide descargar.
+(qué contrapartes operaron ese día, para poder partir un día que excede el tope
+de documentos de la descarga), no la fuente de descarga del documento.
 
 El dato que le falta al tercer nivel de `recibidos` —qué contrapartes
 emitieron documentos ese día— también lo tiene el **RCV** (Registro de Compras
