@@ -316,10 +316,20 @@ export function calcularVeredictoTercerNivel(
   }
   const respetado = tipoOk === true && (folioOk === true || folioOk === 'n/a')
     && (contraparteOk === true || contraparteOk === 'n/a');
+
+  // Nombrar SÓLO la variable del eje que este chequeo realmente midió: si se
+  // pidió folio, el veredicto habla de RESPALDO_XML_TERCER_NIVEL_FOLIO; si se
+  // pidió contraparte, de RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE; si se
+  // pidieron los dos a la vez, las dos. Nombrar la del eje que NO se midió
+  // haría dudar de si el resultado corresponde al eje que se acaba de correr.
+  const variables = [
+    folioOk !== 'n/a' ? 'RESPALDO_XML_TERCER_NIVEL_FOLIO' : null,
+    contraparteOk !== 'n/a' ? 'RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE' : null,
+  ].filter((v): v is string => v != null).join(' o ');
+
   return (respetado
       ? 'RESPETADO'
-      : 'NO RESPETADO — revisar antes de prender la variable del eje correspondiente '
-        + '(RESPALDO_XML_TERCER_NIVEL_FOLIO o RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE)')
+      : `NO RESPETADO — revisar antes de prender ${variables}`)
     + ` (tipo=${tipoOk}, folio=${folioOk}, contraparte=${contraparteOk})`;
 }
 

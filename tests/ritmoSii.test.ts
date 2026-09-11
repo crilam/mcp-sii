@@ -204,4 +204,16 @@ describe('tercerNivelHabilitado', () => {
     expect(tercerNivelHabilitado('folio')).toBe(true);
     expect(tercerNivelHabilitado('contraparte')).toBe(false);
   });
+
+  // Coexistencia parcial: el escenario real de una transición, con el
+  // heredado prendido de antes y sólo UN eje con variable propia. Folio la
+  // tiene puesta (y en un valor que CONTRADICE al heredado, para que la
+  // precedencia se note); contraparte no tiene variable propia y por eso
+  // sigue el heredado. Las dos lecturas conviven en la misma corrida.
+  it('coexistencia parcial: heredado prendido, folio con su propia variable (apagándolo), contraparte sin variable propia (sigue el heredado)', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = '1';
+    process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO = '0';
+    expect(tercerNivelHabilitado('folio')).toBe(false);
+    expect(tercerNivelHabilitado('contraparte')).toBe(true);
+  });
 });
