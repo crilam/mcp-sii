@@ -32,6 +32,85 @@ export function enGrupos<T>(items: T[], tamano: number): T[][] {
   return grupos;
 }
 
+// Hermana de `enGrupos`, específica de folios: además de acotar CUÁNTOS
+// folios entran por grupo (`tamano`), corta un grupo apenas su rango
+// envolvente (`ultimo - primero`) superaría `anchoMaximo` — ver
+// `ANCHO_MAXIMO_RANGO_FOLIO` para qué se midió. No se le metió este
+// conocimiento a `enGrupos<T>`: esa función es genérica y pura (agrupa
+// CUALQUIER arreglo ordenado por posición), y el ancho sólo tiene sentido
+// sobre números — degradarla con una noción de "distancia" que el resto de
+// sus usos ni necesita cambiaría su contrato para todo el mundo. Se separa
+// en una función propia en vez de parametrizar el corte porque acá el corte
+// SIEMPRE es por valor numérico, no un predicado genérico que un caller no
+// numérico tuviera que fingir no usar.
+//
+// PRECONDICIÓN: `folios` tiene que venir ORDENADO ascendente (los tres
+// call-sites lo garantizan). Con entrada desordenada, `folio - primero`
+// puede dar negativo y el corte por ancho NUNCA se dispara: la función
+// degrada en silencio al comportamiento de `enGrupos` (sólo corta por
+// cantidad) sin avisar que dejó de proteger nada.
+//
+// El corte por ancho SÓLO puede partir en MÁS grupos, nunca en menos ni
+// descartar folios: el rango envolvente con huecos ya se pide de más a
+// propósito (es un respaldo; traer documentos vecinos no es un problema),
+// así que acotar el ancho es partir más seguido, no dejar folios afuera. La
+// concatenación de los grupos resultantes es exactamente `folios`, en el
+// mismo orden — ver el test de esa propiedad.
+//
+// Un folio SOLO siempre entra en algún grupo (empieza uno si el anterior se
+// cerró), así que dos folios separados por más que `anchoMaximo` terminan
+// cada uno en su propio grupo de un elemento: ninguno queda sin pedirse.
+//
+// COSTO, medido contra el comportamiento de HOY (sin este corte): con
+// numeración muy dispersa este corte puede terminar pidiendo hasta un tramo
+// POR FOLIO — no es "un tramo más", es caro de verdad. Pero ese costo no es
+// nuevo, ya se estaba pagando y de más: sin el corte por ancho, un grupo de
+// veinte folios dispersos con rango envolvente de millones no cuesta una
+// sola llamada — `descargarGrupoConBiseccion` bisecta el grupo por la mitad
+// del arreglo cada vez que la descarga excede el tope, y el ANCHO por sí
+// solo dispara ese exceso en CADA nivel de la bisección (es justo lo medido:
+// un rango ancho rompe la consulta aunque haya cero documentos reales),
+// hasta llegar recién al fondo del árbol a los mismos folios sueltos. Este
+// corte llega al mismo destino (un tramo por folio disperso) SIN pagar los
+// intentos condenados del camino: en el caso disperso, acotar el ancho acá
+// es estrictamente más barato que el estado anterior, no más caro.
+export function enGruposDeFolios(
+  folios: number[], tamano: number, anchoMaximo: number = ANCHO_MAXIMO_RANGO_FOLIO
+): number[][] {
+  const grupos: number[][] = [];
+  let actual: number[] = [];
+  let anterior: number | null = null;
+  for (const folio of folios) {
+    // Guard de la precondición de arriba, contra el elemento INMEDIATO
+    // anterior (no contra el primero del grupo): con entrada desordenada,
+    // `folio - primero` puede dar negativo dentro de `enGruposDeFolios` y el
+    // corte por ancho no se dispararía NUNCA — la función degradaría en
+    // silencio al comportamiento de `enGrupos` (sólo cantidad) sin que nada
+    // lo avise. Es un error de programación de quien llama, no un caso de
+    // negocio del SII: tiene que explotar acá, ruidoso, en vez de devolver
+    // un resultado que parece sano pero perdió la protección de ancho.
+    if (anterior !== null && folio < anterior) {
+      throw new Error(
+        `enGruposDeFolios recibió folios desordenados (folio ${folio} después de ${anterior}): `
+        + 'la función requiere el arreglo ORDENADO ascendente. Ordená los folios antes de '
+        + 'llamarla.');
+    }
+    anterior = folio;
+    if (actual.length > 0) {
+      const primero = actual[0];
+      const alcanzoCantidad = actual.length >= tamano;
+      const excederiaAncho = folio - primero > anchoMaximo;
+      if (alcanzoCantidad || excederiaAncho) {
+        grupos.push(actual);
+        actual = [];
+      }
+    }
+    actual.push(folio);
+  }
+  if (actual.length > 0) grupos.push(actual);
+  return grupos;
+}
+
 // Recorta un arreglo de folios (ya ordenados) al rango `folioDesde`/
 // `folioHasta` que pidió el CALLER original, si vino alguno. Sin este
 // recorte, el listado del día+tipo trae TODOS los folios —el filtro de folio
@@ -102,6 +181,22 @@ const DOWNLOAD_URL = `${CGI_BASE}/download.cgi`;
 // pantalla —que también lo mira—: el servidor responde una página de error
 // cuando el rango trae más, así que hay que trocear sí o sí.
 const TOPE_DOCUMENTOS_SII = 20;
+
+// Ancho máximo del rango envolvente (`folio_hasta - folio_desde`) que se pide
+// en UNA descarga del tercer nivel de troceo. Medido en vivo contra el SII
+// real (una empresa con numeración de folios dispersa): un rango del orden
+// de 1..1.000 o 1..5.000 sale limpio, pero un rango del orden de
+// 1..20.000.000 (o más ancho) dispara la página de "más de 20 documentos"
+// en TODOS los días del mes, incluso en los que no tienen ni un documento
+// real. O sea, el ANCHO del rango rompe la consulta por sí solo, aparte de
+// cuántos folios entren.
+//
+// No hay medición entre 5.000 y 1.000.000: no se inventa un punto medio en
+// esa zona. Se elige el más chico de los dos valores que salieron limpios
+// —el lado conservador—, no el más grande: partir de más grupos de los
+// estrictamente necesarios es barato (un tramo más contra el presupuesto),
+// mientras que quedarse corto reproduce el bloqueo medido.
+export const ANCHO_MAXIMO_RANGO_FOLIO = 1000;
 
 // Tope de tramos de un respaldo. Existe porque el troceo hace una llamada al SII
 // por tramo DENTRO de una sola request del tenant: sin techo, un rango ancho
@@ -1345,7 +1440,7 @@ export class MipymeHttpScraper {
         return;
       }
       await this.descargarListaDeGrupos(
-        ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos, sinMapear,
+        ctx, dia, enGruposDeFolios(folios, TOPE_DOCUMENTOS_SII), {}, tramos, limitaciones, maxTramos, sinMapear,
         contadorFolioUnico);
       return;
     }
@@ -1521,7 +1616,7 @@ export class MipymeHttpScraper {
       //     ya paga hoy cualquier grupo que se biseccione de más.
       if (ctx.filtros.contraparteRut != null || folios.length > TOPE_DOCUMENTOS_SII) {
         await this.descargarListaDeGrupos(
-          ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
+          ctx, dia, enGruposDeFolios(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
           tramos, limitaciones, maxTramos, sinMapear, contadorFolioUnico);
         continue;
       }
@@ -1549,7 +1644,7 @@ export class MipymeHttpScraper {
         // un mismo emisor, pedir el grupo completo de entrada excede seguro y
         // gasta el presupuesto en una llamada condenada a fallar.
         await this.descargarListaDeGrupos(
-          ctx, dia, enGrupos(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
+          ctx, dia, enGruposDeFolios(folios, TOPE_DOCUMENTOS_SII), { contraparteRut: emisorRut },
           tramos, limitaciones, maxTramos, sinMapear, contadorFolioUnico);
         continue;
       }
@@ -1841,7 +1936,10 @@ export class MipymeHttpScraper {
         `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para bajar los `
         + `folios ${folioDesde}..${folioHasta} del ${dia}${contraparte} (rango envolvente de los `
         + `folios pendientes, puede incluir folios ya bajados o de otro tipo). Pedí un maxTramos `
-        + `más alto o acotá el rango de folios.${notaTipoNoMapeado(sinMapear)}`,
+        + `más alto o acotá el rango de folios. Si lo que agota el presupuesto es la DISPERSIÓN de `
+        + `la numeración (folios muy separados entre sí) y no la cantidad de documentos, subir `
+        + `maxTramos puede no alcanzar ni con el techo absoluto: ahí lo que corresponde es acotar `
+        + `el rango de folios pedido.${notaTipoNoMapeado(sinMapear)}`,
     };
   }
 

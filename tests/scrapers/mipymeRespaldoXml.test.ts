@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   MipymeHttpScraper, LimitacionRespaldoXml, soloCuerpoRut, acotarPorFolio, enGrupos,
+  enGruposDeFolios, ANCHO_MAXIMO_RANGO_FOLIO,
 } from '../../src/scrapers/mipymeHttp';
 import { LimitacionConocida } from '../../src/erroresConsulta';
 import { esperar } from '../../src/ritmoSii';
@@ -1915,6 +1916,33 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
     expect(http.getBinario).toHaveBeenCalledTimes(2);
   });
 
+  // El caso caro que `enGruposDeFolios` introduce: con folios MUY dispersos
+  // (cada uno a más de `ANCHO_MAXIMO_RANGO_FOLIO` del anterior) cada uno cae
+  // en su PROPIO grupo de un elemento, así que agotar el presupuesto entre
+  // grupos pasa a ser el camino normal, no una rareza. Con `maxTramos` bajo
+  // el primer folio se baja bien y el resto queda reportado en UNA sola
+  // limitación de presupuesto — nada se pierde en silencio — y el motivo
+  // tiene que orientar a acotar el rango de folio, no a subir `maxTramos`
+  // (subirlo no alcanza cuando lo que agota el presupuesto es la dispersión,
+  // no la cantidad de documentos).
+  it('emitidos: folios muy dispersos agotan el presupuesto entre grupos de UN folio y quedan reportados', async () => {
+    const { scraper, http } = armar();
+    const folios = [1, 2000, 4000, 6000]; // cada salto > ANCHO_MAXIMO_RANGO_FOLIO (1000)
+    mockearListado(http, historialEmitidosHtml(folios));
+    (http.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados())          // el día entero (descargas: 1)
+      .mockResolvedValueOnce(binarioXmlConFolios(33, [1])); // grupo [1] (descargas: 3, tras el listado)
+
+    const r = await scraper.respaldoXml({ ...RANGO, origen: 'ENV', ...DIA, maxTramos: 3 });
+
+    expect(r.tramos).toHaveLength(1);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({ folioDesde: 2000, folioHasta: 6000, tipoDte: 33 });
+    expect(r.limitaciones[0].causa).toBe('PRESUPUESTO_TRAMOS');
+    expect(r.limitaciones[0].motivo).toMatch(/dispersión/i);
+    expect(http.getBinario).toHaveBeenCalledTimes(2);
+  });
+
   // `contraparte_rut` (el receptor, del lado emitidos) del caller original
   // tiene que seguir viajando en CADA grupo de folios del tercer nivel, no
   // sólo en el intento inicial: si se perdiera al agrupar, el primer grupo
@@ -2471,6 +2499,96 @@ describe('enGrupos', () => {
 
   it('lista vacía, ningún grupo', () => {
     expect(enGrupos([], 20)).toEqual([]);
+  });
+});
+
+// `enGruposDeFolios` es la hermana de `enGrupos` que además acota el ANCHO
+// del rango envolvente (`ultimo - primero`), no sólo la cantidad — medido en
+// vivo que un rango ancho rompe la consulta contra el SII por sí solo,
+// aparte de cuántos folios entren (ver `ANCHO_MAXIMO_RANGO_FOLIO`).
+describe('enGruposDeFolios', () => {
+  it('folios densos: se comporta igual que enGrupos, el ancho no molesta', () => {
+    // Folios consecutivos 100..119: veinte elementos, rango de apenas 19 —
+    // muy por debajo de cualquier ancho máximo razonable, así que el corte
+    // por cantidad sigue siendo el único que actúa (regresión del caso de
+    // siempre).
+    const densos = Array.from({ length: 20 }, (_, i) => 100 + i);
+    expect(enGruposDeFolios(densos, 20)).toEqual([densos]);
+    expect(enGruposDeFolios([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]]);
+  });
+
+  it('numeración dispersa: se parte en EXACTAMENTE un grupo por racimo, y ninguno excede el ancho máximo', () => {
+    // Cuatro racimos de tres folios cada uno (rango interno de 99, muy por
+    // debajo del ancho máximo) separados entre sí por millones: sin el corte
+    // por ancho, `enGrupos` pondría los DOCE folios juntos (cabrían por
+    // cantidad) y el rango envolvente (folio 1 a folio ~19.000.100) sería
+    // justo el patrón medido como roto contra el SII real.
+    //
+    // El número exacto de grupos (4, uno por racimo) ES el contrato de
+    // costo: `grupos.length > 1` pasaría igual con un grupo POR FOLIO (doce
+    // grupos), que es el escenario caro que hay que evitar cuando el ancho
+    // real de los datos no lo exige. Mutación que este test detecta: si se
+    // reemplaza la condición de ancho por `true` (cortar siempre), salen 12
+    // grupos de un folio en vez de 4; si se la reemplaza por `false`
+    // (nunca cortar por ancho), sale 1 solo grupo de doce folios.
+    const dispersos = [
+      1, 50, 100,
+      2_000_000, 2_000_050, 2_000_100,
+      8_000_000, 8_000_050, 8_000_100,
+      19_000_000, 19_000_050, 19_000_100,
+    ];
+    const grupos = enGruposDeFolios(dispersos, 20);
+    expect(grupos).toEqual([
+      [1, 50, 100],
+      [2_000_000, 2_000_050, 2_000_100],
+      [8_000_000, 8_000_050, 8_000_100],
+      [19_000_000, 19_000_050, 19_000_100],
+    ]);
+    for (const grupo of grupos) {
+      const ancho = grupo[grupo.length - 1] - grupo[0];
+      expect(ancho).toBeLessThanOrEqual(ANCHO_MAXIMO_RANGO_FOLIO);
+    }
+  });
+
+  it('la concatenación de los grupos es exactamente la entrada, en orden, sin perder ni duplicar folios', () => {
+    const dispersos = [
+      1, 50, 100,
+      2_000_000, 2_000_050, 2_000_100,
+      8_000_000, 8_000_050, 8_000_100,
+      19_000_000, 19_000_050, 19_000_100,
+    ];
+    expect(enGruposDeFolios(dispersos, 20).flat()).toEqual(dispersos);
+    // Ídem con el caso denso, para no depender de un solo arreglo de prueba.
+    const densos = Array.from({ length: 45 }, (_, i) => 100 + i);
+    expect(enGruposDeFolios(densos, 20).flat()).toEqual(densos);
+  });
+
+  it('dos folios separados por más que el ancho máximo terminan en grupos distintos, y los dos se piden', () => {
+    const separados = [10, 10 + ANCHO_MAXIMO_RANGO_FOLIO + 1];
+    const grupos = enGruposDeFolios(separados, 20);
+    expect(grupos).toEqual([[10], [10 + ANCHO_MAXIMO_RANGO_FOLIO + 1]]);
+    expect(grupos.flat()).toEqual(separados);
+  });
+
+  it('arreglo vacío, ningún grupo', () => {
+    expect(enGruposDeFolios([], 20)).toEqual([]);
+  });
+
+  it('un solo folio, un solo grupo de un elemento', () => {
+    expect(enGruposDeFolios([42], 20)).toEqual([[42]]);
+  });
+
+  // El guard de la precondición de orden: sin él, un arreglo desordenado
+  // haría que `folio - primero` diera negativo, el corte por ancho no se
+  // dispararía nunca, y la función degradaría en silencio al comportamiento
+  // de `enGrupos` (sólo cantidad) — la protección se apaga sola, sin que
+  // nada lo note. Es un error de programación de quien llama (los tres
+  // call-sites ordenan antes), así que tiene que explotar, no devolver un
+  // resultado degradado con cara de sano.
+  it('con folios desordenados, explota en vez de degradar en silencio', () => {
+    expect(() => enGruposDeFolios([10, 5], 20)).toThrow(/desordenados/);
+    // También dentro de un grupo ya abierto, no sólo al principio.
+    expect(() => enGruposDeFolios([1, 2, 3, 2], 20)).toThrow(/desordenados/);
   });
 });
 
