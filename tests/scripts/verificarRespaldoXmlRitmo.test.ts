@@ -8,7 +8,11 @@ import { RegistroSesiones } from '../../src/registroSesiones';
 // contra el DOBLE de `recorrerConRitmo` completo: qué pausa le pide el modo
 // plan, no el reloj real. El comportamiento de la pausa en sí —que de verdad
 // espere entre llamadas— ya lo cubre tests/ritmoSii.test.ts.
-jest.mock('../../src/ritmoSii', () => ({ recorrerConRitmo: jest.fn() }));
+// `PAUSA_POR_DEFECTO_MS` va en el mock (con el mismo valor real) porque
+// `ejecutarPlan` la importa para aplicar su propio piso de defensa (ver
+// Bloqueante de la última ronda): un mock parcial sin esta constante la deja
+// `undefined` y el piso calcula `NaN`.
+jest.mock('../../src/ritmoSii', () => ({ recorrerConRitmo: jest.fn(), PAUSA_POR_DEFECTO_MS: 1200 }));
 
 import { recorrerConRitmo } from '../../src/ritmoSii';
 import { ejecutarPlan, PlanArchivo, ScraperRespaldoXml } from '../../src/scripts/verificarRespaldoXml';
@@ -45,5 +49,33 @@ describe('ejecutarPlan respeta el ritmo entre consultas (vía recorrerConRitmo)'
     await ejecutarPlan(plan, registro, '11111111-1', crearScraperVacio(), undefined);
 
     expect(mockRecorrer.mock.calls[0][2]).toEqual({ pausaMs: undefined });
+  });
+
+  // Bloqueante: `recorrerConRitmo` sólo aplica su piso cuando `pausaMs` es
+  // `undefined` — un `pausaMs` explícito, aunque sea 0, lo pisa por diseño.
+  // `leerPlan` ya sube `pausa_ms` al piso al leer el archivo, pero
+  // `ejecutarPlan` lo vuelve a exigir por si alguien arma un `PlanArchivo` a
+  // mano (sin pasar por `leerPlan`) con una pausa baja.
+  it('sube pausa_ms al piso aunque el PlanArchivo lo traiga por debajo (defensa, no sólo leerPlan)', async () => {
+    mockRecorrer.mockResolvedValue([]);
+    const registro = new RegistroSesiones<{ n: number }>(async () => ({ n: 1 }));
+    const plan: PlanArchivo = { pausa_ms: 5, consultas: [{}] };
+
+    await ejecutarPlan(plan, registro, '11111111-1', crearScraperVacio(), undefined);
+
+    expect(mockRecorrer.mock.calls[0][2]).toEqual({ pausaMs: 1200 });
+  });
+
+  // La única vía para saltarse el piso: el parámetro de prueba explícito, que
+  // NO es parte de `PlanArchivo`/`leerPlan` y por eso no puede colarse desde
+  // un archivo real.
+  it('opcionesDePrueba.pausaMsSinPiso es la única forma de bajar del piso, y sólo la usan los tests', async () => {
+    mockRecorrer.mockResolvedValue([]);
+    const registro = new RegistroSesiones<{ n: number }>(async () => ({ n: 1 }));
+    const plan: PlanArchivo = { pausa_ms: 5000, consultas: [{}] };
+
+    await ejecutarPlan(plan, registro, '11111111-1', crearScraperVacio(), undefined, { pausaMsSinPiso: 0 });
+
+    expect(mockRecorrer.mock.calls[0][2]).toEqual({ pausaMs: 0 });
   });
 });

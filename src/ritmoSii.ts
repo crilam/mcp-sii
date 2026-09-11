@@ -27,7 +27,12 @@
 // Pausa por defecto entre llamadas de un barrido. Es deliberadamente lenta: el
 // portal del SII sirve a personas que hacen clic, y una llamada por segundo ya
 // es más rápido que cualquier humano.
-const PAUSA_POR_DEFECTO_MS = 1_200;
+//
+// Exportada (sin cambiar su valor) para que quien necesite el mismo PISO fuera
+// de `recorrerConRitmo` —hoy, `verificarRespaldoXml.ts` validando `pausa_ms`
+// de un plan leído de archivo— lo reuse en vez de escribir el número de nuevo,
+// que divergiría en silencio si este cambiara.
+export const PAUSA_POR_DEFECTO_MS = 1_200;
 
 /**
  * Pausa a usar. `RITMO_SII_MS` sólo puede hacerla MÁS lenta: el defecto es un

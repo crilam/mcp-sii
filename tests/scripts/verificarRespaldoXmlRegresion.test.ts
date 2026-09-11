@@ -44,6 +44,20 @@ jest.mock('../../src/rest/rutas/mipyme', () => ({
 import { ejecutarModoUnaConsulta } from '../../src/scripts/verificarRespaldoXml';
 
 describe('ejecutarModoUnaConsulta (regresión del modo de siempre)', () => {
+  // Reasigna `process.env` entero (no sólo las variables VERIF_*) a propósito:
+  // es la única forma de GARANTIZAR que no quede una `VERIF_*` de una corrida
+  // manual anterior filtrándose al test. Es seguro porque:
+  //   1. Jest corre cada ARCHIVO de test en su propio proceso worker (o, si
+  //      reusa el proceso entre archivos, cada uno igual reinicia módulos), así
+  //      que esta reasignación no puede afectar a otro archivo de test que ya
+  //      haya leído sus variables al importar.
+  //   2. `ORIG_ENV` se captura ANTES de tocar nada y `afterAll` lo restaura, así
+  //      que al terminar este describe el proceso vuelve a su `process.env` de
+  //      partida — ningún test posterior en el MISMO archivo ve una mutación
+  //      que sobreviva a un test anterior.
+  // Si algún día esto deja de ser seguro (por ejemplo, tests corriendo en el
+  // mismo worker en paralelo dentro de este archivo), la alternativa es aislar
+  // el módulo con `jest.isolateModules` en vez de tocar el global.
   const ORIG_ENV = { ...process.env };
 
   beforeEach(() => {

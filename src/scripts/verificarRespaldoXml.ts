@@ -11,7 +11,7 @@ import { soloCuerpoRut, MipymeHttpScraper, MAX_TRAMOS_ABSOLUTO } from '../scrape
 import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { Browser } from '../browser';
-import { recorrerConRitmo } from '../ritmoSii';
+import { recorrerConRitmo, PAUSA_POR_DEFECTO_MS } from '../ritmoSii';
 import { rutEsValido } from '../rut';
 
 // Verifica `respaldo-xml` contra el SII real, por el handler REST.
@@ -144,6 +144,13 @@ export interface FiltrosNormalizados {
 export function normalizarFiltros(bruto: FiltrosCrudos, etiqueta: string): FiltrosNormalizados {
   const rango = mesPasado();
 
+  // Chequeo de TIPO antes que de valor: un JSON de plan no tiene el tipado de
+  // TypeScript de `FiltrosCrudos` detrás — un `origen` numérico o un objeto
+  // llega tal cual del `JSON.parse`, y `.toLowerCase()` sobre eso revienta con
+  // un `TypeError` que no dice CUÁL consulta ni CUÁL campo estaba mal.
+  if (bruto.origen != null && typeof bruto.origen !== 'string') {
+    throw new Error(`${etiqueta}.origen tiene que ser un string; se recibió ${JSON.stringify(bruto.origen)}.`);
+  }
   const origenCrudo = (bruto.origen ?? 'recibidos').toLowerCase();
   if (origenCrudo !== 'emitidos' && origenCrudo !== 'recibidos') {
     throw new Error(
@@ -153,6 +160,12 @@ export function normalizarFiltros(bruto: FiltrosCrudos, etiqueta: string): Filtr
   }
   const origen = origenCrudo as 'emitidos' | 'recibidos';
 
+  if (bruto.desde != null && typeof bruto.desde !== 'string') {
+    throw new Error(`${etiqueta}.desde tiene que ser un string; se recibió ${JSON.stringify(bruto.desde)}.`);
+  }
+  if (bruto.hasta != null && typeof bruto.hasta !== 'string') {
+    throw new Error(`${etiqueta}.hasta tiene que ser un string; se recibió ${JSON.stringify(bruto.hasta)}.`);
+  }
   const desde = bruto.desde ?? rango.desde;
   const hasta = bruto.hasta ?? rango.hasta;
   validarFecha(desde, `${etiqueta}.desde`);
@@ -178,6 +191,9 @@ export function normalizarFiltros(bruto: FiltrosCrudos, etiqueta: string): Filtr
     throw new Error(`${etiqueta}: folio (${bruto.folio}) no puede ser mayor que folio_hasta (${bruto.folio_hasta}).`);
   }
 
+  if (bruto.contraparte != null && typeof bruto.contraparte !== 'string') {
+    throw new Error(`${etiqueta}.contraparte tiene que ser un string; se recibió ${JSON.stringify(bruto.contraparte)}.`);
+  }
   let contraparte = bruto.contraparte;
   if (contraparte != null) {
     contraparte = contraparte.replace(/\./g, '').trim();
@@ -195,6 +211,9 @@ export function normalizarFiltros(bruto: FiltrosCrudos, etiqueta: string): Filtr
     }
   }
 
+  if (bruto.rzn_soc != null && typeof bruto.rzn_soc !== 'string') {
+    throw new Error(`${etiqueta}.rzn_soc tiene que ser un string; se recibió ${JSON.stringify(bruto.rzn_soc)}.`);
+  }
   let rznSoc = bruto.rzn_soc;
   if (rznSoc != null) {
     rznSoc = rznSoc.trim();
@@ -394,7 +413,9 @@ export interface ConsultaPlan extends FiltrosCrudos {
 export interface PlanArchivo {
   consultas: ConsultaPlan[];
   // Sobrescribe la pausa entre consultas (ver ritmoSii.pausaConfigurada). Sin
-  // esto, `recorrerConRitmo` ya aplica el piso de 1200 ms por defecto.
+  // esto, `recorrerConRitmo` ya aplica el piso por defecto. Un valor por
+  // debajo del piso NO lo salta: `leerPlan` (y, por defensa, `ejecutarPlan`)
+  // lo suben al piso — bajarlo no es un ajuste válido ni por archivo.
   pausa_ms?: number;
 }
 
@@ -410,9 +431,25 @@ export function leerPlan(rutaJson: string): PlanArchivo {
   if (!Array.isArray(obj.consultas) || obj.consultas.length === 0) {
     throw new Error(`VERIF_PLAN (${rutaJson}) tiene que traer un array "consultas" con al menos un elemento.`);
   }
+
+  // El PISO de ritmo (`ritmoSii.pausaConfigurada`) tiene el mismo criterio que
+  // `RITMO_SII_MS`: el defecto es un piso, no una sugerencia, y no se permite
+  // bajarlo. Sin este chequeo, un JSON de plan con `"pausa_ms": 0` reintroduce
+  // por archivo exactamente el atajo que la variable de entorno tiene
+  // cerrado — y `recorrerConRitmo` sólo aplica el piso cuando `pausaMs` es
+  // `undefined`; un `pausaMs` explícito, aunque sea 0, lo pisa por diseño.
+  let pausaMs = typeof obj.pausa_ms === 'number' ? obj.pausa_ms : undefined;
+  if (pausaMs != null && pausaMs < PAUSA_POR_DEFECTO_MS) {
+    console.warn(
+      `VERIF_PLAN (${rutaJson}): pausa_ms=${pausaMs} está bajo el piso de ${PAUSA_POR_DEFECTO_MS} ms; ` +
+      `se usa el piso. El piso no se puede bajar desde el archivo, igual que RITMO_SII_MS no lo baja por variable de entorno.`
+    );
+    pausaMs = PAUSA_POR_DEFECTO_MS;
+  }
+
   return {
     consultas: obj.consultas as ConsultaPlan[],
-    pausa_ms: typeof obj.pausa_ms === 'number' ? obj.pausa_ms : undefined,
+    pausa_ms: pausaMs,
   };
 }
 
@@ -555,13 +592,28 @@ export interface ResultadoPlanItem {
 // una inventada acá: `recorrerConRitmo` ya respeta el piso de 1200 ms y avisa
 // si alguien intenta bajarlo por env — reusarlo es lo que evita que el modo
 // plan tenga su propio riesgo de bloqueo.
+//
+// `opcionesDePrueba.pausaMsSinPiso` es la ÚNICA forma de mandarle a
+// `recorrerConRitmo` una pausa por debajo del piso, y sólo la usan los tests
+// (el nombre lo dice, y no es parte de `PlanArchivo`/`leerPlan`, que es la
+// forma que entra por archivo real). `plan.pausa_ms` en cambio SIEMPRE se
+// sube al piso acá, aunque `leerPlan` ya lo suba al leer el JSON: alguien
+// podría construir un `PlanArchivo` a mano (sin pasar por `leerPlan`) y
+// mandarlo igual con `pausa_ms: 0` — `recorrerConRitmo` sólo aplica su piso
+// cuando `pausaMs` es `undefined`, así que un `pausaMs` explícito, aunque sea
+// 0, lo pisa por diseño, y sin este segundo chequeo el atajo reaparecería acá.
 export async function ejecutarPlan<T>(
   plan: PlanArchivo,
   ejecutor: EjecutorSesion<T>,
   rut: string,
   crearScraper: (sesion: T) => ScraperRespaldoXml,
-  empresaRut: string | undefined
+  empresaRut: string | undefined,
+  opcionesDePrueba?: { pausaMsSinPiso?: number }
 ): Promise<ResultadoPlanItem[]> {
+  const pausaMs = opcionesDePrueba?.pausaMsSinPiso !== undefined
+    ? opcionesDePrueba.pausaMsSinPiso
+    : (plan.pausa_ms != null ? Math.max(plan.pausa_ms, PAUSA_POR_DEFECTO_MS) : undefined);
+
   return recorrerConRitmo(
     plan.consultas,
     async (consultaBruta, indice) => {
@@ -582,7 +634,7 @@ export async function ejecutarPlan<T>(
         };
       }
     },
-    { pausaMs: plan.pausa_ms }
+    { pausaMs }
   );
 }
 
@@ -680,7 +732,7 @@ export function crearEjecutorDeUnaSesion(
   return { registro, contarConstruccionesDeContexto: () => construcciones };
 }
 
-async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
+export async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
   const plan = leerPlan(rutaPlan);
   if (!SALIDA) {
     throw new Error(
@@ -724,8 +776,17 @@ async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
     // el logout (uno sin protección, el de adentro protegido) y, peor, si
     // ESE logout desprotegido lanza, `cerrarYOlvidar` lo propaga desde su
     // `finally` interno y se pierde el error real del plan.
-    await registro.cerrarYOlvidar(p.rut, async () => {});
-    credenciales.borrar(p.rut);
+    //
+    // El borrado de la credencial va en su PROPIO `finally` anidado: si
+    // `cerrarYOlvidar` lanzara (por ejemplo porque el `sesionDe` de adentro
+    // reventó antes de terminar), sin este anidamiento la línea de abajo
+    // nunca correría y el `.pfx` de un certificado real (perfil por defecto
+    // de este script) quedaría en disco con ruta predecible.
+    try {
+      await registro.cerrarYOlvidar(p.rut, async () => {});
+    } finally {
+      credenciales.borrar(p.rut);
+    }
   }
 
   const construccionesDeContexto = contarConstruccionesDeContexto();

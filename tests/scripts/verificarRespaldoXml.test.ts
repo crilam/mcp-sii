@@ -1,6 +1,7 @@
 import { RegistroSesiones } from '../../src/registroSesiones';
 import { ProveedorCredencialesRuntime } from '../../src/credencialesRuntime';
 import { SessionManager } from '../../src/session';
+import { PAUSA_POR_DEFECTO_MS } from '../../src/ritmoSii';
 import {
   ejecutarPlan,
   armarReporte,
@@ -71,7 +72,6 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
       { documentos: 3, tramos: [{ fechaDesde: '2026-01-21', fechaHasta: '2026-01-31', documentos: 3, xml: '<xml/>' }], limitaciones: [] },
     ]);
     const plan: PlanArchivo = {
-      pausa_ms: 0,
       consultas: [
         { desde: '2026-01-01', hasta: '2026-01-10' },
         { desde: '2026-01-11', hasta: '2026-01-20' },
@@ -79,7 +79,7 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
       ],
     };
 
-    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
 
     expect(resultados).toHaveLength(3);
     expect(resultados.map(r => r.resultado.documentos)).toEqual([1, 2, 3]);
@@ -94,9 +94,9 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
       new Error('el SII devolvió una página de error'),
       { documentos: 3, tramos: [{ fechaDesde: '2026-01-21', fechaHasta: '2026-01-31', documentos: 3, xml: '<xml/>' }], limitaciones: [] },
     ]);
-    const plan: PlanArchivo = { pausa_ms: 0, consultas: [{}, {}, {}] };
+    const plan: PlanArchivo = { consultas: [{}, {}, {}] };
 
-    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
 
     expect(resultados).toHaveLength(3);
     expect(resultados[0].resultado.ok).toBe(true);
@@ -120,11 +120,10 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
       { documentos: 7, tramos: [], limitaciones: [] },
     ]);
     const plan: PlanArchivo = {
-      pausa_ms: 0,
       consultas: [{ origen: 'no-existe' }, { origen: 'recibidos' }],
     };
 
-    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
 
     expect(resultados[0].resultado.ok).toBe(false);
     expect(resultados[0].resultado.detalle).toMatch(/consultas\[0\]\.origen.*no es válido/);
@@ -147,11 +146,10 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
     const { registro } = crearRegistroDoble();
     const crearScraper = scraperProgramado([{ documentos: 1, tramos: [], limitaciones: [] }]);
     const plan: PlanArchivo = {
-      pausa_ms: 0,
       consultas: [{}, { folio_hasta: 500 }],
     };
 
-    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
 
     expect(resultados[0].resultado.ok).toBe(true);
     expect(resultados[1].resultado.ok).toBe(false);
@@ -176,9 +174,9 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
         }],
       },
     ], llamadas);
-    const plan: PlanArchivo = { pausa_ms: 0, consultas: [{ max_tramos: 3 }] };
+    const plan: PlanArchivo = { consultas: [{ max_tramos: 3 }] };
 
-    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
 
     expect(llamadas[0].maxTramos).toBe(3);
     expect(resultados[0].resultado.ok).toBe(true);
@@ -211,9 +209,9 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
         }],
       },
     ]);
-    const plan: PlanArchivo = { pausa_ms: 0, consultas: [{ max_tramos: 3 }] };
+    const plan: PlanArchivo = { consultas: [{ max_tramos: 3 }] };
 
-    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
 
     expect(resultados[0].resultado.comparabilidad).toBe('NO_CLASIFICADO');
     const reporte = armarReporte(plan, resultados, 1);
@@ -227,9 +225,9 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
     const crearScraper = scraperProgramado([
       { documentos: 5, tramos: [{ fechaDesde: '2026-01-01', fechaHasta: '2026-01-31', documentos: 5, xml: '<xml/>' }], limitaciones: [] },
     ]);
-    const plan: PlanArchivo = { pausa_ms: 0, consultas: [{}] };
+    const plan: PlanArchivo = { consultas: [{}] };
 
-    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
 
     expect(resultados[0].resultado.comparabilidad).toBe('NO_TOPO');
     const reporte = armarReporte(plan, resultados, 1);
@@ -240,9 +238,9 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
   it('describirFiltros muestra rzn_soc en el reporte (dos consultas que sólo difieren en razón social no se leen igual)', async () => {
     const { registro } = crearRegistroDoble();
     const crearScraper = scraperProgramado([{ documentos: 0, tramos: [], limitaciones: [] }]);
-    const plan: PlanArchivo = { pausa_ms: 0, consultas: [{ contraparte: '77777777-7', rzn_soc: 'Panadería de Prueba' }] };
+    const plan: PlanArchivo = { consultas: [{ contraparte: '77777777-7', rzn_soc: 'Panadería de Prueba' }] };
 
-    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined);
+    const resultados = await ejecutarPlan(plan, registro, '11111111-1', crearScraper, undefined, { pausaMsSinPiso: 0 });
     const reporte = armarReporte(plan, resultados, 1);
 
     expect(reporte).toContain('Panadería de Prueba');
@@ -276,6 +274,26 @@ describe('leerPlan (caminos de error del parser de entrada)', () => {
     const plan = leerPlan(ruta);
     expect(plan.consultas).toHaveLength(1);
     expect(plan.pausa_ms).toBeUndefined();
+  });
+
+  // Bloqueante: un JSON de plan no puede reintroducir por archivo el atajo que
+  // RITMO_SII_MS tiene cerrado por variable de entorno. Cualquier `pausa_ms`
+  // bajo el piso se sube al piso, con aviso.
+  it('sube pausa_ms al piso de ritmo si el archivo pide menos, y avisa', () => {
+    const avisos: string[] = [];
+    jest.spyOn(console, 'warn').mockImplementation((m: unknown) => { avisos.push(String(m)); });
+
+    const ruta = archivoTemporal(JSON.stringify({ consultas: [{}], pausa_ms: 5 }));
+    const plan = leerPlan(ruta);
+
+    expect(plan.pausa_ms).toBe(PAUSA_POR_DEFECTO_MS);
+    expect(avisos.some(a => a.includes('pausa_ms=5') && a.includes('piso'))).toBe(true);
+  });
+
+  it('respeta pausa_ms cuando ya está por encima del piso', () => {
+    const ruta = archivoTemporal(JSON.stringify({ consultas: [{}], pausa_ms: 5000 }));
+    const plan = leerPlan(ruta);
+    expect(plan.pausa_ms).toBe(5000);
   });
 });
 
@@ -345,7 +363,6 @@ describe('crearEjecutorDeUnaSesion (conteo de construcciones de contexto)', () =
       { documentos: 2, tramos: [{ fechaDesde: '2026-01-11', fechaHasta: '2026-01-20', documentos: 2, xml: '<xml/>' }], limitaciones: [] },
     ]);
     const plan: PlanArchivo = {
-      pausa_ms: 0,
       consultas: [
         { desde: '2026-01-01', hasta: '2026-01-10' },
         { desde: '2026-01-11', hasta: '2026-01-20' },
@@ -361,7 +378,8 @@ describe('crearEjecutorDeUnaSesion (conteo de construcciones de contexto)', () =
       registro,
       '11111111-1',
       crearScraper as unknown as (sesion: SessionManager) => ScraperRespaldoXml,
-      undefined
+      undefined,
+      { pausaMsSinPiso: 0 }
     );
 
     expect(resultados.map(r => r.resultado.documentos)).toEqual([1, 2]);

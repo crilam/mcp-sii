@@ -107,10 +107,12 @@ const TOPE_DOCUMENTOS_SII = 20;
 // por tramo DENTRO de una sola request del tenant: sin techo, un rango ancho
 // sobre una empresa con mucho volumen se convierte en un barrido, que es
 // justamente el patrón que hace que el SII bloquee el portal (ver ritmoSii.ts).
-const MAX_TRAMOS_POR_DEFECTO = 10;
+export const MAX_TRAMOS_POR_DEFECTO = 10;
 
-// Techo duro, aunque el caller pida más. Es el mismo número que expone el schema
-// REST, repetido acá porque el schema no cubre a quien llame al scraper directo.
+// Techo duro, aunque el caller pida más. Exportado (junto con
+// `MAX_TRAMOS_POR_DEFECTO`) para que el schema REST y el modo plan del
+// verificador lo IMPORTEN en vez de escribirlo de nuevo: dos constantes que
+// "coinciden" a mano divergen tarde o temprano sin que nada lo avise.
 //
 // RIESGO ASUMIDO: el presupuesto es POR REQUEST, no por cliente ni por ventana.
 // Nada impide repetir requests de 48 tramos sobre el mismo RUT; el lock de
@@ -949,15 +951,13 @@ export class MipymeHttpScraper {
   }
 
   // Junta limitaciones ADYACENTES (el día siguiente al fin de una es el inicio
-  // de la próxima) que vienen de la MISMA causa en una sola, con el rango
-  // unido. "La misma causa" es `causa === 'PRESUPUESTO_TRAMOS'` en las dos
-  // cuando el discriminador estructurado lo dice; para el resto (`'OTRA'` o
-  // sin clasificar) sigue siendo el `motivo` textual, porque esa bolsa junta
-  // motivos genuinamente distintos y ahí el texto es lo único que los separa.
-  // Dos limitaciones de causa distinta —un día lleno al lado de un corte por
-  // tope de tramos— NO se fusionan aunque sean contiguas: el consumidor
-  // perdería la distinción entre "pedí este día con tipo_dte" y "acortá el
-  // rango".
+  // de la próxima) con el MISMO texto de `motivo` en una sola, con el rango
+  // unido. El texto exacto es el único discriminador de fusión (ver el
+  // comentario de más abajo sobre por qué no se usa `causa` acá): dos
+  // limitaciones con motivos distintos —un día lleno al lado de un corte por
+  // tope de tramos— NO se fusionan aunque sean contiguas, porque el
+  // consumidor perdería la distinción entre "pedí este día con tipo_dte" y
+  // "acortá el rango".
   //
   // Se ordena por `fechaDesde` primero porque la bisección no las produce en
   // orden: la rama izquierda de un nivel se resuelve entera (incluida su propia
