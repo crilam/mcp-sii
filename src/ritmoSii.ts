@@ -65,17 +65,28 @@ export function esperar(ms: number): Promise<void> {
  * El tercer nivel de troceo del respaldo XML (folio para emitidos, contraparte
  * para recibidos) combina `TPO_DOC` con `FOLIO`/`FOLIOHASTA` o con `RUT_RECP`
  * en la MISMA llamada al CGI de descarga. Fecha+folio y fecha+contraparte
- * están verificados contra el SII real (ver docs/integracion-api.md); la
- * combinación con `tipo_dte` —la que usa este tercer nivel— NO lo está.
+ * están verificados contra el SII real (ver docs/integracion-api.md).
  *
- * Si el CGI ignorara `TPO_DOC` en presencia de `FOLIO`/`RUT_RECP` (o al revés),
- * cada folio terminaría siendo "dato roto" en la bisección, y un solo día
- * lleno quemaría todo `maxTramos` en llamadas inútiles contra un portal que
- * bloquea por patrón de uso — el mismo riesgo que este módulo documenta más
- * arriba. Por eso el tercer nivel queda APAGADO por defecto: `false` a menos
- * que `RESPALDO_XML_TERCER_NIVEL` sea `'1'` o `'true'` (sin importar
- * mayúsculas). Activarlo sin haberlo verificado en vivo primero (con
- * `src/scripts/verificarRespaldoXml.ts`) es pedir el mismo bloqueo.
+ * La combinación `TPO_DOC` + `FOLIO`/`FOLIOHASTA` también se verificó en vivo:
+ * una consulta de un día con un mes cargado, con `tipo_dte` fijo y un rango de
+ * folio acotado, se midió dos veces con anchos de rango distintos (del orden
+ * de mil y de cinco mil) y en las dos el CGI respetó ambos filtros a la vez,
+ * entregando documentos reales (6 y 18 respectivamente) verificados uno por
+ * uno. O sea: el riesgo de que el CGI ignore `TPO_DOC` en presencia de
+ * `FOLIO`/`FOLIOHASTA` quedó descartado por medición, para ese caso.
+ *
+ * Lo que esa medición NO cubrió: `TPO_DOC` + `RUT_RECP` (el eje que usa el
+ * tercer nivel para recibidos) sigue sin verificación en vivo. No asumir que
+ * el resultado de folio se traslada a contraparte sin haberlo medido.
+ *
+ * Aun con folio+tipo verificado, el tercer nivel queda APAGADO por defecto:
+ * `false` a menos que `RESPALDO_XML_TERCER_NIVEL` sea `'1'` o `'true'` (sin
+ * importar mayúsculas). Prenderlo abre un eje más de llamadas contra un portal
+ * que bloquea por patrón de uso, así que activarlo en producción es una
+ * decisión de despliegue que se toma a conciencia —y sólo para el caso ya
+ * verificado (folio)—, no un default. Antes de activarlo para el eje de
+ * contraparte hay que verificarlo en vivo primero (con
+ * `src/scripts/verificarRespaldoXml.ts`), igual que se hizo para folio.
  */
 export function tercerNivelHabilitado(): boolean {
   const crudo = process.env.RESPALDO_XML_TERCER_NIVEL;

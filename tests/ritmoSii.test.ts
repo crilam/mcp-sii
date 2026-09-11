@@ -119,8 +119,9 @@ describe('pausaConfigurada', () => {
 });
 
 // El tercer nivel de troceo del respaldo XML combina tipo_dte con
-// folio/contraparte, una combinación no verificada contra el SII real: por
-// eso queda apagado salvo que se active explícitamente.
+// folio/contraparte. Folio ya se verificó contra el SII real; contraparte
+// todavía no. Por eso, aunque una de las dos combinaciones esté verificada,
+// el tercer nivel completo queda apagado salvo que se active explícitamente.
 describe('tercerNivelHabilitado', () => {
   afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
 

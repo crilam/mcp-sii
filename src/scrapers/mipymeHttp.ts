@@ -294,10 +294,11 @@ export const MAX_TRAMOS_ABSOLUTO = 48;
 const TOPE_PAGINAS_LISTADO = 10;
 
 // Tope de limitaciones de "folio único que excede por sí solo el tope" por
-// día+tipo (o día+contraparte, del lado recibido). Escenario que motiva NO
-// activar el tercer nivel por defecto: si el CGI de descarga ignorara
-// `FOLIO`/`FOLIOHASTA` (el riesgo no verificado que documenta
-// `tercerNivelHabilitado` en ritmoSii.ts) con el flag igual prendido, TODA
+// día+tipo (o día+contraparte, del lado recibido). Este tope existe para el
+// escenario adverso en general —si el CGI de descarga ignorara `FOLIO`/
+// `FOLIOHASTA` o `RUT_RECP` con el flag prendido— aunque para folio ese
+// riesgo ya se descartó por medición (ver `tercerNivelHabilitado` en
+// ritmoSii.ts); para `RUT_RECP` sigue sin verificar. Si eso pasara, TODA
 // descarga de folio único seguiría excediendo el tope, y un día de 45 folios
 // produce hasta 24 limitaciones casi idénticas (~5.6 KB de `detalle` medidos
 // en la ruta REST en un solo `LIMITE_CONOCIDO`) y 47 llamadas — sin que
@@ -1397,10 +1398,11 @@ export class MipymeHttpScraper {
         // pidiendo por tipo), y se registra la limitación de siempre.
         if (ctx.filtros.tipoDte != null) {
           if (!ctx.tercerNivelOn) {
-            // Ver el comentario de `tercerNivelHabilitado` en ritmoSii.ts: la
-            // combinación tipo_dte+folio/contraparte no está verificada contra
-            // el SII real, y activarla a ciegas puede convertir un día lleno
-            // en un barrido de `maxTramos` llamadas inútiles.
+            // Ver el comentario de `tercerNivelHabilitado` en ritmoSii.ts:
+            // tipo_dte+folio ya se verificó en vivo; tipo_dte+contraparte (el
+            // eje de recibidos) todavía no. Aun así el tercer nivel queda
+            // apagado por defecto: prenderlo es una decisión de despliegue
+            // que se toma a conciencia, no un default automático.
             limitaciones.push({
               fechaDesde: desde,
               fechaHasta: hasta,
@@ -1412,9 +1414,10 @@ export class MipymeHttpScraper {
               motivo:
                 `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos del tipo `
                 + `${ctx.filtros.tipoDte} y el tercer nivel de troceo (por folio o por contraparte) `
-                + `está DESACTIVADO por defecto: esa combinación de filtros no está verificada `
-                + `contra el SII real. Activalo con RESPALDO_XML_TERCER_NIVEL=1 recién después de `
-                + `confirmarlo en vivo (ver src/scripts/verificarRespaldoXml.ts).`,
+                + `está DESACTIVADO por defecto: prenderlo abre un eje más de llamadas contra un `
+                + `portal que bloquea por patrón de uso, así que es una decisión de despliegue. `
+                + `Activalo con RESPALDO_XML_TERCER_NIVEL=1 (ver src/scripts/verificarRespaldoXml.ts `
+                + `para verificar en vivo el eje de contraparte, si aún no se hizo).`,
             });
             return;
           }

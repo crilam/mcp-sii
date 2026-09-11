@@ -2519,10 +2519,11 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
   });
 });
 
-// El tercer nivel está APAGADO por defecto porque la combinación
-// tipo_dte+folio/contraparte no está verificada contra el SII real (ver
-// `tercerNivelHabilitado` en ritmoSii.ts). Este describe NO toca el flag en
-// `beforeEach`: cada test lo deja tal como está o lo prende explícitamente.
+// El tercer nivel está APAGADO por defecto porque, aunque tipo_dte+folio ya
+// se verificó contra el SII real, tipo_dte+contraparte todavía no (ver
+// `tercerNivelHabilitado` en ritmoSii.ts): prenderlo es una decisión de
+// despliegue, no un default. Este describe NO toca el flag en `beforeEach`:
+// cada test lo deja tal como está o lo prende explícitamente.
 describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () => {
   beforeEach(() => jest.clearAllMocks());
   afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
