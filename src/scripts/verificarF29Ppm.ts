@@ -4,6 +4,7 @@ import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { registrarRutasF29 } from '../rest/rutas/f29';
 import { RutaHandler } from '../rest/rutas/comun';
 import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacion';
+import { soloCuerpoRut } from '../scrapers/mipymeHttp';
 
 // Verifica `POST /v1/f29/ppm` contra el SII real, por el handler REST.
 //
@@ -50,8 +51,21 @@ async function main() {
 
   // Lo que NO debe estar. El SII devuelve `rutContribuyente` y `dv` en esta
   // respuesta; la ruta arma el cuerpo campo por campo para dejarlos afuera.
+  //
+  // Este script exige que `p.rut` venga como "cuerpo-DV": sin el guion,
+  // `soloCuerpoRut` no tiene nada que cortar y el "cuerpo" queda con el DV
+  // pegado, algo que la respuesta del SII (sólo el cuerpo, sin DV) nunca va a
+  // contener — el chequeo de abajo daría "sin filtración: SÍ" por vacuidad,
+  // aunque la ruta filtrara mal. Por eso falla acá en vez de adivinar.
+  const rutNormalizado = p.rut.trim().replace(/\./g, '');
+  if (!/^\d{7,8}-[\dkK]$/.test(rutNormalizado)) {
+    throw new Error(
+      `el RUT del perfil '${NOMBRE}' es '${p.rut}' y no tiene la forma "cuerpo-DV" que este chequeo ` +
+      `exige (ej. "12345678-9"). Corregí el RUT del perfil '${NOMBRE}' en perfilesVerificacion.`
+    );
+  }
   const json = JSON.stringify(b);
-  const rutSinFormato = p.rut.replace(/[.-]/g, '').slice(0, -1);
+  const rutSinFormato = soloCuerpoRut(p.rut);
   for (const [que, presente] of [
     ['rutContribuyente', json.includes('rutContribuyente')],
     ['el RUT en cualquier campo', json.includes(rutSinFormato)],

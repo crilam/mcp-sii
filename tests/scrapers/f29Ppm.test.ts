@@ -107,6 +107,40 @@ describe('F29PpmScraper.tasaPpm', () => {
     expect(r.esPropyme).toBe(true);
   });
 
+  // `periodo`, `cod563Propuesto`, `tasaIdpc` y `categoriaTributaria` son
+  // nullables en el tipo `TasaPpmF29` a propósito: el SII puede no traerlos.
+  // Esto no es un bug que se arregla, es el contrato que la interfaz ya
+  // declara — y sin un test que lo ejercite, nadie nota si un cambio futuro
+  // empieza a asumir que siempre vienen y explota con un `.toUpperCase()` o
+  // similar sobre `null`.
+  it('período, 563 propuesto, tasa y categoría tributaria ausentes se devuelven null, no explotan', async () => {
+    const { scraper } = conRespuesta({
+      ...TASA_PPM, periodo: null, cod563Propuesto: null, tasaIDPC: null, categoriaTributaria: null,
+    });
+
+    const r = await scraper.tasaPpm('202608');
+
+    expect(r.periodo).toBeNull();
+    expect(r.cod563Propuesto).toBeNull();
+    expect(r.tasaIdpc).toBeNull();
+    expect(r.categoriaTributaria).toBeNull();
+  });
+
+  // Caso hermano del anterior: ahí faltaban campos SUELTOS; acá faltan TODOS
+  // los casilleros. Es el caso que distingue "no hay datos" de "cero": una
+  // lista vacía es un resultado válido (todos los códigos vinieron null o
+  // vacíos), no un error, y quien cuadre tiene que poder leerlo así en vez de
+  // que el scraper explote o devuelva algo que no sea un arreglo.
+  it('todos los códigos ausentes o vacíos: casilleros queda como lista vacía, no explota', async () => {
+    const { scraper } = conRespuesta({
+      ...TASA_PPM, cod750: null, cod30: null, cod563: null, cod115: null, cod68: '', cod62: null,
+    });
+
+    const r = await scraper.tasaPpm('202608');
+
+    expect(r.casilleros).toEqual([]);
+  });
+
   // Esta app usa "S"/"N" en otros campos (`scoaRealizado`, `scoaPpmoCod750`). Un
   // cast a boolean convertiría el string "N" en `true`.
   it('un "N" del SII en un booleano no se lee como true', async () => {

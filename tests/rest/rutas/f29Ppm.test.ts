@@ -45,18 +45,29 @@ describe('POST /v1/f29/ppm', () => {
   });
 
   // El SII devuelve `rutContribuyente` y `dv` en esta respuesta. La ruta arma el
-  // cuerpo campo por campo justamente para que no salgan: el test corre sobre el
-  // JSON serializado, que es lo que viaja al consumidor.
-  it('no devuelve el RUT del contribuyente aunque el SII lo mande', async () => {
+  // cuerpo campo por campo justamente para que no salgan.
+  //
+  // Se fija la forma EXACTA del cuerpo (las claves contra una lista explícita)
+  // en vez de negativas puntuales del estilo "no contiene rutContribuyente":
+  // esas claves ya no pueden aparecer nunca porque la ruta arma el cuerpo campo
+  // por campo con otros nombres, así que la negativa es casi vacía y un
+  // renombre del campo filtrado la evade igual. Comparar contra la lista
+  // completa sí cubre eso, además de cualquier campo nuevo que se cuele.
+  //
+  // El cuerpo y el DV del doble usan valores DISTINTOS entre sí (RUT
+  // '77777777', DV 'k'): si compartieran dígito, una afirmación futura sobre
+  // uno solo de los dos no podría saber cuál de los dos la hizo pasar.
+  it('el cuerpo de la respuesta tiene exactamente los campos esperados, sin el RUT del contribuyente', async () => {
     (core.tasaPpm as jest.Mock).mockResolvedValue({
-      ...RESULTADO, rutContribuyente: '11111111', dv: '1',
+      ...RESULTADO, rutContribuyente: '77777777', dv: 'k',
     });
 
     const r = await armarRouter().get('POST /v1/f29/ppm')!(BASE);
 
-    const json = JSON.stringify(r.body);
-    expect(json).not.toContain('rutContribuyente');
-    expect(json).not.toContain('11111111');
+    expect(Object.keys(r.body as object).sort()).toEqual([
+      'ok', 'periodo', 'casilleros', 'cod563_propuesto', 'tasa_idpc', 'categoria_tributaria',
+      'realizado', 'fuera_de_plazo', 'es_propyme', 'generada_en',
+    ].sort());
   });
 
   it('un período mal formado es 400 y no llega al SII', async () => {
