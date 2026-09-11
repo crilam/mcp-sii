@@ -4,6 +4,7 @@ import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { registrarRutasF29 } from '../rest/rutas/f29';
 import { RutaHandler } from '../rest/rutas/comun';
 import { perfil, credencialParaBody, NombrePerfil } from '../perfilesVerificacion';
+import { soloCuerpoRut } from '../scrapers/mipymeHttp';
 
 // Verifica `POST /v1/f29/ppm` contra el SII real, por el handler REST.
 //
@@ -50,8 +51,26 @@ async function main() {
 
   // Lo que NO debe estar. El SII devuelve `rutContribuyente` y `dv` en esta
   // respuesta; la ruta arma el cuerpo campo por campo para dejarlos afuera.
+  //
+  // El cuerpo del RUT sale de `soloCuerpoRut`, no de sacarle el último
+  // carácter a mano: eso asumía que `p.rut` siempre trae dígito verificador
+  // pegado, y si algún perfil lo guardara sin DV el corte se comía un dígito
+  // real. Ahí la búsqueda de abajo no encontraba nada, el chequeo daba "SÍ, sin
+  // filtración" — pero por una cadena que nunca existió, no porque la ruta
+  // filtre bien. Un chequeo de filtración que puede dar verde por vacuidad es
+  // peor que no tener chequeo, así que si el cuerpo queda demasiado corto para
+  // ser un RUT, el script corta acá y avisa en vez de seguir con una búsqueda
+  // vacía.
   const json = JSON.stringify(b);
-  const rutSinFormato = p.rut.replace(/[.-]/g, '').slice(0, -1);
+  const rutSinFormato = soloCuerpoRut(p.rut);
+  if (rutSinFormato.length < 7) {
+    throw new Error(
+      `el cuerpo del RUT del perfil '${NOMBRE}' quedó en '${rutSinFormato}' (${rutSinFormato.length} ` +
+      `dígitos), demasiado corto para ser un RUT real. El chequeo de filtración no puede correr así: ` +
+      `buscar una cadena vacía o insuficiente siempre "encuentra que no está" y el chequeo daría verde ` +
+      `sin haber probado nada. Revisá el perfil '${NOMBRE}' en perfilesVerificacion.`
+    );
+  }
   for (const [que, presente] of [
     ['rutContribuyente', json.includes('rutContribuyente')],
     ['el RUT en cualquier campo', json.includes(rutSinFormato)],

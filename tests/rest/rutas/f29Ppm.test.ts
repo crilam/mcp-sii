@@ -47,16 +47,23 @@ describe('POST /v1/f29/ppm', () => {
   // El SII devuelve `rutContribuyente` y `dv` en esta respuesta. La ruta arma el
   // cuerpo campo por campo justamente para que no salgan: el test corre sobre el
   // JSON serializado, que es lo que viaja al consumidor.
+  //
+  // El RUT del doble tiene que ser DISTINTO del de BASE ('11.111.111-1'):
+  // si usáramos el mismo dígito, el "not.toContain('11111111')" pasaría
+  // aunque la ruta copiara el objeto entero del SII tal cual, porque esos
+  // dígitos ya aparecen en BASE por otra razón y no prueban nada sobre el
+  // filtrado. Con un RUT propio del doble, si la ruta alguna vez copiara el
+  // objeto completo, este assert fallaría de verdad.
   it('no devuelve el RUT del contribuyente aunque el SII lo mande', async () => {
     (core.tasaPpm as jest.Mock).mockResolvedValue({
-      ...RESULTADO, rutContribuyente: '11111111', dv: '1',
+      ...RESULTADO, rutContribuyente: '77777777', dv: '7',
     });
 
     const r = await armarRouter().get('POST /v1/f29/ppm')!(BASE);
 
     const json = JSON.stringify(r.body);
     expect(json).not.toContain('rutContribuyente');
-    expect(json).not.toContain('11111111');
+    expect(json).not.toContain('77777777');
   });
 
   it('un período mal formado es 400 y no llega al SII', async () => {

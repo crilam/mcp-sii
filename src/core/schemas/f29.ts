@@ -42,4 +42,22 @@ export const schemaPropuestaF29 = {
 
 // PPM pide lo mismo que la propuesta —RUT y período AAAAMM como string—, y por
 // las mismas razones: las dos rutas las consume AgenticERP con el mismo tipo.
-export const schemaPpmF29 = schemaPropuestaF29;
+//
+// Se COPIA a propósito, no se alias por identidad (`schemaPpmF29 =
+// schemaPropuestaF29`): que hoy tengan la misma forma es un hecho de HOY, no
+// un invariante. Con el alias, si mañana a `propuesta` le agregan un campo
+// opcional propio de esa ruta, PPM lo heredaría en silencio sin que nadie lo
+// decida. Copiando, el día que un contrato cambie hay que tocar el otro a
+// mano, que es lo que corresponde para dos rutas que son distintas aunque
+// hoy coincidan.
+export const schemaPpmF29 = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  periodo: z.union([z.string(), z.number().int()])
+    .transform(v => String(v))
+    .refine(p => /^\d{6}$/.test(p), 'periodo debe ser AAAAMM, por ejemplo "202608"')
+    .refine(p => {
+      const anio = Number(p.slice(0, 4)), mes = Number(p.slice(4));
+      return anio >= 2007 && anio <= 2100 && mes >= 1 && mes <= 12;
+    }, 'periodo debe ser AAAAMM, con año 2007-2100 y mes 01-12')
+    .describe('Período tributario en formato AAAAMM (ej. "202608")'),
+};

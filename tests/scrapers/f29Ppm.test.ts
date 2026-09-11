@@ -107,6 +107,23 @@ describe('F29PpmScraper.tasaPpm', () => {
     expect(r.esPropyme).toBe(true);
   });
 
+  // `periodo`, `tasaIdpc` y `categoriaTributaria` son nullables en el tipo
+  // `TasaPpmF29` a propósito: el SII puede no traerlos. Esto no es un bug que
+  // se arregla, es el contrato que la interfaz ya declara — y sin un test que
+  // lo ejercite, nadie nota si un cambio futuro empieza a asumir que siempre
+  // vienen y explota con un `.toUpperCase()` o similar sobre `null`.
+  it('período, tasa y categoría tributaria ausentes se devuelven null, no explotan', async () => {
+    const { scraper } = conRespuesta({
+      ...TASA_PPM, periodo: null, tasaIDPC: null, categoriaTributaria: null,
+    });
+
+    const r = await scraper.tasaPpm('202608');
+
+    expect(r.periodo).toBeNull();
+    expect(r.tasaIdpc).toBeNull();
+    expect(r.categoriaTributaria).toBeNull();
+  });
+
   // Esta app usa "S"/"N" en otros campos (`scoaRealizado`, `scoaPpmoCod750`). Un
   // cast a boolean convertiría el string "N" en `true`.
   it('un "N" del SII en un booleano no se lee como true', async () => {
