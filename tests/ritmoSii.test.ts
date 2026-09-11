@@ -120,29 +120,100 @@ describe('pausaConfigurada', () => {
 
 // El tercer nivel de troceo del respaldo XML combina tipo_dte con
 // folio/contraparte. Folio ya se verificó contra el SII real; contraparte
-// todavía no. Por eso, aunque una de las dos combinaciones esté verificada,
-// el tercer nivel completo queda apagado salvo que se active explícitamente.
+// todavía no. Por eso cada eje tiene SU PROPIA variable —para poder prender
+// el verificado sin prender el no verificado—, las dos apagadas por defecto,
+// más el flag heredado `RESPALDO_XML_TERCER_NIVEL` que sigue prendiendo los
+// dos ejes a la vez (compatibilidad), con las variables por eje teniendo
+// PRECEDENCIA sobre él.
 describe('tercerNivelHabilitado', () => {
-  afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
-
-  it('está apagado por defecto (sin la variable definida)', () => {
-    expect(tercerNivelHabilitado()).toBe(false);
+  afterEach(() => {
+    delete process.env.RESPALDO_XML_TERCER_NIVEL;
+    delete process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO;
+    delete process.env.RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE;
   });
 
-  it('"1" lo activa', () => {
+  it('está apagado por defecto en los dos ejes (sin ninguna variable definida)', () => {
+    expect(tercerNivelHabilitado('folio')).toBe(false);
+    expect(tercerNivelHabilitado('contraparte')).toBe(false);
+  });
+
+  it('RESPALDO_XML_TERCER_NIVEL_FOLIO prende SÓLO el eje de folio', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO = '1';
+    expect(tercerNivelHabilitado('folio')).toBe(true);
+    expect(tercerNivelHabilitado('contraparte')).toBe(false);
+  });
+
+  it('RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE prende SÓLO el eje de contraparte', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE = '1';
+    expect(tercerNivelHabilitado('contraparte')).toBe(true);
+    expect(tercerNivelHabilitado('folio')).toBe(false);
+  });
+
+  it('"true", sin importar mayúsculas, también activa cada variable por eje', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO = 'TRUE';
+    expect(tercerNivelHabilitado('folio')).toBe(true);
+    process.env.RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE = 'True';
+    expect(tercerNivelHabilitado('contraparte')).toBe(true);
+  });
+
+  it('cualquier otro valor en la variable por eje la deja apagada', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO = '0';
+    expect(tercerNivelHabilitado('folio')).toBe(false);
+    process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO = 'si';
+    expect(tercerNivelHabilitado('folio')).toBe(false);
+  });
+
+  // El flag heredado existe desde antes de partir el interruptor: sigue
+  // funcionando igual que siempre, prendiendo los DOS ejes a la vez, para no
+  // romper a quien ya lo tiene puesto en algún ambiente.
+  it('el flag heredado RESPALDO_XML_TERCER_NIVEL prende los DOS ejes', () => {
     process.env.RESPALDO_XML_TERCER_NIVEL = '1';
-    expect(tercerNivelHabilitado()).toBe(true);
+    expect(tercerNivelHabilitado('folio')).toBe(true);
+    expect(tercerNivelHabilitado('contraparte')).toBe(true);
   });
 
-  it('"true", sin importar mayúsculas, también lo activa', () => {
+  it('el flag heredado también acepta "true" sin importar mayúsculas', () => {
     process.env.RESPALDO_XML_TERCER_NIVEL = 'TRUE';
-    expect(tercerNivelHabilitado()).toBe(true);
+    expect(tercerNivelHabilitado('folio')).toBe(true);
+    expect(tercerNivelHabilitado('contraparte')).toBe(true);
   });
 
-  it('cualquier otro valor lo deja apagado', () => {
+  it('el flag heredado con cualquier otro valor deja los dos ejes apagados', () => {
     process.env.RESPALDO_XML_TERCER_NIVEL = '0';
-    expect(tercerNivelHabilitado()).toBe(false);
+    expect(tercerNivelHabilitado('folio')).toBe(false);
+    expect(tercerNivelHabilitado('contraparte')).toBe(false);
     process.env.RESPALDO_XML_TERCER_NIVEL = 'si';
-    expect(tercerNivelHabilitado()).toBe(false);
+    expect(tercerNivelHabilitado('folio')).toBe(false);
+    expect(tercerNivelHabilitado('contraparte')).toBe(false);
+  });
+
+  // Precedencia: la variable por eje manda sobre el flag heredado, en las dos
+  // direcciones (apaga lo que el heredado prendía, y prende lo que el
+  // heredado dejaba apagado).
+  it('la variable por eje tiene PRECEDENCIA sobre el flag heredado: lo apaga', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = '1';
+    process.env.RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE = '0';
+    expect(tercerNivelHabilitado('contraparte')).toBe(false);
+    // El otro eje, sin variable propia, sigue gobernado por el heredado.
+    expect(tercerNivelHabilitado('folio')).toBe(true);
+  });
+
+  it('la variable por eje tiene PRECEDENCIA sobre el flag heredado: lo prende', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = '0';
+    process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO = '1';
+    expect(tercerNivelHabilitado('folio')).toBe(true);
+    expect(tercerNivelHabilitado('contraparte')).toBe(false);
+  });
+
+  // Coexistencia parcial: el escenario real de una transición, con el
+  // heredado prendido de antes y sólo UN eje con variable propia. Folio la
+  // tiene puesta (y en un valor que CONTRADICE al heredado, para que la
+  // precedencia se note); contraparte no tiene variable propia y por eso
+  // sigue el heredado. Las dos lecturas conviven en la misma corrida.
+  it('coexistencia parcial: heredado prendido, folio con su propia variable (apagándolo), contraparte sin variable propia (sigue el heredado)', () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = '1';
+    process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO = '0';
+    expect(tercerNivelHabilitado('folio')).toBe(false);
+    expect(tercerNivelHabilitado('contraparte')).toBe(true);
   });
 });

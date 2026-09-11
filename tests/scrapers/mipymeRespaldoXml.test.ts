@@ -23,13 +23,17 @@ jest.mock('../../src/ritmoSii', () => ({
 const MockHttp = SiiHttpClient as jest.MockedClass<typeof SiiHttpClient>;
 const MockSession = SessionManager as jest.MockedClass<typeof SessionManager>;
 
-// Global, a nivel de archivo: sólo el describe del tercer nivel prende
-// `RESPALDO_XML_TERCER_NIVEL` y lo limpia en SU `afterEach`, pero eso lo hace
-// inmune al orden sólo porque hoy Jest corre un archivo en un único worker
-// con orden determinista. Este `afterEach` de archivo entero es la red que
-// no depende de ese orden: si algún test futuro seteara la variable sin
-// limpiarla, no se filtraría al resto de los tests del archivo.
-afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
+// Global, a nivel de archivo: sólo el describe del tercer nivel prende estas
+// variables y las limpia en SU `afterEach`, pero eso lo hace inmune al orden
+// sólo porque hoy Jest corre un archivo en un único worker con orden
+// determinista. Este `afterEach` de archivo entero es la red que no depende
+// de ese orden: si algún test futuro seteara alguna sin limpiarla, no se
+// filtraría al resto de los tests del archivo.
+afterEach(() => {
+  delete process.env.RESPALDO_XML_TERCER_NIVEL;
+  delete process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO;
+  delete process.env.RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE;
+});
 
 function fixture(nombre: string): string {
   return fs.readFileSync(path.join(__dirname, '..', 'fixtures', nombre), 'utf-8');
@@ -2522,11 +2526,13 @@ describe('MipymeHttpScraper.respaldoXml — tercer nivel de troceo (folio / cont
 // El tercer nivel está APAGADO por defecto porque, aunque tipo_dte+folio ya
 // se verificó contra el SII real, tipo_dte+contraparte todavía no (ver
 // `tercerNivelHabilitado` en ritmoSii.ts): prenderlo es una decisión de
-// despliegue, no un default. Este describe NO toca el flag en `beforeEach`:
-// cada test lo deja tal como está o lo prende explícitamente.
-describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () => {
+// despliegue, no un default. Agrupa las tres variables que lo gobiernan —
+// RESPALDO_XML_TERCER_NIVEL_FOLIO, RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE y
+// el heredado RESPALDO_XML_TERCER_NIVEL— porque las tres terminan en el
+// mismo `tercerNivelHabilitado`. Este describe NO las toca en `beforeEach`:
+// cada test las deja tal como están o las prende explícitamente.
+describe('MipymeHttpScraper.respaldoXml — flags del tercer nivel (por eje y heredado)', () => {
   beforeEach(() => jest.clearAllMocks());
-  afterEach(() => { delete process.env.RESPALDO_XML_TERCER_NIVEL; });
 
   it('apagado (default): el tercer nivel no se intenta y el motivo explica cómo activarlo', async () => {
     delete process.env.RESPALDO_XML_TERCER_NIVEL;
@@ -2548,7 +2554,7 @@ describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () 
   // (RESPALDO_XML_TERCER_NIVEL, DESACTIVADO) matchean igual en las dos
   // variantes y no detectan el error. Cada assertion de acá afirma una frase
   // que SÓLO aparece en la rama correcta.
-  it('apagado, origen ENV (emitidos): el motivo dice que el eje de FOLIO ya está verificado y no manda a verificar contraparte', async () => {
+  it('apagado, origen ENV (emitidos): el motivo nombra RESPALDO_XML_TERCER_NIVEL_FOLIO, dice que el eje ya está verificado y NO menciona el eje de contraparte', async () => {
     delete process.env.RESPALDO_XML_TERCER_NIVEL;
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
@@ -2558,11 +2564,13 @@ describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () 
     });
 
     expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/RESPALDO_XML_TERCER_NIVEL_FOLIO/);
     expect(r.limitaciones[0].motivo).toMatch(/eje de folio \(emitidos\) ya se verificó en vivo/);
+    expect(r.limitaciones[0].motivo).not.toMatch(/RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE/);
     expect(r.limitaciones[0].motivo).not.toMatch(/verificar en vivo el eje de contraparte/);
   });
 
-  it('apagado, origen RCP (recibidos): el motivo dice que el eje de CONTRAPARTE no está verificado y manda a verificarlo', async () => {
+  it('apagado, origen RCP (recibidos): el motivo nombra RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE, dice que el eje no está verificado y manda a verificarlo', async () => {
     delete process.env.RESPALDO_XML_TERCER_NIVEL;
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
@@ -2572,8 +2580,10 @@ describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () 
     });
 
     expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE/);
     expect(r.limitaciones[0].motivo).toMatch(/eje de contraparte.*todavía NO se verificó/);
     expect(r.limitaciones[0].motivo).toMatch(/verificar en vivo el eje de contraparte/);
+    expect(r.limitaciones[0].motivo).not.toMatch(/RESPALDO_XML_TERCER_NIVEL_FOLIO/);
     expect(r.limitaciones[0].motivo).not.toMatch(/eje de folio \(emitidos\) ya se verificó/);
   });
 
@@ -2634,6 +2644,68 @@ describe('MipymeHttpScraper.respaldoXml — flag RESPALDO_XML_TERCER_NIVEL', () 
 
     expect(r.limitaciones).toEqual([]);
     expect(r.tramos).toHaveLength(1);
+  });
+
+  // RESPALDO_XML_TERCER_NIVEL_FOLIO prende SÓLO el eje de emitidos: con el
+  // heredado ausente, un pedido de recibidos (RCP) para el mismo día sigue
+  // apagado, aunque el flag de folio esté prendido.
+  it('RESPALDO_XML_TERCER_NIVEL_FOLIO prende folio (ENV) y deja contraparte (RCP) apagado', async () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL_FOLIO = '1';
+    const { scraper: scraperEnv, http: httpEnv } = armar();
+    (httpEnv.get as jest.Mock)
+      .mockResolvedValueOnce(SEL_EMPRESA)
+      .mockResolvedValueOnce('<html></html>')
+      .mockResolvedValueOnce(`<table>${[1].map((f, i) => `
+        <tr>
+          <td><a href="/cgi-bin/Portal001/mipeGesDocEmi.cgi?CODIGO=${9300 + i}"><img></a></td>
+          <td>77777777-7</td>
+          <td>Receptor</td>
+          <td>Factura Electronica</td>
+          <td>${f}</td>
+          <td>2026-08-05</td>
+          <td>1000</td>
+          <td>Documento Emitido</td>
+        </tr>`).join('\n')}</table>`);
+    (httpEnv.getBinario as jest.Mock)
+      .mockResolvedValueOnce(binarioDemasiados())
+      .mockResolvedValueOnce(binarioXml());
+
+    const rEnv = await scraperEnv.respaldoXml({
+      ...RANGO, origen: 'ENV', fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33,
+    });
+    expect(rEnv.limitaciones).toEqual([]);
+    expect(rEnv.tramos).toHaveLength(1);
+
+    const { scraper: scraperRcp, http: httpRcp } = armar();
+    (httpRcp.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
+
+    const rRcp = await scraperRcp.respaldoXml({
+      ...RANGO, origen: 'RCP', fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33,
+    });
+    expect(rRcp.limitaciones).toHaveLength(1);
+    expect(rRcp.limitaciones[0].motivo).toMatch(/RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE/);
+    // Ningún listado de emisores: con el eje de contraparte apagado, ni se
+    // intenta, aunque RESPALDO_XML_TERCER_NIVEL_FOLIO esté prendido.
+    expect(httpRcp.get).not.toHaveBeenCalledWith(expect.stringContaining('mipeAdminDocs'));
+  });
+
+  // Precedencia: la variable por eje manda sobre el flag heredado. Acá el
+  // heredado está prendido (habilitaría los dos ejes) pero
+  // RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE lo apaga explícitamente sólo para
+  // recibidos.
+  it('precedencia: RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE=0 apaga el eje de contraparte aunque el heredado esté prendido', async () => {
+    process.env.RESPALDO_XML_TERCER_NIVEL = '1';
+    process.env.RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE = '0';
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, origen: 'RCP', fechaDesde: '2026-08-05', fechaHasta: '2026-08-05', tipoDte: 33,
+    });
+
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0].motivo).toMatch(/RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE/);
+    expect(http.get).not.toHaveBeenCalledWith(expect.stringContaining('mipeAdminDocs'));
   });
 
   // El flag es de ARRANQUE: se lee UNA sola vez al entrar a `respaldoXml`, no

@@ -62,40 +62,58 @@ export function esperar(ms: number): Promise<void> {
 }
 
 /**
- * El tercer nivel de troceo del respaldo XML (folio para emitidos, contraparte
- * para recibidos) combina `TPO_DOC` con `FOLIO`/`FOLIOHASTA` o con `RUT_RECP`
- * en la MISMA llamada al CGI de descarga. Fecha+folio y fecha+contraparte
- * están verificados contra el SII real (ver docs/integracion-api.md).
+ * El tercer nivel de troceo del respaldo XML combina `TPO_DOC` con
+ * `FOLIO`/`FOLIOHASTA` (eje de `emitidos`) o con `RUT_RECP` (eje de
+ * `recibidos`) en la MISMA llamada al CGI de descarga.
  *
- * La combinación `TPO_DOC` + `FOLIO`/`FOLIOHASTA` (el eje de emitidos) también
- * se verificó en vivo: una consulta de un día con un mes cargado, con
- * `tipo_dte` fijo y un rango de folio acotado, se midió dos veces con anchos
- * de rango distintos (del orden de mil y de cinco mil) y en las dos el CGI
- * respetó ambos filtros a la vez, entregando documentos reales (6 y 18
- * respectivamente) verificados uno por uno.
+ * Los dos ejes NO tienen el mismo respaldo de evidencia, y por eso cada uno
+ * tiene SU PROPIA variable — nunca una sola para los dos:
  *
- * `TPO_DOC` + `RUT_RECP` (el eje de recibidos) sigue SIN verificación en
- * vivo. No asumir que el resultado de folio se traslada a contraparte sin
- * haberlo medido.
+ *   - `RESPALDO_XML_TERCER_NIVEL_FOLIO` (eje de emitidos): la combinación
+ *     `TPO_DOC` + `FOLIO`/`FOLIOHASTA` **ya se verificó en vivo** contra el
+ *     SII real. Una consulta de un día con un mes cargado, con `tipo_dte`
+ *     fijo y un rango de folio acotado, se midió dos veces con anchos de
+ *     rango distintos (del orden de mil y de cinco mil) y en las dos el CGI
+ *     respetó ambos filtros a la vez, entregando documentos reales (6 y 18
+ *     respectivamente) verificados uno por uno (ver docs/integracion-api.md).
+ *   - `RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE` (eje de recibidos): la
+ *     combinación `TPO_DOC` + `RUT_RECP` sigue **SIN verificación en vivo**.
+ *     No asumir que el resultado de folio se traslada a contraparte sin
+ *     haberlo medido: antes de prender esta variable en un ambiente que
+ *     atienda `recibidos` hay que verificar el eje primero (con
+ *     `src/scripts/verificarRespaldoXml.ts`), igual que ya se hizo para
+ *     folio.
  *
- * IMPORTANTE: `RESPALDO_XML_TERCER_NIVEL` es un interruptor único que
- * habilita LOS DOS EJES A LA VEZ, sin granularidad — no existe forma de
- * prender folio (verificado) y dejar contraparte (no verificado) apagado.
- * Prenderlo en un ambiente que reciba consultas de `recibidos` habilita
- * también el eje no medido. Por eso, aunque el eje de folio ya esté
- * verificado, el tercer nivel completo queda APAGADO por defecto: `false` a
- * menos que la variable sea `'1'` o `'true'` (sin importar mayúsculas).
- * Prenderlo abre un eje más de llamadas contra un portal que bloquea por
- * patrón de uso, así que activarlo en producción es una decisión de
- * despliegue que se toma a conciencia, no un default. Antes de activarlo en
- * un ambiente que atienda `recibidos` hay que verificar en vivo el eje de
- * contraparte primero (con `src/scripts/verificarRespaldoXml.ts`), igual que
- * ya se hizo para folio.
+ * Las dos quedan APAGADAS por defecto: `false` a menos que la variable sea
+ * `'1'` o `'true'` (sin importar mayúsculas). Partir el interruptor en dos no
+ * es una excusa para prender nada solo — cada eje abre un frente más de
+ * llamadas contra un portal que bloquea por patrón de uso, así que activar
+ * cualquiera de los dos en producción es una decisión de despliegue que se
+ * toma a conciencia, no un default.
+ *
+ * COMPATIBILIDAD: `RESPALDO_XML_TERCER_NIVEL` (el interruptor único
+ * original) sigue existiendo y, si está puesto, prende LOS DOS EJES A LA
+ * VEZ — igual que siempre hizo — para no romper a quien ya lo usa en algún
+ * ambiente. Las variables por eje tienen PRECEDENCIA sobre él: si
+ * `RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE` está puesta (aunque sea en `'0'`),
+ * su valor manda para el eje de contraparte sin importar qué diga el flag
+ * heredado, y lo mismo para folio con `RESPALDO_XML_TERCER_NIVEL_FOLIO`. Esto
+ * permite, por ejemplo, tener el heredado prendido de antes y apagar
+ * explícitamente sólo el eje no verificado sin tocar el otro.
  */
-export function tercerNivelHabilitado(): boolean {
-  const crudo = process.env.RESPALDO_XML_TERCER_NIVEL;
-  if (crudo == null) return false;
-  return /^(1|true)$/i.test(crudo.trim());
+export function tercerNivelHabilitado(eje: 'folio' | 'contraparte'): boolean {
+  const esBooleano = (crudo: string | undefined): boolean | undefined => {
+    if (crudo == null) return undefined;
+    return /^(1|true)$/i.test(crudo.trim());
+  };
+
+  const porEje = esBooleano(
+    process.env[eje === 'folio'
+      ? 'RESPALDO_XML_TERCER_NIVEL_FOLIO'
+      : 'RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE']);
+  if (porEje != null) return porEje;
+
+  return esBooleano(process.env.RESPALDO_XML_TERCER_NIVEL) ?? false;
 }
 
 /**

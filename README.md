@@ -305,14 +305,17 @@ Dos cosas que definen su forma, las dos verificadas contra el SII:
   contenido firmado. Lo que no se pudo bajar sale en `limitaciones` en vez de
   descartar todo el respaldo (ver `docs/integracion-api.md`).
 - Un día suelto que TODAVÍA excede el tope con `tipo_dte` puesto tiene un tercer
-  eje —folio para emitidos, contraparte para recibidos—, pero queda **apagado
-  por defecto**: la variable `RESPALDO_XML_TERCER_NIVEL` (ver `.env.example`) lo
-  prende. Es un interruptor único que habilita LOS DOS EJES A LA VEZ: no hay
-  forma de prender folio (ya verificado en vivo contra el SII real) y dejar
-  contraparte (todavía no verificado) apagada. Por eso conviene verificar el
-  eje de contraparte primero con `src/scripts/verificarRespaldoXml.ts`
-  (`VERIF_TIPO_DTE` + `VERIF_CONTRAPARTE`) antes de prender el flag en un
-  ambiente que atienda `recibidos`.
+  eje —folio para emitidos, contraparte para recibidos—, pero cada eje queda
+  **apagado por defecto** y tiene SU PROPIA variable (ver `.env.example`):
+  `RESPALDO_XML_TERCER_NIVEL_FOLIO` prende el eje de emitidos, que **ya se
+  verificó en vivo** contra el SII real, y `RESPALDO_XML_TERCER_NIVEL_CONTRAPARTE`
+  prende el eje de recibidos, que **todavía NO está verificado**. Por eso
+  conviene verificar el eje de contraparte primero con
+  `src/scripts/verificarRespaldoXml.ts` (`VERIF_TIPO_DTE` + `VERIF_CONTRAPARTE`)
+  antes de prender esa variable en un ambiente que atienda `recibidos`. El
+  interruptor único original, `RESPALDO_XML_TERCER_NIVEL`, sigue existiendo
+  por compatibilidad y prende los dos ejes a la vez; las variables por eje
+  tienen precedencia sobre él.
 
   **Verificar EN VIVO con `src/scripts/verificarRespaldoXml.ts` (`npm run
   verificar-respaldo-xml`):**
