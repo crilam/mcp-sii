@@ -329,6 +329,60 @@ const DIAS_PORTAL_CAIDO_PARA_CORTAR = 3;
 // mañana si alguien ajusta uno y no el otro.
 const DIA_MS = 24 * 60 * 60 * 1000;
 
+// Cantidad de días CALENDARIO que cubre un rango [desde,hasta], INCLUSIVE en
+// los dos extremos (el mismo día da 1, no 0). Vive acá, junto a `DIA_MS`, y
+// no duplicada en cada lugar que necesita saber cuán ancho es un rango de
+// fecha: el piso de ancho (`ANCHO_MAXIMO_DIAS_RANGO_FECHA`) la usa para
+// decidir si corta, `partirParejoPorAncho` la usa para repartir, y antes de
+// esta función cada uno la recalculaba a mano (incluidos los tests) — dos
+// cálculos que hoy dan lo mismo podrían divergir si alguien ajusta uno y no
+// el otro, igual que `DIA_MS`. Exportada para que los tests la importen en
+// vez de reescribirla.
+export function diasDelRango(desde: string, hasta: string): number {
+  return Math.round((Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / DIA_MS) + 1;
+}
+
+// Parte un rango de fecha [desde,hasta] en la cantidad MÍNIMA de tramos
+// necesaria para que NINGUNO supere `anchoMaximo` días, repartiendo el
+// sobrante lo más PAREJO posible entre ellos (a lo sumo un día de
+// diferencia entre el tramo más largo y el más corto).
+//
+// A propósito NO reusa `partirRango` (que bisecta a la mitad, recursivo):
+// bisectar un rango de 31 días contra un piso de 7 con ese método da hojas
+// de 4,4,4,4,4,4,7 —SIETE tramos, dos de más que el mínimo posible—, porque
+// cada bisección corta a la mitad sin mirar el piso. Repartir parejo da
+// CINCO tramos de 7,6,6,6,6: el mínimo. Esos dos tramos de más importan
+// porque cada uno es una descarga de más contra `MAX_TRAMOS_POR_DEFECTO`
+// (10), que está atado al timeout del llamador y no se puede subir para
+// compensar (ver el comentario de esa constante) — un piso que gasta de más
+// su propio presupuesto es, literalmente, el mismo problema que vino a
+// destapar, sólo que auto-infligido.
+//
+// Esta partición NO se usa para la bisección por `excedeTope` (que sigue
+// siendo por la mitad, recursiva, en `partirRango`): ese camino no sabe de
+// antemano cuántos tramos va a necesitar —depende de cuántas veces avise el
+// portal—, así que no hay "parejo" que calcular ahí. Acá sí se sabe de
+// antemano (el ancho total del rango pedido), y por eso vale la pena
+// calcular el reparto óptimo una sola vez.
+export function partirParejoPorAncho(desde: string, hasta: string, anchoMaximo: number): [string, string][] {
+  const dias = diasDelRango(desde, hasta);
+  const numPartes = Math.ceil(dias / anchoMaximo);
+  const base = Math.floor(dias / numPartes);
+  // Las primeras `resto` partes se llevan un día extra: es la única forma de
+  // repartir un sobrante que no divide parejo (31 días en 5 partes son
+  // 6+1/5=6,2 → cuatro partes de 6 y UNA de 7, no cinco partes fraccionarias).
+  const resto = dias % numPartes;
+  let cursor = Date.parse(`${desde}T00:00:00Z`);
+  const partes: [string, string][] = [];
+  for (let i = 0; i < numPartes; i++) {
+    const largoDias = base + (i < resto ? 1 : 0);
+    const finParte = cursor + (largoDias - 1) * DIA_MS;
+    partes.push([aIsoUtc(cursor), aIsoUtc(finParte)]);
+    cursor = finParte + DIA_MS;
+  }
+  return partes;
+}
+
 // Los BORRADORES no viven en el portal viejo. El menú los publica con una
 // función JavaScript (`printLinkAdmBorradores`, definida en `valores.js`) que
 // arma un enlace a otra aplicación, en otro host y con otra tecnología: una SPA
@@ -1265,25 +1319,30 @@ export class MipymeHttpScraper {
 
     // Piso ESTRUCTURAL, no colgado de `excedeTope`: si el rango a pedir es
     // más ancho que el confiable (ver `ANCHO_MAXIMO_DIAS_RANGO_FECHA`), se
-    // parte SIN descargarlo y se recursa sobre las mitades — la misma
-    // partición que usa la bisección por `excedeTope` de más abajo, sólo
-    // que ACÁ se decide antes de gastar la llamada. Partir antes de pedir
-    // es parte del punto: medido en vivo, esa llamada ancha no avisa nada
-    // —vuelve `excedeTope: false` con un tramo truncado—, así que ni
-    // siquiera vale la pena hacerla. Esto NO consume presupuesto de
-    // `maxTramos` (que cuenta DESCARGAS, no particiones): dividir un rango
-    // ancho es gratis en llamadas contra el portal, sólo cuesta CPU local.
+    // parte SIN descargarlo y se recursa sobre los tramos resultantes.
+    // Partir antes de pedir es parte del punto: medido en vivo, esa llamada
+    // ancha no avisa nada —vuelve `excedeTope: false` con un tramo
+    // truncado—, así que ni siquiera vale la pena hacerla. Esto NO consume
+    // presupuesto de `maxTramos` (que cuenta DESCARGAS, no particiones):
+    // dividir un rango ancho es gratis en llamadas contra el portal, sólo
+    // cuesta CPU local.
+    //
+    // La partición es PAREJA (`partirParejoPorAncho`), no la bisección por
+    // la mitad de `partirRango`: acá se sabe de antemano el ancho total del
+    // rango, así que se reparte en el MÍNIMO de tramos posible en vez de
+    // bisectar a ciegas (ver el comentario de esa función para el porqué —
+    // cada tramo de más acá es una descarga de más contra un presupuesto
+    // que no se puede subir).
     //
     // Va DESPUÉS de los dos cortes de arriba (presupuesto y portal caído) a
     // propósito: si el presupuesto ya se agotó o el portal ya está caído,
     // no tiene sentido seguir partiendo un rango que de todas formas no se
     // va a poder pedir.
-    const diasDelRango = Math.round(
-      (Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / DIA_MS) + 1;
-    if (diasDelRango > ANCHO_MAXIMO_DIAS_RANGO_FECHA) {
-      const [primerFin, segundoInicio] = this.partirRango(desde, hasta);
-      await this.acumularTramos(ctx, desde, primerFin, tramos, limitaciones, maxTramos);
-      await this.acumularTramos(ctx, segundoInicio, hasta, tramos, limitaciones, maxTramos);
+    if (diasDelRango(desde, hasta) > ANCHO_MAXIMO_DIAS_RANGO_FECHA) {
+      const partes = partirParejoPorAncho(desde, hasta, ANCHO_MAXIMO_DIAS_RANGO_FECHA);
+      for (const [subDesde, subHasta] of partes) {
+        await this.acumularTramos(ctx, subDesde, subHasta, tramos, limitaciones, maxTramos);
+      }
       return;
     }
 

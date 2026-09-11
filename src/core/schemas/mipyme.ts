@@ -122,11 +122,21 @@ export const schemaRespaldoXml = {
   // El tope existe para que un rango ancho no se convierta en un barrido: el
   // SII entrega 20 documentos por descarga, así que cada tramo extra es otra
   // llamada al portal dentro de la misma request.
-  // Default 10 y no 24: cada tramo es una descarga con su pausa de ritmo, y la
-  // request retiene el lock de la empresa mientras dura. Con 24 el techo de
-  // latencia pasa de los dos minutos y todo lo demás sobre ese RUT responde
-  // SERVICIO_OCUPADO mientras tanto. Diez cubre un mes normal de sobra; quien
-  // necesite más lo pide explícitamente y sabe lo que eso cuesta.
+  //
+  // Default 10, y el número está ATADO AL TIMEOUT DEL LLAMADOR, no elegido
+  // por cubrir un mes de sobra —eso dejó de ser cierto con el piso de ancho
+  // de fecha (`ANCHO_MAXIMO_DIAS_RANGO_FECHA` en mipymeHttp.ts): un mes
+  // TRANQUILO (sin ningún día que exceda el tope) ya cuesta varios tramos
+  // por el piso, y un mes con días que SÍ exceden puede agotar el
+  // presupuesto antes de terminar. El ERP le da ~35s a esta llamada; a ~2s
+  // por tramo más su pausa de ritmo, unos 16 tramos ya rondan ese techo. Por
+  // eso el default NO SE SUBE para que "entre" un mes con más días cargados:
+  // subirlo no produce respaldos más completos, produce TIMEOUTS —y un
+  // timeout es estrictamente peor que un parcial, porque el parcial dice con
+  // precisión (en `limitaciones`) qué rango exacto faltó, mientras que el
+  // timeout no deja nada—. Quien necesite más presupuesto lo pide
+  // explícitamente (hasta `MAX_TRAMOS_ABSOLUTO`) sabiendo que cambia el
+  // riesgo de parcial por el riesgo de timeout.
   max_tramos: z.number().int().min(1).max(MAX_TRAMOS_ABSOLUTO).default(MAX_TRAMOS_POR_DEFECTO)
     .describe(`Máximo de descargas al SII para cubrir el rango (default ${MAX_TRAMOS_POR_DEFECTO}). Cada tramo agrega ~2s de latencia y retiene el lock de la empresa.`),
 };
