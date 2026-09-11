@@ -24,17 +24,21 @@ carga es justamente lo que este documento pone en duda.
 
 ## Lo que se midió el 2026-09-11, en vivo contra el SII real
 
-En cinco sesiones distintas a lo largo del día, `mipeAdminDocsRcp.cgi` devolvió
-la página de error genérica del portal —título «Error al contribuyente», aviso
-«Por el momento no se puede responder a sus requerimientos»— en vez del
-listado esperado. Las cinco veces con el mismo código de error, y las cinco
-veces en la **primera** llamada de la sesión.
+En cinco sesiones distintas a lo largo del día, `mipeAdminDocsRcp.cgi` (CGI de
+listado de contrapartes) devolvió la página de error genérica del portal
+—título «Error al contribuyente», aviso «Por el momento no se puede responder
+a sus requerimientos»— en vez del listado esperado. Las cinco veces con el
+mismo código de error, y las cinco veces en la **primera** llamada de la
+sesión.
 
 Datos relevantes de esas corridas:
 
-- **La descarga funcionó.** `lista_documentos.cgi` / `download.cgi` respondió
-  con normalidad para la misma empresa en la misma sesión. Lo que falla es el
-  *listado*, no el portal entero ni la sesión.
+- **La descarga funcionó, el listado no.** `lista_documentos.cgi` / `download.cgi`
+  (CGI de descarga de documentos) respondió con normalidad para la misma empresa
+  en la misma sesión; en cambio, `mipeAdminDocsRcp.cgi` (CGI de listado de
+  contrapartes, usado en `listarRecibidosDelDia`) no pudo responder. Lo que
+  falla es una función específica del portal (el listado de contrapartes), no
+  el portal entero ni la sesión. La descarga del documento sigue siendo accesible.
 - **No es el error de secuencia.** `assertEmpresaSeleccionada` —el que detecta
   «no ha seleccionado una Empresa»— no se disparó en ninguna corrida, así que
   no es un problema de orden de llamadas de nuestro lado.
@@ -74,6 +78,14 @@ flag no tiene granularidad: prende los dos ejes a la vez. No hay forma de
 activar folio (verificado) y dejar contraparte (no verificado) apagado.
 
 ## La línea a evaluar: el RCV como fuente del eje de contraparte
+
+**Límite de alcance:** el RCV NO entrega el XML del documento tributario
+(`SetDTE` firmado). El RCV entrega **metadata**: qué contrapartes emitieron,
+con qué folios, en qué fechas. El documento XML se descarga, como hoy, del CGI
+legacy del portal mipyme (`lista_documentos.cgi` / `download.cgi`). La línea
+propuesta reemplazaría el listado que alimenta la **decisión de troceo**
+(qué contrapartes operaron ese día, para poder partir un día que excede el tope
+de documentos de la descarga), no la fuente de descarga del documento.
 
 El dato que le falta al tercer nivel de `recibidos` —qué contrapartes
 emitieron documentos ese día— también lo tiene el **RCV** (Registro de Compras
