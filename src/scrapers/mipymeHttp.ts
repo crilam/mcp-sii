@@ -79,7 +79,23 @@ export function enGruposDeFolios(
 ): number[][] {
   const grupos: number[][] = [];
   let actual: number[] = [];
+  let anterior: number | null = null;
   for (const folio of folios) {
+    // Guard de la precondición de arriba, contra el elemento INMEDIATO
+    // anterior (no contra el primero del grupo): con entrada desordenada,
+    // `folio - primero` puede dar negativo dentro de `enGruposDeFolios` y el
+    // corte por ancho no se dispararía NUNCA — la función degradaría en
+    // silencio al comportamiento de `enGrupos` (sólo cantidad) sin que nada
+    // lo avise. Es un error de programación de quien llama, no un caso de
+    // negocio del SII: tiene que explotar acá, ruidoso, en vez de devolver
+    // un resultado que parece sano pero perdió la protección de ancho.
+    if (anterior !== null && folio < anterior) {
+      throw new Error(
+        `enGruposDeFolios recibió folios desordenados (folio ${folio} después de ${anterior}): `
+        + 'la función requiere el arreglo ORDENADO ascendente. Ordená los folios antes de '
+        + 'llamarla.');
+    }
+    anterior = folio;
     if (actual.length > 0) {
       const primero = actual[0];
       const alcanzoCantidad = actual.length >= tamano;

@@ -2577,6 +2577,19 @@ describe('enGruposDeFolios', () => {
   it('un solo folio, un solo grupo de un elemento', () => {
     expect(enGruposDeFolios([42], 20)).toEqual([[42]]);
   });
+
+  // El guard de la precondición de orden: sin él, un arreglo desordenado
+  // haría que `folio - primero` diera negativo, el corte por ancho no se
+  // dispararía nunca, y la función degradaría en silencio al comportamiento
+  // de `enGrupos` (sólo cantidad) — la protección se apaga sola, sin que
+  // nada lo note. Es un error de programación de quien llama (los tres
+  // call-sites ordenan antes), así que tiene que explotar, no devolver un
+  // resultado degradado con cara de sano.
+  it('con folios desordenados, explota en vez de degradar en silencio', () => {
+    expect(() => enGruposDeFolios([10, 5], 20)).toThrow(/desordenados/);
+    // También dentro de un grupo ya abierto, no sólo al principio.
+    expect(() => enGruposDeFolios([1, 2, 3, 2], 20)).toThrow(/desordenados/);
+  });
 });
 
 // Invariante estructural: cuatro rondas seguidas de review encontraron el
