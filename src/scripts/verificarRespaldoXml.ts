@@ -431,6 +431,18 @@ export function leerPlan(rutaJson: string): PlanArchivo {
   if (!Array.isArray(obj.consultas) || obj.consultas.length === 0) {
     throw new Error(`VERIF_PLAN (${rutaJson}) tiene que traer un array "consultas" con al menos un elemento.`);
   }
+  // Mismo criterio que los chequeos de tipo por campo de `normalizarFiltros`:
+  // un elemento de "consultas" que no es un objeto (un `null`, un número, un
+  // string) revienta más abajo con un error sin contexto —`normalizarFiltros`
+  // asume que puede leer `bruto.origen`, `bruto.desde`, etc.— en vez de decir
+  // CUÁL consulta del plan está mal formada.
+  obj.consultas.forEach((c, i) => {
+    if (typeof c !== 'object' || c === null || Array.isArray(c)) {
+      throw new Error(
+        `VERIF_PLAN (${rutaJson}): consultas[${i}] tiene que ser un objeto; se recibió ${JSON.stringify(c)}.`
+      );
+    }
+  });
 
   // El PISO de ritmo (`ritmoSii.pausaConfigurada`) tiene el mismo criterio que
   // `RITMO_SII_MS`: el defecto es un piso, no una sugerencia, y no se permite
@@ -479,7 +491,7 @@ export interface ResultadoConsulta {
 }
 
 function comparabilidadDe(
-  limitaciones: { causa?: 'PRESUPUESTO_TRAMOS' | 'OTRA' }[]
+  limitaciones: { causa?: 'PRESUPUESTO_TRAMOS' | 'SII_NO_DISPONIBLE' | 'OTRA' }[]
 ): 'TOPO' | 'NO_TOPO' | 'NO_CLASIFICADO' {
   if (limitaciones.some(l => l.causa === 'PRESUPUESTO_TRAMOS')) return 'TOPO';
   if (limitaciones.some(l => l.causa === undefined)) return 'NO_CLASIFICADO';
@@ -513,7 +525,10 @@ export interface ScraperRespaldoXml {
   }): Promise<{
     documentos: number;
     tramos: { fechaDesde: string; fechaHasta: string; documentos: number; xml: string }[];
-    limitaciones: { fechaDesde: string; fechaHasta: string; motivo: string; causa?: 'PRESUPUESTO_TRAMOS' | 'OTRA' }[];
+    limitaciones: {
+      fechaDesde: string; fechaHasta: string; motivo: string;
+      causa?: 'PRESUPUESTO_TRAMOS' | 'SII_NO_DISPONIBLE' | 'OTRA';
+    }[];
   }>;
 }
 
@@ -593,7 +608,7 @@ export interface ResultadoPlanItem {
 // si alguien intenta bajarlo por env — reusarlo es lo que evita que el modo
 // plan tenga su propio riesgo de bloqueo.
 //
-// `opcionesDePrueba.pausaMsSinPiso` es la ÚNICA forma de mandarle a
+// `opciones.pausaMsSinPiso` es la ÚNICA forma de mandarle a
 // `recorrerConRitmo` una pausa por debajo del piso, y sólo la usan los tests
 // (el nombre lo dice, y no es parte de `PlanArchivo`/`leerPlan`, que es la
 // forma que entra por archivo real). `plan.pausa_ms` en cambio SIEMPRE se
@@ -602,37 +617,48 @@ export interface ResultadoPlanItem {
 // mandarlo igual con `pausa_ms: 0` — `recorrerConRitmo` sólo aplica su piso
 // cuando `pausaMs` es `undefined`, así que un `pausaMs` explícito, aunque sea
 // 0, lo pisa por diseño, y sin este segundo chequeo el atajo reaparecería acá.
+//
+// `opciones.onResultado` SÍ es de producción: `ejecutarModoPlan` lo usa para
+// acumular cada resultado A MEDIDA que se produce, no sólo al final. Cada
+// consulta individual ya está protegida por el `try/catch` de acá abajo, así
+// que en la práctica esto nunca hace falta para una falla de negocio — pero
+// si `recorrerConRitmo` (o algo fuera de este `try`) llegara a lanzar a mitad
+// de un plan largo, sin este acumulador el llamador perdería TODAS las
+// consultas ya resueltas, no sólo la que falló.
 export async function ejecutarPlan<T>(
   plan: PlanArchivo,
   ejecutor: EjecutorSesion<T>,
   rut: string,
   crearScraper: (sesion: T) => ScraperRespaldoXml,
   empresaRut: string | undefined,
-  opcionesDePrueba?: { pausaMsSinPiso?: number }
+  opciones?: { pausaMsSinPiso?: number; onResultado?: (item: ResultadoPlanItem) => void }
 ): Promise<ResultadoPlanItem[]> {
-  const pausaMs = opcionesDePrueba?.pausaMsSinPiso !== undefined
-    ? opcionesDePrueba.pausaMsSinPiso
+  const pausaMs = opciones?.pausaMsSinPiso !== undefined
+    ? opciones.pausaMsSinPiso
     : (plan.pausa_ms != null ? Math.max(plan.pausa_ms, PAUSA_POR_DEFECTO_MS) : undefined);
 
   return recorrerConRitmo(
     plan.consultas,
     async (consultaBruta, indice) => {
+      let item: ResultadoPlanItem;
       try {
         const filtros = normalizarFiltros(consultaBruta, `consultas[${indice}]`);
         const resultado = await consultarRespaldoXml(ejecutor, rut, crearScraper, empresaRut, filtros);
-        return { indice, filtrosCrudos: consultaBruta, filtros, resultado };
+        item = { indice, filtrosCrudos: consultaBruta, filtros, resultado };
       } catch (e) {
         // Sólo cae acá un error de VALIDACIÓN (por ejemplo un origen mal
         // escrito): consultarRespaldoXml ya atrapa los errores de la consulta
         // en sí. Sin este catch, una consulta inválida en la posición 2 de 3
         // abortaría el `recorrerConRitmo` entero (no atrapa nada por dentro) y
         // se perdería la 3.
-        return {
+        item = {
           indice,
           filtrosCrudos: consultaBruta,
           resultado: { ok: false, error: 'ERROR', detalle: (e as Error).message },
         };
       }
+      opciones?.onResultado?.(item);
+      return item;
     },
     { pausaMs }
   );
@@ -733,20 +759,26 @@ export function crearEjecutorDeUnaSesion(
 }
 
 export async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
-  const plan = leerPlan(rutaPlan);
+  // El chequeo de VERIF_SALIDA va ANTES de leer el plan: si falta, no tiene
+  // sentido pagar la lectura del archivo (ni, con ella, el aviso de
+  // `leerPlan` si el `pausa_ms` del archivo estaba bajo el piso) por un plan
+  // que no se va a correr — el operador vería un aviso sobre algo que nunca
+  // pasó.
   if (!SALIDA) {
     throw new Error(
       'VERIF_SALIDA es obligatorio en modo plan: ahí queda el reporte comparable ' +
       'de todas las consultas — sin un archivo no hay dónde comparar.'
     );
   }
+  const plan = leerPlan(rutaPlan);
 
   const p = perfil(NOMBRE);
   const credenciales = new ProveedorCredencialesRuntime();
   if (p.credencial.tipo === 'clave') {
     credenciales.guardar(p.rut, p.credencial.clave);
   } else {
-    credenciales.guardarCertificado(p.rut, p.credencial.certificadoBase64, p.credencial.certificadoPassword);
+    credenciales.guardarCertificado(
+      p.rut, p.credencial.certificadoBase64, p.credencial.certificadoPassword, process.env.SII_CERT_CLAVE_SII);
   }
 
   const { registro, contarConstruccionesDeContexto } = crearEjecutorDeUnaSesion(credenciales);
@@ -754,15 +786,26 @@ export async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
 
   console.log(`Plan de ${plan.consultas.length} consulta(s), perfil ${NOMBRE}, UNA sola sesión`);
 
-  let resultados: ResultadoPlanItem[];
+  // Acumulador de resultados A MEDIDA que se producen, no sólo al final: cada
+  // consulta individual ya está protegida por su propio try/catch dentro de
+  // `ejecutarPlan`, así que en la práctica esto no hace falta para una falla
+  // de negocio — pero si algo ajeno a una consulta puntual hiciera que
+  // `ejecutarPlan` lance (por ejemplo, un plan de quince consultas donde algo
+  // revienta a mitad de camino), sin este acumulador se perderían TODAS las
+  // mediciones ya resueltas, no sólo la que falló.
+  let resultados: ResultadoPlanItem[] = [];
+  let errorFatal: Error | undefined;
   try {
     resultados = await ejecutarPlan(
       plan,
       registro,
       p.rut,
       sesion => new MipymeHttpScraper(new SiiHttpClient(sesion), sesion),
-      empresaRut
+      empresaRut,
+      { onResultado: item => { resultados.push(item); } }
     );
+  } catch (e) {
+    errorFatal = e as Error;
   } finally {
     // Cierra la sesión compartida al terminar el plan: sin esto el proceso
     // deja un Browser vivo y, peor, la sesión del SII abierta hasta que
@@ -790,13 +833,24 @@ export async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
   }
 
   const construccionesDeContexto = contarConstruccionesDeContexto();
-  const reporte = armarReporte(plan, resultados, construccionesDeContexto);
+  let reporte = armarReporte(plan, resultados, construccionesDeContexto);
+  // Si `ejecutarPlan` lanzó, el reporte de arriba es PARCIAL (sólo las
+  // consultas que llegaron a resolverse antes del corte) — se escribe IGUAL,
+  // en vez de perder mediciones que ya costaron llamadas reales al portal, y
+  // se avisa explícitamente para que no se lea como una corrida completa.
+  if (errorFatal) {
+    reporte += `\nATENCIÓN: el plan se interrumpió antes de terminar (${resultados.length}/`
+      + `${plan.consultas.length} consultas resueltas). Este reporte es PARCIAL.\n`
+      + `Error: ${errorFatal.message}\n`;
+  }
 
   fs.mkdirSync(SALIDA, { recursive: true });
   const destino = path.join(SALIDA, 'reporte-verificacion-plan.txt');
   fs.writeFileSync(destino, reporte, 'utf-8');
   console.log(reporte);
   console.log(`Reporte escrito en ${destino}`);
+
+  if (errorFatal) throw errorFatal;
 }
 
 async function main(): Promise<void> {

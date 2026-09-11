@@ -8,13 +8,19 @@ import { RegistroSesiones } from '../../src/registroSesiones';
 // contra el DOBLE de `recorrerConRitmo` completo: qué pausa le pide el modo
 // plan, no el reloj real. El comportamiento de la pausa en sí —que de verdad
 // espere entre llamadas— ya lo cubre tests/ritmoSii.test.ts.
-// `PAUSA_POR_DEFECTO_MS` va en el mock (con el mismo valor real) porque
-// `ejecutarPlan` la importa para aplicar su propio piso de defensa (ver
-// Bloqueante de la última ronda): un mock parcial sin esta constante la deja
-// `undefined` y el piso calcula `NaN`.
-jest.mock('../../src/ritmoSii', () => ({ recorrerConRitmo: jest.fn(), PAUSA_POR_DEFECTO_MS: 1200 }));
+// `PAUSA_POR_DEFECTO_MS` viaja con `jest.requireActual` (el valor REAL, no
+// uno escrito a mano acá) porque `ejecutarPlan` la importa para aplicar su
+// propio piso de defensa: un mock parcial sin esta constante la deja
+// `undefined` y el piso calcula `NaN`. Escribirla a mano en el mock es
+// justo lo que exportar la constante vino a evitar — si el piso cambia algún
+// día, esta prueba tiene que enterarse sola, no seguir pasando con el valor
+// viejo.
+jest.mock('../../src/ritmoSii', () => ({
+  ...jest.requireActual('../../src/ritmoSii'),
+  recorrerConRitmo: jest.fn(),
+}));
 
-import { recorrerConRitmo } from '../../src/ritmoSii';
+import { recorrerConRitmo, PAUSA_POR_DEFECTO_MS } from '../../src/ritmoSii';
 import { ejecutarPlan, PlanArchivo, ScraperRespaldoXml } from '../../src/scripts/verificarRespaldoXml';
 
 const mockRecorrer = recorrerConRitmo as jest.MockedFunction<typeof recorrerConRitmo>;
@@ -63,7 +69,7 @@ describe('ejecutarPlan respeta el ritmo entre consultas (vía recorrerConRitmo)'
 
     await ejecutarPlan(plan, registro, '11111111-1', crearScraperVacio(), undefined);
 
-    expect(mockRecorrer.mock.calls[0][2]).toEqual({ pausaMs: 1200 });
+    expect(mockRecorrer.mock.calls[0][2]).toEqual({ pausaMs: PAUSA_POR_DEFECTO_MS });
   });
 
   // La única vía para saltarse el piso: el parámetro de prueba explícito, que

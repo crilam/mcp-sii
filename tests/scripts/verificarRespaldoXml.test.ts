@@ -295,6 +295,15 @@ describe('leerPlan (caminos de error del parser de entrada)', () => {
     const plan = leerPlan(ruta);
     expect(plan.pausa_ms).toBe(5000);
   });
+
+  // Menor: un elemento de "consultas" que no es un objeto revienta más abajo
+  // (en `normalizarFiltros`) con un TypeError sin contexto — el mismo
+  // criterio que los chequeos de tipo por campo, aplicado acá para decir
+  // CUÁL consulta del plan está mal formada.
+  it.each([null, 42, 'texto', ['array']])('rechaza consultas[i] = %p (no es un objeto)', (elemento) => {
+    const ruta = archivoTemporal(JSON.stringify({ consultas: [{}, elemento] }));
+    expect(() => leerPlan(ruta)).toThrow(/consultas\[1\] tiene que ser un objeto/);
+  });
 });
 
 describe('armarReporte (comparación y contaminación visible)', () => {

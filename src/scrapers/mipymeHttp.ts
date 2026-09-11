@@ -365,24 +365,40 @@ export interface LimitacionRespaldoXml {
   razonSocial?: string;
   // Discriminador ESTRUCTURADO de la causa del corte, para que un consumidor
   // (el ERP vía REST, o quien llame al scraper directo) no tenga que parsear
-  // `motivo` en PROSA para saber si esta limitación viene de agotar el
-  // presupuesto de tramos (`maxTramos`) — el único caso, hoy, que hace que un
-  // respaldo con `ok:true` sea un respaldo PARCIAL comparado con uno que
-  // cubrió el rango entero sin cortarse. Parsear el texto para esa decisión
-  // es frágil: cambiar una palabra del motivo (una traducción, una mejora de
-  // redacción) rompe la detección EN SILENCIO.
+  // `motivo` en PROSA para saber qué acción corresponde. El criterio para
+  // agregar un valor NUEVO no es "es un corte distinto", es "la acción que
+  // induce en quien lo lee es distinta":
   //
-  // `'OTRA'` agrupa a propósito el resto de las causas (tope de páginas de
-  // listado, folio único que excede por sí solo, portal caído, tercer nivel
-  // apagado, día lleno sin tipo_dte...): no son la misma clase de corte entre
-  // sí, así que agruparlas bajo su propio valor cada una sería agrandar esta
-  // enumeración sin que ningún consumidor lo necesite todavía — se agrega
-  // cuando alguien lo necesite, no antes (mismo criterio que ya usa el
-  // comentario de `TOPE_PAGINAS_LISTADO` más abajo para distinguir motivos).
+  //   'PRESUPUESTO_TRAMOS': subir `maxTramos` (o acotar el rango) ARREGLA
+  //   esto. Es el único caso, hoy, que hace que un respaldo con `ok:true` sea
+  //   un respaldo PARCIAL comparado con uno que cubrió el rango entero sin
+  //   cortarse.
+  //
+  //   'SII_NO_DISPONIBLE': el portal devolvió su página de error genérica
+  //   varias veces seguidas (mismo vocabulario que `PortalSiiNoDisponible` en
+  //   erroresConsulta.ts / `SII_NO_DISPONIBLE` en rest/rutas/comun.ts) — un
+  //   fallo TRANSITORIO, no un límite. La acción correcta es esperar y
+  //   reintentar más tarde, NUNCA subir el presupuesto: reintentar con más
+  //   tramos contra un portal caído es el barrido de llamadas que
+  //   ritmoSii.ts documenta como la causa real del bloqueo. Confundir esta
+  //   causa con `PRESUPUESTO_TRAMOS` induce al consumidor a hacer exactamente
+  //   lo que rompe.
+  //
+  //   'OTRA': agrupa el resto (tope de páginas de listado, folio único que
+  //   excede por sí solo, demasiados folios únicos acumulados, tercer nivel
+  //   apagado, día lleno sin tipo_dte...): ninguna acción genérica (ni subir
+  //   `maxTramos` ni esperar) arregla estos casos por igual, así que no
+  //   comparten causa con las de arriba. Ver `motivo` para el detalle
+  //   accionable de cada uno.
+  //
+  // Parsear el texto de `motivo` para esta decisión es frágil: cambiar una
+  // palabra (una traducción, una mejora de redacción) rompe la detección EN
+  // SILENCIO — por eso el campo estructurado.
+  //
   // Opcional y no en TODOS los `push` de limitaciones — es aditivo: no se
-  // reclasificó cada motivo existente, sólo se marcó el que hoy hace falta
-  // distinguir.
-  causa?: 'PRESUPUESTO_TRAMOS' | 'OTRA';
+  // reclasificó cada motivo existente, sólo se marcaron los que hoy hace
+  // falta distinguir.
+  causa?: 'PRESUPUESTO_TRAMOS' | 'SII_NO_DISPONIBLE' | 'OTRA';
 }
 
 export interface RespaldoXmlResult {
@@ -1804,7 +1820,11 @@ export class MipymeHttpScraper {
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
       contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
-      causa: 'PRESUPUESTO_TRAMOS',
+      // NO 'PRESUPUESTO_TRAMOS': el comentario de arriba de esta función ya
+      // lo dice — acá no se agotó `maxTramos`, y subirlo no cambia nada si el
+      // CGI está ignorando el filtro de folio. Marcarlo como presupuesto
+      // induciría al consumidor a la acción que NO arregla esto.
+      causa: 'OTRA',
       motivo:
         `El respaldo de ${ctx.empresaRut} acumuló más de ${TOPE_FOLIOS_UNICOS_POR_DIA} folios `
         + `que exceden por sí solos el tope del ${dia}${contraparte}: se corta acá para no seguir `
@@ -1836,7 +1856,11 @@ export class MipymeHttpScraper {
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
       contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
-      causa: 'PRESUPUESTO_TRAMOS',
+      // NO 'PRESUPUESTO_TRAMOS': esto es el portal caído, un fallo
+      // TRANSITORIO. Subir `maxTramos` contra un portal caído es el barrido
+      // de llamadas que ritmoSii.ts documenta como la causa del bloqueo —
+      // marcarlo como presupuesto induciría exactamente esa acción dañina.
+      causa: 'SII_NO_DISPONIBLE',
       motivo:
         `El portal del SII respondió su página de error genérica en ${dias} descargas de folio `
         + `consecutivas del ${dia}${contraparte}: parece estar caído, no ser un problema puntual de `
