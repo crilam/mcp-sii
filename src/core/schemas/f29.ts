@@ -17,7 +17,17 @@ export const schemaEstadoF29 = {
   periodo,
 };
 
-export const schemaCompactoF29 = schemaEstadoF29;
+// Se COPIA a propósito, no se alias por identidad (`schemaCompactoF29 =
+// schemaEstadoF29`): que hoy tengan la misma forma es un hecho de HOY, no un
+// invariante. Con el alias, si mañana a `estado-declaracion` le agregan un
+// campo opcional propio de esa ruta, `formulario-compacto` lo heredaría en
+// silencio sin que nadie lo decida. Copiando, el día que un contrato cambie
+// hay que tocar el otro a mano, que es lo que corresponde para dos rutas que
+// son distintas aunque hoy coincidan.
+export const schemaCompactoF29 = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  periodo,
+};
 
 // La propuesta pide el período como STRING AAAAMM y no como number, a diferencia
 // de `schemaEstadoF29`. Es deliberado: este contrato lo consume AgenticERP, que

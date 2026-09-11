@@ -47,5 +47,23 @@ export const schemaAsyncSolicitar = {
 };
 
 // estado y detalle piden exactamente lo mismo que solicitar.
-export const schemaAsyncEstado = schemaAsyncSolicitar;
-export const schemaAsyncDetalle = schemaAsyncSolicitar;
+//
+// Se COPIAN a propósito, no se alias por identidad: que hoy las tres pidan lo
+// mismo es un hecho de HOY, no un invariante. Con un alias, si mañana a
+// `solicitar` le agregan un campo propio (por ejemplo, un parámetro que sólo
+// tiene sentido al disparar la consulta, no al consultar su estado), `estado`
+// y `detalle` lo heredarían en silencio sin que nadie lo decida. Copiando, el
+// día que un contrato cambie hay que tocar los otros a mano, que es lo que
+// corresponde para tres rutas que son distintas aunque hoy coincidan.
+export const schemaAsyncEstado = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  ...camposComunes,
+  tipo_doc: z.number().int().positive()
+    .describe('Código del tipo de documento (33, 61, 46, 34, 110, 914, 56...), igual que en sii_rcv_detalle.'),
+};
+export const schemaAsyncDetalle = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  ...camposComunes,
+  tipo_doc: z.number().int().positive()
+    .describe('Código del tipo de documento (33, 61, 46, 34, 110, 914, 56...), igual que en sii_rcv_detalle.'),
+};
