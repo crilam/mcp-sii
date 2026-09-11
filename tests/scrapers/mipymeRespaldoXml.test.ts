@@ -3,6 +3,7 @@ import * as path from 'path';
 import {
   MipymeHttpScraper, LimitacionRespaldoXml, soloCuerpoRut, acotarPorFolio, enGrupos,
   enGruposDeFolios, ANCHO_MAXIMO_RANGO_FOLIO, ANCHO_MAXIMO_DIAS_RANGO_FECHA, diasDelRango,
+  partirParejoPorAncho,
 } from '../../src/scrapers/mipymeHttp';
 import { LimitacionConocida } from '../../src/erroresConsulta';
 import { esperar } from '../../src/ritmoSii';
@@ -1027,6 +1028,53 @@ describe('MipymeHttpScraper.respaldoXml — piso de ancho de fecha', () => {
     )).toBe(false);
   });
 
+  // El caso más común de producción, no el más raro: la PyME que factura
+  // TODOS los días, donde cualquier tramo de más de un día (incluido cada
+  // tramo parejo de 7 días que arma el piso) excede el tope por sí solo,
+  // pero un día suelto no. Con el presupuesto POR DEFECTO, la bisección
+  // dentro de cada tramo del piso se come el presupuesto ANTES de terminar
+  // el mes: bajan los primeros 4 días individuales y el resto —contiguo,
+  // desde el primer día que no alcanzó a pedirse— queda como UNA limitación
+  // `PRESUPUESTO_TRAMOS` con el rango exacto.
+  //
+  // ESTE NÚMERO (4 de 31) sale del PRESUPUESTO, no del piso: es el mismo
+  // techo de `MAX_TRAMOS_POR_DEFECTO` que ya existía en `main` antes de este
+  // PR, verificado idéntico contra la bisección por `excedeTope` sin el piso
+  // de por medio. El piso no lo empeora ni lo mejora acá —simplemente no
+  // interviene, porque cada tramo parejo YA excede antes de llegar al
+  // ancho—; lo fija este test para que si alguien toca el reparto (parejo,
+  // bisección, lo que sea) se entere si el número deja de ser 4.
+  it('PyME con facturación diaria: el presupuesto por defecto baja los primeros días y limita el resto con el rango exacto', async () => {
+    const { scraper, http } = armar();
+    (http.getBinario as jest.Mock).mockImplementation((_url: string, params: Record<string, string>) => {
+      // Cualquier rango de MÁS de un día excede el tope (factura de sobra
+      // para superar 20 documentos en una semana); un día suelto no.
+      return Promise.resolve(params.FEC_DESDE !== params.FEC_HASTA ? binarioDemasiados() : binarioXml());
+    });
+
+    const r = await scraper.respaldoXml({
+      ...RANGO, fechaDesde: '2026-08-01', fechaHasta: '2026-08-31',
+    });
+
+    expect(r.tramos.map(t => [t.fechaDesde, t.fechaHasta])).toEqual([
+      ['2026-08-01', '2026-08-01'],
+      ['2026-08-02', '2026-08-02'],
+      ['2026-08-03', '2026-08-03'],
+      ['2026-08-04', '2026-08-04'],
+    ]);
+    expect(r.limitaciones).toHaveLength(1);
+    expect(r.limitaciones[0]).toMatchObject({
+      causa: 'PRESUPUESTO_TRAMOS', fechaDesde: '2026-08-05', fechaHasta: '2026-08-31',
+    });
+    // Nunca se pidió el rango ancho completo: el piso sigue cortando ANTES
+    // de gastar esa llamada, aunque el presupuesto se agote enseguida.
+    const llamadas = (http.getBinario as jest.Mock).mock.calls;
+    expect(llamadas.some(
+      ([, params]: [string, Record<string, string>]) =>
+        params.FEC_DESDE === '2026-08-01' && params.FEC_HASTA === '2026-08-31',
+    )).toBe(false);
+  });
+
   // Un rango que ya entra en el ancho confiable no se toca: se pide ENTERO,
   // en una sola descarga, exactamente como antes de este piso.
   it('un rango dentro del ancho confiable se pide entero, en una sola descarga', async () => {
@@ -1068,6 +1116,13 @@ describe('MipymeHttpScraper.respaldoXml — piso de ancho de fecha', () => {
       expect(diasDelRango(params.FEC_DESDE, params.FEC_HASTA)).toBeLessThanOrEqual(ANCHO_MAXIMO_DIAS_RANGO_FECHA);
     }
     expect(r.limitaciones).toEqual([]);
+  });
+
+  // Mismo criterio que el guard de `enGruposDeFolios`: con un rango
+  // invertido, `partirParejoPorAncho` explota en vez de devolver `[]` en
+  // silencio (que `acumularTramos` leería como "período sin documentos").
+  it('partirParejoPorAncho explota con un rango invertido en vez de devolver [] en silencio', () => {
+    expect(() => partirParejoPorAncho('2026-08-10', '2026-08-05', 7)).toThrow(/invertido/);
   });
 });
 

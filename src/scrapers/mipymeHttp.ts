@@ -366,6 +366,21 @@ export function diasDelRango(desde: string, hasta: string): number {
 // calcular el reparto óptimo una sola vez.
 export function partirParejoPorAncho(desde: string, hasta: string, anchoMaximo: number): [string, string][] {
   const dias = diasDelRango(desde, hasta);
+  // Guard de precondición, mismo criterio que `enGruposDeFolios`: con
+  // `desde > hasta`, `dias` da negativo o cero, `numPartes` queda en 0 (o
+  // negativo), el loop de abajo NO ITERA, y esta función devolvería `[]` EN
+  // SILENCIO — que `acumularTramos` leería como "período sin tramos ni
+  // limitaciones", indistinguible de un rango que de verdad no tuvo
+  // documentos. Es un error de programación de quien llama (esta función es
+  // `export`, así que el guard de rango invertido de `respaldoXml` no viaja
+  // con ella), no un caso de negocio del SII: tiene que explotar acá,
+  // ruidoso, en vez de degradar un respaldo tributario a un vacío que nadie
+  // nota.
+  if (dias < 1) {
+    throw new Error(
+      `partirParejoPorAncho recibió un rango invertido o vacío (desde=${desde}, hasta=${hasta}): `
+      + 'la función requiere desde <= hasta.');
+  }
   const numPartes = Math.ceil(dias / anchoMaximo);
   const base = Math.floor(dias / numPartes);
   // Las primeras `resto` partes se llevan un día extra: es la única forma de
