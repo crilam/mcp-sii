@@ -317,7 +317,8 @@ Dos cosas que definen su forma, las dos verificadas contra el SII:
   - Modo de una consulta: `VERIF_EMPRESA`, `VERIF_ORIGEN` (`recibidos` por
     defecto o `emitidos`), `VERIF_DESDE`/`VERIF_HASTA` (default: mes pasado),
     `VERIF_TIPO_DTE`, `VERIF_FOLIO`/`VERIF_FOLIO_HASTA`, `VERIF_CONTRAPARTE`,
-    `VERIF_RZN_SOC`, `VERIF_SALIDA` (directorio donde deja los XML bajados).
+    `VERIF_RZN_SOC`, `VERIF_MAX_TRAMOS` (default 10, igual que la ruta REST),
+    `VERIF_SALIDA` (directorio donde deja los XML bajados).
   - Modo plan (`VERIF_PLAN=ruta/al/plan.json`): corre VARIAS combinaciones de
     filtros en la MISMA corrida, contra la MISMA sesión del SII (un solo
     login), con la pausa de `ritmoSii.ts` entre cada una. El formato:
@@ -334,9 +335,10 @@ Dos cosas que definen su forma, las dos verificadas contra el SII:
     `VERIF_EMPRESA` y `VERIF_SALIDA` siguen valiendo para el plan entero (la
     empresa a consultar y, en este modo, dónde queda el reporte). `VERIF_SALIDA`
     es OBLIGATORIO en modo plan: ahí se escribe `reporte-verificacion-plan.txt`,
-    un solo archivo con las tres consultas EN ORDEN, sus veredictos, si alguna
-    TOPÓ su `max_tramos` (no comparable con una que no topó) y —arriba de
-    todo— cuántos logins hizo la corrida. **A diferencia del modo de una
+    un solo archivo con las consultas EN ORDEN, sus veredictos, si alguna quedó
+    INCOMPLETA (con la causa y la acción correspondiente, no comparable con
+    una completa) y —arriba de todo— cuántos logins hizo la corrida. **A
+    diferencia del modo de una
     consulta, el modo plan NO guarda los XML bajados** — sólo el reporte
     comparable; si hace falta archivar el XML de una combinación puntual,
     correla aparte en modo de una consulta con esos mismos filtros.

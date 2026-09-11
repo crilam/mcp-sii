@@ -41,27 +41,16 @@ jest.mock('../../src/rest/rutas/mipyme', () => ({
   },
 }));
 
-import { ejecutarModoUnaConsulta } from '../../src/scripts/verificarRespaldoXml';
-
 describe('ejecutarModoUnaConsulta (regresión del modo de siempre)', () => {
-  // Reasigna `process.env` entero (no sólo las variables VERIF_*) a propósito:
-  // es la única forma de GARANTIZAR que no quede una `VERIF_*` de una corrida
-  // manual anterior filtrándose al test. Es seguro porque:
-  //   1. Jest corre cada ARCHIVO de test en su propio proceso worker (o, si
-  //      reusa el proceso entre archivos, cada uno igual reinicia módulos), así
-  //      que esta reasignación no puede afectar a otro archivo de test que ya
-  //      haya leído sus variables al importar.
-  //   2. `ORIG_ENV` se captura ANTES de tocar nada y `afterAll` lo restaura, así
-  //      que al terminar este describe el proceso vuelve a su `process.env` de
-  //      partida — ningún test posterior en el MISMO archivo ve una mutación
-  //      que sobreviva a un test anterior.
-  // Si algún día esto deja de ser seguro (por ejemplo, tests corriendo en el
-  // mismo worker en paralelo dentro de este archivo), la alternativa es aislar
-  // el módulo con `jest.isolateModules` en vez de tocar el global.
-  const ORIG_ENV = { ...process.env };
+  // `jest.isolateModules` en vez de reasignar `process.env`: aísla el
+  // registro de módulos para este `require`, así que las variables VERIF_*
+  // que fija cada test no se filtran a otro archivo ni sobreviven al test.
+  const ORIG_VERIF_PLAN = process.env.VERIF_PLAN;
+  const ORIG_TIPO_DTE = process.env.VERIF_TIPO_DTE;
+  const ORIG_FOLIO = process.env.VERIF_FOLIO;
+  const ORIG_FOLIO_HASTA = process.env.VERIF_FOLIO_HASTA;
 
   beforeEach(() => {
-    process.env = { ...ORIG_ENV };
     delete process.env.VERIF_PLAN;
     process.env.VERIF_TIPO_DTE = '33';
     process.env.VERIF_FOLIO = '100';
@@ -69,12 +58,24 @@ describe('ejecutarModoUnaConsulta (regresión del modo de siempre)', () => {
     (globalThis as any).__capturado = undefined;
   });
 
-  afterAll(() => { process.env = ORIG_ENV; });
+  afterAll(() => {
+    const restaurar = (clave: string, valor: string | undefined) => {
+      if (valor === undefined) delete process.env[clave]; else process.env[clave] = valor;
+    };
+    restaurar('VERIF_PLAN', ORIG_VERIF_PLAN);
+    restaurar('VERIF_TIPO_DTE', ORIG_TIPO_DTE);
+    restaurar('VERIF_FOLIO', ORIG_FOLIO);
+    restaurar('VERIF_FOLIO_HASTA', ORIG_FOLIO_HASTA);
+  });
 
   it('sigue calculando RESPETADO para tipo_dte+folio, igual que antes del refactor', async () => {
     const logs: string[] = [];
     jest.spyOn(console, 'log').mockImplementation((m: unknown) => { logs.push(String(m)); });
 
+    let ejecutarModoUnaConsulta!: () => Promise<void>;
+    jest.isolateModules(() => {
+      ({ ejecutarModoUnaConsulta } = require('../../src/scripts/verificarRespaldoXml'));
+    });
     await ejecutarModoUnaConsulta();
 
     expect(logs.some(l => l.includes('2 documentos en 1 tramo'))).toBe(true);
@@ -85,5 +86,21 @@ describe('ejecutarModoUnaConsulta (regresión del modo de siempre)', () => {
     expect(capturado.tipo_dte).toBe(33);
     expect(capturado.folio_desde).toBe(100);
     expect(capturado.folio_hasta).toBe(101);
+  });
+
+  it('propaga VERIF_MAX_TRAMOS al body de la ruta', async () => {
+    process.env.VERIF_MAX_TRAMOS = '20';
+    try {
+      let ejecutarModoUnaConsulta!: () => Promise<void>;
+      jest.isolateModules(() => {
+        ({ ejecutarModoUnaConsulta } = require('../../src/scripts/verificarRespaldoXml'));
+      });
+      await ejecutarModoUnaConsulta();
+
+      const capturado = (globalThis as any).__capturado as Record<string, unknown>;
+      expect(capturado.max_tramos).toBe(20);
+    } finally {
+      delete process.env.VERIF_MAX_TRAMOS;
+    }
   });
 });

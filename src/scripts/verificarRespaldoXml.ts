@@ -39,6 +39,11 @@ import { rutEsValido } from '../rut';
 //                      end-to-end contra el SII — correr este script con las
 //                      dos combinaciones antes de prender
 //                      RESPALDO_XML_TERCER_NIVEL=1 en un ambiente real.
+//   VERIF_MAX_TRAMOS   presupuesto de tramos para esta consulta (entero entre
+//                      1 y MAX_TRAMOS_ABSOLUTO; default MAX_TRAMOS_POR_DEFECTO,
+//                      igual que la ruta REST). Sin esto, un rango ancho en
+//                      modo de una consulta topaba el default sin forma de
+//                      subirlo salvo pasando al modo plan.
 //   VERIF_PLAN         ruta a un JSON con VARIAS consultas para correr en la
 //                      MISMA corrida y la MISMA sesión del SII (ver más abajo).
 //
@@ -329,6 +334,7 @@ export async function ejecutarModoUnaConsulta(): Promise<void> {
     folio_hasta: numeroDe('VERIF_FOLIO_HASTA'),
     contraparte: process.env.VERIF_CONTRAPARTE,
     rzn_soc: process.env.VERIF_RZN_SOC,
+    max_tramos: numeroDe('VERIF_MAX_TRAMOS'),
   }, 'VERIF');
 
   console.log(`Perfil ${NOMBRE}, rango ${filtros.desde}..${filtros.hasta}`);
@@ -344,6 +350,7 @@ export async function ejecutarModoUnaConsulta(): Promise<void> {
     folio_desde: filtros.folio,
     folio_hasta: filtros.folio_hasta,
     tipo_dte: filtros.tipo_dte,
+    max_tramos: filtros.max_tramos,
   });
   const b = r.body as Record<string, unknown>;
 
@@ -835,14 +842,22 @@ export async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
 
   console.log(`Plan de ${plan.consultas.length} consulta(s), perfil ${NOMBRE}, UNA sola sesión`);
 
-  // Acumulador de resultados A MEDIDA que se producen, no sólo al final: cada
-  // consulta individual ya está protegida por su propio try/catch dentro de
-  // `ejecutarPlan`, así que en la práctica esto no hace falta para una falla
-  // de negocio — pero si algo ajeno a una consulta puntual hiciera que
-  // `ejecutarPlan` lance (por ejemplo, un plan de quince consultas donde algo
-  // revienta a mitad de camino), sin este acumulador se perderían TODAS las
-  // mediciones ya resueltas, no sólo la que falló.
-  let resultados: ResultadoPlanItem[] = [];
+  // `acumulados` guarda cada resultado A MEDIDA que se produce, no sólo al
+  // final: cada consulta individual ya está protegida por su propio
+  // try/catch dentro de `ejecutarPlan`, así que en la práctica esto no hace
+  // falta para una falla de negocio — pero si algo ajeno a una consulta
+  // puntual hiciera que `ejecutarPlan` lance (por ejemplo, un plan de quince
+  // consultas donde algo revienta a mitad de camino), sin este acumulador se
+  // perderían TODAS las mediciones ya resueltas, no sólo la que falló.
+  //
+  // `acumulados` y `resultados` son variables DISTINTAS a propósito, no la
+  // misma reasignada: si `ejecutarPlan` resuelve bien, `resultados` es SU
+  // valor de retorno (la fuente autoritativa) y `acumulados` se descarta —
+  // nunca se leen los dos juntos, así que no hay forma de que una consulta
+  // termine dos veces en el reporte aunque alguien cambie cómo se llena
+  // `acumulados` (push, splice, lo que sea).
+  const acumulados: ResultadoPlanItem[] = [];
+  let resultados: ResultadoPlanItem[];
   let errorFatal: Error | undefined;
   try {
     resultados = await ejecutarPlan(
@@ -851,10 +866,13 @@ export async function ejecutarModoPlan(rutaPlan: string): Promise<void> {
       p.rut,
       sesion => new MipymeHttpScraper(new SiiHttpClient(sesion), sesion),
       empresaRut,
-      { onResultado: item => { resultados.push(item); } }
+      { onResultado: item => { acumulados.push(item); } }
     );
   } catch (e) {
     errorFatal = e as Error;
+    // `ejecutarPlan` no llegó a resolver: lo único que hay son las consultas
+    // que sí alcanzaron a correr antes del fallo.
+    resultados = acumulados;
   } finally {
     // Cierra la sesión compartida al terminar el plan: sin esto el proceso
     // deja un Browser vivo y, peor, la sesión del SII abierta hasta que

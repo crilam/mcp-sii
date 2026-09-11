@@ -141,10 +141,9 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
     expect(reporte).toContain('no-existe');
   });
 
-  // Bloqueante de la ronda anterior: la validación tiene que ser la MISMA que
-  // la ruta REST rechaza (folio_hasta requiere folio, ver schemas/mipyme.ts),
-  // no una más laxa — y el mensaje tiene que decir CUÁL consulta del plan
-  // estaba mal escrita.
+  // La validación tiene que ser la MISMA que la ruta REST rechaza
+  // (folio_hasta requiere folio, ver schemas/mipyme.ts), no una más laxa —
+  // y el mensaje tiene que decir CUÁL consulta del plan estaba mal escrita.
   it('replica el invariante de la ruta REST folio_hasta-requiere-folio, con el índice de la consulta', async () => {
     const { registro } = crearRegistroDoble();
     const crearScraper = scraperProgramado([{ documentos: 1, tramos: [], limitaciones: [] }]);
@@ -265,12 +264,10 @@ describe('ejecutarPlan (modo plan: varias consultas, una sola sesión)', () => {
     expect(reporte).toContain('NO comparable');
   });
 
-  // Bug reportado por el coordinador: una limitación por portal caído
-  // (causa SII_NO_DISPONIBLE) deja el respaldo INCOMPLETO igual que una por
-  // presupuesto — trajo menos documentos de los que existen — pero
-  // `comparabilidadDe` sólo miraba si la causa era PRESUPUESTO_TRAMOS, así
-  // que esto pasaba como "NO_TOPO" (comparable). Esta prueba tiene que
-  // fallar ANTES del arreglo y pasar después.
+  // Una limitación por portal caído (causa SII_NO_DISPONIBLE) deja el
+  // respaldo INCOMPLETO igual que una por presupuesto — en ambos casos se
+  // trajo menos documentos de los que existen — así que el veredicto de
+  // completitud tiene que mirar si HAY limitaciones, no cuál es su causa.
   it('una limitación de portal caído (SII_NO_DISPONIBLE) deja la consulta NO comparable', async () => {
     const { registro } = crearRegistroDoble();
     const crearScraper = scraperProgramado([
@@ -335,7 +332,7 @@ describe('leerPlan (caminos de error del parser de entrada)', () => {
     expect(plan.pausa_ms).toBeUndefined();
   });
 
-  // Bloqueante: un JSON de plan no puede reintroducir por archivo el atajo que
+  // Un JSON de plan no puede reintroducir por archivo el atajo que
   // RITMO_SII_MS tiene cerrado por variable de entorno. Cualquier `pausa_ms`
   // bajo el piso se sube al piso, con aviso.
   it('sube pausa_ms al piso de ritmo si el archivo pide menos, y avisa', () => {
@@ -355,7 +352,7 @@ describe('leerPlan (caminos de error del parser de entrada)', () => {
     expect(plan.pausa_ms).toBe(5000);
   });
 
-  // Mismo bloqueante que en ejecutarPlan: el piso de leerPlan tiene que ser
+  // Mismo criterio que en ejecutarPlan: el piso de leerPlan tiene que ser
   // el CONFIGURADO (RITMO_SII_MS), no la constante a secas.
   it('con RITMO_SII_MS en un valor alto, sube pausa_ms a ESE piso y no al default', () => {
     const anterior = process.env.RITMO_SII_MS;
@@ -431,12 +428,11 @@ describe('crearEjecutorDeUnaSesion (conteo de construcciones de contexto)', () =
     expect(contarConstruccionesDeContexto()).toBe(1);
   });
 
-  // Minor #4 de la última ronda: el test anterior llama al registro directo,
-  // salteando `ejecutarPlan` — no prueba el cableado real entre el ejecutor
-  // de una sesión (producción) y el plan. Esta prueba junta las dos piezas
-  // reales (sólo el scraper queda doble) para confirmar que un plan de varias
-  // consultas, corrido con el ejecutor que arma `ejecutarModoPlan`, construye
-  // UN SOLO contexto.
+  // El test anterior llama al registro directo, salteando `ejecutarPlan` —
+  // no prueba el cableado real entre el ejecutor de una sesión (producción)
+  // y el plan. Esta prueba junta las dos piezas reales (sólo el scraper
+  // queda doble) para confirmar que un plan de varias consultas, corrido con
+  // el ejecutor que arma `ejecutarModoPlan`, construye UN SOLO contexto.
   it('un plan de varias consultas corrido con crearEjecutorDeUnaSesion construye un solo contexto', async () => {
     const credenciales = new ProveedorCredencialesRuntime();
     credenciales.guardar('11111111-1', 'clave-test');

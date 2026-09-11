@@ -2,11 +2,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Bloqueante: `ejecutarModoPlan` no tenía NINGÚN test — los que hay corren
-// contra `ejecutarPlan`, que no abre sesión ni cierra nada. Esta suite cubre
-// justo el cierre: `credenciales.borrar()` tiene que correr SIEMPRE, incluso
+// `ejecutarModoPlan` no tenía ningún test — los que hay corren contra
+// `ejecutarPlan`, que no abre sesión ni cierra nada. Esta suite cubre justo
+// el cierre: `credenciales.borrar()` tiene que correr SIEMPRE, incluso
 // cuando `registro.cerrarYOlvidar()` (el cierre de la sesión del SII) lanza,
-// porque antes del `finally` anidado un certificado real (perfil por defecto
+// porque sin el `finally` anidado un certificado real (perfil por defecto
 // del script) podía quedar en disco si el cierre de sesión fallaba.
 //
 // Los dos `jest.mock` van a nivel de módulo, y `mockEjecutar`/`mockCerrarYOlvidar`
@@ -136,10 +136,10 @@ describe('ejecutarModoPlan (la credencial se borra siempre, aunque el cierre de 
     expect(borrarSpy).toHaveBeenCalledWith('11111111-1');
   });
 
-  // Bloqueante: si falta VERIF_SALIDA, el chequeo tiene que ganarle a la
-  // lectura del plan — si el orden estuviera invertido, este test fallaría
-  // con un ENOENT de `fs.readFileSync` (la ruta no existe) en vez del error
-  // de VERIF_SALIDA, probando que el plan se leyó (y su aviso de piso, si lo
+  // Si falta VERIF_SALIDA, el chequeo tiene que ganarle a la lectura del
+  // plan — si el orden estuviera invertido, este test fallaría con un
+  // ENOENT de `fs.readFileSync` (la ruta no existe) en vez del error de
+  // VERIF_SALIDA, probando que el plan se leyó (y su aviso de piso, si lo
   // tuviera, se hubiera impreso) para un plan que nunca iba a correr.
   it('chequea VERIF_SALIDA ANTES de leer el archivo del plan', async () => {
     // `SALIDA` es una constante de módulo que se fija al importar — el

@@ -57,11 +57,11 @@ describe('ejecutarPlan respeta el ritmo entre consultas (vía recorrerConRitmo)'
     expect(mockRecorrer.mock.calls[0][2]).toEqual({ pausaMs: undefined });
   });
 
-  // Bloqueante: `recorrerConRitmo` sólo aplica su piso cuando `pausaMs` es
-  // `undefined` — un `pausaMs` explícito, aunque sea 0, lo pisa por diseño.
-  // `leerPlan` ya sube `pausa_ms` al piso al leer el archivo, pero
-  // `ejecutarPlan` lo vuelve a exigir por si alguien arma un `PlanArchivo` a
-  // mano (sin pasar por `leerPlan`) con una pausa baja.
+  // `recorrerConRitmo` sólo aplica su piso cuando `pausaMs` es `undefined`
+  // — un `pausaMs` explícito, aunque sea 0, lo pisa por diseño. `leerPlan`
+  // ya sube `pausa_ms` al piso al leer el archivo, pero `ejecutarPlan` lo
+  // vuelve a exigir por si alguien arma un `PlanArchivo` a mano (sin pasar
+  // por `leerPlan`) con una pausa baja.
   it('sube pausa_ms al piso aunque el PlanArchivo lo traiga por debajo (defensa, no sólo leerPlan)', async () => {
     mockRecorrer.mockResolvedValue([]);
     const registro = new RegistroSesiones<{ n: number }>(async () => ({ n: 1 }));
@@ -85,11 +85,10 @@ describe('ejecutarPlan respeta el ritmo entre consultas (vía recorrerConRitmo)'
     expect(mockRecorrer.mock.calls[0][2]).toEqual({ pausaMs: 0 });
   });
 
-  // Bloqueante de esta ronda: el piso tiene que ser el CONFIGURADO
-  // (RITMO_SII_MS), no la constante `PAUSA_POR_DEFECTO_MS` a secas. Un
-  // operador que subió el ritmo por variable de entorno espera que NINGÚN
-  // plan (ni siquiera uno con `pausa_ms` explícito y más bajo) corra más
-  // rápido que ese piso.
+  // El piso tiene que ser el CONFIGURADO (RITMO_SII_MS), no la constante
+  // `PAUSA_POR_DEFECTO_MS` a secas. Un operador que subió el ritmo por
+  // variable de entorno espera que NINGÚN plan (ni siquiera uno con
+  // `pausa_ms` explícito y más bajo) corra más rápido que ese piso.
   it('con RITMO_SII_MS en un valor alto, el plan no baja de ese piso aunque pida menos', async () => {
     const anterior = process.env.RITMO_SII_MS;
     process.env.RITMO_SII_MS = '5000';
