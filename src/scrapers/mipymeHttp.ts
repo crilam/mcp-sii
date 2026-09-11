@@ -198,6 +198,66 @@ const TOPE_DOCUMENTOS_SII = 20;
 // mientras que quedarse corto reproduce el bloqueo medido.
 export const ANCHO_MAXIMO_RANGO_FOLIO = 1000;
 
+// Piso ESTRUCTURAL del ancho de rango de FECHA que se pide en UNA descarga
+// del troceo principal (`acumularTramos`), análogo en espíritu a
+// `ANCHO_MAXIMO_RANGO_FOLIO` pero para el eje de fecha.
+//
+// Existe porque la bisección por fecha estaba colgada ENTERAMENTE de que el
+// portal avise `excedeTope`, y ese aviso NO es confiable en rangos anchos —
+// medido en vivo, misma empresa, misma sesión, llamadas con segundos de
+// diferencia: un mes completo sin filtro volvió UN tramo, con pocos
+// documentos y `excedeTope: false` (nunca bisectó, porque nunca avisó),
+// mientras que un solo día de ese mismo mes, sin filtro, sí avisó que ya
+// excedía por sí solo, y ese mismo día acotado por tipo y por folio tenía
+// documentos reales de sobra para exceder el tope. O sea, la consulta MÁS
+// ancha, que contiene MÁS documentos, volvió limpia con MENOS: el portal
+// TRUNCA EN SILENCIO cuando el rango de fecha es ancho, en vez de disparar
+// su página de "demasiados documentos" —que sí dispara con la misma
+// consulta acotada—. Un truncamiento así es indistinguible de un mes con
+// pocos documentos: ni `acumularTramos` ni las limitaciones se enteran, y
+// el tramo truncado se guarda como completo. Es grave porque este es el
+// camino que corre SIEMPRE (con o sin `RESPALDO_XML_TERCER_NIVEL`) para
+// toda empresa en producción.
+//
+// Se descartaron las explicaciones alternativas: no es paginación
+// (`NUM_PAG=1,2,3` sobre la misma consulta ancha devuelve exactamente los
+// mismos documentos —parámetro muerto en este CGI—) y acotar sólo por tipo
+// no alcanza (el mes completo con `tipo_dte` puesto sigue truncando).
+//
+// El ancho confiable, medido (mismo tipo de documento, mismo mes, una sola
+// sesión): 7 días avisa y bisecta de verdad hasta aislar días individuales
+// que genuinamente exceden; 10 días también avisa y bisecta de verdad; 15
+// días NO avisa (un tramo, un documento, `excedeTope: false` — el mismo
+// truncamiento silencioso que el mes entero). La frontera real está ENTRE
+// 10 y 15, sin medir dentro de esa franja. Se elige acá 7, el más chico de
+// los dos confirmados limpios, no el más grande ni el borde exacto: afinar
+// a 10 ahorraría una descarga por mes, pero ataría el arreglo a la
+// frontera exacta de un comportamiento del portal que no controlamos y que
+// puede moverse sin avisar. Mismo criterio que `ANCHO_MAXIMO_RANGO_FOLIO`.
+//
+// Por qué NO se reemplaza este piso por `cant_reg` (el conteo que trae
+// oculto la respuesta de `lista_documentos.cgi`, que `descargarTramo` ya
+// pide y descarta): parecía la solución ideal —una señal numérica,
+// determinística, gratis en llamadas porque ese POST ya se hace igual—
+// pero medido en vivo NO SIRVE. En el mes ancho, `cant_reg` vale
+// EXACTAMENTE el mismo número truncado que después entrega la descarga; y
+// con `tipo_dte` puesto, `cant_reg` vale 2 en un mes que tenía al menos 18
+// documentos reales de ese tipo, verificados uno por uno. O sea, el
+// LISTADO ya cuenta mal ANTES de llegar a la descarga: no es que
+// `download.cgi` trunque un listado que sabía la verdad, el conteo se
+// pierde en la búsqueda misma. `cant_reg` sirve como corroboración, nunca
+// como fuente de verdad independiente — no se lo tome como reemplazo de
+// este piso en el futuro creyendo que es una señal mejor.
+//
+// Nota aparte, no arreglada acá: el único detector de "excede el tope" que
+// existe hoy es una expresión regular sobre la prosa del portal
+// (`/demasiados Documentos electr/i` sobre la respuesta de
+// `download.cgi`, ver `descargarTramo`). Si el SII reescribe esa frase, la
+// señal desaparece EN SILENCIO y todo vuelve a verse completo — es una
+// razón más por la que la decisión de trocear por fecha no puede depender
+// SÓLO de ese aviso, y por la que este piso existe aparte de él.
+export const ANCHO_MAXIMO_DIAS_RANGO_FECHA = 7;
+
 // Tope de tramos de un respaldo. Existe porque el troceo hace una llamada al SII
 // por tramo DENTRO de una sola request del tenant: sin techo, un rango ancho
 // sobre una empresa con mucho volumen se convierte en un barrido, que es
@@ -1200,6 +1260,30 @@ export class MipymeHttpScraper {
           + `parece estar caído, no ser un problema puntual de este tramo. Se abandona para no `
           + `seguir insistiendo contra un portal caído; reintentá más tarde.`,
       });
+      return;
+    }
+
+    // Piso ESTRUCTURAL, no colgado de `excedeTope`: si el rango a pedir es
+    // más ancho que el confiable (ver `ANCHO_MAXIMO_DIAS_RANGO_FECHA`), se
+    // parte SIN descargarlo y se recursa sobre las mitades — la misma
+    // partición que usa la bisección por `excedeTope` de más abajo, sólo
+    // que ACÁ se decide antes de gastar la llamada. Partir antes de pedir
+    // es parte del punto: medido en vivo, esa llamada ancha no avisa nada
+    // —vuelve `excedeTope: false` con un tramo truncado—, así que ni
+    // siquiera vale la pena hacerla. Esto NO consume presupuesto de
+    // `maxTramos` (que cuenta DESCARGAS, no particiones): dividir un rango
+    // ancho es gratis en llamadas contra el portal, sólo cuesta CPU local.
+    //
+    // Va DESPUÉS de los dos cortes de arriba (presupuesto y portal caído) a
+    // propósito: si el presupuesto ya se agotó o el portal ya está caído,
+    // no tiene sentido seguir partiendo un rango que de todas formas no se
+    // va a poder pedir.
+    const diasDelRango = Math.round(
+      (Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / DIA_MS) + 1;
+    if (diasDelRango > ANCHO_MAXIMO_DIAS_RANGO_FECHA) {
+      const [primerFin, segundoInicio] = this.partirRango(desde, hasta);
+      await this.acumularTramos(ctx, desde, primerFin, tramos, limitaciones, maxTramos);
+      await this.acumularTramos(ctx, segundoInicio, hasta, tramos, limitaciones, maxTramos);
       return;
     }
 
