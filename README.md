@@ -307,10 +307,12 @@ Dos cosas que definen su forma, las dos verificadas contra el SII:
 - Un día suelto que TODAVÍA excede el tope con `tipo_dte` puesto tiene un tercer
   eje —folio para emitidos, contraparte para recibidos—, pero queda **apagado
   por defecto**: la variable `RESPALDO_XML_TERCER_NIVEL` (ver `.env.example`) lo
-  prende. El eje de folio ya se verificó en vivo contra el SII real; el de
-  contraparte todavía no, así que conviene verificarlo primero con
-  `src/scripts/verificarRespaldoXml.ts` (`VERIF_TIPO_DTE` + `VERIF_CONTRAPARTE`)
-  antes de prender el flag en un ambiente que dependa de ese eje.
+  prende. Es un interruptor único que habilita LOS DOS EJES A LA VEZ: no hay
+  forma de prender folio (ya verificado en vivo contra el SII real) y dejar
+  contraparte (todavía no verificado) apagada. Por eso conviene verificar el
+  eje de contraparte primero con `src/scripts/verificarRespaldoXml.ts`
+  (`VERIF_TIPO_DTE` + `VERIF_CONTRAPARTE`) antes de prender el flag en un
+  ambiente que atienda `recibidos`.
 
   **Verificar EN VIVO con `src/scripts/verificarRespaldoXml.ts` (`npm run
   verificar-respaldo-xml`):**

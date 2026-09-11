@@ -67,26 +67,30 @@ export function esperar(ms: number): Promise<void> {
  * en la MISMA llamada al CGI de descarga. Fecha+folio y fecha+contraparte
  * están verificados contra el SII real (ver docs/integracion-api.md).
  *
- * La combinación `TPO_DOC` + `FOLIO`/`FOLIOHASTA` también se verificó en vivo:
- * una consulta de un día con un mes cargado, con `tipo_dte` fijo y un rango de
- * folio acotado, se midió dos veces con anchos de rango distintos (del orden
- * de mil y de cinco mil) y en las dos el CGI respetó ambos filtros a la vez,
- * entregando documentos reales (6 y 18 respectivamente) verificados uno por
- * uno. O sea: el riesgo de que el CGI ignore `TPO_DOC` en presencia de
- * `FOLIO`/`FOLIOHASTA` quedó descartado por medición, para ese caso.
+ * La combinación `TPO_DOC` + `FOLIO`/`FOLIOHASTA` (el eje de emitidos) también
+ * se verificó en vivo: una consulta de un día con un mes cargado, con
+ * `tipo_dte` fijo y un rango de folio acotado, se midió dos veces con anchos
+ * de rango distintos (del orden de mil y de cinco mil) y en las dos el CGI
+ * respetó ambos filtros a la vez, entregando documentos reales (6 y 18
+ * respectivamente) verificados uno por uno.
  *
- * Lo que esa medición NO cubrió: `TPO_DOC` + `RUT_RECP` (el eje que usa el
- * tercer nivel para recibidos) sigue sin verificación en vivo. No asumir que
- * el resultado de folio se traslada a contraparte sin haberlo medido.
+ * `TPO_DOC` + `RUT_RECP` (el eje de recibidos) sigue SIN verificación en
+ * vivo. No asumir que el resultado de folio se traslada a contraparte sin
+ * haberlo medido.
  *
- * Aun con folio+tipo verificado, el tercer nivel queda APAGADO por defecto:
- * `false` a menos que `RESPALDO_XML_TERCER_NIVEL` sea `'1'` o `'true'` (sin
- * importar mayúsculas). Prenderlo abre un eje más de llamadas contra un portal
- * que bloquea por patrón de uso, así que activarlo en producción es una
- * decisión de despliegue que se toma a conciencia —y sólo para el caso ya
- * verificado (folio)—, no un default. Antes de activarlo para el eje de
- * contraparte hay que verificarlo en vivo primero (con
- * `src/scripts/verificarRespaldoXml.ts`), igual que se hizo para folio.
+ * IMPORTANTE: `RESPALDO_XML_TERCER_NIVEL` es un interruptor único que
+ * habilita LOS DOS EJES A LA VEZ, sin granularidad — no existe forma de
+ * prender folio (verificado) y dejar contraparte (no verificado) apagado.
+ * Prenderlo en un ambiente que reciba consultas de `recibidos` habilita
+ * también el eje no medido. Por eso, aunque el eje de folio ya esté
+ * verificado, el tercer nivel completo queda APAGADO por defecto: `false` a
+ * menos que la variable sea `'1'` o `'true'` (sin importar mayúsculas).
+ * Prenderlo abre un eje más de llamadas contra un portal que bloquea por
+ * patrón de uso, así que activarlo en producción es una decisión de
+ * despliegue que se toma a conciencia, no un default. Antes de activarlo en
+ * un ambiente que atienda `recibidos` hay que verificar en vivo el eje de
+ * contraparte primero (con `src/scripts/verificarRespaldoXml.ts`), igual que
+ * ya se hizo para folio.
  */
 export function tercerNivelHabilitado(): boolean {
   const crudo = process.env.RESPALDO_XML_TERCER_NIVEL;
