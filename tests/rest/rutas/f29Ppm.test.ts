@@ -45,29 +45,29 @@ describe('POST /v1/f29/ppm', () => {
   });
 
   // El SII devuelve `rutContribuyente` y `dv` en esta respuesta. La ruta arma el
-  // cuerpo campo por campo justamente para que no salgan: el test corre sobre el
-  // JSON serializado, que es lo que viaja al consumidor.
+  // cuerpo campo por campo justamente para que no salgan.
   //
-  // El RUT del doble tiene que ser DISTINTO del de BASE ('11.111.111-1'):
-  // si usáramos el mismo dígito, el "not.toContain('11111111')" pasaría
-  // aunque la ruta copiara el objeto entero del SII tal cual, porque esos
-  // dígitos ya aparecen en BASE por otra razón y no prueban nada sobre el
-  // filtrado. Con un RUT propio del doble, si la ruta alguna vez copiara el
-  // objeto completo, este assert fallaría de verdad.
-  it('no devuelve el RUT del contribuyente aunque el SII lo mande', async () => {
+  // Se fija la forma EXACTA del cuerpo (las claves contra una lista explícita)
+  // en vez de negativas puntuales del estilo "no contiene rutContribuyente":
+  // esas claves ya no pueden aparecer nunca porque la ruta arma el cuerpo campo
+  // por campo con otros nombres, así que la negativa es casi vacía y un
+  // renombre del campo filtrado la evade igual. Comparar contra la lista
+  // completa sí cubre eso, además de cualquier campo nuevo que se cuele.
+  //
+  // El cuerpo y el DV del doble usan valores DISTINTOS entre sí (RUT
+  // '77777777', DV 'k'): si compartieran dígito, una afirmación futura sobre
+  // uno solo de los dos no podría saber cuál de los dos la hizo pasar.
+  it('el cuerpo de la respuesta tiene exactamente los campos esperados, sin el RUT del contribuyente', async () => {
     (core.tasaPpm as jest.Mock).mockResolvedValue({
-      ...RESULTADO, rutContribuyente: '77777777', dv: '7',
+      ...RESULTADO, rutContribuyente: '77777777', dv: 'k',
     });
 
     const r = await armarRouter().get('POST /v1/f29/ppm')!(BASE);
 
-    const json = JSON.stringify(r.body);
-    expect(json).not.toContain('rutContribuyente');
-    expect(json).not.toContain('77777777');
-    // El dígito verificador también tiene que quedar afuera: sin este assert,
-    // una ruta que filtrara el RUT pero dejara pasar el `dv` (por ejemplo, sólo
-    // borrando la clave `rutContribuyente` y no `dv`) pasaría igual.
-    expect(json).not.toContain('"dv"');
+    expect(Object.keys(r.body as object).sort()).toEqual([
+      'ok', 'periodo', 'casilleros', 'cod563_propuesto', 'tasa_idpc', 'categoria_tributaria',
+      'realizado', 'fuera_de_plazo', 'es_propyme', 'generada_en',
+    ].sort());
   });
 
   it('un período mal formado es 400 y no llega al SII', async () => {

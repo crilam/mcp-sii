@@ -2,27 +2,21 @@ import { z } from 'zod';
 
 export const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
 
-// Extraído a constante para que un arreglo a la regla del formato (por
-// ejemplo, si el SII alguna vez acepta otro rango de meses) se aplique en
-// TODOS los esquemas que validan período y no sólo en el que se editó. Antes
-// la misma expresión estaba duplicada entera en dos lugares; con eso, corregir
-// una y olvidarse de la otra dejaba un esquema validando distinto sin que
-// nadie lo notara hasta que fallara en producción.
-const validadorPeriodo = z.string().regex(/^\d{4}(0[1-9]|1[0-2])$/)
+// Reglas de formato compartidas entre los esquemas de este archivo, para que
+// un arreglo se aplique en todos los que validan lo mismo y no sólo en el que
+// se editó. `DESC_TIPO_DOC` es además el texto MÁS completo de los que había
+// —incluye de dónde se obtiene el código y el detalle de cada valor—; las
+// variantes async tenían antes una versión resumida que decía "igual que en
+// sii_rcv_detalle" cuando ya no lo era.
+const reglaFormatoPeriodo = z.string().regex(/^\d{4}(0[1-9]|1[0-2])$/)
   .describe('Período tributario en formato AAAAMM (por ejemplo 202607). El mes debe ser 01-12.');
 
-// El texto del tipo de documento se comparte entre los cinco esquemas que lo
-// piden (detalle síncrono y las tres variantes async), por la misma razón que
-// `validadorPeriodo`: es el texto MÁS completo —incluye de dónde se obtiene el
-// código y el detalle de cada valor—, y antes las variantes async tenían una
-// versión resumida que además decía "igual que en sii_rcv_detalle" cuando ya
-// no lo era.
 const DESC_TIPO_DOC = 'Código del tipo de documento, obligatorio. Se obtiene de sii_rcv_resumen en '
   + 'filas[].tipoDocCodigo (33 factura electrónica, 61 nota de crédito, 46 factura de compra, 34 exenta, '
   + '110 exportación, 914 DIN, 56 nota de débito)';
 
 const camposComunes = {
-  periodo: validadorPeriodo,
+  periodo: reglaFormatoPeriodo,
   operacion: z.enum(['COMPRA', 'VENTA'])
     .describe('COMPRA para el registro de compras, VENTA para el de ventas'),
   empresa_rut: z.string().optional()
@@ -62,18 +56,11 @@ export const schemaAsyncSolicitar = {
   tipo_doc: z.number().int().positive().describe(DESC_TIPO_DOC),
 };
 
-// estado y detalle piden exactamente lo mismo que solicitar.
-//
-// Se COPIAN a propósito, no se alias por identidad: que hoy las tres pidan lo
-// mismo es un hecho de HOY, no un invariante. Con un alias, si mañana a
-// `solicitar` le agregan un campo propio (por ejemplo, un parámetro que sólo
-// tiene sentido al disparar la consulta, no al consultar su estado), `estado`
-// y `detalle` lo heredarían en silencio sin que nadie lo decida. Copiando, el
-// día que un contrato cambie hay que tocar los otros a mano, que es lo que
-// corresponde para tres rutas que son distintas aunque hoy coincidan.
+// estado y detalle piden exactamente lo mismo que solicitar. Se COPIAN a
+// propósito, no se alias por identidad —mismo razonamiento que
+// `schemaCompactoF29` en src/core/schemas/f29.ts—, y
 // `tests/core/schemas/rcv.test.ts` fija los campos de las tres contra una
-// lista explícita, así que una edición que rompa la coincidencia de hoy no
-// pasa en silencio.
+// lista explícita: es la red que reemplaza al alias que se saca acá.
 export const schemaAsyncEstado = {
   rut: z.string().min(1).describe(RUT_DESC),
   ...camposComunes,

@@ -126,6 +126,21 @@ describe('F29PpmScraper.tasaPpm', () => {
     expect(r.categoriaTributaria).toBeNull();
   });
 
+  // Caso hermano del anterior: ahí faltaban campos SUELTOS; acá faltan TODOS
+  // los casilleros. Es el caso que distingue "no hay datos" de "cero": una
+  // lista vacía es un resultado válido (todos los códigos vinieron null o
+  // vacíos), no un error, y quien cuadre tiene que poder leerlo así en vez de
+  // que el scraper explote o devuelva algo que no sea un arreglo.
+  it('todos los códigos ausentes o vacíos: casilleros queda como lista vacía, no explota', async () => {
+    const { scraper } = conRespuesta({
+      ...TASA_PPM, cod750: null, cod30: null, cod563: null, cod115: null, cod68: '', cod62: null,
+    });
+
+    const r = await scraper.tasaPpm('202608');
+
+    expect(r.casilleros).toEqual([]);
+  });
+
   // Esta app usa "S"/"N" en otros campos (`scoaRealizado`, `scoaPpmoCod750`). Un
   // cast a boolean convertiría el string "N" en `true`.
   it('un "N" del SII en un booleano no se lee como true', async () => {
