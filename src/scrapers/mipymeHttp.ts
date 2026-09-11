@@ -107,17 +107,19 @@ const TOPE_DOCUMENTOS_SII = 20;
 // por tramo DENTRO de una sola request del tenant: sin techo, un rango ancho
 // sobre una empresa con mucho volumen se convierte en un barrido, que es
 // justamente el patrón que hace que el SII bloquee el portal (ver ritmoSii.ts).
-const MAX_TRAMOS_POR_DEFECTO = 10;
+export const MAX_TRAMOS_POR_DEFECTO = 10;
 
-// Techo duro, aunque el caller pida más. Es el mismo número que expone el schema
-// REST, repetido acá porque el schema no cubre a quien llame al scraper directo.
+// Techo duro, aunque el caller pida más. Exportado (junto con
+// `MAX_TRAMOS_POR_DEFECTO`) para que el schema REST y el modo plan del
+// verificador lo IMPORTEN en vez de escribirlo de nuevo: dos constantes que
+// "coinciden" a mano divergen tarde o temprano sin que nada lo avise.
 //
 // RIESGO ASUMIDO: el presupuesto es POR REQUEST, no por cliente ni por ventana.
 // Nada impide repetir requests de 48 tramos sobre el mismo RUT; el lock de
 // empresa los serializa —no corren en paralelo— pero no acota el volumen
 // agregado contra el portal. Si alguna vez el SII corta por esta ruta, el
 // arreglo es un presupuesto por ventana, no bajar este número.
-const MAX_TRAMOS_ABSOLUTO = 48;
+export const MAX_TRAMOS_ABSOLUTO = 48;
 
 // Tope explícito de páginas al listar un día+tipo dentro del tercer nivel de
 // troceo (`listarEmitidosDelDia`/`listarRecibidosDelDia`). Sin esto, el único
@@ -361,6 +363,47 @@ export interface LimitacionRespaldoXml {
   // fijó `razonSocial`, hay que devolvérselo para que el reintento del
   // sub-rango no se olvide de acotar por ella.
   razonSocial?: string;
+  // Discriminador ESTRUCTURADO de la causa del corte, para que un consumidor
+  // (el ERP vía REST, o quien llame al scraper directo) no tenga que parsear
+  // `motivo` en PROSA para saber qué acción corresponde. El criterio para
+  // agregar un valor NUEVO no es "es un corte distinto", es "la acción que
+  // induce en quien lo lee es distinta":
+  //
+  //   'PRESUPUESTO_TRAMOS': subir `maxTramos` (o acotar el rango) ARREGLA
+  //   esto. Es el único caso, hoy, que hace que un respaldo con `ok:true` sea
+  //   un respaldo PARCIAL comparado con uno que cubrió el rango entero sin
+  //   cortarse.
+  //
+  //   'SII_NO_DISPONIBLE': el portal devolvió su página de error genérica
+  //   varias veces seguidas (mismo vocabulario que `PortalSiiNoDisponible` en
+  //   erroresConsulta.ts / `SII_NO_DISPONIBLE` en rest/rutas/comun.ts) — un
+  //   fallo TRANSITORIO, no un límite. La acción correcta es esperar y
+  //   reintentar más tarde, NUNCA subir el presupuesto: reintentar con más
+  //   tramos contra un portal caído es el barrido de llamadas que
+  //   ritmoSii.ts documenta como la causa real del bloqueo. Confundir esta
+  //   causa con `PRESUPUESTO_TRAMOS` induce al consumidor a hacer exactamente
+  //   lo que rompe.
+  //
+  //   'OTRA': agrupa el resto (tope de páginas de listado, folio único que
+  //   excede por sí solo, demasiados folios únicos acumulados, tercer nivel
+  //   apagado, día lleno sin tipo_dte...): ninguna acción genérica (ni subir
+  //   `maxTramos` ni esperar) arregla estos casos por igual, así que no
+  //   comparten causa con las de arriba. Ver `motivo` para el detalle
+  //   accionable de cada uno.
+  //
+  // Parsear el texto de `motivo` para esta decisión es frágil: cambiar una
+  // palabra (una traducción, una mejora de redacción) rompe la detección EN
+  // SILENCIO — por eso el campo estructurado.
+  //
+  // Los 26 lugares que empujan una limitación clasifican TODOS con uno de
+  // estos tres valores (revisado uno por uno con la pregunta de arriba:
+  // "¿la acción que induce ayuda o hace daño?"). Sigue siendo opcional en el
+  // TIPO (para no forzar un valor en cualquier objeto literal que lo omita
+  // por error de compilación), pero en la práctica un `push` sin `causa` es
+  // un bug de este archivo, no un caso esperado — si alguno se agrega sin
+  // clasificar, `verificarRespaldoXml.ts` lo va a reportar como
+  // `NO_CLASIFICADO` (ver ahí) para que no pase desapercibido.
+  causa?: 'PRESUPUESTO_TRAMOS' | 'SII_NO_DISPONIBLE' | 'OTRA';
 }
 
 export interface RespaldoXmlResult {
@@ -929,11 +972,13 @@ export class MipymeHttpScraper {
   }
 
   // Junta limitaciones ADYACENTES (el día siguiente al fin de una es el inicio
-  // de la próxima) que comparten el mismo `motivo` textual en una sola, con el
-  // rango unido. Dos limitaciones con motivos distintos —un día lleno al lado
-  // de un corte por tope de tramos— NO se fusionan aunque sean contiguas: el
-  // texto ya no describiría bien a las dos juntas, y el consumidor perdería la
-  // distinción entre "pedí este día con tipo_dte" y "acortá el rango".
+  // de la próxima) con el MISMO texto de `motivo` en una sola, con el rango
+  // unido. El texto exacto es el único discriminador de fusión (ver el
+  // comentario de más abajo sobre por qué no se usa `causa` acá): dos
+  // limitaciones con motivos distintos —un día lleno al lado de un corte por
+  // tope de tramos— NO se fusionan aunque sean contiguas, porque el
+  // consumidor perdería la distinción entre "pedí este día con tipo_dte" y
+  // "acortá el rango".
   //
   // Se ordena por `fechaDesde` primero porque la bisección no las produce en
   // orden: la rama izquierda de un nivel se resuelve entera (incluida su propia
@@ -967,6 +1012,14 @@ export class MipymeHttpScraper {
         && anterior.folioHasta === actual.folioHasta
         && anterior.contraparteRut === actual.contraparteRut
         && anterior.razonSocial === actual.razonSocial;
+      // A propósito NO se usa `causa` acá aunque exista: descarga principal,
+      // listado y tercer nivel son tres superficies del portal que fallan de
+      // forma INDEPENDIENTE, y ya nos costó una vez en esta rama unificar un
+      // conteo entre dos de ellas (portal caído en listado/descarga) — el
+      // éxito de una borró la racha de fallas de la otra. Fusionar por
+      // `causa` repetiría ese daño: el consumidor perdería de vista qué
+      // superficie topó. El texto exacto del motivo es el único
+      // discriminador de fusión; `causa` queda para la marca del reporte.
       if (anterior != null && contigua && anterior.motivo === actual.motivo && mismosCamposTercerNivel) {
         anterior.fechaHasta = actual.fechaHasta;
       } else {
@@ -1006,6 +1059,7 @@ export class MipymeHttpScraper {
       limitaciones.push({
         fechaDesde: desde,
         fechaHasta: hasta,
+        causa: 'PRESUPUESTO_TRAMOS',
         motivo:
           `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para respetar el `
           + `tope de ${TOPE_DOCUMENTOS_SII} documentos por descarga del SII. Pedí un rango más corto `
@@ -1035,6 +1089,10 @@ export class MipymeHttpScraper {
       limitaciones.push({
         fechaDesde: desde,
         fechaHasta: hasta,
+        // Portal caído, no presupuesto: subir maxTramos acá sería el mismo
+        // barrido de llamadas que ritmoSii.ts documenta como la causa del
+        // bloqueo.
+        causa: 'SII_NO_DISPONIBLE',
         // Sin el rango (${desde}..${hasta}) embebido en el texto a propósito
         // —ya viaja en `fechaDesde`/`fechaHasta`—: un motivo genérico es lo
         // que permite que `fusionarLimitacionesContiguas` una los VARIOS
@@ -1066,6 +1124,10 @@ export class MipymeHttpScraper {
       limitaciones.push({
         fechaDesde: desde,
         fechaHasta: hasta,
+        // `descargarTramoSeguro` sólo devuelve `error` para
+        // `PortalSiiNoDisponible` (ver ahí): siempre es portal caído, nunca
+        // presupuesto.
+        causa: 'SII_NO_DISPONIBLE',
         motivo:
           `El portal del SII no contestó para ${desde}${desde !== hasta ? `..${hasta}` : ''}: `
           + `${resultado.error.message}`,
@@ -1090,6 +1152,10 @@ export class MipymeHttpScraper {
               fechaDesde: desde,
               fechaHasta: hasta,
               tipoDte: ctx.filtros.tipoDte,
+              // Ni presupuesto ni portal caído: es una decisión de
+              // configuración (el flag apagado). Subir maxTramos o reintentar
+              // no cambia nada; la acción está en el propio motivo.
+              causa: 'OTRA',
               motivo:
                 `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos del tipo `
                 + `${ctx.filtros.tipoDte} y el tercer nivel de troceo (por folio o por contraparte) `
@@ -1105,6 +1171,10 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: desde,
           fechaHasta: hasta,
+          // Ni presupuesto ni portal caído: el día genuinamente tiene más
+          // documentos de los que el SII entrega por descarga, y el eje que
+          // falta (tipo_dte) lo tiene que aportar el consumidor.
+          causa: 'OTRA',
           motivo:
             `El día ${desde} tiene más de ${TOPE_DOCUMENTOS_SII} documentos y el SII no entrega más `
             + `por descarga. El filtro por fecha ya no se puede afinar: pedí ese día con tipo_dte `
@@ -1262,6 +1332,10 @@ export class MipymeHttpScraper {
           // haya usado para nada.
           contraparteRut: ctx.filtros.contraparteRut,
           razonSocial: ctx.filtros.razonSocial,
+          // Ni presupuesto ni portal caído: es un desacople de conteo entre
+          // el listado y la descarga (documentado más arriba), un dato del
+          // SII, no algo que maxTramos o un reintento arreglen.
+          causa: 'OTRA',
           motivo:
             `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
             + `(tipo ${ctx.filtros.tipoDte}), pero el listado de emitidos no devolvió ningún folio`
@@ -1332,6 +1406,9 @@ export class MipymeHttpScraper {
         // usado para nada.
         contraparteRut: ctx.filtros.contraparteRut,
         razonSocial: ctx.filtros.razonSocial,
+        // Mismo motivo que el espejo ENV: desacople de conteo entre listado
+        // y descarga, no presupuesto ni portal caído.
+        causa: 'OTRA',
         motivo:
           `El día ${dia} excede el tope de ${TOPE_DOCUMENTOS_SII} documentos en la descarga `
           + `(tipo ${ctx.filtros.tipoDte}), pero el listado de recibidos no devolvió ningún emisor `
@@ -1392,6 +1469,7 @@ export class MipymeHttpScraper {
           // por la misma razón.
           razonSocial: ctx.filtros.razonSocial,
           contraparteRut: ctx.filtros.contraparteRut,
+          causa: 'PRESUPUESTO_TRAMOS',
           motivo:
             `El respaldo de ${ctx.empresaRut} necesita más de ${maxTramos} tramos para trocear por `
             + `contraparte el ${dia} (tipo ${ctx.filtros.tipoDte}): quedaron ${pendientes.length} `
@@ -1412,6 +1490,7 @@ export class MipymeHttpScraper {
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           razonSocial: ctx.filtros.razonSocial,
           contraparteRut: ctx.filtros.contraparteRut,
+          causa: 'SII_NO_DISPONIBLE',
           motivo:
             `El portal del SII respondió su página de error genérica en ${ctx.diasPortalCaidoDescarga} `
             + `descargas consecutivas: parece estar caído. Quedaron ${pendientes.length} emisores sin `
@@ -1456,6 +1535,7 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           contraparteRut: emisorRut, razonSocial: ctx.filtros.razonSocial,
+          causa: 'SII_NO_DISPONIBLE',
           motivo:
             `El portal del SII no contestó para el emisor ${emisorRut} del ${dia}: `
             + `${resultado.error.message}`,
@@ -1503,6 +1583,7 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           razonSocial: ctx.filtros.razonSocial,
+          causa: 'PRESUPUESTO_TRAMOS',
           motivo:
             `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más de `
             + `${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día con `
@@ -1519,6 +1600,12 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           razonSocial: ctx.filtros.razonSocial,
+          // Ni presupuesto (el comentario de arriba ya lo aclara: subir
+          // maxTramos no alcanza) ni portal caído. No hay una causa dedicada
+          // para "listado demasiado grande" todavía, así que se marca como
+          // genérica; el motivo trae la acción específica (acotar por
+          // contraparte_rut/razon_social).
+          causa: 'OTRA',
           motivo:
             `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) tiene más de `
             + `${TOPE_PAGINAS_LISTADO} páginas: es demasiado grande para leerlo entero. Subir `
@@ -1572,6 +1659,7 @@ export class MipymeHttpScraper {
           // listado no llegó a contestar — el portal devolvió su propia
           // página de error—, así que el motivo tiene que decir eso y
           // apuntar a reintentar, no a revisar el filtro.
+          causa: 'SII_NO_DISPONIBLE',
           motivo:
             `El listado de folios emitidos del ${dia} (tipo ${ctx.filtros.tipoDte}) no se pudo leer: `
             + `${e.message}`,
@@ -1614,6 +1702,7 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           razonSocial: ctx.filtros.razonSocial,
+          causa: 'PRESUPUESTO_TRAMOS',
           motivo:
             `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) necesita más `
             + `de ${maxTramos} tramos para leerse completo y quedó a mitad de camino. Pedí este día `
@@ -1628,6 +1717,9 @@ export class MipymeHttpScraper {
         limitaciones.push({
           fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
           razonSocial: ctx.filtros.razonSocial,
+          // Mismo caso que el espejo ENV: sin causa dedicada todavía, se
+          // marca genérica y el motivo trae la acción específica.
+          causa: 'OTRA',
           motivo:
             `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) tiene más de `
             + `${TOPE_PAGINAS_LISTADO} páginas: es demasiado grande para leerlo entero. Subir `
@@ -1667,6 +1759,7 @@ export class MipymeHttpScraper {
           // A propósito NO dice "el listado no devolvió ningún emisor": ese
           // motivo es para un día genuinamente vacío o mal filtrado. Acá el
           // portal ni llegó a contestar el listado.
+          causa: 'SII_NO_DISPONIBLE',
           motivo:
             `El listado de emisores recibidos del ${dia} (tipo ${ctx.filtros.tipoDte}) no se pudo `
             + `leer: ${e.message}`,
@@ -1695,6 +1788,10 @@ export class MipymeHttpScraper {
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte,
       contraparteRut, razonSocial, folioDesde: folio, folioHasta: folio,
+      // Ni presupuesto ni portal caído: es un dato roto (un folio que por sí
+      // solo excede el tope), no hay acción de reintento ni de subir
+      // maxTramos que lo resuelva.
+      causa: 'OTRA',
       motivo:
         `El folio ${folio} del ${dia}${contraparte} excede por sí solo el tope de `
         + `${TOPE_DOCUMENTOS_SII} documentos del SII: es un único folio y el filtro ya no se `
@@ -1732,6 +1829,7 @@ export class MipymeHttpScraper {
       // tiene un `overrideBase` por grupo — el filtro es siempre el del
       // llamador original.
       contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      causa: 'PRESUPUESTO_TRAMOS',
       // `folioDesde`/`folioHasta` acá son el ENVOLVENTE (`Math.min`/`Math.max`)
       // de los folios PENDIENTES, no necesariamente contiguo: con huecos entre
       // grupos (p.ej. folios 100..101 y 900..901 pendientes), el rango sale
@@ -1767,6 +1865,11 @@ export class MipymeHttpScraper {
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
       contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      // NO 'PRESUPUESTO_TRAMOS': el comentario de arriba de esta función ya
+      // lo dice — acá no se agotó `maxTramos`, y subirlo no cambia nada si el
+      // CGI está ignorando el filtro de folio. Marcarlo como presupuesto
+      // induciría al consumidor a la acción que NO arregla esto.
+      causa: 'OTRA',
       motivo:
         `El respaldo de ${ctx.empresaRut} acumuló más de ${TOPE_FOLIOS_UNICOS_POR_DIA} folios `
         + `que exceden por sí solos el tope del ${dia}${contraparte}: se corta acá para no seguir `
@@ -1798,6 +1901,11 @@ export class MipymeHttpScraper {
     return {
       fechaDesde: dia, fechaHasta: dia, tipoDte: ctx.filtros.tipoDte,
       contraparteRut, razonSocial: ctx.filtros.razonSocial, folioDesde, folioHasta,
+      // NO 'PRESUPUESTO_TRAMOS': esto es el portal caído, un fallo
+      // TRANSITORIO. Subir `maxTramos` contra un portal caído es el barrido
+      // de llamadas que ritmoSii.ts documenta como la causa del bloqueo —
+      // marcarlo como presupuesto induciría exactamente esa acción dañina.
+      causa: 'SII_NO_DISPONIBLE',
       motivo:
         `El portal del SII respondió su página de error genérica en ${dias} descargas de folio `
         + `consecutivas del ${dia}${contraparte}: parece estar caído, no ser un problema puntual de `
@@ -1957,6 +2065,7 @@ export class MipymeHttpScraper {
           contraparteRut: overrideBase.contraparteRut ?? ctx.filtros.contraparteRut,
           razonSocial: ctx.filtros.razonSocial,
           folioDesde, folioHasta,
+          causa: 'SII_NO_DISPONIBLE',
           motivo:
             `El portal del SII no contestó para los folios ${folioDesde}..${folioHasta} del ${dia}: `
             + `${resultado.error.message}`,

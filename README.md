@@ -311,6 +311,52 @@ Dos cosas que definen su forma, las dos verificadas contra el SII:
   `src/scripts/verificarRespaldoXml.ts` (`VERIF_TIPO_DTE` + `VERIF_FOLIO` /
   `VERIF_CONTRAPARTE`).
 
+  **Verificar EN VIVO con `src/scripts/verificarRespaldoXml.ts` (`npm run
+  verificar-respaldo-xml`):**
+
+  - Modo de una consulta: `VERIF_EMPRESA`, `VERIF_ORIGEN` (`recibidos` por
+    defecto o `emitidos`), `VERIF_DESDE`/`VERIF_HASTA` (default: mes pasado),
+    `VERIF_TIPO_DTE`, `VERIF_FOLIO`/`VERIF_FOLIO_HASTA`, `VERIF_CONTRAPARTE`,
+    `VERIF_RZN_SOC`, `VERIF_MAX_TRAMOS` (default 10, igual que la ruta REST),
+    `VERIF_SALIDA` (directorio donde deja los XML bajados).
+  - Modo plan (`VERIF_PLAN=ruta/al/plan.json`): corre VARIAS combinaciones de
+    filtros en la MISMA corrida, contra la MISMA sesión del SII (un solo
+    login), con la pausa de `ritmoSii.ts` entre cada una. El formato:
+    ```json
+    {
+      "pausa_ms": 1500,
+      "consultas": [
+        { "origen": "recibidos", "desde": "2026-01-01", "hasta": "2026-01-31" },
+        { "origen": "recibidos", "desde": "2026-01-01", "hasta": "2026-01-31", "tipo_dte": 33, "folio": 1, "folio_hasta": 500 },
+        { "origen": "recibidos", "desde": "2026-01-01", "hasta": "2026-01-31", "tipo_dte": 33, "contraparte": "77777777-7" }
+      ]
+    }
+    ```
+    `VERIF_EMPRESA` y `VERIF_SALIDA` siguen valiendo para el plan entero (la
+    empresa a consultar y, en este modo, dónde queda el reporte). `VERIF_SALIDA`
+    es OBLIGATORIO en modo plan: ahí se escribe `reporte-verificacion-plan.txt`,
+    un solo archivo con las consultas EN ORDEN, sus veredictos, si alguna quedó
+    INCOMPLETA (con la causa y la acción correspondiente, no comparable con
+    una completa) y —arriba de todo— cuántos logins hizo la corrida. **A
+    diferencia del modo de una
+    consulta, el modo plan NO guarda los XML bajados** — sólo el reporte
+    comparable; si hace falta archivar el XML de una combinación puntual,
+    correla aparte en modo de una consulta con esos mismos filtros.
+    `max_tramos` también se puede fijar por consulta (default 10, igual que
+    la ruta REST), para que un rango ancho no tope el límite y quede como
+    respaldo parcial sin que se note en el reporte.
+  - **Por qué existe el modo plan y no alcanza con encadenar corridas
+    sueltas:** cada corrida de este script abre un `Browser` nuevo (un login
+    nuevo al SII), porque compartir contexto entre sesiones fue un bug real
+    (ver `registroSesionesSii.ts`). Encadenar quince corridas para probar
+    quince combinaciones de filtros es encadenar quince logins — el patrón que
+    el SII bloquea por sesiones simultáneas — y una vez dio resultados
+    DISTINTOS para el mismo mes y el mismo tipo de documento en corridas
+    consecutivas (3 documentos contra 7), sin ninguna página de error de por
+    medio: la herramienta de medición estaba alterando lo que medía. El modo
+    plan corre todas las consultas en un solo proceso y una sola sesión para
+    que el resultado sea comparable consigo mismo.
+
 `sii_mipyme_list_dte_recibidos` es el espejo de `list_dte_emitidos` y comparte su
 forma, con el **emisor** como contraparte en vez del receptor. Trae algo que
 `sii_rcv_*` no tiene: el **estado del acuse** (`DTE Recibido Sin Reparos`,

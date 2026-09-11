@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EmitirDteParams } from '../../scrapers/mipymeHttp';
+import { EmitirDteParams, MAX_TRAMOS_ABSOLUTO, MAX_TRAMOS_POR_DEFECTO } from '../../scrapers/mipymeHttp';
 import { rutEsValido } from '../../rut';
 
 export const RUT_DESC = 'RUT de la persona con sesión iniciada vía sii_iniciar_sesion';
@@ -127,8 +127,8 @@ export const schemaRespaldoXml = {
   // latencia pasa de los dos minutos y todo lo demás sobre ese RUT responde
   // SERVICIO_OCUPADO mientras tanto. Diez cubre un mes normal de sobra; quien
   // necesite más lo pide explícitamente y sabe lo que eso cuesta.
-  max_tramos: z.number().int().min(1).max(48).default(10)
-    .describe('Máximo de descargas al SII para cubrir el rango (default 10). Cada tramo agrega ~2s de latencia y retiene el lock de la empresa.'),
+  max_tramos: z.number().int().min(1).max(MAX_TRAMOS_ABSOLUTO).default(MAX_TRAMOS_POR_DEFECTO)
+    .describe(`Máximo de descargas al SII para cubrir el rango (default ${MAX_TRAMOS_POR_DEFECTO}). Cada tramo agrega ~2s de latencia y retiene el lock de la empresa.`),
 };
 
 export const schemaListBorradores = {
