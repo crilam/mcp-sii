@@ -198,6 +198,66 @@ const TOPE_DOCUMENTOS_SII = 20;
 // mientras que quedarse corto reproduce el bloqueo medido.
 export const ANCHO_MAXIMO_RANGO_FOLIO = 1000;
 
+// Piso ESTRUCTURAL del ancho de rango de FECHA que se pide en UNA descarga
+// del troceo principal (`acumularTramos`), análogo en espíritu a
+// `ANCHO_MAXIMO_RANGO_FOLIO` pero para el eje de fecha.
+//
+// Existe porque la bisección por fecha estaba colgada ENTERAMENTE de que el
+// portal avise `excedeTope`, y ese aviso NO es confiable en rangos anchos —
+// medido en vivo, misma empresa, misma sesión, llamadas con segundos de
+// diferencia: un mes completo sin filtro volvió UN tramo, con pocos
+// documentos y `excedeTope: false` (nunca bisectó, porque nunca avisó),
+// mientras que un solo día de ese mismo mes, sin filtro, sí avisó que ya
+// excedía por sí solo, y ese mismo día acotado por tipo y por folio tenía
+// documentos reales de sobra para exceder el tope. O sea, la consulta MÁS
+// ancha, que contiene MÁS documentos, volvió limpia con MENOS: el portal
+// TRUNCA EN SILENCIO cuando el rango de fecha es ancho, en vez de disparar
+// su página de "demasiados documentos" —que sí dispara con la misma
+// consulta acotada—. Un truncamiento así es indistinguible de un mes con
+// pocos documentos: ni `acumularTramos` ni las limitaciones se enteran, y
+// el tramo truncado se guarda como completo. Es grave porque este es el
+// camino que corre SIEMPRE (con o sin `RESPALDO_XML_TERCER_NIVEL`) para
+// toda empresa en producción.
+//
+// Se descartaron las explicaciones alternativas: no es paginación
+// (`NUM_PAG=1,2,3` sobre la misma consulta ancha devuelve exactamente los
+// mismos documentos —parámetro muerto en este CGI—) y acotar sólo por tipo
+// no alcanza (el mes completo con `tipo_dte` puesto sigue truncando).
+//
+// El ancho confiable, medido (mismo tipo de documento, mismo mes, una sola
+// sesión): 7 días avisa y bisecta de verdad hasta aislar días individuales
+// que genuinamente exceden; 10 días también avisa y bisecta de verdad; 15
+// días NO avisa (un tramo, un documento, `excedeTope: false` — el mismo
+// truncamiento silencioso que el mes entero). La frontera real está ENTRE
+// 10 y 15, sin medir dentro de esa franja. Se elige acá 7, el más chico de
+// los dos confirmados limpios, no el más grande ni el borde exacto: afinar
+// a 10 ahorraría una descarga por mes, pero ataría el arreglo a la
+// frontera exacta de un comportamiento del portal que no controlamos y que
+// puede moverse sin avisar. Mismo criterio que `ANCHO_MAXIMO_RANGO_FOLIO`.
+//
+// Por qué NO se reemplaza este piso por `cant_reg` (el conteo que trae
+// oculto la respuesta de `lista_documentos.cgi`, que `descargarTramo` ya
+// pide y descarta): parecía la solución ideal —una señal numérica,
+// determinística, gratis en llamadas porque ese POST ya se hace igual—
+// pero medido en vivo NO SIRVE. En el mes ancho, `cant_reg` vale
+// EXACTAMENTE el mismo número truncado que después entrega la descarga; y
+// con `tipo_dte` puesto, `cant_reg` vale 2 en un mes que tenía al menos 18
+// documentos reales de ese tipo, verificados uno por uno. O sea, el
+// LISTADO ya cuenta mal ANTES de llegar a la descarga: no es que
+// `download.cgi` trunque un listado que sabía la verdad, el conteo se
+// pierde en la búsqueda misma. `cant_reg` sirve como corroboración, nunca
+// como fuente de verdad independiente — no se lo tome como reemplazo de
+// este piso en el futuro creyendo que es una señal mejor.
+//
+// Nota aparte, no arreglada acá: el único detector de "excede el tope" que
+// existe hoy es una expresión regular sobre la prosa del portal
+// (`/demasiados Documentos electr/i` sobre la respuesta de
+// `download.cgi`, ver `descargarTramo`). Si el SII reescribe esa frase, la
+// señal desaparece EN SILENCIO y todo vuelve a verse completo — es una
+// razón más por la que la decisión de trocear por fecha no puede depender
+// SÓLO de ese aviso, y por la que este piso existe aparte de él.
+export const ANCHO_MAXIMO_DIAS_RANGO_FECHA = 7;
+
 // Tope de tramos de un respaldo. Existe porque el troceo hace una llamada al SII
 // por tramo DENTRO de una sola request del tenant: sin techo, un rango ancho
 // sobre una empresa con mucho volumen se convierte en un barrido, que es
@@ -268,6 +328,75 @@ const DIAS_PORTAL_CAIDO_PARA_CORTAR = 3;
 // dos literales `24 * 60 * 60 * 1000` que hoy dicen lo mismo podrían divergir
 // mañana si alguien ajusta uno y no el otro.
 const DIA_MS = 24 * 60 * 60 * 1000;
+
+// Cantidad de días CALENDARIO que cubre un rango [desde,hasta], INCLUSIVE en
+// los dos extremos (el mismo día da 1, no 0). Vive acá, junto a `DIA_MS`, y
+// no duplicada en cada lugar que necesita saber cuán ancho es un rango de
+// fecha: el piso de ancho (`ANCHO_MAXIMO_DIAS_RANGO_FECHA`) la usa para
+// decidir si corta, `partirParejoPorAncho` la usa para repartir, y antes de
+// esta función cada uno la recalculaba a mano (incluidos los tests) — dos
+// cálculos que hoy dan lo mismo podrían divergir si alguien ajusta uno y no
+// el otro, igual que `DIA_MS`. Exportada para que los tests la importen en
+// vez de reescribirla.
+export function diasDelRango(desde: string, hasta: string): number {
+  return Math.round((Date.parse(`${hasta}T00:00:00Z`) - Date.parse(`${desde}T00:00:00Z`)) / DIA_MS) + 1;
+}
+
+// Parte un rango de fecha [desde,hasta] en la cantidad MÍNIMA de tramos
+// necesaria para que NINGUNO supere `anchoMaximo` días, repartiendo el
+// sobrante lo más PAREJO posible entre ellos (a lo sumo un día de
+// diferencia entre el tramo más largo y el más corto).
+//
+// A propósito NO reusa `partirRango` (que bisecta a la mitad, recursivo):
+// bisectar un rango de 31 días contra un piso de 7 con ese método da hojas
+// de 4,4,4,4,4,4,7 —SIETE tramos, dos de más que el mínimo posible—, porque
+// cada bisección corta a la mitad sin mirar el piso. Repartir parejo da
+// CINCO tramos de 7,6,6,6,6: el mínimo. Esos dos tramos de más importan
+// porque cada uno es una descarga de más contra `MAX_TRAMOS_POR_DEFECTO`
+// (10), que está atado al timeout del llamador y no se puede subir para
+// compensar (ver el comentario de esa constante) — un piso que gasta de más
+// su propio presupuesto es, literalmente, el mismo problema que vino a
+// destapar, sólo que auto-infligido.
+//
+// Esta partición NO se usa para la bisección por `excedeTope` (que sigue
+// siendo por la mitad, recursiva, en `partirRango`): ese camino no sabe de
+// antemano cuántos tramos va a necesitar —depende de cuántas veces avise el
+// portal—, así que no hay "parejo" que calcular ahí. Acá sí se sabe de
+// antemano (el ancho total del rango pedido), y por eso vale la pena
+// calcular el reparto óptimo una sola vez.
+export function partirParejoPorAncho(desde: string, hasta: string, anchoMaximo: number): [string, string][] {
+  const dias = diasDelRango(desde, hasta);
+  // Guard de precondición, mismo criterio que `enGruposDeFolios`: con
+  // `desde > hasta`, `dias` da negativo o cero, `numPartes` queda en 0 (o
+  // negativo), el loop de abajo NO ITERA, y esta función devolvería `[]` EN
+  // SILENCIO — que `acumularTramos` leería como "período sin tramos ni
+  // limitaciones", indistinguible de un rango que de verdad no tuvo
+  // documentos. Es un error de programación de quien llama (esta función es
+  // `export`, así que el guard de rango invertido de `respaldoXml` no viaja
+  // con ella), no un caso de negocio del SII: tiene que explotar acá,
+  // ruidoso, en vez de degradar un respaldo tributario a un vacío que nadie
+  // nota.
+  if (dias < 1) {
+    throw new Error(
+      `partirParejoPorAncho recibió un rango invertido o vacío (desde=${desde}, hasta=${hasta}): `
+      + 'la función requiere desde <= hasta.');
+  }
+  const numPartes = Math.ceil(dias / anchoMaximo);
+  const base = Math.floor(dias / numPartes);
+  // Las primeras `resto` partes se llevan un día extra: es la única forma de
+  // repartir un sobrante que no divide parejo (31 días en 5 partes son
+  // 6+1/5=6,2 → cuatro partes de 6 y UNA de 7, no cinco partes fraccionarias).
+  const resto = dias % numPartes;
+  let cursor = Date.parse(`${desde}T00:00:00Z`);
+  const partes: [string, string][] = [];
+  for (let i = 0; i < numPartes; i++) {
+    const largoDias = base + (i < resto ? 1 : 0);
+    const finParte = cursor + (largoDias - 1) * DIA_MS;
+    partes.push([aIsoUtc(cursor), aIsoUtc(finParte)]);
+    cursor = finParte + DIA_MS;
+  }
+  return partes;
+}
 
 // Los BORRADORES no viven en el portal viejo. El menú los publica con una
 // función JavaScript (`printLinkAdmBorradores`, definida en `valores.js`) que
@@ -1200,6 +1329,35 @@ export class MipymeHttpScraper {
           + `parece estar caído, no ser un problema puntual de este tramo. Se abandona para no `
           + `seguir insistiendo contra un portal caído; reintentá más tarde.`,
       });
+      return;
+    }
+
+    // Piso ESTRUCTURAL, no colgado de `excedeTope`: si el rango a pedir es
+    // más ancho que el confiable (ver `ANCHO_MAXIMO_DIAS_RANGO_FECHA`), se
+    // parte SIN descargarlo y se recursa sobre los tramos resultantes.
+    // Partir antes de pedir es parte del punto: medido en vivo, esa llamada
+    // ancha no avisa nada —vuelve `excedeTope: false` con un tramo
+    // truncado—, así que ni siquiera vale la pena hacerla. Esto NO consume
+    // presupuesto de `maxTramos` (que cuenta DESCARGAS, no particiones):
+    // dividir un rango ancho es gratis en llamadas contra el portal, sólo
+    // cuesta CPU local.
+    //
+    // La partición es PAREJA (`partirParejoPorAncho`), no la bisección por
+    // la mitad de `partirRango`: acá se sabe de antemano el ancho total del
+    // rango, así que se reparte en el MÍNIMO de tramos posible en vez de
+    // bisectar a ciegas (ver el comentario de esa función para el porqué —
+    // cada tramo de más acá es una descarga de más contra un presupuesto
+    // que no se puede subir).
+    //
+    // Va DESPUÉS de los dos cortes de arriba (presupuesto y portal caído) a
+    // propósito: si el presupuesto ya se agotó o el portal ya está caído,
+    // no tiene sentido seguir partiendo un rango que de todas formas no se
+    // va a poder pedir.
+    if (diasDelRango(desde, hasta) > ANCHO_MAXIMO_DIAS_RANGO_FECHA) {
+      const partes = partirParejoPorAncho(desde, hasta, ANCHO_MAXIMO_DIAS_RANGO_FECHA);
+      for (const [subDesde, subHasta] of partes) {
+        await this.acumularTramos(ctx, subDesde, subHasta, tramos, limitaciones, maxTramos);
+      }
       return;
     }
 
