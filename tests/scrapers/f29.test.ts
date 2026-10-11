@@ -91,7 +91,9 @@ describe('F29Scraper', () => {
 
   // El sobre mal formado devuelve //EX: no puede leerse como "sin declaración".
   it('una excepción GWT no se confunde con período sin datos', async () => {
-    const { scraper } = armar('//EX[2,1,["com.google.gwt.user.client.rpc.IncompatibleRemoteServiceException/3936916533"],0,7]');
+    const { scraper, http } = armar('//EX[2,1,["com.google.gwt.user.client.rpc.IncompatibleRemoteServiceException/3936916533"],0,7]');
+    // El redescubrimiento no encuentra nada: se propaga el error original del SII.
+    (http.get as jest.Mock) = jest.fn().mockResolvedValue('<html>404</html>');
 
     await expect(scraper.estadoDeclaracion(202601)).rejects.toThrow(/excepción/);
   });
@@ -163,6 +165,48 @@ describe('F29Scraper', () => {
 
       await expect(r.scraper.estadoDeclaracion(202601)).rejects.toThrow(/IncompatibleRemoteServiceException/);
       expect(r.http.postCrudo).toHaveBeenCalledTimes(1);
+    });
+
+    it('si el redescubrimiento falla, se propaga el error original del SII', async () => {
+      const r = armar(INCOMPATIBLE);
+      (r.http.get as jest.Mock) = jest.fn().mockRejectedValue(new Error('red caída'));
+
+      await expect(r.scraper.estadoDeclaracion(202601)).rejects.toThrow(/IncompatibleRemoteServiceException/);
+      expect(r.http.postCrudo).toHaveBeenCalledTimes(1);
+    });
+
+    // Si el reintento también falla, las constantes nuevas no quedan guardadas:
+    // la próxima consulta vuelve a partir de las anteriores.
+    it('un reintento fallido no deja guardadas las constantes descubiertas', async () => {
+      const r = armar(OK);
+      (r.http.postCrudo as jest.Mock) = jest.fn().mockResolvedValue(INCOMPATIBLE);
+      (r.http.get as jest.Mock) = jest.fn(async (url: string) => (url.endsWith('.nocache.js') ? NOCACHE : BUNDLE));
+
+      await expect(r.scraper.estadoDeclaracion(202601)).rejects.toThrow(/IncompatibleRemoteServiceException/);
+      expect(r.http.postCrudo).toHaveBeenCalledTimes(2);
+      expect(sobreGetFolios(1, 202601, '')).not.toContain('0123456789ABCDEF0123456789ABCDEF');
+    });
+
+    // Dos consultas en vuelo con el hash viejo: la segunda no debe fallar sólo
+    // porque la primera ya actualizó las constantes.
+    it('con dos consultas concurrentes, ambas terminan bien', async () => {
+      const r = armar(OK);
+      let n = 0;
+      (r.http.postCrudo as jest.Mock) = jest.fn(async (_u: string, cuerpo: string) => {
+        n++;
+        // Las dos primeras salen con el hash viejo y fallan; después responde OK.
+        if (!cuerpo.includes('0123456789ABCDEF0123456789ABCDEF')) {
+          await new Promise(res => setTimeout(res, n === 1 ? 5 : 15));
+          return INCOMPATIBLE;
+        }
+        return OK;
+      });
+      (r.http.get as jest.Mock) = jest.fn(async (url: string) => (url.endsWith('.nocache.js') ? NOCACHE : BUNDLE));
+
+      const [a, b] = await Promise.all([r.scraper.estadoDeclaracion(202601), r.scraper.estadoDeclaracion(202602)]);
+
+      expect(a.folio).toBe(8000000001);
+      expect(b.folio).toBe(8000000001);
     });
 
     it('otros errores GWT no disparan el redescubrimiento', async () => {

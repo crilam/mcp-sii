@@ -168,22 +168,29 @@ export class F29Scraper {
         'X-GWT-Module-Base': `${BASE}/`,
         Referer: `${BASE}/index.html?dest=cifxx&form=29`,
       }));
+    const usadas = constantesVigentes;
     try {
-      return await enviar(constantesVigentes);
+      return await enviar(usadas);
     } catch (e) {
       // Sólo una política vencida se arregla redescubriendo; cualquier otro
       // error (sesión caída, //EX de negocio) se propaga tal cual.
       if (!(e instanceof Error) || !e.message.includes('IncompatibleRemoteServiceException')) throw e;
-      let nuevas: ConstantesGwt;
-      try {
-        nuevas = await descubrirConstantesGwt(url => this.http.get(url), BASE, MODULO, RUTA_SERVICIO);
-      } catch {
-        // Si no se pudo redescubrir, el error útil sigue siendo el del SII.
-        throw e;
+      // Otra consulta en vuelo ya pudo redescubrirlas: se reintenta con las
+      // vigentes sin volver a leer la app.
+      let nuevas: ConstantesGwt = constantesVigentes;
+      if (nuevas.hashPolitica === usadas.hashPolitica) {
+        try {
+          nuevas = await descubrirConstantesGwt(url => this.http.get(url), BASE, MODULO, RUTA_SERVICIO);
+        } catch {
+          // Si no se pudo redescubrir, el error útil sigue siendo el del SII.
+          throw e;
+        }
+        if (nuevas.hashPolitica === usadas.hashPolitica) throw e;
       }
-      if (nuevas.hashPolitica === constantesVigentes.hashPolitica) throw e;
+      const respuesta = await enviar(nuevas);
+      // Se guardan recién cuando sirvieron: un hash malo no queda pegado al proceso.
       constantesVigentes = nuevas;
-      return enviar(nuevas);
+      return respuesta;
     }
   }
 

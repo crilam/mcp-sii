@@ -19,7 +19,8 @@ export interface ConstantesGwt {
   hashPolitica: string;
 }
 
-const HEX32 = /[0-9A-F]{32}/g;
+// Con bordes: un hex más largo (p. ej. un hash de 40) no aporta permutaciones falsas.
+const HEX32 = /(?<![0-9A-Fa-f])[0-9A-F]{32}(?![0-9A-Fa-f])/g;
 
 export function extraerPermutaciones(nocache: string): string[] {
   return [...new Set(nocache.match(HEX32) ?? [])];
@@ -56,7 +57,7 @@ export async function descubrirConstantesGwt(
   base: string,
   modulo: string,
   rutaServicio: string,
-  maxPermutaciones = 3
+  maxPermutaciones = 8
 ): Promise<ConstantesGwt> {
   const permutaciones = extraerPermutaciones(await get(`${base}/${modulo}.nocache.js`));
   if (permutaciones.length === 0) {
@@ -64,6 +65,8 @@ export async function descubrirConstantesGwt(
   }
   for (const permutacion of permutaciones.slice(0, maxPermutaciones)) {
     for (const ext of ['cache.js', 'cache.html']) {
+      // Un 404 no siempre lanza (curl sin -f devuelve la página de error): en ese
+      // caso el hash simplemente no aparece y se sigue con la siguiente URL.
       let bundle: string;
       try {
         bundle = await get(`${base}/${permutacion}.${ext}`);
