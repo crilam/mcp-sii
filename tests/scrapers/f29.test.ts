@@ -1,4 +1,4 @@
-import { sobreGetFolios, F29Scraper } from '../../src/scrapers/f29';
+import { sobreGetFolios, F29Scraper, reiniciarConstantesF29 } from '../../src/scrapers/f29';
 import { codificarLong } from '../../src/scrapers/gwtRpc';
 import { SiiHttpClient } from '../../src/http';
 import { SessionManager } from '../../src/session';
@@ -33,6 +33,8 @@ describe('sobreGetFolios', () => {
 });
 
 describe('F29Scraper', () => {
+  beforeEach(() => reiniciarConstantesF29());
+
   function armar(gwt: string) {
     const session = new (SessionManager as jest.MockedClass<typeof SessionManager>)({} as any, {} as any);
     const http = new (SiiHttpClient as jest.MockedClass<typeof SiiHttpClient>)(session);
@@ -89,7 +91,9 @@ describe('F29Scraper', () => {
 
   // El sobre mal formado devuelve //EX: no puede leerse como "sin declaración".
   it('una excepción GWT no se confunde con período sin datos', async () => {
-    const { scraper } = armar('//EX[2,1,["com.google.gwt.user.client.rpc.IncompatibleRemoteServiceException/3936916533"],0,7]');
+    const { scraper, http } = armar('//EX[2,1,["com.google.gwt.user.client.rpc.IncompatibleRemoteServiceException/3936916533"],0,7]');
+    // El redescubrimiento no encuentra nada: se propaga el error original del SII.
+    (http.get as jest.Mock) = jest.fn().mockResolvedValue('<html>404</html>');
 
     await expect(scraper.estadoDeclaracion(202601)).rejects.toThrow(/excepción/);
   });
@@ -113,5 +117,104 @@ describe('F29Scraper', () => {
     (http.getBinario as jest.Mock) = jest.fn().mockResolvedValue({ contenido: Buffer.from('<html>error</html>'), contentType: 'text/html' });
 
     await expect(new F29Scraper(http, session).pdfCompacto(1, 'x')).rejects.toThrow(/no devolvió un PDF/);
+  });
+
+  describe('política de serialización vencida', () => {
+    const INCOMPATIBLE = '//EX[2,1,["com.google.gwt.user.client.rpc.IncompatibleRemoteServiceException/3936916533","Type \'x.LogAuditoriaDTO\' was not assignable to \'com.google.gwt.user.client.rpc.IsSerializable\'"],0,7]';
+    const NOCACHE = "var a='AAAA1111BBBB2222CCCC3333DDDD4444';";
+    const BUNDLE = "Vxh='svcConsulta';function c(){Tb.call(this,ecf(),Vxh,'0123456789ABCDEF0123456789ABCDEF',p)}";
+
+    function armarConRedeploy() {
+      const r = armar(OK);
+      (r.http.postCrudo as jest.Mock) = jest.fn()
+        .mockResolvedValueOnce(INCOMPATIBLE)
+        .mockResolvedValueOnce(OK);
+      (r.http.get as jest.Mock) = jest.fn(async (url: string) => (url.endsWith('.nocache.js') ? NOCACHE : BUNDLE));
+      return r;
+    }
+
+    it('redescubre permutación y hash desde los archivos de la app y reintenta una vez', async () => {
+      const { scraper, http } = armarConRedeploy();
+
+      const e = await scraper.estadoDeclaracion(202601);
+
+      expect(e.folio).toBe(8000000001);
+      expect(http.postCrudo).toHaveBeenCalledTimes(2);
+      const [, cuerpo, , headers] = (http.postCrudo as jest.Mock).mock.calls[1];
+      expect(cuerpo).toContain('|0123456789ABCDEF0123456789ABCDEF|');
+      expect(headers['X-GWT-Permutation']).toBe('AAAA1111BBBB2222CCCC3333DDDD4444');
+    });
+
+    it('los siguientes pedidos usan las constantes redescubiertas sin volver a fallar', async () => {
+      const { scraper, http } = armarConRedeploy();
+      await scraper.estadoDeclaracion(202601);
+      (http.postCrudo as jest.Mock).mockResolvedValueOnce(OK);
+
+      await scraper.estadoDeclaracion(202602);
+
+      expect(http.postCrudo).toHaveBeenCalledTimes(3);
+      expect((http.postCrudo as jest.Mock).mock.calls[2][1]).toContain('|0123456789ABCDEF0123456789ABCDEF|');
+      expect(http.get).toHaveBeenCalledTimes(2); // nocache + bundle, una sola vez
+    });
+
+    it('si el hash descubierto es el mismo, no reintenta y propaga el error', async () => {
+      const r = armar(INCOMPATIBLE);
+      const actual = sobreGetFolios(1, 202601, '').split('|')[4];
+      (r.http.get as jest.Mock) = jest.fn(async (url: string) =>
+        url.endsWith('.nocache.js') ? NOCACHE : `Vxh='svcConsulta';Tb.call(this,ecf(),Vxh,'${actual}',p)`);
+
+      await expect(r.scraper.estadoDeclaracion(202601)).rejects.toThrow(/IncompatibleRemoteServiceException/);
+      expect(r.http.postCrudo).toHaveBeenCalledTimes(1);
+    });
+
+    it('si el redescubrimiento falla, se propaga el error original del SII', async () => {
+      const r = armar(INCOMPATIBLE);
+      (r.http.get as jest.Mock) = jest.fn().mockRejectedValue(new Error('red caída'));
+
+      await expect(r.scraper.estadoDeclaracion(202601)).rejects.toThrow(/IncompatibleRemoteServiceException/);
+      expect(r.http.postCrudo).toHaveBeenCalledTimes(1);
+    });
+
+    // Si el reintento también falla, las constantes nuevas no quedan guardadas:
+    // la próxima consulta vuelve a partir de las anteriores.
+    it('un reintento fallido no deja guardadas las constantes descubiertas', async () => {
+      const r = armar(OK);
+      (r.http.postCrudo as jest.Mock) = jest.fn().mockResolvedValue(INCOMPATIBLE);
+      (r.http.get as jest.Mock) = jest.fn(async (url: string) => (url.endsWith('.nocache.js') ? NOCACHE : BUNDLE));
+
+      await expect(r.scraper.estadoDeclaracion(202601)).rejects.toThrow(/IncompatibleRemoteServiceException/);
+      expect(r.http.postCrudo).toHaveBeenCalledTimes(2);
+      expect(sobreGetFolios(1, 202601, '')).not.toContain('0123456789ABCDEF0123456789ABCDEF');
+    });
+
+    // Dos consultas en vuelo con el hash viejo: la segunda no debe fallar sólo
+    // porque la primera ya actualizó las constantes.
+    it('con dos consultas concurrentes, ambas terminan bien', async () => {
+      const r = armar(OK);
+      let n = 0;
+      (r.http.postCrudo as jest.Mock) = jest.fn(async (_u: string, cuerpo: string) => {
+        n++;
+        // Las dos primeras salen con el hash viejo y fallan; después responde OK.
+        if (!cuerpo.includes('0123456789ABCDEF0123456789ABCDEF')) {
+          await new Promise(res => setTimeout(res, n === 1 ? 5 : 15));
+          return INCOMPATIBLE;
+        }
+        return OK;
+      });
+      (r.http.get as jest.Mock) = jest.fn(async (url: string) => (url.endsWith('.nocache.js') ? NOCACHE : BUNDLE));
+
+      const [a, b] = await Promise.all([r.scraper.estadoDeclaracion(202601), r.scraper.estadoDeclaracion(202602)]);
+
+      expect(a.folio).toBe(8000000001);
+      expect(b.folio).toBe(8000000001);
+    });
+
+    it('otros errores GWT no disparan el redescubrimiento', async () => {
+      const r = armar('//EX[2,1,["cl.sii.AlgunaExcepcionDeNegocio/1"],0,7]');
+      (r.http.get as jest.Mock) = jest.fn();
+
+      await expect(r.scraper.estadoDeclaracion(202601)).rejects.toThrow(/excepción/);
+      expect(r.http.get).not.toHaveBeenCalled();
+    });
   });
 });
