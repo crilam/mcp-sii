@@ -4,24 +4,43 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { clasificarErrorCredenciales, envolverParaMcp } from '../erroresSesion';
+import { LectorClave, leerClaveDelLlavero } from '../claveLlavero';
 import * as core from '../core/bienesRaices';
 import { schemaListBienesRaices, schemaSoloRut, schemaRol } from '../core/schemas/bienesRaices';
 
 export function registerSesionTools(
   server: McpServer,
   registro: RegistroSesiones<SessionManager>,
-  credenciales: ProveedorCredencialesRuntime
+  credenciales: ProveedorCredencialesRuntime,
+  lectorClave: LectorClave = leerClaveDelLlavero
 ): void {
   server.tool(
     'sii_iniciar_sesion',
-    'Inicia sesión en el SII con el RUT y clave tributaria de una persona. Necesario antes de ' +
+    'Inicia sesión en el SII con el RUT y clave tributaria de una persona o empresa. Necesario antes de ' +
     'llamar cualquier otra tool con ese mismo RUT. Reintentar con el mismo RUT no abre una ' +
-    'sesión nueva mientras la anterior siga vigente (dentro de 2 horas).',
+    'sesión nueva mientras la anterior siga vigente (dentro de 2 horas). Si se omite `clave`, ' +
+    'se lee del Llavero de macOS; en ese caso nunca hay que pedirle la clave al usuario en el chat.',
     {
-      rut: z.string().describe('RUT de la persona, con o sin puntos/guión'),
-      clave: z.string().describe('Clave tributaria del SII de esa persona'),
+      rut: z.string().describe('RUT de la persona o empresa, con o sin puntos/guión'),
+      clave: z.string().optional().describe(
+        'Clave tributaria del SII de ese RUT. Opcional: si se omite, se lee del Llavero de macOS ' +
+        '(servicio mcp-sii, cuenta = RUT sin puntos ni guión, con dígito verificador).'
+      ),
     },
-    async ({ rut, clave }) => {
+    async ({ rut, clave: claveParametro }) => {
+      let clave = claveParametro;
+      if (clave === undefined) {
+        try {
+          clave = await lectorClave(rut);
+        } catch {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error: 'LLAVERO_NO_DISPONIBLE' }) }] };
+        }
+        // Sin clave no se toca el SII: un intento con clave vacía igual cuenta
+        // para el límite de sesiones del RUT.
+        if (!clave) {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error: 'CLAVE_NO_EN_LLAVERO' }) }] };
+        }
+      }
       credenciales.guardar(rut, clave);
       try {
         await registro.ejecutar(rut, sesion => sesion.authenticateOnly());

@@ -35,6 +35,18 @@ export interface SiiConfig {
   claveCertificadoSii?: string;
 }
 
+// Lo único que necesita el servidor MCP para arrancar. Las credenciales llegan
+// después, por RUT, vía sii_iniciar_sesion (parámetro o Llavero), así que exigir
+// SII_CLAVE o SII_CERT_PATH acá obligaba a dejar una clave en el entorno que
+// ninguna tool usa.
+export function validateEnvArranque(): void {
+  if (!process.env.SII_RUT) {
+    throw new Error('Variable de entorno requerida no encontrada: SII_RUT');
+  }
+}
+
+// Validación del flujo legado de una sola credencial por proceso (getConfig),
+// que todavía usa `npm run validate-cert`.
 export function validateEnv(): void {
   if (!process.env.SII_RUT) {
     throw new Error('Variable de entorno requerida no encontrada: SII_RUT');

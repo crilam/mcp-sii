@@ -21,7 +21,7 @@ npm run build
 Ya no hay una única credencial fija por proceso. Antes de llamar cualquier
 tool de consulta hay que abrir sesión para el RUT que se va a usar:
 
-1. `sii_iniciar_sesion(rut, clave)` — autentica al SII con el RUT y la clave
+1. `sii_iniciar_sesion(rut, clave?)` — autentica al SII con el RUT y la clave
    tributaria de esa persona. La credencial vive sólo en memoria del proceso
    (no se persiste a disco) y queda asociada a ese `rut`. Repetir la llamada
    con el mismo RUT no abre una sesión nueva mientras la anterior siga
@@ -41,16 +41,33 @@ tool de consulta hay que abrir sesión para el RUT que se va a usar:
 Esto permite operar varios RUT en paralelo desde el mismo proceso, cada uno
 con su propia credencial y su propia sesión (cookie jar independiente).
 
-**Limitación actual:** `sii_iniciar_sesion` sólo acepta `rut` + `clave`
-(autenticación por clave tributaria, que corre por navegador). No hay hoy
-forma de autenticar con certificado digital por esta vía. Las tools que
-consultan por HTTP en vez de navegador (`sii_bhe_*`, `sii_rcv_*`,
-`sii_dte_*`, `sii_renta_*`, `sii_mipyme_list_*`) necesitan el archivo de
-cookies que **sólo produce** la autenticación con certificado — una sesión
-abierta con clave vía `sii_iniciar_sesion` no lo genera, y esas tools van a
-fallar (`RequiereCertificado`) para un RUT autenticado así. Hoy funcionan sin
-problema con `sii_iniciar_sesion` las tools que operan por navegador:
-`sii_persona_list_bienes_raices` y `sii_mipyme_emitir_dte`.
+**Certificado vs. clave:** `sii_iniciar_sesion` autentica con clave
+tributaria, que corre por navegador. Al terminar el login, las cookies del
+navegador se exportan al cookie jar que usan las tools que consultan por HTTP
+(`sii_bhe_*`, `sii_rcv_*`, `sii_dte_*`, `sii_renta_*`, `sii_mipyme_list_*`),
+así que una sesión abierta con clave también las habilita. Lo único que exige
+certificado digital es **firmar** (emitir DTE): la clave autentica, pero no
+firma.
+
+### Clave desde el Llavero de macOS
+
+`clave` es opcional. Si se omite, `sii_iniciar_sesion(rut)` la lee del Llavero
+de macOS, así la clave nunca pasa por el modelo ni queda en el historial del
+chat. El ítem se crea una vez desde la terminal (`security` pide la clave sin
+mostrarla):
+
+```bash
+security add-generic-password -s mcp-sii -a 123456785 -w
+```
+
+- Servicio: `mcp-sii` (configurable con `SII_LLAVERO_SERVICIO`).
+- Cuenta: el RUT sin puntos ni guión, **con** dígito verificador.
+
+Si no hay ítem para ese RUT, la tool devuelve `CLAVE_NO_EN_LLAVERO`, y si el
+Llavero no responde (por ejemplo, está bloqueado), `LLAVERO_NO_DISPONIBLE`.
+En ninguno de los dos casos se intenta autenticar contra el SII, porque un
+intento fallido igual cuenta para el límite de sesiones del RUT. Fuera de macOS
+no hay Llavero: hay que pasar `clave`.
 
 ## Configuración
 

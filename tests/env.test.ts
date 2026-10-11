@@ -1,4 +1,24 @@
-import { validateEnv, getConfig, AuthStrategy } from '../src/env';
+import { validateEnv, validateEnvArranque, getConfig, AuthStrategy } from '../src/env';
+
+describe('validateEnvArranque', () => {
+  const orig = { ...process.env };
+  beforeEach(() => {
+    delete process.env.SII_RUT;
+    delete process.env.SII_CLAVE;
+    delete process.env.SII_CERT_PATH;
+  });
+  afterEach(() => { Object.assign(process.env, orig); });
+
+  it('lanza error si falta SII_RUT', () => {
+    expect(() => validateEnvArranque()).toThrow('SII_RUT');
+  });
+
+  // Las credenciales llegan por sii_iniciar_sesion, no del entorno.
+  it('arranca con SII_RUT aunque no haya SII_CLAVE ni SII_CERT_PATH', () => {
+    process.env.SII_RUT = '12345678';
+    expect(() => validateEnvArranque()).not.toThrow();
+  });
+});
 
 describe('validateEnv', () => {
   const orig = { ...process.env };
