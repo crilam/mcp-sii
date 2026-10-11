@@ -78,6 +78,6 @@ describe('leerClaveDelLlavero', () => {
 });
 
 describe('rutValidoParaLlavero', () => {
-  it.each([['11.111.111-1', true], ['76019824-K', true], ['-', false], ['', false], ['abc', false], ['1', false]])(
+  it.each([['11.111.111-1', true], ['11111111-K', true], ['-', false], ['', false], ['abc', false], ['1', false]])(
     '%s → %s', (rut, esperado) => expect(rutValidoParaLlavero(rut)).toBe(esperado));
 });
