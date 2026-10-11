@@ -220,8 +220,12 @@ monto cambiado en un peso.
 compacto** —donde están todos los montos— se pide aparte por REST
 (`/v1/f29/formulario-compacto`). La Consulta Integral del SII es una app GWT sin
 API pública: el servicio habla su protocolo GWT-RPC directamente, así que esta
-consulta es **más frágil que las demás** —si el SII recompila la app cambia un
-hash interno y hay que re-relevarlo—, y falla explícito cuando eso pasa.
+consulta es **más frágil que las demás**: si el SII recompila la app cambian la
+permutación y el hash de la política de serialización, y el SII responde
+`IncompatibleRemoteServiceException`. Cuando pasa eso, el scraper lee las
+constantes nuevas de los archivos públicos de la app (`sifmConsulta.nocache.js`
+y el bundle de la permutación) y reintenta una vez. Si la firma del método
+también cambió, falla explícito y hay que re-relevar con `relevarF29Rpc.ts`.
 
 ### Impuestos y registros
 

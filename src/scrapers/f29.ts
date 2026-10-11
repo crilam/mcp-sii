@@ -2,6 +2,7 @@ import { SiiHttpClient } from '../http';
 import { SessionManager } from '../session';
 import { RecursoNoEncontrado } from '../erroresConsulta';
 import { codificarLong, leerRespuestaGwt, ValorGwt } from './gwtRpc';
+import { ConstantesGwt, descubrirConstantesGwt } from './gwtConstantes';
 
 
 // Estado de la declaración F29 de un período y el PDF de su formulario compacto.
@@ -18,17 +19,25 @@ import { codificarLong, leerRespuestaGwt, ValorGwt } from './gwtRpc';
 // El `codInt` NO es opcional: sin él, el GET del PDF responde una página de
 // error en vez del documento (medido).
 //
-// FRÁGIL POR DISEÑO DEL SII: el sobre GWT lleva un hash de interfaz y una
-// permutación que cambian cuando el SII recompila la app (meses). Están como
-// constantes acá, relevadas el 2026-08-29; si el SII responde algo que no es
-// `//OK`, el error manda a re-relevar con `relevarF29Rpc.ts`.
+// FRÁGIL POR DISEÑO DEL SII: el sobre GWT lleva el hash de la política de
+// serialización y una permutación que cambian cuando el SII recompila la app.
+// Los valores de abajo son el punto de partida (relevados el 2026-10-11); si el
+// SII responde `IncompatibleRemoteServiceException`, el scraper los vuelve a
+// leer de los archivos públicos de la app (gwtConstantes.ts) y reintenta una vez.
 const BASE = 'https://www4.sii.cl/sifmConsultaInternet';
 const PDF_BASE = 'https://www4.sii.cl/rfiInternet/formCompacto';
 
-// Constantes del sobre GWT relevadas de la captura. `PERMUTACION` y `HASH_SVC`
-// son las que cambian con un redeploy de la app.
-const PERMUTACION = 'E8E144E2E2983BE000865D9EE574D4C9';
-const HASH_SVC = 'E1DE9D75F7AA0CB6A7ABFCB1B0DA8709';
+// Constantes del sobre GWT que cambian con un redeploy de la app. Las del
+// 2026-08-29 (E8E144E2…/E1DE9D75…) dejaron de servir en octubre de 2026.
+const CONSTANTES_INICIALES: ConstantesGwt = {
+  permutacion: '2B652D623FCB54033FB7DD3635124407',
+  hashPolitica: 'EAC02ECE1F11D7A35EBE0540E19D4C61',
+};
+const MODULO = 'sifmConsulta';
+const RUTA_SERVICIO = 'svcConsulta';
+// Compartidas por el proceso: si un scraper las redescubre, los siguientes
+// arrancan con las vigentes en vez de fallar una vez cada uno.
+let constantesVigentes: ConstantesGwt = { ...CONSTANTES_INICIALES };
 const INTERFAZ = 'cl.sii.sdi.diii.sifmConsulta.web.client.consulta.service.SvcConsulta';
 
 // El F29 en el sistema del SII: aplicación IVAEXP, formulario 29, tipo MES,
@@ -74,18 +83,21 @@ export interface EstadoF29 {
 // dejan como venían: el servidor los aceptó y son campos de traza, no de
 // identidad.
 const PLANTILLA_GET_FOLIOS =
-  `7|0|21|${BASE}/|${HASH_SVC}|${INTERFAZ}|getFoliosConsulta|`
+  `7|0|21|${BASE}/|{HASH}|${INTERFAZ}|getFoliosConsulta|`
   + 'java.lang.String/2004016611|J|cl.sii.sdi.sifm.commons.to.parser.LogAuditoriaDTO/2405597199|'
   + `${APP}|${FORM}|DPS|Internet|${AUD_COD}|${AUD_APP}|${AUD_NUM}|2|${AUD_IP}|${AUD_TTL}|`
   + 'java.lang.Integer/3438268394|C|{UNIDAD}|java.util.HashMap/1797211028|'
   + '1|2|3|4|7|5|5|6|6|5|5|7|8|9|{PERLONG}|{RUTLONG}|10|11|7|12|13|14|15|15|16|17|18|{RUT}|18|{RUT}|19|20|21|0|';
 
-export function sobreGetFolios(rut: number, periodo: number, unidadOperativa: string): string {
+export function sobreGetFolios(
+  rut: number, periodo: number, unidadOperativa: string, hashPolitica = constantesVigentes.hashPolitica
+): string {
   // La unidad va en la tabla de strings: no puede traer `|` (rompería el sobre).
   // Vacía si no se conoce: es un campo de auditoría y el SII respondió igual sin
   // ella; inventar una unidad ajena sería mentir en la traza.
   const unidad = unidadOperativa.replace(/\|/g, ' ');
   return PLANTILLA_GET_FOLIOS
+    .replace('{HASH}', hashPolitica)
     .replace('{UNIDAD}', unidad)
     .replace('{PERLONG}', codificarLong(periodo))
     .replace('{RUTLONG}', codificarLong(rut))
@@ -147,13 +159,32 @@ function extraerEstado(stream: ValorGwt[], periodo: number): EstadoF29 {
 export class F29Scraper {
   constructor(private http: SiiHttpClient, private session: SessionManager) {}
 
-  private async postGwt(cuerpo: string): Promise<{ stream: ValorGwt[]; tabla: string[] }> {
-    const crudo = await this.http.postCrudo(`${BASE}/svcConsulta`, cuerpo, 'text/x-gwt-rpc; charset=utf-8', {
-      'X-GWT-Permutation': PERMUTACION,
-      'X-GWT-Module-Base': `${BASE}/`,
-      Referer: `${BASE}/index.html?dest=cifxx&form=29`,
-    });
-    return leerRespuestaGwt(crudo);
+  private async postGwt(
+    armarCuerpo: (hashPolitica: string) => string
+  ): Promise<{ stream: ValorGwt[]; tabla: string[] }> {
+    const enviar = async (c: ConstantesGwt) => leerRespuestaGwt(
+      await this.http.postCrudo(`${BASE}/${RUTA_SERVICIO}`, armarCuerpo(c.hashPolitica), 'text/x-gwt-rpc; charset=utf-8', {
+        'X-GWT-Permutation': c.permutacion,
+        'X-GWT-Module-Base': `${BASE}/`,
+        Referer: `${BASE}/index.html?dest=cifxx&form=29`,
+      }));
+    try {
+      return await enviar(constantesVigentes);
+    } catch (e) {
+      // Sólo una política vencida se arregla redescubriendo; cualquier otro
+      // error (sesión caída, //EX de negocio) se propaga tal cual.
+      if (!(e instanceof Error) || !e.message.includes('IncompatibleRemoteServiceException')) throw e;
+      let nuevas: ConstantesGwt;
+      try {
+        nuevas = await descubrirConstantesGwt(url => this.http.get(url), BASE, MODULO, RUTA_SERVICIO);
+      } catch {
+        // Si no se pudo redescubrir, el error útil sigue siendo el del SII.
+        throw e;
+      }
+      if (nuevas.hashPolitica === constantesVigentes.hashPolitica) throw e;
+      constantesVigentes = nuevas;
+      return enviar(nuevas);
+    }
   }
 
   /**
@@ -167,7 +198,7 @@ export class F29Scraper {
     this.session.assertPuedeEntregarCookieJar();
     const { rut } = this.session.identidad();
     const { stream } = await this.postGwt(
-      sobreGetFolios(Number(rut), periodo, unidadOperativa));
+      hash => sobreGetFolios(Number(rut), periodo, unidadOperativa, hash));
     return extraerEstado(stream, periodo);
   }
 
@@ -188,4 +219,9 @@ export class F29Scraper {
     }
     return contenido;
   }
+}
+
+// Sólo para tests: vuelve a las constantes iniciales entre casos.
+export function reiniciarConstantesF29(): void {
+  constantesVigentes = { ...CONSTANTES_INICIALES };
 }
