@@ -20,12 +20,24 @@ export const SERVICIO_LLAVERO_POR_DEFECTO = 'mcp-sii';
 // bloqueado, permiso denegado) se propaga para no confundirlo con una ausencia.
 const ITEM_NO_ENCONTRADO = 44;
 
+// Fuera de macOS no hay Llavero: se distingue de "no hay clave guardada" para
+// que el error diga que hay que pasar `clave`, no que falta un ítem.
+export class LlaveroNoSoportado extends Error {}
+
+// Un RUT normalizado tiene cuerpo y dígito verificador. Uno vacío (p. ej. de
+// `"-"`) llegaría a `security` como `-a ""`, y no se arriesga a que eso calce
+// con el ítem de otro RUT.
+export function rutValidoParaLlavero(rut: string): boolean {
+  return /^\d{1,9}[0-9K]$/.test(normalizar(rut));
+}
+
 export function servicioLlavero(): string {
   return process.env.SII_LLAVERO_SERVICIO || SERVICIO_LLAVERO_POR_DEFECTO;
 }
 
 export const leerClaveDelLlavero: LectorClave = (rut) => {
-  if (process.platform !== 'darwin') return Promise.resolve(undefined);
+  if (process.platform !== 'darwin') return Promise.reject(new LlaveroNoSoportado('No hay Llavero fuera de macOS'));
+  if (!rutValidoParaLlavero(rut)) return Promise.resolve(undefined);
   return new Promise((resolve, reject) => {
     // Arreglo de argumentos, sin shell: el RUT no puede inyectar nada.
     execFile(

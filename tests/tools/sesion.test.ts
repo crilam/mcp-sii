@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerSesionTools } from '../../src/tools/bienesRaices';
 import { ProveedorCredencialesRuntime } from '../../src/credencialesRuntime';
 import { RegistroSesiones } from '../../src/registroSesiones';
-import { LectorClave } from '../../src/claveLlavero';
+import { LectorClave, LlaveroNoSoportado } from '../../src/claveLlavero';
 
 // Patrón vigente en este repo para testear tools MCP: el SDK expone los
 // handlers registrados en `server._registeredTools` (ver
@@ -137,6 +137,41 @@ describe('sii_iniciar_sesion / sii_cerrar_sesion', () => {
       expect(JSON.parse(resultado.content[0].text)).toEqual({ ok: false, error: 'CLAVE_NO_EN_LLAVERO' });
       expect(authenticateOnly).not.toHaveBeenCalled();
       await expect(proveedor.para('11.111.111-1')).rejects.toThrow();
+    });
+
+    it('una clave vacía o de espacios se trata como ausente y se lee del Llavero', async () => {
+      const proveedor = new ProveedorCredencialesRuntime();
+      const { registro } = registroQueAutentica();
+      const lector = jest.fn().mockResolvedValue('delLlavero');
+
+      const { tools } = armar(registro, proveedor, lector);
+      await tools['sii_iniciar_sesion'].handler({ rut: '11.111.111-1', clave: '  ' });
+
+      expect(lector).toHaveBeenCalled();
+      await expect(proveedor.para('11.111.111-1')).resolves.toMatchObject({ clave: 'delLlavero' });
+    });
+
+    it('un RUT sin cuerpo ni dígito verificador devuelve RUT_INVALIDO sin consultar el Llavero', async () => {
+      const proveedor = new ProveedorCredencialesRuntime();
+      const { registro, authenticateOnly } = registroQueAutentica();
+      const lector = jest.fn();
+
+      const { tools } = armar(registro, proveedor, lector);
+      const resultado = await tools['sii_iniciar_sesion'].handler({ rut: '-' });
+
+      expect(JSON.parse(resultado.content[0].text)).toEqual({ ok: false, error: 'RUT_INVALIDO' });
+      expect(lector).not.toHaveBeenCalled();
+      expect(authenticateOnly).not.toHaveBeenCalled();
+    });
+
+    it('fuera de macOS devuelve LLAVERO_NO_SOPORTADO', async () => {
+      const proveedor = new ProveedorCredencialesRuntime();
+      const { registro } = registroQueAutentica();
+
+      const { tools } = armar(registro, proveedor, jest.fn().mockRejectedValue(new LlaveroNoSoportado('x')));
+      const resultado = await tools['sii_iniciar_sesion'].handler({ rut: '11.111.111-1' });
+
+      expect(JSON.parse(resultado.content[0].text)).toEqual({ ok: false, error: 'LLAVERO_NO_SOPORTADO' });
     });
 
     it('si el Llavero falla, devuelve LLAVERO_NO_DISPONIBLE sin tocar el SII', async () => {

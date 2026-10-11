@@ -45,8 +45,9 @@ export function validateEnvArranque(): void {
   }
 }
 
-// Validación del flujo legado de una sola credencial por proceso (getConfig),
-// que todavía usa `npm run validate-cert`.
+// Validación del flujo legado de una sola credencial por proceso (getConfig).
+// Desde que el arranque usa validateEnvArranque ya no tiene callers en src/; se
+// conserva por compatibilidad con integraciones que la importen.
 export function validateEnv(): void {
   if (!process.env.SII_RUT) {
     throw new Error('Variable de entorno requerida no encontrada: SII_RUT');

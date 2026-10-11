@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { leerClaveDelLlavero, servicioLlavero } from '../src/claveLlavero';
+import { leerClaveDelLlavero, servicioLlavero, LlaveroNoSoportado, rutValidoParaLlavero } from '../src/claveLlavero';
 
 jest.mock('child_process', () => ({ execFile: jest.fn() }));
 const execFileMock = execFile as unknown as jest.Mock;
@@ -18,7 +18,7 @@ describe('leerClaveDelLlavero', () => {
   });
   afterEach(() => {
     Object.defineProperty(process, 'platform', { value: plataforma });
-    Object.assign(process.env, orig);
+    process.env = { ...orig };
   });
 
   it('consulta el servicio mcp-sii con el RUT normalizado como cuenta, sin shell', async () => {
@@ -50,9 +50,34 @@ describe('leerClaveDelLlavero', () => {
     await expect(leerClaveDelLlavero('11111111-1')).rejects.toThrow('No se pudo leer el Llavero de macOS');
   });
 
-  it('fuera de macOS no hay Llavero: devuelve undefined sin ejecutar nada', async () => {
+  it('fuera de macOS rechaza con LlaveroNoSoportado sin ejecutar nada', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux' });
-    await expect(leerClaveDelLlavero('11111111-1')).resolves.toBeUndefined();
+    await expect(leerClaveDelLlavero('11111111-1')).rejects.toBeInstanceOf(LlaveroNoSoportado);
     expect(execFileMock).not.toHaveBeenCalled();
   });
+
+  it('un RUT que normaliza a vacío no llega a security', async () => {
+    await expect(leerClaveDelLlavero('-')).resolves.toBeUndefined();
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  it('stdout vacío es ausencia de clave', async () => {
+    responder(null, '');
+    await expect(leerClaveDelLlavero('11111111-1')).resolves.toBeUndefined();
+  });
+
+  it('quita el fin de línea CRLF', async () => {
+    responder(null, 'secreta\r\n');
+    await expect(leerClaveDelLlavero('11111111-1')).resolves.toBe('secreta');
+  });
+
+  it('un timeout (error sin código numérico) es error, no ausencia', async () => {
+    responder(Object.assign(new Error('timeout'), { killed: true, signal: 'SIGTERM' }));
+    await expect(leerClaveDelLlavero('11111111-1')).rejects.toThrow('No se pudo leer el Llavero de macOS');
+  });
+});
+
+describe('rutValidoParaLlavero', () => {
+  it.each([['11.111.111-1', true], ['76019824-K', true], ['-', false], ['', false], ['abc', false], ['1', false]])(
+    '%s → %s', (rut, esperado) => expect(rutValidoParaLlavero(rut)).toBe(esperado));
 });

@@ -63,11 +63,17 @@ security add-generic-password -s mcp-sii -a 123456785 -w
 - Servicio: `mcp-sii` (configurable con `SII_LLAVERO_SERVICIO`).
 - Cuenta: el RUT sin puntos ni guión, **con** dígito verificador.
 
-Si no hay ítem para ese RUT, la tool devuelve `CLAVE_NO_EN_LLAVERO`, y si el
-Llavero no responde (por ejemplo, está bloqueado), `LLAVERO_NO_DISPONIBLE`.
-En ninguno de los dos casos se intenta autenticar contra el SII, porque un
-intento fallido igual cuenta para el límite de sesiones del RUT. Fuera de macOS
-no hay Llavero: hay que pasar `clave`.
+Errores, ninguno de los cuales intenta autenticar contra el SII (un intento
+fallido igual cuenta para el límite de sesiones del RUT):
+
+- `CLAVE_NO_EN_LLAVERO`: no hay ítem para ese RUT.
+- `LLAVERO_NO_DISPONIBLE`: el Llavero no respondió (por ejemplo, está bloqueado).
+- `LLAVERO_NO_SOPORTADO`: fuera de macOS no hay Llavero; hay que pasar `clave`.
+- `RUT_INVALIDO`: el RUT no tiene cuerpo y dígito verificador.
+
+Una `clave` vacía se trata como ausente. Si la clave tiene caracteres fuera de
+ASCII (ñ, tildes), `security -w` la entrega en hexadecimal y el login va a
+fallar: en ese caso hay que pasarla como parámetro.
 
 ## Configuración
 

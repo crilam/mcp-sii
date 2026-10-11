@@ -4,7 +4,7 @@ import { SessionManager } from '../session';
 import { RegistroSesiones } from '../registroSesiones';
 import { ProveedorCredencialesRuntime } from '../credencialesRuntime';
 import { clasificarErrorCredenciales, envolverParaMcp } from '../erroresSesion';
-import { LectorClave, leerClaveDelLlavero } from '../claveLlavero';
+import { LectorClave, LlaveroNoSoportado, leerClaveDelLlavero, rutValidoParaLlavero } from '../claveLlavero';
 import * as core from '../core/bienesRaices';
 import { schemaListBienesRaices, schemaSoloRut, schemaRol } from '../core/schemas/bienesRaices';
 
@@ -28,18 +28,22 @@ export function registerSesionTools(
       ),
     },
     async ({ rut, clave: claveParametro }) => {
-      let clave = claveParametro;
+      const fallar = (error: string) =>
+        ({ content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error }) }] });
+      // Una clave vacía o de puros espacios se toma como ausente: lo más probable
+      // es que quien llama quiso decir "usá el Llavero", y autenticar con ella
+      // sólo sumaría un intento fallido al límite de sesiones del RUT.
+      let clave = claveParametro?.trim() ? claveParametro : undefined;
       if (clave === undefined) {
+        if (!rutValidoParaLlavero(rut)) return fallar('RUT_INVALIDO');
         try {
           clave = await lectorClave(rut);
-        } catch {
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error: 'LLAVERO_NO_DISPONIBLE' }) }] };
+        } catch (e) {
+          return fallar(e instanceof LlaveroNoSoportado ? 'LLAVERO_NO_SOPORTADO' : 'LLAVERO_NO_DISPONIBLE');
         }
         // Sin clave no se toca el SII: un intento con clave vacía igual cuenta
         // para el límite de sesiones del RUT.
-        if (!clave) {
-          return { content: [{ type: 'text' as const, text: JSON.stringify({ ok: false, error: 'CLAVE_NO_EN_LLAVERO' }) }] };
-        }
+        if (!clave) return fallar('CLAVE_NO_EN_LLAVERO');
       }
       credenciales.guardar(rut, clave);
       try {

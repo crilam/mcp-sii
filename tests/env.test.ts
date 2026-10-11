@@ -7,7 +7,7 @@ describe('validateEnvArranque', () => {
     delete process.env.SII_CLAVE;
     delete process.env.SII_CERT_PATH;
   });
-  afterEach(() => { Object.assign(process.env, orig); });
+  afterEach(() => { process.env = { ...orig }; });
 
   it('lanza error si falta SII_RUT', () => {
     expect(() => validateEnvArranque()).toThrow('SII_RUT');
