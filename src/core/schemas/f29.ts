@@ -60,3 +60,18 @@ export const schemaPpmF29 = {
   rut: z.string().min(1).describe(RUT_DESC),
   periodo: reglaFormatoPeriodo,
 };
+
+// Verificación del F29 contra el RCV (sólo lectura). Sin período revisa el
+// último declarado; `desde`/`hasta` un rango; `propuesta` además la propuesta
+// del SII de ese período, antes de declarar.
+const periodoOpcional = z.number().int().optional()
+  .refine(n => n === undefined || (Math.floor(n / 100) >= 2007 && n % 100 >= 1 && n % 100 <= 12), 'debe ser AAAAMM');
+export const schemaVerificarF29 = {
+  rut: z.string().min(1).describe(RUT_DESC),
+  periodo: periodoOpcional.describe('Período AAAAMM a cruzar con el RCV. Sin él, el último F29 declarado.'),
+  desde: periodoOpcional.describe('Inicio de un rango AAAAMM (con hasta, máximo 12 meses).'),
+  hasta: periodoOpcional.describe('Fin del rango AAAAMM.'),
+  propuesta: periodoOpcional.describe('Período AAAAMM cuya propuesta del SII se cruza también con el RCV, antes de declarar.'),
+  dia_vencimiento: z.union([z.literal(12), z.literal(20)]).optional()
+    .describe('Día de vencimiento del F29. Sin él, el de la ficha de Mi SII (20 si declara con facturación electrónica).'),
+};
