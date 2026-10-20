@@ -230,6 +230,7 @@ Todas reciben `rut` como primer parámetro — ver
 | `sii_dte_validez` | Si un DTE (emisor, tipo, folio) fue recibido por el SII |
 | `sii_dte_verificar` | Si emisor, receptor, folio, fecha y monto coinciden con lo informado al SII |
 | `sii_f29_estado_declaracion` | Estado del F29 (IVA mensual) de un período |
+| `sii_f29_verificar` | Revisa el F29 contra el RCV (sólo lectura): declaración vencida, condición IVA, diferencias por código |
 
 `sii_dte_validez` y `sii_dte_verificar` eran consultas públicas del SII y hoy
 están detrás del login, así que van con sesión. La segunda es la que sirve para
@@ -249,6 +250,43 @@ permutación y el hash de la política de serialización, y el SII responde
 constantes nuevas de los archivos públicos de la app (`sifmConsulta.nocache.js`
 y el bundle de la permutación) y reintenta una vez. Si la firma del método
 también cambió, falla explícito y hay que re-relevar con `relevarF29Rpc.ts`.
+
+#### Verificación del F29 contra el RCV (`sii_f29_verificar` y `npm run f29-check`)
+
+Sólo lectura. Responde dos preguntas para la empresa de la sesión:
+
+1. Si el F29 del último período vencido está declarado: vigente, fuera de plazo
+   o no presentado. Vence el día 20 del mes siguiente si la ficha de Mi SII
+   dice que está autorizada a declarar ese día (facturación electrónica) y el
+   12 si no; corre al día hábil siguiente con los feriados de fecha fija.
+2. Si el último F29 declarado (o un período o rango) cuadra con el RCV del
+   mismo período. Lee los montos del PDF compacto y compara al peso: 520 (+525)
+   con el IVA de las facturas 33 y 46, 528 con las NC de compra (sin las que
+   referencian boletas), 535 con las DIN, 039/736/596 con las facturas de
+   compra tipo 46 y sus NC, 502/510/513 con las ventas, y la aritmética de los
+   totales. Marca montos atípicos frente a los 6 meses anteriores.
+
+El caso que la motivó: la propuesta del SII llena el 520 sólo con el IVA de las
+facturas 33 y omite el de las facturas de compra con retención total (46,
+cambio de sujeto), aunque trae la retención. Quien declara la propuesta paga la
+retención y no usa el crédito. Con `--propuesta AAAAMM` se cruza la propuesta
+antes de declarar.
+
+La condición IVA decide el derecho a crédito: en una empresa exenta el 520
+debe ser 0 y el IVA de las facturas 46 es costo, no crédito omitido; en una
+mixta se avisa que el crédito de uso común se prorratea (no se calcula).
+
+```
+npm run f29-check -- --rut 11111111-1
+npm run f29-check -- --rut 11111111-1 --desde 202601 --hasta 202608 --json salida.json
+npm run f29-check -- --rut 11111111-1 --propuesta 202610 --vence 20
+```
+
+El CLI toma la clave del Llavero (servicio `mcp-sii`) y cierra la sesión al
+terminar. Sale con código 1 si hay errores o el período vencido no está
+presentado. Los casos reales se prueban fuera de este repositorio:
+`F29_FIXTURES_REALES=<dir> npx jest tests/f29Verificacion/reales` (ver el
+formato en el test).
 
 ### Impuestos y registros
 
