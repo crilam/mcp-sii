@@ -118,6 +118,53 @@ describe('MipymeHttpScraper.respaldoXml', () => {
   // cuántas pausas hubo miden el archivo entero, no el caso.
   beforeEach(() => jest.clearAllMocks());
 
+  // Verificado en vivo (2026-11-23) con una empresa recién inscrita, sin
+  // historial en el portal: `lista_documentos.cgi` informa `cant_reg value="0"`
+  // y `download.cgi`, sobre ese mismo filtro vacío, responde igual la página
+  // de "demasiados documentos" (con código `...-1...`). Leído literal, el
+  // troceo baja hasta el día sin converger y devuelve un LIMITE_CONOCIDO falso.
+  describe('respaldo vacío que el portal anuncia como "demasiados"', () => {
+    const LISTA_VACIA = '<html><div id="resultados"><div id="cant_reg" value="0"></div></div></html>';
+    const LISTA_CON_DOCUMENTOS = '<html><div id="resultados"><div id="cant_reg" value="45"></div></div></html>';
+
+    it('listado en cero + "demasiados" es un período sin documentos, no un exceso', async () => {
+      const { scraper, http } = armar();
+      (http.postForm as jest.Mock).mockResolvedValue(LISTA_VACIA);
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioDemasiados());
+
+      const r = await scraper.respaldoXml(RANGO);
+
+      expect(r.tramos).toEqual([]);
+      expect(r.limitaciones).toEqual([]);
+      // Una sola descarga: no hay nada que bisectar.
+      expect(http.getBinario).toHaveBeenCalledTimes(1);
+    });
+
+    it('listado con documentos + "demasiados" sigue siendo un exceso y se bisecta', async () => {
+      const { scraper, http } = armar();
+      (http.postForm as jest.Mock).mockResolvedValue(LISTA_CON_DOCUMENTOS);
+      (http.getBinario as jest.Mock)
+        .mockResolvedValueOnce(binarioDemasiados())
+        .mockResolvedValue(binarioXml());
+
+      const r = await scraper.respaldoXml(RANGO);
+
+      expect(r.tramos).toHaveLength(2);
+      expect(http.getBinario).toHaveBeenCalledTimes(3);
+    });
+
+    it('listado en cero pero la descarga trae un SetDTE: manda el XML', async () => {
+      const { scraper, http } = armar();
+      (http.postForm as jest.Mock).mockResolvedValue(LISTA_VACIA);
+      (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());
+
+      const r = await scraper.respaldoXml(RANGO);
+
+      expect(r.tramos).toHaveLength(1);
+      expect(r.limitaciones).toEqual([]);
+    });
+  });
+
   it('baja el XML por download.cgi con ORIGEN y DOWNLOAD=XML', async () => {
     const { scraper, http } = armar();
     (http.getBinario as jest.Mock).mockResolvedValue(binarioXml());

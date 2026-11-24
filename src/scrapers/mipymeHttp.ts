@@ -561,6 +561,26 @@ export interface FiltrosRespaldoXml {
 // Los tramos NO se concatenan en un XML único a propósito — dos `SetDTE` pegados
 // no son un documento XML bien formado, y unificarlos obligaría a reescribir el
 // contenido firmado por el emisor.
+// Lo que devuelve UNA descarga de `download.cgi`. `vacio` marca el caso en que
+// el portal confirmó que el filtro no trae documentos: no hay XML y tampoco hay
+// nada que trocear (ver el comentario en `descargarTramo`).
+interface RespuestaTramo {
+  xml: string;
+  excedeTope: boolean;
+  vacio?: true;
+}
+
+// Cantidad de documentos que informa `lista_documentos.cgi` para el filtro
+// recién fijado: `<div id="cant_reg" value="N">`, el mismo dato que usa el JS
+// del portal para habilitar o esconder el botón de respaldo. `null` cuando la
+// página no lo trae o no es un número — "no se sabe", que NO es lo mismo que
+// cero.
+export function cantidadRegistrosListado(html: unknown): number | null {
+  if (typeof html !== 'string') return null;
+  const m = /id=["']cant_reg["'][^>]*\bvalue=["'](\d+)["']/i.exec(html);
+  return m ? Number(m[1]) : null;
+}
+
 export interface TramoRespaldoXml {
   fechaDesde: string;
   fechaHasta: string;
@@ -1457,6 +1477,10 @@ export class MipymeHttpScraper {
       return;
     }
 
+    // Rango sin documentos (ver `vacio` en `RespuestaTramo`): no hay `SetDTE`
+    // que entregar, así que no se agrega tramo ni limitación.
+    if (respuesta.vacio) return;
+
     // El reset de `diasPortalCaidoDescarga` ya ocurrió dentro de
     // `descargarTramoSeguro` (sólo si `!excedeTope`, ver ahí el porqué).
     tramos.push({
@@ -1822,6 +1846,7 @@ export class MipymeHttpScraper {
           tramos, limitaciones, maxTramos, sinMapear, contadorFolioUnico);
         continue;
       }
+      if (respuesta.vacio) continue;
       tramos.push({
         fechaDesde: dia,
         fechaHasta: dia,
@@ -2377,6 +2402,7 @@ export class MipymeHttpScraper {
       // `<Referencia>`)— así que sería fácil corromper el respaldo por
       // intentar acotarlo. Respaldar de más no rompe nada; reescribir un XML
       // tributario firmado sí. Ver también la nota en docs/integracion-api.md.
+      if (respuesta.vacio) continue;
       tramos.push({
         fechaDesde: dia,
         fechaHasta: dia,
@@ -2413,8 +2439,8 @@ export class MipymeHttpScraper {
     desde: string,
     hasta: string,
     overrides?: Partial<Pick<FiltrosRespaldoXml, 'folioDesde' | 'folioHasta' | 'contraparteRut'>>
-  ): Promise<{ xml: string; excedeTope: boolean } | { error: PortalSiiNoDisponible }> {
-    let respuesta: { xml: string; excedeTope: boolean };
+  ): Promise<RespuestaTramo | { error: PortalSiiNoDisponible }> {
+    let respuesta: RespuestaTramo;
     try {
       respuesta = await this.descargarTramo(ctx, desde, hasta, overrides);
     } catch (e) {
@@ -2452,7 +2478,7 @@ export class MipymeHttpScraper {
     // folios necesita su propio recorte y los hermanos no tienen por qué
     // compartirlo.
     overrides?: Partial<Pick<FiltrosRespaldoXml, 'folioDesde' | 'folioHasta' | 'contraparteRut'>>
-  ): Promise<{ xml: string; excedeTope: boolean }> {
+  ): Promise<RespuestaTramo> {
     const f: FiltrosRespaldoXml = overrides ? { ...ctx.filtros, ...overrides } : ctx.filtros;
     const comunes = {
       RUT_EMP: ctx.rut,
@@ -2482,7 +2508,7 @@ export class MipymeHttpScraper {
     // como `MuÃ±oz` y devuelve cero documentos — el respaldo vacío que se
     // confunde con "este período no tuvo documentos". Las razones sociales
     // chilenas con ñ y tildes son la norma, no el borde.
-    await this.http.postForm(LISTA_DOCUMENTOS_URL, {
+    const listado = await this.http.postForm(LISTA_DOCUMENTOS_URL, {
       ...comunes, TPO_ARCHIVO: 'dte', ORIGEN: f.origen, NUM_PAG: '1',
       // `FOLIOHASTA` va también acá y no sólo en la descarga: este POST fija el
       // contexto de búsqueda del lado del servidor, y sin el extremo superior la
@@ -2523,7 +2549,26 @@ export class MipymeHttpScraper {
     // El corte por volumen llega como PÁGINA, no como error HTTP: el CGI
     // responde 200 con HTML. Reconocerlo es lo que permite trocear en vez de
     // fallar.
-    if (/demasiados Documentos electr/i.test(texto)) return { xml: '', excedeTope: true };
+    //
+    // PERO la misma página sale cuando el filtro no trae NINGÚN documento:
+    // verificado en vivo (2026-11-23) con una empresa recién inscrita en
+    // Facturación Gratuita, sin historial en el portal. El listado informaba
+    // `cant_reg value="0"` y "No hay resultados", y `download.cgi` contestó
+    // igual "demasiados Documentos electrónicos(mas de 20)", con código
+    // `02.35.209.-1.946.23`. Leído literal, el troceo bisecta hasta el día sin
+    // converger nunca y devuelve un `LIMITE_CONOCIDO` falso — permanente para
+    // el consumidor, sobre un período que simplemente está vacío.
+    //
+    // Se exigen las DOS señales para llamarlo vacío: el listado en cero Y esta
+    // página. El listado solo no alcanza —un respaldo vacío es indistinguible
+    // de "el período no tuvo documentos", así que no se declara por una única
+    // fuente— y si la descarga trae un `SetDTE` a pesar del cero, manda el XML
+    // (más abajo). Un listado sin `cant_reg` legible (`null`) NO cuenta como
+    // cero: queda el comportamiento de siempre.
+    if (/demasiados Documentos electr/i.test(texto)) {
+      if (cantidadRegistrosListado(listado) === 0) return { xml: '', excedeTope: false, vacio: true };
+      return { xml: '', excedeTope: true };
+    }
 
     // La página de error genérica del portal (ver `assertNoPaginaDeErrorDelPortal`)
     // puede salir acá también, en vez del SetDTE: mismo síntoma que en el
