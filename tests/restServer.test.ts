@@ -72,6 +72,38 @@ describe('restServer', () => {
     expect(res.status).toBe(200);
   });
 
+  it('GET /health no consulta la base (deja que Neon se suspenda)', async () => {
+    const spy = jest.spyOn(pool, 'query');
+    try {
+      const res = await new Promise<{ status: number }>((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/health`, r => resolve({ status: r.statusCode ?? 0 })).on('error', reject);
+      });
+      expect(res.status).toBe(200);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('GET /ready responde 200 con la base arriba', async () => {
+    const res = await new Promise<{ status: number }>((resolve, reject) => {
+      http.get(`http://127.0.0.1:${port}/ready`, r => resolve({ status: r.statusCode ?? 0 })).on('error', reject);
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('GET /ready responde 503 si la base no responde', async () => {
+    const spy = jest.spyOn(pool, 'query').mockRejectedValueOnce(new Error('neon caído') as never);
+    try {
+      const res = await new Promise<{ status: number }>((resolve, reject) => {
+        http.get(`http://127.0.0.1:${port}/ready`, r => resolve({ status: r.statusCode ?? 0 })).on('error', reject);
+      });
+      expect(res.status).toBe(503);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('sin Authorization responde 401 y audita', async () => {
     const res = await request(port, { path: '/v1/rcv/resumen', body: '{}' });
     expect(res.status).toBe(401);

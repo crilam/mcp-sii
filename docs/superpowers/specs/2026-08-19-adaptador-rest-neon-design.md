@@ -110,9 +110,12 @@ por tenant.
   meter después de que terceros ya integraron. `/v2` conviviría con `/v1` el
   tiempo que haga falta migrar consumidores, no un reemplazo instantáneo.
 - **`GET /health` sin autenticar**, responde `200` si el proceso puede
-  responder y `503` si no puede conectar a Neon (mismo criterio fail-closed
-  que auth). Es el target del health check del load balancer (ALB) — sin él,
-  el ALB no tiene forma de saber si una instancia está viva.
+  responder, sin tocar Neon. Es el target del health check del load balancer
+  (ALB) y del `HEALTHCHECK` de Docker — sin él, el ALB no tiene forma de saber
+  si una instancia está viva. *(Revisado 2026-11-17: originalmente hacía
+  `SELECT 1` y devolvía `503` sin Neon; ese sondeo cada 30 s impedía el
+  autosuspend y agotó las 100 CU-hora mensuales del plan Free. La verificación
+  de la base pasó a `GET /ready`, para chequeos puntuales.)*
 - **El header `Authorization` nunca llega a un log de aplicación.** Mismo
   criterio ya vigente para la clave tributaria ("la clave nunca se loguea"),
   extendido a la API key del tenant: cualquier logger de request/error debe
