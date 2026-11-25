@@ -171,13 +171,17 @@ Dos detalles del diseño que te favorecen:
 
 ## 6. Endpoints
 
-Todos son `POST` con `Content-Type: application/json`, salvo `/health`.
+Todos son `POST` con `Content-Type: application/json`, salvo `/health` y `/ready`.
 
 En todos, `rut` es un string obligatorio. **No se valida el formato ni el dígito verificador**, así que un RUT mal formado no da `BAD_REQUEST`: falla más adelante como error de autenticación del SII.
 
 ### `GET /health`
 
-Sin autenticación. Responde `200` sin cuerpo si el servicio y la base están sanos, `503` si no.
+Sin autenticación. Responde `200` sin cuerpo si el proceso está vivo. **No consulta la base**: es el target del health check de Docker y del load balancer, y un `SELECT 1` periódico impediría que Neon suspenda el compute.
+
+### `GET /ready`
+
+Sin autenticación. Responde `200` sin cuerpo si además la base responde, `503` si no. Usalo para chequeos puntuales (post-deploy, diagnóstico), no para sondeo periódico: cada llamada despierta el compute de Neon.
 
 ---
 

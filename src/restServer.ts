@@ -106,7 +106,18 @@ async function manejarRequest(
   const ip = ipDe(req);
   const ruta = `${req.method} ${req.url}`;
 
+  // Liveness: NO toca la base. Lo consultan el HEALTHCHECK de Docker y el ALB
+  // cada pocos segundos; si hiciera SELECT 1, Neon nunca llegaría a su
+  // autosuspend y el compute quedaría prendido 24/7 (agotó la cuota mensual
+  // de CU-hora del plan Free).
   if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200).end();
+    return;
+  }
+
+  // Readiness: sí verifica Neon. Para chequeos manuales o de despliegue, no
+  // para sondeo periódico (despierta el compute en cada llamada).
+  if (req.method === 'GET' && req.url === '/ready') {
     try {
       await pool.query('SELECT 1');
       res.writeHead(200).end();
